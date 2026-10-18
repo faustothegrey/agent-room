@@ -12,7 +12,7 @@ function fakeRunner(outputs) {
   return { calls, runner };
 }
 
-test('claude: first turn creates the session, later turns resume it, tools stay read-only', async () => {
+test('claude: first turn creates the session, later turns resume it, writes limited to proposal/', async () => {
   const { calls, runner } = fakeRunner([
     JSON.stringify({ result: 'hi', is_error: false }),
     JSON.stringify({ result: 'again', is_error: false }),
@@ -24,7 +24,10 @@ test('claude: first turn creates the session, later turns resume it, tools stay 
   assert.ok(id);
   assert.equal(calls[1].args[calls[1].args.indexOf('--resume') + 1], id);
   for (const c of calls) {
-    assert.deepEqual(c.args.slice(-4), ['--tools', 'Read', 'Grep', 'Glob']);
+    assert.deepEqual(c.args.slice(-6), ['--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write']);
+    assert.ok(!c.args.includes('--permission-mode'));
+    const i = c.args.indexOf('--allowedTools');
+    assert.deepEqual(c.args.slice(i + 1, i + 3), ['Write(proposal/**)', 'Edit(proposal/**)']);
   }
   assert.equal(calls[0].input, 'p1');
 });
@@ -40,7 +43,7 @@ test('claude: an error result throws and does not mark the session started', asy
   assert.ok(calls[1].args.includes('--session-id'));
 });
 
-test('codex: resumes the thread it was given and forces the read-only sandbox every call', async () => {
+test('codex: resumes the thread it was given and forces the workspace-write sandbox every call', async () => {
   const first = [
     '{"type":"thread.started","thread_id":"t-1"}',
     '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}',
@@ -53,7 +56,7 @@ test('codex: resumes the thread it was given and forces the read-only sandbox ev
   assert.deepEqual(calls[0].args.slice(0, 1), ['exec']);
   assert.deepEqual(calls[1].args.slice(0, 2), ['exec', 'resume']);
   assert.ok(calls[1].args.includes('t-1'));
-  for (const c of calls) assert.ok(c.args.includes('sandbox_mode="read-only"'));
+  for (const c of calls) assert.ok(c.args.includes('sandbox_mode="workspace-write"'));
 });
 
 test('codex events: last agent_message wins, noise lines are ignored, turn.failed throws', () => {

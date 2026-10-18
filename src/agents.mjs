@@ -1,6 +1,7 @@
 // Provider adapters. Each agent is { name, provider, turn(prompt) -> Promise<string> }.
 // One CLI process per turn; the provider's own session id carries memory between turns.
-// Talk-only: tools are restricted to reading, on every turn (not just the first).
+// Agents may write only in proposal/: enforced for claude (path rules, no shell), by instructions
+// only for codex. Set on every turn (not just the first).
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
@@ -38,8 +39,10 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, runner = run })
       const args = ['-p', '--output-format', 'json'];
       args.push(started ? '--resume' : '--session-id', sessionId);
       if (model) args.push('--model', model);
+      // Edits outside proposal/ need a permission that -p cannot grant, so they are refused.
+      args.push('--allowedTools', 'Write(proposal/**)', 'Edit(proposal/**)');
       // --tools is variadic, so it must come last: the prompt goes on stdin.
-      args.push('--tools', 'Read', 'Grep', 'Glob');
+      args.push('--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write');
       const out = await runner('claude', args, { input: prompt, cwd, timeoutMs });
       const result = JSON.parse(out);
       if (result.is_error) throw new Error(`claude: ${result.result || 'turn failed'}`);
@@ -56,9 +59,10 @@ export function createCodexAgent({ name, model, cwd, timeoutMs, runner = run }) 
     provider: 'codex',
     async turn(prompt) {
       // `exec resume` has no -s flag, and the user's config.toml may grant full access,
-      // so the read-only sandbox is forced through -c on every call.
+      // so the workspace-write sandbox is forced through -c on every call. It allows writes
+      // anywhere under cwd: keeping codex inside proposal/ relies on its instructions (owner's call).
       const args = threadId ? ['exec', 'resume'] : ['exec'];
-      args.push('--json', '--skip-git-repo-check', '-c', 'sandbox_mode="read-only"');
+      args.push('--json', '--skip-git-repo-check', '-c', 'sandbox_mode="workspace-write"');
       if (model) args.push('-m', model);
       if (threadId) args.push(threadId);
       args.push('-');
