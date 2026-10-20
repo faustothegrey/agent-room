@@ -1,7 +1,7 @@
 {
   "name": "agent-room",
   "version": "0.1.0",
-  "description": "A group conversation between you and several CLI agents, one reply each per round.",
+  "description": "A human and several AI agents discuss and revise ideas around a shared document or drawing.",
   "type": "module",
   "private": true,
   "bin": {

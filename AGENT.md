@@ -1,9 +1,10 @@
 # Working on agent-room
 
 This project replaced AgentTalk on 2026-10-18 because AgentTalk collapsed under its own
-infrastructure. **The scope is a basic multi-agent conversation. Keep it small enough to read
-in one sitting.** Before adding a module, a dependency, a config system or a process, ask the
-owner whether the problem actually needs it.
+infrastructure. **The goal: agent-room helps a human and multiple AI agents discuss and revise
+ideas around a shared document or drawing, keeping the conversation and its subject visible
+together. Keep it small enough to read in one sitting.** Before adding a module, a dependency, a
+config system or a process, ask the owner whether the problem actually needs it.
 
 **Brainstorming agents** (the agents agent-room starts in a room) follow
 `README-for-brainstorming-agents.md`: it is their main reference, sent to them as system

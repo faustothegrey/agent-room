@@ -10,7 +10,11 @@ agents. This page tells you what the work is for and how to take part. Design an
 implementation choices are **not** here: they live in the individual proposal documents.
 
 ## The overarching goal
-The User wants to create **educational software, especially for maths and science**, with
+**Agent-room's goal** (approved by the User, 2026-10-20): "Agent-room helps a human and multiple
+AI agents discuss and revise ideas around a shared document or drawing, keeping the conversation
+and its subject visible together."
+
+**The longer-term purpose**, unchanged: the User wants to create **educational software, especially for maths and science**, with
 engaging, interactive UI and animations, and to build it **entirely by vibecoding**
 (developing through conversation with AI agents).
 
@@ -63,9 +67,17 @@ running costs under control.
 - Don't ask the User to choose technical mechanisms before showing their practical consequences.
 
 ## Project constraint (from agent-room's `AGENT.md`)
-When a proposal concerns agent-room itself: its scope is a basic multi-agent conversation,
-kept small enough to read in one sitting. Before proposing a new module, dependency, config
-system or process, ask whether the problem actually needs it.
+When a proposal concerns agent-room itself: its goal is the one above, and it stays small
+enough to read in one sitting. Before proposing a new module, dependency, config system or
+process, ask whether the problem actually needs it.
+
+Keep three kinds of statement apart:
+- **Today:** what agent-room does now (the terminal room, `/docs`, `/usage`, `/reload`).
+- **The first implementation cycle** (the User's direction, 2026-10-20): the chat on the left,
+  the chosen Markdown document or SVG drawing on the right, nothing else. See
+  `proposal/discussion-ide.md`.
+- **Possible later** (not planned): for example live preview, pointing at animations,
+  DiagramTalk. Mention these only as "possible later", if at all.
 
 ## Where to start reading
 First check `proposal/handoff.md`. This exact filename is the pending handoff for the next

@@ -1,6 +1,17 @@
 # agent-room
 
-A group brainstorm between you and several CLI agents, on your own subscriptions.
+Agent-room helps a human and multiple AI agents discuss and revise ideas around a shared
+document or drawing, keeping the conversation and its subject visible together. It runs the
+agents' own CLIs, on your own subscriptions. Longer term, it serves building educational
+software for maths and science by vibecoding, with costs under control.
+
+**First implementation cycle** (decided by the owner, 2026-10-20; **not built yet**): one
+screen, with the chat between you and the agents on the left and the Markdown document or SVG
+drawing under discussion on the right. Nothing else. See `proposal/discussion-ide.md`, which
+also lists what is still open (who picks the document; whether the screen replaces the terminal
+or sits beside it).
+
+## Today
 
 ```
 You ──▶ Claude ──▶ Codex ──▶ Claude ──▶ … ──▶ back to you once everyone passes in a row
@@ -9,13 +20,14 @@ You ──▶ Claude ──▶ Codex ──▶ Claude ──▶ … ──▶ ba
 Each round, you speak, then the agents take turns in a fixed order until every one of them has
 replied `PASS` in a row (passes are hidden on screen, kept in the transcript). A round is capped at
 8 agent turns, and a failed turn ends it. Start a message with `@name` to address one agent only.
-Each agent sees everything said since its last turn. The room is for brainstorming: its only
-output is documents in `proposal/`.
+Each agent sees everything said since its last turn. The room is for brainstorming: its output
+is documents in `proposal/`, and agents write elsewhere only when you ask them to.
 
 ```sh
 npm install                                   # once: installs marked
 npm start                                     # claude + codex, in the current directory
 node src/cli.mjs --agents claude:Ada,codex:Linus --cwd ~/Software/some-project
+node src/cli.mjs --log-dir ~/room-logs        # transcripts elsewhere (default: ./transcripts)
 npm test
 ```
 
@@ -51,9 +63,9 @@ npm test
 
 - **Full filesystem access; no shell for claude.** Both agents can read and write anywhere on
   disk, and only their instructions keep them to `proposal/` unless you ask otherwise. Claude:
-  the file tools (`Edit`/`Write` pre-approved for any path), web search and fetch, sub-agents,
-  skills, and the look-and-click part of Claude in Chrome (to see rendered pages); no Bash; your
-  claude.ai connectors (Gmail, Calendar, Drive) left out. Codex: `sandbox_mode="danger-full-access"`
+  the file tools (`Read`/`Grep`/`Glob`/`Edit`/`Write` pre-approved for any path), web search
+  and fetch, sub-agents, skills, and the look-and-click part of Claude in Chrome (to see
+  rendered pages); no Bash; your claude.ai connectors (Gmail, Calendar, Drive) left out. Codex: `sandbox_mode="danger-full-access"`
   (no sandbox: any file, any command, network) and live web search.
 - **No streaming.** A reply appears when the agent finishes.
 - **Two providers**: `claude` and `codex`. A failed turn is reported and ends the round.
