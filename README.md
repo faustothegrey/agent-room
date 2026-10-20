@@ -13,6 +13,7 @@ Each agent sees everything said since its last turn. The room is for brainstormi
 output is documents in `proposal/`.
 
 ```sh
+npm install                                   # once: installs marked
 npm start                                     # claude + codex, in the current directory
 node src/cli.mjs --agents claude:Ada,codex:Linus --cwd ~/Software/some-project
 npm test
@@ -27,11 +28,19 @@ npm test
   so a `claude` or `codex` you start yourself is not a brainstorming agent.
 - `src/room.mjs` is the round loop: pass counting, the turn cap, `@name`, and sending each agent
   only the messages it has not seen yet.
-- `src/cli.mjs` is the terminal front end. Every room is saved to `transcripts/` as markdown.
-  `/docs` opens the room's `proposal/` folder in Finder (macOS).
-- **Hot reload:** edit `src/room.mjs`, `src/agents.mjs` or the rulebook while a room is running, then type
-  `/reload`. The new code takes over from the next round and the conversation carries on; if the
-  new code fails to load, the room keeps running the old code. `src/cli.mjs` itself needs a restart.
+- `src/cli.mjs` is a small shell that never reloads: arguments, the input loop, `/reload`, `/quit`.
+- `src/ui.mjs` is everything else on screen: building the room, the display, the commands, and the
+  transcript (every room is saved to `transcripts/` as markdown). `/docs` lists the room's
+  `proposal/` files: move with ↑/↓, Enter opens one in the browser.
+- `src/docs.mjs` is that viewer: a local-only web server (127.0.0.1, started on the first `/docs`)
+  that renders Markdown with [marked](https://marked.js.org), the project's one dependency.
+  Images show inline, plain links to images get a preview, and an open page reloads when an
+  agent edits the file.
+- **Hot reload:** edit any file in `src/` except `cli.mjs`, or the rulebook, while a room is
+  running, then type `/reload`. The new code takes over from the next round and the conversation
+  carries on. If the new code fails to load, the room keeps running the old code; if it fails
+  while running a command, the error is shown and the room carries on. Only `cli.mjs` itself
+  needs a restart.
 
 ## Current limits (deliberate)
 
@@ -40,4 +49,4 @@ npm test
   enforced for codex**: `sandbox_mode="workspace-write"` lets it write anywhere under the cwd, and
   only its instructions keep it in `proposal/`.
 - **No streaming.** A reply appears when the agent finishes.
-- **Two providers**: `claude` and `codex`. A failed agent is reported and skipped; the round goes on.
+- **Two providers**: `claude` and `codex`. A failed turn is reported and ends the round.

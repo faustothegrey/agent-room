@@ -4,10 +4,17 @@
   "description": "A group conversation between you and several CLI agents, one reply each per round.",
   "type": "module",
   "private": true,
-  "bin": { "agent-room": "src/cli.mjs" },
+  "bin": {
+    "agent-room": "src/cli.mjs"
+  },
   "scripts": {
     "start": "node src/cli.mjs",
     "test": "node --test 'test/*.test.mjs'"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "marked": "^18.1.1"
+  }
 }

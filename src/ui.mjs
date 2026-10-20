@@ -1,0 +1,143 @@
+// Everything about a running room except the input loop: loading the other modules, building the
+// room, the transcript file, the screen, and the commands. cli.mjs re-imports this file on /reload;
+// it imports the local modules with the same version tag, so they are fresh too. (A static import
+// of a local module here would stay cached and never reload.)
+// What must survive a reload lives in `ctx`, owned by cli.mjs: the conversation state, the CLI
+// sessions, the transcript path and the viewer server.
+import { execFile } from 'node:child_process';
+import { createServer } from 'node:http';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+export const USAGE = `Usage: agent-room [--agents claude,codex] [--cwd DIR] [--log-dir DIR]
+
+Each agent is provider[:name], e.g. --agents claude:Ada,codex:Linus
+Type a message to start a round; start it with @name to address one agent.
+Commands: /docs (pick a proposal/ file to view in the browser), /reload (load edited code and
+README-for-brainstorming-agents.md; the conversation continues), /quit`;
+
+// Imports fresh copies of the modules and the rulebook and builds a room on ctx.state. Returns
+// the parts to put into ctx; if anything fails it throws, leaving ctx as it was (at most an
+// unused empty session added).
+export async function load(ctx, v) {
+  const instructions = readFileSync(new URL('../README-for-brainstorming-agents.md', import.meta.url), 'utf8');
+  const { createAgent } = await import(`./agents.mjs${v}`);
+  const { createRoom } = await import(`./room.mjs${v}`);
+  const docs = await import(`./docs.mjs${v}`);
+  const agents = ctx.agentSpecs.split(',').map((spec) => {
+    const [provider, name = provider[0].toUpperCase() + provider.slice(1)] = spec.trim().split(':');
+    if (!ctx.sessions.has(name)) ctx.sessions.set(name, {});
+    return createAgent(provider, { name, cwd: ctx.cwd, instructions, session: ctx.sessions.get(name) });
+  });
+  return { room: createRoom(agents, ctx.state), docs };
+}
+
+const tty = process.stdout.isTTY;
+const style = (code) => (s) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
+const bold = style('1');
+const dim = style('2');
+const red = style('31');
+const log = (ctx, text) => appendFileSync(ctx.logPath, text);
+const describe = (room) => room.agents.map((a) => `${a.name} (${a.provider})`).join(', ');
+
+export const promptText = () => (tty ? '\x1b[1;36mYou ›\x1b[0m ' : 'You › ');
+
+// Once per session: create the transcript file and print the banner.
+export function start(ctx) {
+  mkdirSync(ctx.logDir, { recursive: true });
+  ctx.logPath = join(ctx.logDir, `room-${new Date().toISOString().replace(/[:.]/g, '-')}.md`);
+  log(ctx, `# Room — ${describe(ctx.room)}\n\nWorking directory: ${ctx.cwd}\n\n`);
+  console.log(`Room: ${describe(ctx.room)} · cwd ${ctx.cwd}`);
+  console.log(`Transcript: ${ctx.logPath}\nType a message, /docs to see the proposals, /reload after editing the code, or /quit.\n`);
+}
+
+export function reloaded(ctx) {
+  log(ctx, '_(code reloaded)_\n\n');
+  console.log('Reloaded the code and the agents\' rulebook; the conversation continues.\n');
+}
+
+export async function handleLine(line, ctx) {
+  if (!line) return;
+  if (line === '/docs') return showDocs(ctx);
+  return runRound(line, ctx);
+}
+
+// One status line per turn, rewritten every second so a long (or silently passing) turn is visible.
+let ticker = null;
+function startThinking(name) {
+  const t0 = Date.now();
+  const show = () => process.stdout.write(`\r\x1b[2K${dim(`  … ${name} is thinking (${Math.round((Date.now() - t0) / 1000)}s)`)}`);
+  if (!tty) return console.log(`  … ${name} is thinking`);
+  show();
+  ticker = setInterval(show, 1000);
+}
+function stopThinking() {
+  clearInterval(ticker);
+  ticker = null;
+  if (tty) process.stdout.write('\r\x1b[2K');
+}
+
+async function runRound(line, ctx) {
+  let started = 0;
+  const roundStart = Date.now();
+  let turns = 0;
+  let ending = 'all passed';
+  try {
+    await ctx.room.round(line, {
+      onTurnStart(agent) {
+        started = Date.now();
+        startThinking(agent.name);
+      },
+      onMessage(m) {
+        const secs = m.speaker === 'User' ? '' : ` (${((Date.now() - started) / 1000).toFixed(0)}s)`;
+        log(ctx, `**${m.speaker}**${m.error ? ' — failed' : ''}${secs}\n\n${m.text}\n\n`);
+        if (m.speaker === 'User') return;
+        stopThinking();
+        turns++;
+        if (m.error) ending = `${m.speaker} failed`;
+        if (m.pass) return; // passes are logged, not shown
+        console.log(m.error ? red(`\n✗ ${m.speaker} failed${secs}: ${m.text}\n`) : `\n${bold(m.speaker)}${dim(secs)} › ${m.text}\n`);
+      },
+      onNotice(text) {
+        log(ctx, `_${text}_\n\n`);
+        console.log(`${text}\n`);
+        ending = 'turn cap reached';
+      },
+    });
+    const secs = Math.round((Date.now() - roundStart) / 1000);
+    console.log(dim(`── your turn · ${ending} · ${turns} agent turn${turns === 1 ? '' : 's'} · ${secs}s ──`));
+  } catch (err) {
+    // An unknown @name: nothing was sent or recorded.
+    console.log(red(`✗ ${err.message}`));
+  }
+}
+
+// The proposal viewer: a local-only HTTP server kept in ctx, started on the first /docs. It calls
+// ctx.docs on every request, so a reload applies to it too.
+async function viewerUrl(ctx) {
+  if (!ctx.server) {
+    ctx.server = createServer((req, res) => {
+      try { ctx.docs.handle(req, res, join(ctx.cwd, 'proposal')); } catch (err) { res.writeHead(500); res.end(String(err)); }
+    });
+    await new Promise((ok) => ctx.server.listen(0, '127.0.0.1', ok));
+    ctx.server.unref();
+  }
+  return `http://127.0.0.1:${ctx.server.address().port}/`;
+}
+
+async function showDocs(ctx) {
+  const dir = join(ctx.cwd, 'proposal');
+  const files = existsSync(dir) ? ctx.docs.listFiles(dir) : [];
+  if (!files.length) return console.log(`No files in ${dir} yet: they appear when an agent writes a proposal.\n`);
+  const base = await viewerUrl(ctx);
+  const open = (f) => execFile('open', [base + ctx.docs.urlPath(f)], (err) => err && console.log(red(`✗ ${err.message}`)));
+  if (!tty) return console.log(`${files.map((f) => base + ctx.docs.urlPath(f)).join('\n')}\n`);
+  // Take the keys away from readline while the list is up, then give them back.
+  const readlineKeys = process.stdin.listeners('keypress');
+  process.stdin.removeAllListeners('keypress');
+  try {
+    await ctx.docs.pick(files, { input: process.stdin, output: process.stdout, onOpen: open, header: `${base} · ` });
+  } finally {
+    for (const l of readlineKeys) process.stdin.on('keypress', l);
+  }
+}
