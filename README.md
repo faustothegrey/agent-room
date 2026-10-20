@@ -22,11 +22,14 @@ npm test
 
 - `src/agents.mjs` runs each CLI headlessly, once per turn, and resumes its own session
   (`claude -p --resume <id>`, `codex exec resume <thread>`), so agents remember the conversation.
+- `README-for-brainstorming-agents.md` is the agents' rulebook. The room sends it to every agent it
+  starts as system instructions (claude `--append-system-prompt`, codex `developer_instructions`),
+  so a `claude` or `codex` you start yourself is not a brainstorming agent.
 - `src/room.mjs` is the round loop: pass counting, the turn cap, `@name`, and sending each agent
   only the messages it has not seen yet.
 - `src/cli.mjs` is the terminal front end. Every room is saved to `transcripts/` as markdown.
   `/docs` opens the room's `proposal/` folder in Finder (macOS).
-- **Hot reload:** edit `src/room.mjs` or `src/agents.mjs` while a room is running, then type
+- **Hot reload:** edit `src/room.mjs`, `src/agents.mjs` or the rulebook while a room is running, then type
   `/reload`. The new code takes over from the next round and the conversation carries on; if the
   new code fails to load, the room keeps running the old code. `src/cli.mjs` itself needs a restart.
 

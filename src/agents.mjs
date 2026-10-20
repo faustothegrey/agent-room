@@ -1,6 +1,7 @@
 // Provider adapters. Each agent is { name, provider, turn(prompt) -> Promise<string> }.
 // One CLI process per turn; the provider's own session id carries memory between turns.
 // That id lives in `session`, a plain object owned by the caller, so it survives a code reload.
+// `instructions` (the brainstorming rulebook) go in as system-level instructions on every turn.
 // Agents may write only in proposal/: enforced for claude (path rules, no shell), by instructions
 // only for codex. Set on every turn (not just the first).
 import { spawn } from 'node:child_process';
@@ -30,7 +31,7 @@ export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOU
   });
 }
 
-export function createClaudeAgent({ name, model, cwd, timeoutMs, runner = run, session = {} }) {
+export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, runner = run, session = {} }) {
   session.id ??= randomUUID();
   return {
     name,
@@ -39,6 +40,7 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, runner = run, s
       const args = ['-p', '--output-format', 'json'];
       args.push(session.started ? '--resume' : '--session-id', session.id);
       if (model) args.push('--model', model);
+      if (instructions) args.push('--append-system-prompt', instructions);
       // Edits outside proposal/ need a permission that -p cannot grant, so they are refused.
       args.push('--allowedTools', 'Write(proposal/**)', 'Edit(proposal/**)');
       // --tools is variadic, so it must come last: the prompt goes on stdin.
@@ -52,7 +54,7 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, runner = run, s
   };
 }
 
-export function createCodexAgent({ name, model, cwd, timeoutMs, runner = run, session = {} }) {
+export function createCodexAgent({ name, model, cwd, timeoutMs, instructions, runner = run, session = {} }) {
   return {
     name,
     provider: 'codex',
@@ -63,6 +65,8 @@ export function createCodexAgent({ name, model, cwd, timeoutMs, runner = run, se
       const args = session.threadId ? ['exec', 'resume'] : ['exec'];
       args.push('--json', '--skip-git-repo-check', '-c', 'sandbox_mode="workspace-write"');
       if (model) args.push('-m', model);
+      // -c takes TOML; a JSON string is a valid TOML basic string.
+      if (instructions) args.push('-c', `developer_instructions=${JSON.stringify(instructions)}`);
       if (session.threadId) args.push(session.threadId);
       args.push('-');
       const out = await runner('codex', args, { input: prompt, cwd, timeoutMs });

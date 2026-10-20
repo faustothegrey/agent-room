@@ -4,7 +4,7 @@
 // The conversation (transcript, seen, CLI sessions) lives here and is carried over.
 import { createInterface } from 'node:readline/promises';
 import { execFile } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -12,7 +12,8 @@ const USAGE = `Usage: agent-room [--agents claude,codex] [--cwd DIR] [--log-dir 
 
 Each agent is provider[:name], e.g. --agents claude:Ada,codex:Linus
 Type a message to start a round; start it with @name to address one agent.
-Commands: /docs (open proposal/ in Finder), /reload (load edited room.mjs and agents.mjs), /quit`;
+Commands: /docs (open proposal/ in Finder), /reload (load edited room.mjs, agents.mjs and
+README-for-brainstorming-agents.md), /quit`;
 
 const { values } = parseArgs({
   options: {
@@ -35,13 +36,14 @@ const specs = values.agents.split(',').map((spec) => {
 const state = { transcript: [], seen: new Map() };
 const sessions = new Map(specs.map((s) => [s.name, {}]));
 
-// Imports fresh copies of the modules (the query defeats the module cache) and builds a room on
-// the existing state. If anything throws, the caller keeps its current room.
+// Imports fresh copies of the modules (the query defeats the module cache) and the rulebook, and
+// builds a room on the existing state. If anything throws, the caller keeps its current room.
 async function load() {
+  const instructions = readFileSync(new URL('../README-for-brainstorming-agents.md', import.meta.url), 'utf8');
   const v = `?v=${Date.now()}`;
   const { createAgent } = await import(`./agents.mjs${v}`);
   const { createRoom } = await import(`./room.mjs${v}`);
-  const agents = specs.map((s) => createAgent(s.provider, { name: s.name, cwd, session: sessions.get(s.name) }));
+  const agents = specs.map((s) => createAgent(s.provider, { name: s.name, cwd, instructions, session: sessions.get(s.name) }));
   return createRoom(agents, state);
 }
 let room = await load();
@@ -101,7 +103,7 @@ for await (const raw of rl) {
     try {
       room = await load();
       appendFileSync(logPath, '_(code reloaded)_\n\n');
-      console.log('Reloaded room.mjs and agents.mjs; the conversation continues.\n');
+      console.log('Reloaded room.mjs, agents.mjs and the agents\' rulebook; the conversation continues.\n');
     } catch (err) {
       console.log(`✗ Reload failed, still running the previous code: ${err.message}\n`);
     }

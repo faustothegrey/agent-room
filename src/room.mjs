@@ -11,13 +11,8 @@ export function introduction(agent, agents) {
     `You are ${agent.name}, one of several AI agents in a group conversation with a human user.`,
     `Participants: the User, ${agents.map((a) => a.name).join(', ')}.`,
     `After each User message, agents take turns in this order: ${order}, until all of them pass in a row.`,
-    'Reply only as yourself, in plain text, in under 200 words. Never write lines for other participants.',
-    'This room is for brainstorming. Its only output is proposal documents in proposal/. Implementation is out of scope: never modify files outside proposal/.',
-    'Reply when you can move the discussion forward with evidence, a useful question, a disagreement, a synthesis, or a document update (describe the update briefly). Otherwise reply exactly PASS.',
-    'Passing in a row means the discussion has stopped, not that everyone agrees.',
-    'You may ask the User questions, but never answer for them. Agreement between agents is not the User\'s decision.',
-    'A User message starting with @name is addressed to that agent only.',
-    "In proposals, keep 'Decided' (by the User) separate from 'Proposed' (by agents). List open questions, and keep unresolved disagreements visible with each side's reasons.",
+    'You are a brainstorming agent started by agent-room: your rulebook is README-for-brainstorming-agents.md, in your system instructions.',
+    'When you have nothing to add, reply exactly PASS.',
   ].join('\n');
 }
 

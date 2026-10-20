@@ -84,3 +84,23 @@ test('a recreated agent on the same session object resumes instead of starting o
   assert.deepEqual(x.calls[1].args.slice(0, 2), ['exec', 'resume']);
   assert.ok(x.calls[1].args.includes('t-9'));
 });
+
+test('the rulebook goes in as system-level instructions on every turn, for both providers', async () => {
+  const rules = 'Rule one.\nSay "PASS" when done.';
+  const c = fakeRunner([JSON.stringify({ result: 'a' }), JSON.stringify({ result: 'b' })]);
+  const claude = createClaudeAgent({ name: 'A', runner: c.runner, instructions: rules });
+  await claude.turn('p1');
+  await claude.turn('p2');
+  for (const call of c.calls) {
+    assert.equal(call.args[call.args.indexOf('--append-system-prompt') + 1], rules);
+    assert.deepEqual(call.args.slice(-6), ['--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write']);
+  }
+
+  const x = fakeRunner(['{"type":"thread.started","thread_id":"t-1"}', '']);
+  const codex = createCodexAgent({ name: 'B', runner: x.runner, instructions: rules });
+  await codex.turn('p1');
+  await codex.turn('p2');
+  for (const call of x.calls) {
+    assert.ok(call.args.includes('developer_instructions="Rule one.\\nSay \\"PASS\\" when done."'));
+  }
+});
