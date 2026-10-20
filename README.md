@@ -25,6 +25,7 @@ npm test
 - `src/room.mjs` is the round loop: pass counting, the turn cap, `@name`, and sending each agent
   only the messages it has not seen yet.
 - `src/cli.mjs` is the terminal front end. Every room is saved to `transcripts/` as markdown.
+  `/docs` opens the room's `proposal/` folder in Finder (macOS).
 - **Hot reload:** edit `src/room.mjs` or `src/agents.mjs` while a room is running, then type
   `/reload`. The new code takes over from the next round and the conversation carries on; if the
   new code fails to load, the room keeps running the old code. `src/cli.mjs` itself needs a restart.

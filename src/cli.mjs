@@ -3,7 +3,8 @@
 // room.mjs and agents.mjs are loaded by load(), so /reload swaps in edited code between rounds.
 // The conversation (transcript, seen, CLI sessions) lives here and is carried over.
 import { createInterface } from 'node:readline/promises';
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -11,7 +12,7 @@ const USAGE = `Usage: agent-room [--agents claude,codex] [--cwd DIR] [--log-dir 
 
 Each agent is provider[:name], e.g. --agents claude:Ada,codex:Linus
 Type a message to start a round; start it with @name to address one agent.
-Commands: /reload (load edited room.mjs and agents.mjs), /quit`;
+Commands: /docs (open proposal/ in Finder), /reload (load edited room.mjs and agents.mjs), /quit`;
 
 const { values } = parseArgs({
   options: {
@@ -51,7 +52,7 @@ const logPath = join(values['log-dir'], `room-${new Date().toISOString().replace
 appendFileSync(logPath, `# Room — ${agents.map((a) => `${a.name} (${a.provider})`).join(', ')}\n\nWorking directory: ${cwd}\n\n`);
 
 console.log(`Room: ${agents.map((a) => `${a.name} (${a.provider})`).join(', ')} · cwd ${cwd}`);
-console.log(`Transcript: ${logPath}\nType a message, or /quit.\n`);
+console.log(`Transcript: ${logPath}\nType a message, /docs to see the proposals, or /quit.\n`);
 
 // Colours and the live "thinking" line only on a terminal; piped output stays plain.
 const tty = process.stdout.isTTY;
@@ -86,6 +87,16 @@ for await (const raw of rl) {
   const line = raw.trim();
   if (!line) { prompt(); continue; }
   if (line === '/quit') break;
+  if (line === '/docs') {
+    const dir = join(cwd, 'proposal');
+    if (!existsSync(dir)) console.log(`No ${dir} yet: it appears when an agent writes the first proposal.\n`);
+    else {
+      const err = await new Promise((done) => execFile('open', [dir], done));
+      console.log(err ? red(`✗ Could not open ${dir}: ${err.message}\n`) : `Opened ${dir} in Finder.\n`);
+    }
+    prompt();
+    continue;
+  }
   if (line === '/reload') {
     try {
       room = await load();
