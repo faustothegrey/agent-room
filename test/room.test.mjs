@@ -187,3 +187,16 @@ test('an agent left out of a round receives that exchange when next selected', a
   assert.match(a.prompts[0], /You are A/);
   assert.match(a.prompts[0], /\[User\]: @B hi\n\n\[B\]: b1\n\n\[B\]: \(passed\)\n\n\[User\]: all of you/);
 });
+
+test('a room recreated on the same state continues the conversation', async () => {
+  const state = { transcript: [], seen: new Map() };
+  const a = fakeAgent('A', ['a1', 'PASS']);
+  const b = fakeAgent('B', ['PASS', 'PASS']);
+  await createRoom([a, b], state).round('u1');
+  const room = createRoom([a, b], state);
+  await room.round('u2');
+  assert.equal(room.transcript.filter((m) => m.speaker === 'User').length, 2);
+  // No second introduction, and only what is new since A's last turn.
+  assert.doesNotMatch(a.prompts[2], /You are A|u1|a1/);
+  assert.match(a.prompts[2], /New messages since your last turn:\n\n\[User\]: u2\n\nYour reply/);
+});

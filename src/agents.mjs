@@ -1,5 +1,6 @@
 // Provider adapters. Each agent is { name, provider, turn(prompt) -> Promise<string> }.
 // One CLI process per turn; the provider's own session id carries memory between turns.
+// That id lives in `session`, a plain object owned by the caller, so it survives a code reload.
 // Agents may write only in proposal/: enforced for claude (path rules, no shell), by instructions
 // only for codex. Set on every turn (not just the first).
 import { spawn } from 'node:child_process';
@@ -29,15 +30,14 @@ export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOU
   });
 }
 
-export function createClaudeAgent({ name, model, cwd, timeoutMs, runner = run }) {
-  const sessionId = randomUUID();
-  let started = false;
+export function createClaudeAgent({ name, model, cwd, timeoutMs, runner = run, session = {} }) {
+  session.id ??= randomUUID();
   return {
     name,
     provider: 'claude',
     async turn(prompt) {
       const args = ['-p', '--output-format', 'json'];
-      args.push(started ? '--resume' : '--session-id', sessionId);
+      args.push(session.started ? '--resume' : '--session-id', session.id);
       if (model) args.push('--model', model);
       // Edits outside proposal/ need a permission that -p cannot grant, so they are refused.
       args.push('--allowedTools', 'Write(proposal/**)', 'Edit(proposal/**)');
@@ -46,14 +46,13 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, runner = run })
       const out = await runner('claude', args, { input: prompt, cwd, timeoutMs });
       const result = JSON.parse(out);
       if (result.is_error) throw new Error(`claude: ${result.result || 'turn failed'}`);
-      started = true;
+      session.started = true;
       return String(result.result ?? '').trim();
     },
   };
 }
 
-export function createCodexAgent({ name, model, cwd, timeoutMs, runner = run }) {
-  let threadId = null;
+export function createCodexAgent({ name, model, cwd, timeoutMs, runner = run, session = {} }) {
   return {
     name,
     provider: 'codex',
@@ -61,14 +60,14 @@ export function createCodexAgent({ name, model, cwd, timeoutMs, runner = run }) 
       // `exec resume` has no -s flag, and the user's config.toml may grant full access,
       // so the workspace-write sandbox is forced through -c on every call. It allows writes
       // anywhere under cwd: keeping codex inside proposal/ relies on its instructions (owner's call).
-      const args = threadId ? ['exec', 'resume'] : ['exec'];
+      const args = session.threadId ? ['exec', 'resume'] : ['exec'];
       args.push('--json', '--skip-git-repo-check', '-c', 'sandbox_mode="workspace-write"');
       if (model) args.push('-m', model);
-      if (threadId) args.push(threadId);
+      if (session.threadId) args.push(session.threadId);
       args.push('-');
       const out = await runner('codex', args, { input: prompt, cwd, timeoutMs });
       const { threadId: id, text } = parseCodexEvents(out);
-      if (id) threadId = id;
+      if (id) session.threadId = id;
       return text;
     },
   };

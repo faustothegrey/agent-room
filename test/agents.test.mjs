@@ -69,3 +69,18 @@ test('codex events: last agent_message wins, noise lines are ignored, turn.faile
   assert.equal(parseCodexEvents(out).text, 'final');
   assert.throws(() => parseCodexEvents('{"type":"turn.failed","error":{"message":"quota"}}'), /quota/);
 });
+
+test('a recreated agent on the same session object resumes instead of starting over', async () => {
+  const session = {};
+  const c = fakeRunner([JSON.stringify({ result: 'hi' }), JSON.stringify({ result: 'again' })]);
+  await createClaudeAgent({ name: 'A', runner: c.runner, session }).turn('p1');
+  await createClaudeAgent({ name: 'A', runner: c.runner, session }).turn('p2');
+  assert.equal(c.calls[1].args[c.calls[1].args.indexOf('--resume') + 1], session.id);
+
+  const codexSession = {};
+  const x = fakeRunner(['{"type":"thread.started","thread_id":"t-9"}', '']);
+  await createCodexAgent({ name: 'B', runner: x.runner, session: codexSession }).turn('p1');
+  await createCodexAgent({ name: 'B', runner: x.runner, session: codexSession }).turn('p2');
+  assert.deepEqual(x.calls[1].args.slice(0, 2), ['exec', 'resume']);
+  assert.ok(x.calls[1].args.includes('t-9'));
+});

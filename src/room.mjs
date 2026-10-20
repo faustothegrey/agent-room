@@ -1,6 +1,7 @@
 // The round loop: the user speaks, then the selected agents take turns in order until every one
 // of them has passed in a row (or the turn cap is hit, or a turn fails).
 // Each agent is sent only what it has not yet seen; its own CLI session holds the rest.
+// The transcript and `seen` live in `state`, owned by the caller, so they survive a code reload.
 
 export const MAX_TURNS = 8;
 
@@ -28,15 +29,15 @@ export function formatMessages(messages) {
   return messages.map((m) => `[${m.speaker}]: ${m.pass ? '(passed)' : m.text}`).join('\n\n');
 }
 
-export function createRoom(agents) {
+export function createRoom(agents, state = { transcript: [], seen: new Map() }) {
   const names = new Set();
   for (const a of agents) {
     if (names.has(a.name)) throw new Error(`Duplicate agent name "${a.name}"`);
     names.add(a.name);
   }
   // Every entry: { speaker, text, error?, pass? }. Errors are shown to the user, never sent to agents.
-  const transcript = [];
-  const seen = new Map(agents.map((a) => [a.name, 0]));
+  const { transcript, seen } = state;
+  for (const a of agents) if (!seen.has(a.name)) seen.set(a.name, 0);
 
   function unseenFor(agent) {
     return transcript

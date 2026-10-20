@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 // Terminal front end: read a user message, run one cycle, print each reply, repeat.
+// room.mjs and agents.mjs are loaded by load(), so /reload swaps in edited code between rounds.
+// The conversation (transcript, seen, CLI sessions) lives here and is carried over.
 import { createInterface } from 'node:readline/promises';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { createAgent } from './agents.mjs';
-import { createRoom } from './room.mjs';
 
 const USAGE = `Usage: agent-room [--agents claude,codex] [--cwd DIR] [--log-dir DIR]
 
 Each agent is provider[:name], e.g. --agents claude:Ada,codex:Linus
-Type a message to start a round; start it with @name to address one agent. Commands: /quit`;
+Type a message to start a round; start it with @name to address one agent.
+Commands: /reload (load edited room.mjs and agents.mjs), /quit`;
 
 const { values } = parseArgs({
   options: {
@@ -26,11 +27,24 @@ if (values.help) {
 }
 
 const cwd = resolve(values.cwd);
-const agents = values.agents.split(',').map((spec) => {
+const specs = values.agents.split(',').map((spec) => {
   const [provider, name] = spec.trim().split(':');
-  return createAgent(provider, { name: name || provider[0].toUpperCase() + provider.slice(1), cwd });
+  return { provider, name: name || provider[0].toUpperCase() + provider.slice(1) };
 });
-const room = createRoom(agents);
+const state = { transcript: [], seen: new Map() };
+const sessions = new Map(specs.map((s) => [s.name, {}]));
+
+// Imports fresh copies of the modules (the query defeats the module cache) and builds a room on
+// the existing state. If anything throws, the caller keeps its current room.
+async function load() {
+  const v = `?v=${Date.now()}`;
+  const { createAgent } = await import(`./agents.mjs${v}`);
+  const { createRoom } = await import(`./room.mjs${v}`);
+  const agents = specs.map((s) => createAgent(s.provider, { name: s.name, cwd, session: sessions.get(s.name) }));
+  return createRoom(agents, state);
+}
+let room = await load();
+const { agents } = room;
 
 mkdirSync(values['log-dir'], { recursive: true });
 const logPath = join(values['log-dir'], `room-${new Date().toISOString().replace(/[:.]/g, '-')}.md`);
@@ -50,6 +64,17 @@ for await (const raw of rl) {
   const line = raw.trim();
   if (!line) { prompt(); continue; }
   if (line === '/quit') break;
+  if (line === '/reload') {
+    try {
+      room = await load();
+      appendFileSync(logPath, '_(code reloaded)_\n\n');
+      console.log('Reloaded room.mjs and agents.mjs; the conversation continues.\n');
+    } catch (err) {
+      console.log(`✗ Reload failed, still running the previous code: ${err.message}\n`);
+    }
+    prompt();
+    continue;
+  }
   let started = 0;
   try {
     await room.round(line, {
