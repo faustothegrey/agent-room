@@ -200,3 +200,14 @@ test('a room recreated on the same state continues the conversation', async () =
   assert.doesNotMatch(a.prompts[2], /You are A|u1|a1/);
   assert.match(a.prompts[2], /New messages since your last turn:\n\n\[User\]: u2\n\nYour reply/);
 });
+
+test('a reply carries the usage its agent reported for that turn', async () => {
+  const a = fakeAgent('A', ['a1', 'PASS']);
+  const b = fakeAgent('B', ['PASS', 'PASS']);
+  const turn = a.turn;
+  a.turn = async (p) => { const r = await turn(p); a.lastUsage = { input: 10, cached: 0, output: 2 }; return r; };
+  const room = createRoom([a, b]);
+  await room.round('u1');
+  assert.deepEqual(room.transcript[1].usage, { input: 10, cached: 0, output: 2 });
+  assert.equal(room.transcript[2].usage, undefined); // B reported none
+});

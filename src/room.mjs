@@ -30,7 +30,8 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
     if (names.has(a.name)) throw new Error(`Duplicate agent name "${a.name}"`);
     names.add(a.name);
   }
-  // Every entry: { speaker, text, error?, pass? }. Errors are shown to the user, never sent to agents.
+  // Every entry: { speaker, text, error?, pass?, usage? }. Errors are shown to the user, never sent
+  // to agents; usage is the agent's lastUsage for that turn, when its CLI reported one.
   const { transcript, seen } = state;
   for (const a of agents) if (!seen.has(a.name)) seen.set(a.name, 0);
 
@@ -76,6 +77,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
         try {
           const text = await agent.turn(prompt);
           entry = isPass(text) ? { speaker: agent.name, text: 'PASS', pass: true } : { speaker: agent.name, text };
+          if (agent.lastUsage) entry.usage = agent.lastUsage;
           // Advance only on success: a failed agent gets these messages again next time.
           seen.set(agent.name, transcript.length + 1);
         } catch (err) {

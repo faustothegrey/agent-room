@@ -36,6 +36,11 @@ npm test
   that renders Markdown with [marked](https://marked.js.org), the project's one dependency.
   Images show inline, plain links to images get a preview, and an open page reloads when an
   agent edits the file.
+- `src/usage.mjs` is usage stats. Each reply shows its tokens (and, for claude, the API-price
+  cost) as reported by the CLI itself; the round's end line adds the round's totals and your
+  subscription quotas, and `/usage` shows the session totals per agent. Quotas come from the
+  local quota meter (`~/Software/scripts-ai/quota-monitoring`, `http://127.0.0.1:9899`, or
+  `AGENT_ROOM_METER`); if it isn't running, quotas are left out.
 - **Hot reload:** edit any file in `src/` except `cli.mjs`, or the rulebook, while a room is
   running, then type `/reload`. The new code takes over from the next round and the conversation
   carries on. If the new code fails to load, the room keeps running the old code; if it fails

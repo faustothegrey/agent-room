@@ -110,3 +110,24 @@ test('the rulebook goes in as system-level instructions on every turn, for both 
     assert.ok(call.args.includes('developer_instructions="Rule one.\\nSay \\"PASS\\" when done."'));
   }
 });
+
+test('each turn reports its usage: claude from its JSON result, codex from turn.completed', async () => {
+  const c = fakeRunner([JSON.stringify({
+    result: 'hi', total_cost_usd: 0.02,
+    usage: { input_tokens: 2, cache_creation_input_tokens: 2499, cache_read_input_tokens: 1670, output_tokens: 5 },
+  })]);
+  const claude = createClaudeAgent({ name: 'A', runner: c.runner });
+  await claude.turn('p');
+  assert.deepEqual(claude.lastUsage, { input: 4171, cached: 1670, output: 5, cost: 0.02 });
+
+  const x = fakeRunner([[
+    '{"type":"thread.started","thread_id":"t-1"}',
+    '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}',
+    '{"type":"turn.completed","usage":{"input_tokens":15973,"cached_input_tokens":7168,"output_tokens":5,"reasoning_output_tokens":0}}',
+  ].join('\n'), '{"type":"item.completed","item":{"type":"agent_message","text":"again"}}']);
+  const codex = createCodexAgent({ name: 'B', runner: x.runner });
+  await codex.turn('p1');
+  assert.deepEqual(codex.lastUsage, { input: 15973, cached: 7168, output: 5 });
+  await codex.turn('p2'); // no turn.completed this time: no stale usage from the previous turn
+  assert.equal(codex.lastUsage, null);
+});

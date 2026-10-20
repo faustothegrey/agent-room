@@ -45,10 +45,12 @@ export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOU
 
 export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, runner = run, session = {} }) {
   session.id ??= randomUUID();
-  return {
+  const agent = {
     name,
     provider: 'claude',
+    lastUsage: null,
     async turn(prompt) {
+      agent.lastUsage = null;
       const args = ['-p', '--output-format', 'json'];
       args.push(session.started ? '--resume' : '--session-id', session.id);
       if (model) args.push('--model', model);
@@ -60,16 +62,29 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, r
       const result = JSON.parse(out);
       if (result.is_error) throw new Error(`claude: ${result.result || 'turn failed'}`);
       session.started = true;
+      agent.lastUsage = claudeUsage(result);
       return String(result.result ?? '').trim();
     },
   };
+  return agent;
+}
+
+// Every adapter reports a turn's usage as { input, cached, output, cost? }: input counts all prompt
+// tokens (cached ones included), cost is claude's API-price equivalent in USD, not a subscription bill.
+function claudeUsage({ usage: u, total_cost_usd: cost }) {
+  if (!u) return null;
+  const cached = u.cache_read_input_tokens ?? 0;
+  const input = (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + cached;
+  return { input, cached, output: u.output_tokens ?? 0, ...(typeof cost === 'number' && { cost }) };
 }
 
 export function createCodexAgent({ name, model, cwd, timeoutMs, instructions, runner = run, session = {} }) {
-  return {
+  const agent = {
     name,
     provider: 'codex',
+    lastUsage: null,
     async turn(prompt) {
+      agent.lastUsage = null;
       // `exec resume` has no -s flag, so the sandbox is set through -c on every call: none at all
       // (any file, any command, network). Web search is live rather than cached.
       const args = session.threadId ? ['exec', 'resume'] : ['exec'];
@@ -80,17 +95,21 @@ export function createCodexAgent({ name, model, cwd, timeoutMs, instructions, ru
       if (session.threadId) args.push(session.threadId);
       args.push('-');
       const out = await runner('codex', args, { input: prompt, cwd, timeoutMs });
-      const { threadId: id, text } = parseCodexEvents(out);
+      const { threadId: id, text, usage } = parseCodexEvents(out);
       if (id) session.threadId = id;
+      agent.lastUsage = usage;
       return text;
     },
   };
+  return agent;
 }
 
-// Codex --json prints one event per line. The reply is the last agent_message.
+// Codex --json prints one event per line. The reply is the last agent_message; the usage is in
+// turn.completed (its input_tokens already include the cached ones).
 export function parseCodexEvents(stdout) {
   let threadId = null;
   let text = '';
+  let usage = null;
   for (const line of stdout.split('\n')) {
     if (!line.trim()) continue;
     let event;
@@ -98,8 +117,12 @@ export function parseCodexEvents(stdout) {
     if (event.type === 'thread.started') threadId = event.thread_id;
     if (event.type === 'item.completed' && event.item?.type === 'agent_message') text = event.item.text;
     if (event.type === 'turn.failed') throw new Error(`codex: ${event.error?.message || 'turn failed'}`);
+    if (event.type === 'turn.completed' && event.usage) {
+      const u = event.usage;
+      usage = { input: u.input_tokens ?? 0, cached: u.cached_input_tokens ?? 0, output: u.output_tokens ?? 0 };
+    }
   }
-  return { threadId, text: text.trim() };
+  return { threadId, text: text.trim(), usage };
 }
 
 const FACTORIES = { claude: createClaudeAgent, codex: createCodexAgent };

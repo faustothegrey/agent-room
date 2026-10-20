@@ -13,8 +13,9 @@ export const USAGE = `Usage: agent-room [--agents claude,codex] [--cwd DIR] [--l
 
 Each agent is provider[:name], e.g. --agents claude:Ada,codex:Linus
 Type a message to start a round; start it with @name to address one agent.
-Commands: /docs (pick a proposal/ file to view in the browser), /reload (load edited code and
-README-for-brainstorming-agents.md; the conversation continues), /quit`;
+Commands: /docs (pick a proposal/ file to view in the browser), /usage (tokens this session and
+subscription quotas), /reload (load edited code and README-for-brainstorming-agents.md; the
+conversation continues), /quit`;
 
 // Imports fresh copies of the modules and the rulebook and builds a room on ctx.state. Returns
 // the parts to put into ctx; if anything fails it throws, leaving ctx as it was (at most an
@@ -24,12 +25,14 @@ export async function load(ctx, v) {
   const { createAgent } = await import(`./agents.mjs${v}`);
   const { createRoom } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
+  const usage = await import(`./usage.mjs${v}`);
   const agents = ctx.agentSpecs.split(',').map((spec) => {
     const [provider, name = provider[0].toUpperCase() + provider.slice(1)] = spec.trim().split(':');
     if (!ctx.sessions.has(name)) ctx.sessions.set(name, {});
     return createAgent(provider, { name, cwd: ctx.cwd, instructions, session: ctx.sessions.get(name) });
   });
-  return { room: createRoom(agents, ctx.state), docs };
+  // Session token totals per agent name; kept in ctx so they survive a reload.
+  return { room: createRoom(agents, ctx.state), docs, usage, totals: ctx.totals ?? {} };
 }
 
 const tty = process.stdout.isTTY;
@@ -48,7 +51,7 @@ export function start(ctx) {
   ctx.logPath = join(ctx.logDir, `room-${new Date().toISOString().replace(/[:.]/g, '-')}.md`);
   log(ctx, `# Room — ${describe(ctx.room)}\n\nWorking directory: ${ctx.cwd}\n\n`);
   console.log(`Room: ${describe(ctx.room)} · cwd ${ctx.cwd}`);
-  console.log(`Transcript: ${ctx.logPath}\nType a message, /docs to see the proposals, /reload after editing the code, or /quit.\n`);
+  console.log(`Transcript: ${ctx.logPath}\nType a message, /docs to see the proposals, /usage for tokens and quotas, /reload after editing the code, or /quit.\n`);
 }
 
 export function reloaded(ctx) {
@@ -59,6 +62,10 @@ export function reloaded(ctx) {
 export async function handleLine(line, ctx) {
   if (!line) return;
   if (line === '/docs') return showDocs(ctx);
+  if (line === '/usage') {
+    const quota = await ctx.usage.fetchQuota();
+    return console.log(`${ctx.usage.usageReport({ totals: ctx.totals, agents: ctx.room.agents, quota })}\n`);
+  }
   return runRound(line, ctx);
 }
 
@@ -82,6 +89,7 @@ async function runRound(line, ctx) {
   const roundStart = Date.now();
   let turns = 0;
   let ending = 'all passed';
+  let roundUsage;
   try {
     await ctx.room.round(line, {
       onTurnStart(agent) {
@@ -89,11 +97,16 @@ async function runRound(line, ctx) {
         startThinking(agent.name);
       },
       onMessage(m) {
-        const secs = m.speaker === 'User' ? '' : ` (${((Date.now() - started) / 1000).toFixed(0)}s)`;
+        const tokens = m.usage ? ` · ${ctx.usage.formatUsage(m.usage)}` : '';
+        const secs = m.speaker === 'User' ? '' : ` (${((Date.now() - started) / 1000).toFixed(0)}s${tokens})`;
         log(ctx, `**${m.speaker}**${m.error ? ' — failed' : ''}${secs}\n\n${m.text}\n\n`);
         if (m.speaker === 'User') return;
         stopThinking();
         turns++;
+        if (m.usage) {
+          roundUsage = ctx.usage.addUsage(roundUsage, m.usage);
+          ctx.totals[m.speaker] = ctx.usage.addUsage(ctx.totals[m.speaker], m.usage);
+        }
         if (m.error) ending = `${m.speaker} failed`;
         if (m.pass) return; // passes are logged, not shown
         console.log(m.error ? red(`\n✗ ${m.speaker} failed${secs}: ${m.text}\n`) : `\n${bold(m.speaker)}${dim(secs)} › ${m.text}\n`);
@@ -105,7 +118,10 @@ async function runRound(line, ctx) {
       },
     });
     const secs = Math.round((Date.now() - roundStart) / 1000);
-    console.log(dim(`── your turn · ${ending} · ${turns} agent turn${turns === 1 ? '' : 's'} · ${secs}s ──`));
+    const providers = [...new Set(ctx.room.agents.map((a) => a.provider))];
+    const quota = ctx.usage.quotaSummary(await ctx.usage.fetchQuota(), providers);
+    const parts = [ending, `${turns} agent turn${turns === 1 ? '' : 's'}`, `${secs}s`, ctx.usage.formatUsage(roundUsage), quota];
+    console.log(dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
   } catch (err) {
     // An unknown @name: nothing was sent or recorded.
     console.log(red(`✗ ${err.message}`));
