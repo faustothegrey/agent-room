@@ -1,5 +1,8 @@
 // Proposal viewer: handle() serves proposal/ over local HTTP, rendering Markdown with marked so
 // images (and plain links to images) show inline; pick() is the terminal list behind /docs.
+// It also serves the discussion screen (/__room, first cycle of proposal/discussion-ide.md): the
+// chat on the left, mirrored live from the terminal, and the document picked with /docs on the
+// right. The screen is read-only: the User types in the terminal.
 // cli.mjs loads this module in load(), so /reload swaps it too.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
@@ -69,8 +72,98 @@ setInterval(async () => {
 </script></body></html>`;
 }
 
-export function handle(req, res, dir) {
+// ── The discussion screen ────────────────────────────────────────────────────────────────────
+// `screen` is plain state kept by the caller across reloads:
+// { clients: Set of open event streams, transcript: the room's entries, doc: file or null,
+//   thinking: name or null, status: the last round's end line or null }.
+
+// A transcript entry as the page shows it: the text rendered as Markdown.
+export const messageView = (m) => ({ speaker: m.speaker, html: md.parse(m.text ?? ''), error: !!m.error, pass: !!m.pass });
+
+// Sends one event ({ type, ... }) to every open screen. The last round's end line is remembered
+// until the User speaks again, so a page opened later still shows that it is the User's turn.
+export function broadcast(screen, event) {
+  if (event.type === 'turn') screen.status = event.text;
+  if (event.type === 'message' && event.message.speaker === 'User') screen.status = null;
+  for (const res of screen.clients) res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>agent-room</title><style>
+:root { color-scheme: light dark; --line: #8884; --dim: #888; }
+body { margin: 0; height: 100vh; display: grid; grid-template-columns: minmax(300px, 38%) 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+#chat { overflow-y: auto; padding: 1rem; border-right: 1px solid var(--line); }
+.msg { margin: 0 0 .9rem; padding: .5rem .75rem; border-radius: 8px; background: #8881; }
+.msg.user { background: #3b82f622; } .msg.error { background: #ef444422; }
+.who { font-weight: 600; font-size: .85rem; margin-bottom: .2rem; }
+.msg p { margin: .3rem 0; } .msg pre { overflow-x: auto; } .msg img { max-width: 100%; }
+.status { color: var(--dim); font-size: .85rem; margin: .4rem 0 .9rem; }
+#doc { border: 0; width: 100%; height: 100vh; }
+#empty { display: grid; place-items: center; color: var(--dim); height: 100vh; padding: 1rem; text-align: center; }
+</style></head><body>
+<div id="chat"></div>
+<div id="right"><div id="empty">Pick a document with <code>/docs</code> in the terminal.</div></div>
+<script>
+const chat = document.getElementById('chat'), right = document.getElementById('right');
+let thinking = null;
+const atBottom = () => chat.scrollHeight - chat.scrollTop - chat.clientHeight < 40;
+function add(el) { const stick = atBottom(); chat.insertBefore(el, thinking); if (stick) chat.scrollTop = chat.scrollHeight; }
+function message(m) {
+  if (m.pass) return; // passes are hidden, as in the terminal
+  const el = document.createElement('div');
+  el.className = 'msg' + (m.speaker === 'User' ? ' user' : '') + (m.error ? ' error' : '');
+  el.innerHTML = '<div class="who"></div>' + m.html;
+  el.firstChild.textContent = m.speaker + (m.error ? ' — failed' : '');
+  add(el);
+}
+function status(text) { const el = document.createElement('div'); el.className = 'status'; el.textContent = text; add(el); }
+function setThinking(name) {
+  thinking?.remove(); thinking = null;
+  if (!name) return;
+  thinking = document.createElement('div'); thinking.className = 'status'; thinking.textContent = '… ' + name + ' is thinking';
+  const stick = atBottom(); chat.append(thinking); if (stick) chat.scrollTop = chat.scrollHeight;
+}
+function showDoc(file) {
+  if (!file) return;
+  right.innerHTML = '<iframe id="doc"></iframe>';
+  right.firstChild.src = '/' + file.split('/').map(encodeURIComponent).join('/');
+  document.title = file + ' · agent-room';
+}
+new EventSource('/__events').onmessage = (e) => {
+  const ev = JSON.parse(e.data);
+  if (ev.type === 'reset') {
+    chat.textContent = ''; thinking = null;
+    ev.messages.forEach(message);
+    if (ev.status) status(ev.status);
+    setThinking(ev.thinking); showDoc(ev.doc);
+  }
+  if (ev.type === 'message') message(ev.message);
+  if (ev.type === 'thinking') setThinking(ev.name);
+  if (ev.type === 'turn') status(ev.text);
+  if (ev.type === 'doc') showDoc(ev.file);
+};
+</script></body></html>`;
+
+// Serves /__room (the page) and /__events (its live stream); returns false for any other path.
+function handleScreen(req, res, url, screen) {
+  if (url.pathname === '/__room') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(SCREEN);
+    return true;
+  }
+  if (url.pathname !== '/__events') return false;
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+  screen.clients.add(res);
+  req.on('close', () => screen.clients.delete(res));
+  // A page that (re)connects first gets everything so far, so it never shows a partial room.
+  const reset = { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc, thinking: screen.thinking, status: screen.status };
+  res.write(`data: ${JSON.stringify(reset)}\n\n`);
+  return true;
+}
+
+export function handle(req, res, dir, screen) {
   const url = new URL(req.url, 'http://localhost');
+  if (screen && handleScreen(req, res, url, screen)) return;
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
   if (url.pathname === '/__mtime') {
     const rel = url.searchParams.get('f') ?? '';

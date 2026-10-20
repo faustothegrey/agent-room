@@ -5,11 +5,11 @@ document or drawing, keeping the conversation and its subject visible together. 
 agents' own CLIs, on your own subscriptions. Longer term, it serves building educational
 software for maths and science by vibecoding, with costs under control.
 
-**First implementation cycle** (decided by the owner, 2026-10-20; **not built yet**): one
-screen, with the chat between you and the agents on the left and the Markdown document or SVG
-drawing under discussion on the right. Nothing else. See `proposal/discussion-ide.md`, which
-also lists what is still open (who picks the document; whether the screen replaces the terminal
-or sits beside it).
+**First implementation cycle** (decided by the owner, 2026-10-20; **first version built**): the
+discussion screen, a browser page with the chat between you and the agents on the left and the
+Markdown document or SVG drawing under discussion on the right. Nothing else. It sits beside the
+terminal: you keep typing there, and you pick the document with `/docs`. See
+`proposal/discussion-ide.md`.
 
 ## Today
 
@@ -26,6 +26,7 @@ is documents in `proposal/`, and agents write elsewhere only when you ask them t
 ```sh
 npm install                                   # once: installs marked
 npm start                                     # claude + codex, in the current directory
+npm run terminal                              # the same, terminal only: /docs opens files alone
 node src/cli.mjs --agents claude:Ada,codex:Linus --cwd ~/Software/some-project
 node src/cli.mjs --log-dir ~/room-logs        # transcripts elsewhere (default: ./transcripts)
 npm test
@@ -43,11 +44,14 @@ npm test
 - `src/cli.mjs` is a small shell that never reloads: arguments, the input loop, `/reload`, `/quit`.
 - `src/ui.mjs` is everything else on screen: building the room, the display, the commands, and the
   transcript (every room is saved to `transcripts/` as markdown). `/docs` lists the room's
-  `proposal/` files: move with ↑/↓, Enter opens one in the browser.
-- `src/docs.mjs` is that viewer: a local-only web server (127.0.0.1, started on the first `/docs`)
-  that renders Markdown with [marked](https://marked.js.org), the project's one dependency.
-  Images show inline, plain links to images get a preview, and an open page reloads when an
-  agent edits the file.
+  `proposal/` files: move with ↑/↓, and Enter puts the file on the discussion screen (opening the
+  screen in your browser if none is open yet).
+- `src/docs.mjs` is the viewer and the discussion screen: a local-only web server (127.0.0.1,
+  started on the first `/docs`) that renders Markdown with [marked](https://marked.js.org), the
+  project's one dependency. Images show inline, plain links to images get a preview, and the
+  document reloads when an agent edits it. The screen (`/__room`) mirrors the chat live from
+  the terminal, including who is thinking and the end of each round, but hides passes as the
+  terminal does. It is read-only, and a screen opened later catches up on the whole chat.
 - `src/usage.mjs` is usage stats. Each reply shows its tokens (and, for claude, the API-price
   cost) as reported by the CLI itself; the round's end line adds the round's totals and your
   subscription quotas, and `/usage` shows the session totals per agent. Quotas come from the

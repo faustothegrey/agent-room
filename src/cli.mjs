@@ -12,6 +12,7 @@ const { values } = parseArgs({
     agents: { type: 'string', default: 'claude,codex' },
     cwd: { type: 'string', default: process.cwd() },
     'log-dir': { type: 'string', default: join(process.cwd(), 'transcripts') },
+    'no-screen': { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -20,6 +21,7 @@ const ctx = {
   cwd: resolve(values.cwd),
   agentSpecs: values.agents,
   logDir: values['log-dir'],
+  noScreen: !!values['no-screen'],
   state: { transcript: [], seen: new Map() },
   sessions: new Map(),
 };

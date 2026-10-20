@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node src/cli.mjs",
+    "terminal": "node src/cli.mjs --no-screen",
     "test": "node --test 'test/*.test.mjs'"
   },
   "engines": {
