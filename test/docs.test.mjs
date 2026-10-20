@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { createServer } from 'node:http';
+import { createServer, request } from 'node:http';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,7 +24,7 @@ async function serve(dir, screen) {
   const server = createServer((req, res) => handle(req, res, dir, screen));
   await new Promise((ok) => server.listen(0, '127.0.0.1', ok));
   const base = `http://127.0.0.1:${server.address().port}`;
-  return { get: (path) => fetch(base + path), close: () => server.close() };
+  return { base, get: (path) => fetch(base + path), close: () => server.close() };
 }
 
 test('listFiles: every non-hidden file, recursively, sorted', () => {
@@ -132,4 +132,58 @@ test('without a screen, /__room is just a missing file', async () => {
 
 test('messageView marks errors and passes for the page', () => {
   assert.deepEqual(messageView({ speaker: 'A', text: 'quota', error: true }), { speaker: 'A', html: '<p>quota</p>\n', error: true, pass: false });
+});
+
+// A POST as the room page sends it (same host, JSON), with optional header overrides.
+const postFrom = (s, path, body, headers = {}) =>
+  fetch(s.base + path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+
+test('the screen lists proposal/ files and shows the one picked, for every open page', async () => {
+  const screen = { clients: new Set(), transcript: [] };
+  const s = await serve(fixture(), screen);
+  assert.deepEqual(await (await s.get('/__files')).json(), ['drawings/flow.png', 'drawings/sketch.png', 'plan.md']);
+  const next = eventReader(await s.get('/__events'));
+  await next(); // reset
+  assert.equal((await postFrom(s, '/__show', { file: 'plan.md' })).status, 204);
+  assert.equal(screen.doc, 'plan.md');
+  assert.deepEqual(await next(), { type: 'doc', file: 'plan.md' });
+  assert.equal((await postFrom(s, '/__show', { file: '../secret.txt' })).status, 404);
+  assert.equal(screen.doc, 'plan.md');
+  for (const c of screen.clients) c.end();
+  s.close();
+});
+
+// A POST with a forged Host header (fetch ignores one, so this uses node:http); resolves to the status.
+const postWithHost = (s, path, host) => new Promise((done) => {
+  const req = request(s.base + path, { method: 'POST', headers: { host, 'content-type': 'application/json' } }, (res) => { res.resume(); done(res.statusCode); });
+  req.end(JSON.stringify({ text: 'x' }));
+});
+
+test('what the User types on the screen reaches the room only from the page itself', async () => {
+  const said = [];
+  const screen = { clients: new Set(), transcript: [], say: (line) => said.push(line) };
+  const s = await serve(fixture(), screen);
+  try {
+    assert.equal((await postFrom(s, '/__say', { text: '  hello @Claude  ' })).status, 204);
+    assert.deepEqual(said, ['hello @Claude']);
+    // Another site's page, a form post, or a rebinding host are refused.
+    assert.equal((await postFrom(s, '/__say', { text: 'x' }, { origin: 'https://evil.example' })).status, 403);
+    assert.equal((await postFrom(s, '/__say', { text: 'x' }, { 'content-type': 'text/plain' })).status, 403);
+    assert.equal(await postWithHost(s, '/__say', 'evil.example'), 403);
+    assert.equal((await postFrom(s, '/__show', { file: 'plan.md' }, { origin: 'https://evil.example' })).status, 403);
+    assert.equal((await s.get('/__say')).status, 403); // GET
+    assert.deepEqual(said, ['hello @Claude']);
+  } finally {
+    s.close();
+  }
+});
+
+test('in terminal mode the page only watches: /__say is refused and the reset says so', async () => {
+  const screen = { clients: new Set(), transcript: [] };
+  const s = await serve(fixture(), screen);
+  assert.equal((await postFrom(s, '/__say', { text: 'hi' })).status, 409);
+  const next = eventReader(await s.get('/__events'));
+  assert.equal((await next()).input, false);
+  for (const c of screen.clients) c.end();
+  s.close();
 });

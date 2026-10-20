@@ -6,9 +6,11 @@ agents' own CLIs, on your own subscriptions. Longer term, it serves building edu
 software for maths and science by vibecoding, with costs under control.
 
 **First implementation cycle** (decided by the owner, 2026-10-20; **first version built**): the
-discussion screen, a browser page with the chat between you and the agents on the left and the
-Markdown document or SVG drawing under discussion on the right. Nothing else. It sits beside the
-terminal: you keep typing there, and you pick the document with `/docs`. See
+discussion screen, a browser page with the chat between you and the agents on the left and, when
+you want one, a Markdown document or SVG drawing from `proposal/` on the right, watched live.
+`npm start` opens it and you use the room from there: you type in its message box, the agents
+discuss freely, and at any time Documents (or `/docs`) lets you pick a file. The terminal you
+started it from only shows a log. `npm run terminal` keeps the room in the terminal instead. See
 `proposal/discussion-ide.md`.
 
 ## Today
@@ -25,8 +27,8 @@ is documents in `proposal/`, and agents write elsewhere only when you ask them t
 
 ```sh
 npm install                                   # once: installs marked
-npm start                                     # claude + codex, in the current directory
-npm run terminal                              # the same, terminal only: /docs opens files alone
+npm start                                     # claude + codex, in the current directory; used from the browser
+npm run terminal                              # the same, used from the terminal: /docs opens files alone
 node src/cli.mjs --agents claude:Ada,codex:Linus --cwd ~/Software/some-project
 node src/cli.mjs --log-dir ~/room-logs        # transcripts elsewhere (default: ./transcripts)
 npm test
@@ -42,16 +44,17 @@ npm test
 - `src/room.mjs` is the round loop: pass counting, the turn cap, `@name`, and sending each agent
   only the messages it has not seen yet.
 - `src/cli.mjs` is a small shell that never reloads: arguments, the input loop, `/reload`, `/quit`.
-- `src/ui.mjs` is everything else on screen: building the room, the display, the commands, and the
-  transcript (every room is saved to `transcripts/` as markdown). `/docs` lists the room's
-  `proposal/` files: move with ↑/↓, and Enter puts the file on the discussion screen (opening the
-  screen in your browser if none is open yet).
-- `src/docs.mjs` is the viewer and the discussion screen: a local-only web server (127.0.0.1,
-  started on the first `/docs`) that renders Markdown with [marked](https://marked.js.org), the
-  project's one dependency. Images show inline, plain links to images get a preview, and the
-  document reloads when an agent edits it. The screen (`/__room`) mirrors the chat live from
-  the terminal, including who is thinking and the end of each round, but hides passes as the
-  terminal does. It is read-only, and a screen opened later catches up on the whole chat.
+- `src/ui.mjs` is everything else: building the room, the display, the commands, and the
+  transcript (every room is saved to `transcripts/` as markdown). In the terminal, `/docs` lists
+  the room's `proposal/` files: move with ↑/↓, and Enter opens one alone in the browser.
+- `src/docs.mjs` is the viewer and the discussion screen: a local-only web server (127.0.0.1)
+  that renders Markdown with [marked](https://marked.js.org), the project's one dependency.
+  Images show inline, plain links to images get a preview, and an open document is checked every
+  2 seconds and reloaded when an agent edits it. The screen (`/__room`) does everything the
+  terminal does: the chat with who is thinking and each round's end line (passes hidden), a
+  message box (with `@name`, `/docs`, `/usage`, `/reload`, `/quit`), Usage, Reload and Quit
+  buttons, and Documents to pick the file on the right at any time, even mid-round. A screen
+  opened later catches up on the whole chat. Only the room's own page can send it input.
 - `src/usage.mjs` is usage stats. Each reply shows its tokens (and, for claude, the API-price
   cost) as reported by the CLI itself; the round's end line adds the round's totals and your
   subscription quotas, and `/usage` shows the session totals per agent. Quotas come from the
