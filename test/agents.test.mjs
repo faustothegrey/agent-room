@@ -12,7 +12,7 @@ function fakeRunner(outputs) {
   return { calls, runner };
 }
 
-test('claude: first turn creates the session, later turns resume it, writes limited to proposal/', async () => {
+test('claude: first turn creates the session, later turns resume it, writes anywhere but no shell', async () => {
   const { calls, runner } = fakeRunner([
     JSON.stringify({ result: 'hi', is_error: false }),
     JSON.stringify({ result: 'again', is_error: false }),
@@ -24,10 +24,13 @@ test('claude: first turn creates the session, later turns resume it, writes limi
   assert.ok(id);
   assert.equal(calls[1].args[calls[1].args.indexOf('--resume') + 1], id);
   for (const c of calls) {
-    assert.deepEqual(c.args.slice(-6), ['--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write']);
+    assert.deepEqual(c.args.slice(-11), ['--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch']);
     assert.ok(!c.args.includes('--permission-mode'));
     const i = c.args.indexOf('--allowedTools');
-    assert.deepEqual(c.args.slice(i + 1, i + 3), ['Write(proposal/**)', 'Edit(proposal/**)']);
+    const allowed = c.args.slice(i + 1, c.args.indexOf('--tools'));
+    assert.deepEqual(allowed.slice(0, 7), ['Write', 'Edit', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch']);
+    // Writes go anywhere (owner's call), but still no shell.
+    assert.ok(!allowed.includes('Bash'));
   }
   assert.equal(calls[0].input, 'p1');
 });
@@ -43,7 +46,7 @@ test('claude: an error result throws and does not mark the session started', asy
   assert.ok(calls[1].args.includes('--session-id'));
 });
 
-test('codex: resumes the thread it was given and forces the workspace-write sandbox every call', async () => {
+test('codex: resumes the thread it was given and runs without a sandbox every call', async () => {
   const first = [
     '{"type":"thread.started","thread_id":"t-1"}',
     '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}',
@@ -56,7 +59,10 @@ test('codex: resumes the thread it was given and forces the workspace-write sand
   assert.deepEqual(calls[0].args.slice(0, 1), ['exec']);
   assert.deepEqual(calls[1].args.slice(0, 2), ['exec', 'resume']);
   assert.ok(calls[1].args.includes('t-1'));
-  for (const c of calls) assert.ok(c.args.includes('sandbox_mode="workspace-write"'));
+  for (const c of calls) {
+    assert.ok(c.args.includes('sandbox_mode="danger-full-access"'));
+    assert.ok(c.args.includes('web_search="live"'));
+  }
 });
 
 test('codex events: last agent_message wins, noise lines are ignored, turn.failed throws', () => {
@@ -93,7 +99,7 @@ test('the rulebook goes in as system-level instructions on every turn, for both 
   await claude.turn('p2');
   for (const call of c.calls) {
     assert.equal(call.args[call.args.indexOf('--append-system-prompt') + 1], rules);
-    assert.deepEqual(call.args.slice(-6), ['--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write']);
+    assert.deepEqual(call.args.slice(-11), ['--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch']);
   }
 
   const x = fakeRunner(['{"type":"thread.started","thread_id":"t-1"}', '']);

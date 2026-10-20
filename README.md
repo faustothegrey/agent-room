@@ -44,9 +44,11 @@ npm test
 
 ## Current limits (deliberate)
 
-- **Writes only in `proposal/`.** Enforced for claude: `Read/Grep/Glob/Edit/Write`, no Bash, and
-  `--allowedTools 'Write(proposal/**)' 'Edit(proposal/**)'`, so other writes are refused. **Not
-  enforced for codex**: `sandbox_mode="workspace-write"` lets it write anywhere under the cwd, and
-  only its instructions keep it in `proposal/`.
+- **Full filesystem access; no shell for claude.** Both agents can read and write anywhere on
+  disk, and only their instructions keep them to `proposal/` unless you ask otherwise. Claude:
+  the file tools (`Edit`/`Write` pre-approved for any path), web search and fetch, sub-agents,
+  skills, and the look-and-click part of Claude in Chrome (to see rendered pages); no Bash; your
+  claude.ai connectors (Gmail, Calendar, Drive) left out. Codex: `sandbox_mode="danger-full-access"`
+  (no sandbox: any file, any command, network) and live web search.
 - **No streaming.** A reply appears when the agent finishes.
 - **Two providers**: `claude` and `codex`. A failed turn is reported and ends the round.

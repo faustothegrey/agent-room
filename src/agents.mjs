@@ -2,10 +2,22 @@
 // One CLI process per turn; the provider's own session id carries memory between turns.
 // That id lives in `session`, a plain object owned by the caller, so it survives a code reload.
 // `instructions` (the brainstorming rulebook) go in as system-level instructions on every turn.
-// Agents may write only in proposal/: enforced for claude (path rules, no shell), by instructions
-// only for codex. Set on every turn (not just the first).
+// Agents get full filesystem access (the owner's call): claude can read and write any path but has
+// no shell; codex runs with no sandbox. Keeping to proposal/ is left to their instructions.
+// Set on every turn (not just the first).
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+
+// Claude: the file, web and sub-agent built-ins (no Bash), plus the
+// look-and-click subset of Claude in Chrome (no JavaScript, forms, uploads or batches). The
+// claude.ai connectors (Gmail, Calendar, Drive, Docs) are left out: --strict-mcp-config drops them.
+const CLAUDE_TOOLS = ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch'];
+const CHROME_TOOLS = ['tabs_context_mcp', 'tabs_create_mcp', 'tabs_close_mcp', 'navigate', 'computer', 'read_page',
+  'get_page_text', 'find', 'read_console_messages', 'read_network_requests', 'resize_window'].map((t) => `mcp__claude-in-chrome__${t}`);
+// Headless claude refuses anything that would need a permission prompt, so these are pre-approved.
+// Plain Edit and Write allow any path, also outside the working directory; the read tools need
+// no approval.
+const CLAUDE_ALLOWED = ['Write', 'Edit', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch', ...CHROME_TOOLS];
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -41,10 +53,9 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, r
       args.push(session.started ? '--resume' : '--session-id', session.id);
       if (model) args.push('--model', model);
       if (instructions) args.push('--append-system-prompt', instructions);
-      // Edits outside proposal/ need a permission that -p cannot grant, so they are refused.
-      args.push('--allowedTools', 'Write(proposal/**)', 'Edit(proposal/**)');
+      args.push('--chrome', '--strict-mcp-config', '--allowedTools', ...CLAUDE_ALLOWED);
       // --tools is variadic, so it must come last: the prompt goes on stdin.
-      args.push('--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write');
+      args.push('--tools', ...CLAUDE_TOOLS);
       const out = await runner('claude', args, { input: prompt, cwd, timeoutMs });
       const result = JSON.parse(out);
       if (result.is_error) throw new Error(`claude: ${result.result || 'turn failed'}`);
@@ -59,11 +70,10 @@ export function createCodexAgent({ name, model, cwd, timeoutMs, instructions, ru
     name,
     provider: 'codex',
     async turn(prompt) {
-      // `exec resume` has no -s flag, and the user's config.toml may grant full access,
-      // so the workspace-write sandbox is forced through -c on every call. It allows writes
-      // anywhere under cwd: keeping codex inside proposal/ relies on its instructions (owner's call).
+      // `exec resume` has no -s flag, so the sandbox is set through -c on every call: none at all
+      // (any file, any command, network). Web search is live rather than cached.
       const args = session.threadId ? ['exec', 'resume'] : ['exec'];
-      args.push('--json', '--skip-git-repo-check', '-c', 'sandbox_mode="workspace-write"');
+      args.push('--json', '--skip-git-repo-check', '-c', 'sandbox_mode="danger-full-access"', '-c', 'web_search="live"');
       if (model) args.push('-m', model);
       // -c takes TOML; a JSON string is a valid TOML basic string.
       if (instructions) args.push('-c', `developer_instructions=${JSON.stringify(instructions)}`);
