@@ -28,7 +28,7 @@ test('claude: first turn creates the session, later turns resume it, writes anyw
     assert.ok(!c.args.includes('--permission-mode'));
     const i = c.args.indexOf('--allowedTools');
     const allowed = c.args.slice(i + 1, c.args.indexOf('--tools'));
-    assert.deepEqual(allowed.slice(0, 7), ['Write', 'Edit', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch']);
+    assert.deepEqual(allowed.slice(0, 10), ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch']);
     // Writes go anywhere (owner's call), but still no shell.
     assert.ok(!allowed.includes('Bash'));
   }

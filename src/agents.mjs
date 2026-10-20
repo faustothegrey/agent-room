@@ -15,9 +15,9 @@ const CLAUDE_TOOLS = ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebSearch', 'Web
 const CHROME_TOOLS = ['tabs_context_mcp', 'tabs_create_mcp', 'tabs_close_mcp', 'navigate', 'computer', 'read_page',
   'get_page_text', 'find', 'read_console_messages', 'read_network_requests', 'resize_window'].map((t) => `mcp__claude-in-chrome__${t}`);
 // Headless claude refuses anything that would need a permission prompt, so these are pre-approved.
-// Plain Edit and Write allow any path, also outside the working directory; the read tools need
-// no approval.
-const CLAUDE_ALLOWED = ['Write', 'Edit', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch', ...CHROME_TOOLS];
+// The plain tool names allow any path. The read tools are listed too: inside the working directory
+// they need no approval, but outside it they do.
+const CLAUDE_ALLOWED = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch', ...CHROME_TOOLS];
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
