@@ -53,9 +53,31 @@ appendFileSync(logPath, `# Room — ${agents.map((a) => `${a.name} (${a.provider
 console.log(`Room: ${agents.map((a) => `${a.name} (${a.provider})`).join(', ')} · cwd ${cwd}`);
 console.log(`Transcript: ${logPath}\nType a message, or /quit.\n`);
 
+// Colours and the live "thinking" line only on a terminal; piped output stays plain.
+const tty = process.stdout.isTTY;
+const style = (code) => (s) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
+const bold = style('1');
+const dim = style('2');
+const red = style('31');
+
+// One status line per turn, rewritten every second so a long (or silently passing) turn is visible.
+let ticker = null;
+function startThinking(name) {
+  const t0 = Date.now();
+  const show = () => process.stdout.write(`\r\x1b[2K${dim(`  … ${name} is thinking (${Math.round((Date.now() - t0) / 1000)}s)`)}`);
+  if (!tty) return console.log(`  … ${name} is thinking`);
+  show();
+  ticker = setInterval(show, 1000);
+}
+function stopThinking() {
+  clearInterval(ticker);
+  ticker = null;
+  if (tty) process.stdout.write('\r\x1b[2K');
+}
+
 // Iterating the lines (rather than rl.question) buffers anything typed during a round,
 // so it becomes the next round instead of being lost.
-const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: 'You › ' });
+const rl = createInterface({ input: process.stdin, output: process.stdout, prompt: tty ? '\x1b[1;36mYou ›\x1b[0m ' : 'You › ' });
 let inputOpen = true;
 rl.on('close', () => { inputOpen = false; });
 const prompt = () => { if (inputOpen) rl.prompt(); };
@@ -76,28 +98,36 @@ for await (const raw of rl) {
     continue;
   }
   let started = 0;
+  const roundStart = Date.now();
+  let turns = 0;
+  let ending = 'all passed';
   try {
     await room.round(line, {
       onTurnStart(agent) {
         started = Date.now();
-        process.stdout.write(`  … ${agent.name} is thinking\r`);
+        startThinking(agent.name);
       },
       onMessage(m) {
         const secs = m.speaker === 'User' ? '' : ` (${((Date.now() - started) / 1000).toFixed(0)}s)`;
         appendFileSync(logPath, `**${m.speaker}**${m.error ? ' — failed' : ''}${secs}\n\n${m.text}\n\n`);
         if (m.speaker === 'User') return;
-        process.stdout.write('\x1b[2K');
+        stopThinking();
+        turns++;
+        if (m.error) ending = `${m.speaker} failed`;
         if (m.pass) return; // passes are logged, not shown
-        console.log(m.error ? `\n✗ ${m.speaker} failed${secs}: ${m.text}\n` : `\n${m.speaker}${secs} › ${m.text}\n`);
+        console.log(m.error ? red(`\n✗ ${m.speaker} failed${secs}: ${m.text}\n`) : `\n${bold(m.speaker)}${dim(secs)} › ${m.text}\n`);
       },
       onNotice(text) {
         appendFileSync(logPath, `_${text}_\n\n`);
         console.log(`${text}\n`);
+        ending = 'turn cap reached';
       },
     });
+    const secs = Math.round((Date.now() - roundStart) / 1000);
+    console.log(dim(`── your turn · ${ending} · ${turns} agent turn${turns === 1 ? '' : 's'} · ${secs}s ──`));
   } catch (err) {
     // An unknown @name: nothing was sent or recorded.
-    console.log(`✗ ${err.message}\n`);
+    console.log(red(`✗ ${err.message}`));
   }
   prompt();
 }
