@@ -103,8 +103,12 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 <title>agent-room</title><style>
 :root { color-scheme: light dark; --line: #8884; --dim: #888; }
 * { box-sizing: border-box; }
-body { margin: 0; height: 100vh; display: grid; grid-template-columns: minmax(320px, 38%) 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
-#left { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+body { margin: 0; height: 100vh; display: grid; grid-template-columns: var(--left, 38%) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+#left { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+#split { cursor: col-resize; background: var(--line); background-clip: content-box; padding: 0 3px; touch-action: none; }
+#split:hover, #split:focus-visible, body.resizing #split { background-color: #3b82f6; outline: none; }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing iframe { pointer-events: none; } /* the document would swallow the drag */
 #chat { flex: 1; overflow-y: auto; padding: 1rem; }
 .msg { margin: 0 0 .9rem; padding: .5rem .75rem; border-radius: 8px; background: #8881; }
 .msg.user { background: #3b82f622; } .msg.error { background: #ef444422; }
@@ -134,6 +138,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <button id="usage">Usage</button><button id="reload">Reload</button><button id="quit">Quit</button></div>
   </div>
 </div>
+<div id="split" role="separator" aria-orientation="vertical" aria-label="Resize the chat and the document" tabindex="0" title="Drag to resize"></div>
 <div id="right">
   <div id="bar"><button id="docs">Documents</button><span id="current">No document shown.</span></div>
   <div id="pane"><div class="empty">The agents can talk without a document. Pick one with Documents (or /docs) to watch it live.</div></div>
@@ -142,6 +147,42 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 const $ = (id) => document.getElementById(id);
 const chat = $('chat'), pane = $('pane'), box = $('box'), hint = $('hint');
 let thinking = null, busy = false, ended = false, doc = null;
+
+// The divider between the chat and the document: drag it, or use ←/→ when it has focus. Neither
+// side gets narrower than MIN. The width is kept in this browser (it lasts while the room runs:
+// each room has its own address).
+const split = $('split'), MIN = 260, KEY = 'agent-room:left';
+function setLeft(px) {
+  const room = document.documentElement.clientWidth - split.offsetWidth; // no scrollbar, no divider
+  const w = Math.round(Math.max(MIN, Math.min(room - MIN, px)));
+  document.body.style.setProperty('--left', w + 'px');
+  return w;
+}
+const keep = (w) => { try { localStorage.setItem(KEY, String(w)); } catch {} };
+try { const saved = Number(localStorage.getItem(KEY)); if (saved) setLeft(saved); } catch {}
+split.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  split.setPointerCapture(e.pointerId);
+  document.body.classList.add('resizing');
+  const move = (ev) => setLeft(ev.clientX - 3);
+  const stop = (ev) => {
+    split.removeEventListener('pointermove', move);
+    split.removeEventListener('pointerup', stop);
+    split.removeEventListener('pointercancel', stop);
+    document.body.classList.remove('resizing');
+    keep(setLeft(ev.clientX - 3));
+  };
+  split.addEventListener('pointermove', move);
+  split.addEventListener('pointerup', stop);
+  split.addEventListener('pointercancel', stop);
+});
+split.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  e.preventDefault();
+  keep(setLeft($('left').getBoundingClientRect().width + (e.key === 'ArrowLeft' ? -24 : 24)));
+});
+// A narrower window must not squeeze one side below MIN.
+window.addEventListener('resize', () => { if (document.body.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width); });
 const atBottom = () => chat.scrollHeight - chat.scrollTop - chat.clientHeight < 40;
 function add(el) { const stick = atBottom(); chat.insertBefore(el, thinking); if (stick) chat.scrollTop = chat.scrollHeight; }
 function setBusy(b) { busy = b; hint.textContent = b ? 'Agents are talking: what you send now waits for the round to end.' : ''; }
