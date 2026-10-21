@@ -211,3 +211,57 @@ test('a reply carries the usage its agent reported for that turn', async () => {
   assert.deepEqual(room.transcript[1].usage, { input: 10, cached: 0, output: 2 });
   assert.equal(room.transcript[2].usage, undefined); // B reported none
 });
+
+test('summary: the draft is agreed when the other agent passes on it', async () => {
+  const a = fakeAgent('A', ['**Agreed**\n- blue button']);
+  const b = fakeAgent('B', ['PASS']);
+  const room = createRoom([a, b]);
+  const r = await room.summary();
+  assert.equal(r.status, 'agreed');
+  assert.deepEqual(r.result, { speaker: 'Summary', text: '**Agreed**\n- blue button', outcome: 'agreed', by: 'A' });
+  assert.match(a.prompts[0], /asked for a summary/);
+  assert.match(b.prompts[0], /latest message from A above is the current version/);
+  assert.match(b.prompts[0], /\[A\]: \*\*Agreed\*\*/);
+  // The turns are kept, marked as summary turns; the result comes last.
+  assert.deepEqual(room.transcript.map((m) => [m.speaker, !!m.summary]), [['A', true], ['B', true], ['Summary', false]]);
+});
+
+test('summary: a revision counts as its author\'s acceptance', async () => {
+  const room = createRoom([fakeAgent('A', ['v1', 'PASS']), fakeAgent('B', ['v2'])]);
+  const r = await room.summary();
+  assert.deepEqual([r.status, r.result.text, r.result.by], ['agreed', 'v2', 'B']);
+  assert.equal(room.transcript.filter((m) => m.summary).length, 3);
+});
+
+test('summary: three turns each without agreement fail, and the last revision stands', async () => {
+  const a = fakeAgent('A', ['a1', 'a2', 'a3']);
+  const b = fakeAgent('B', ['b1', 'b2', 'b3']);
+  const room = createRoom([a, b]);
+  const r = await room.summary();
+  assert.deepEqual([r.status, r.result.text, r.result.by, r.result.outcome], ['not agreed', 'b3', 'B', 'not agreed']);
+  assert.equal(a.prompts.length, 3);
+  assert.equal(b.prompts.length, 3);
+});
+
+test('summary: the drafter rotates, and agents see the result in later rounds', async () => {
+  const a = fakeAgent('A', ['sA', 'PASS', 'PASS']);
+  const b = fakeAgent('B', ['PASS', 'sB', 'PASS']);
+  const room = createRoom([a, b]);
+  assert.equal((await room.summary()).result.by, 'A');
+  assert.equal((await room.summary()).result.by, 'B'); // B drafted this time
+  await room.round('next');
+  assert.match(a.prompts.at(-1), /\[Summary, agreed\]: sB/);
+});
+
+test('summary: nothing to summarize, or a failed turn, records no result', async () => {
+  const empty = createRoom([fakeAgent('A', ['PASS']), fakeAgent('B')]);
+  assert.deepEqual(await empty.summary(), { status: 'empty' });
+  const broken = createRoom([fakeAgent('A', ['v1']), fakeAgent('B', [new Error('quota')])]);
+  assert.deepEqual(await broken.summary(), { status: 'failed' });
+  assert.ok(!empty.transcript.some((m) => m.outcome) && !broken.transcript.some((m) => m.outcome));
+});
+
+test('summary: with a single agent, its draft is the summary', async () => {
+  const room = createRoom([fakeAgent('A', ['solo'])]);
+  assert.deepEqual([(await room.summary()).status, room.transcript.at(-1).text], ['agreed', 'solo']);
+});

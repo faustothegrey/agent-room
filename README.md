@@ -42,7 +42,12 @@ npm test
   starts as system instructions (claude `--append-system-prompt`, codex `developer_instructions`),
   so a `claude` or `codex` you start yourself is not a brainstorming agent.
 - `src/room.mjs` is the round loop: pass counting, the turn cap, `@name`, and sending each agent
-  only the messages it has not seen yet.
+  only the messages it has not seen yet. It also runs `/summary` (Summarize on the screen): the
+  agents agree a short summary by points (Agreed / Not agreed / Questions for you), at most three
+  turns each. One drafts (taking turns from one summary to the next); writing or revising a
+  version counts as accepting it, and the summary is agreed when every other agent passes on it.
+  Otherwise the last revision is shown, marked "not agreed". Only the result is shown; every
+  turn is in the transcript.
 - `src/cli.mjs` is a small shell that never reloads: arguments, the input loop, `/reload`, `/quit`.
 - `src/ui.mjs` is everything else: building the room, the display, the commands, and the
   transcript (every room is saved to `transcripts/` as markdown). In the terminal, `/docs` lists

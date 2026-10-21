@@ -78,8 +78,17 @@ setInterval(async () => {
 //   thinking: name or null, status: the last round's end line or null,
 //   say: (line) => void, set only when the page is the room's input (UI mode) }.
 
-// A transcript entry as the page shows it: the text rendered as Markdown.
-export const messageView = (m) => ({ speaker: m.speaker, html: md.parse(m.text ?? ''), error: !!m.error, pass: !!m.pass });
+// A transcript entry as the page shows it: the text rendered as Markdown. Summary turns are
+// hidden (only the summary's result is shown); the result carries its label.
+export function messageView(m) {
+  const view = { speaker: m.speaker, html: md.parse(m.text ?? ''), error: !!m.error, pass: !!m.pass };
+  if (m.summary) view.hidden = true;
+  if (m.outcome) {
+    view.outcome = m.outcome;
+    view.speaker = m.outcome === 'agreed' ? `Summary — agreed, by ${m.by}` : `Summary — not agreed: the last version, by ${m.by}`;
+  }
+  return view;
+}
 
 // Sends one event ({ type, ... }) to every open screen. The last round's end line is remembered
 // until the User speaks again, so a page opened later still shows that it is the User's turn.
@@ -112,6 +121,7 @@ body.resizing iframe { pointer-events: none; } /* the document would swallow the
 #chat { flex: 1; overflow-y: auto; padding: 1rem; }
 .msg { margin: 0 0 .9rem; padding: .5rem .75rem; border-radius: 8px; background: #8881; }
 .msg.user { background: #3b82f622; } .msg.error { background: #ef444422; }
+.msg.summary { background: #10b98122; border-left: 3px solid #10b981; } .msg.summary.not-agreed { background: #f59e0b22; border-left-color: #f59e0b; }
 .who { font-weight: 600; font-size: .85rem; margin-bottom: .2rem; }
 .msg p { margin: .3rem 0; } .msg pre { overflow-x: auto; } .msg img { max-width: 100%; }
 .status { color: var(--dim); font-size: .85rem; margin: .4rem 0 .9rem; white-space: pre-wrap; }
@@ -133,9 +143,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <div id="left">
   <div id="chat"></div>
   <div id="composer">
-    <textarea id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /usage, /reload, /quit"></textarea>
+    <textarea id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit"></textarea>
     <div id="tools"><span id="hint"></span>
-      <button id="usage">Usage</button><button id="reload">Reload</button><button id="quit">Quit</button></div>
+      <button id="summary">Summarize</button><button id="usage">Usage</button><button id="reload">Reload</button><button id="quit">Quit</button></div>
   </div>
 </div>
 <div id="split" role="separator" aria-orientation="vertical" aria-label="Resize the chat and the document" tabindex="0" title="Drag to resize"></div>
@@ -188,9 +198,10 @@ function add(el) { const stick = atBottom(); chat.insertBefore(el, thinking); if
 function setBusy(b) { busy = b; hint.textContent = b ? 'Agents are talking: what you send now waits for the round to end.' : ''; }
 function message(m) {
   if (m.speaker === 'User') setBusy(true);
-  if (m.pass) return; // passes are hidden, as in the terminal
+  if (m.pass || m.hidden) return; // passes and summary turns are hidden, as in the terminal
   const el = document.createElement('div');
-  el.className = 'msg' + (m.speaker === 'User' ? ' user' : '') + (m.error ? ' error' : '');
+  el.className = 'msg' + (m.speaker === 'User' ? ' user' : '') + (m.error ? ' error' : '')
+    + (m.outcome ? ' summary' + (m.outcome === 'agreed' ? '' : ' not-agreed') : '');
   el.innerHTML = '<div class="who"></div>' + m.html;
   el.firstChild.textContent = m.speaker + (m.error ? ' — failed' : '');
   add(el);
@@ -199,6 +210,7 @@ function status(text, error) { const el = document.createElement('div'); el.clas
 function setThinking(name) {
   thinking?.remove(); thinking = null;
   if (!name) return;
+  setBusy(true); // a round or a summary is running
   thinking = document.createElement('div'); thinking.className = 'status'; thinking.textContent = '… ' + name + ' is thinking';
   const stick = atBottom(); chat.append(thinking); if (stick) chat.scrollTop = chat.scrollHeight;
 }
@@ -235,6 +247,7 @@ box.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(box.value); box.value = ''; }
 });
 $('docs').onclick = openFiles;
+$('summary').onclick = () => send('/summary');
 $('usage').onclick = () => send('/usage');
 $('reload').onclick = () => send('/reload');
 // Two clicks to quit, so a stray click doesn't end the room.

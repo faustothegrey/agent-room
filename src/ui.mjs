@@ -16,9 +16,9 @@ By default (npm start) the room is used from the discussion screen in the browse
 only shows a log. --no-screen (or npm run terminal): the room is used from the terminal instead,
 and /docs opens each file alone in the browser.
 Type a message to start a round; start it with @name to address one agent.
-Commands: /docs (pick a proposal/ file to view in the browser), /usage (tokens this session and
-subscription quotas), /reload (load edited code and README-for-brainstorming-agents.md; the
-conversation continues), /quit`;
+Commands: /docs (pick a proposal/ file to view in the browser), /summary (the agents agree a short
+summary by points; only the result is shown), /usage (tokens this session and subscription quotas),
+/reload (load edited code and README-for-brainstorming-agents.md; the conversation continues), /quit`;
 
 // Imports fresh copies of the modules and the rulebook and builds a room on ctx.state. Returns
 // the parts to put into ctx; if anything fails it throws, leaving ctx as it was (at most an
@@ -61,7 +61,7 @@ export async function start(ctx) {
   console.log(`Room: ${describe(ctx.room)} · cwd ${ctx.cwd}`);
   console.log(`Transcript: ${ctx.logPath}`);
   if (ctx.noScreen) {
-    return console.log('Type a message, /docs to see the proposals, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
+    return console.log('Type a message, /docs to see the proposals, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
   }
   ctx.screen.say = (line) => ctx.say(line);
   const screenUrl = `${await viewerUrl(ctx)}__room`;
@@ -91,6 +91,7 @@ export function ended(ctx) {
 export async function handleLine(line, ctx) {
   if (!line) return;
   if (line === '/docs') return showDocs(ctx);
+  if (line === '/summary') return runSummary(ctx);
   if (line === '/usage') {
     const quota = await ctx.usage.fetchQuota();
     return note(ctx, `${ctx.usage.usageReport({ totals: ctx.totals, agents: ctx.room.agents, quota })}\n`);
@@ -118,6 +119,48 @@ const toScreen = (ctx, event) => ctx.docs.broadcast(ctx.screen, event);
 function setScreenThinking(ctx, name) {
   ctx.screen.thinking = name;
   toScreen(ctx, { type: 'thinking', name });
+}
+
+// /summary: only the result is shown; every turn goes to the transcript file, marked as a summary
+// turn, and its tokens count like any other turn.
+async function runSummary(ctx) {
+  const t0 = Date.now();
+  let started = 0;
+  let turns = 0;
+  let used;
+  log(ctx, '_(summary requested)_\n\n');
+  const { status, result } = await ctx.room.summary({
+    onTurnStart(agent, { turn, of }) {
+      started = Date.now();
+      const label = `${agent.name} (summary, turn ${turn} of at most ${of})`;
+      startThinking(label);
+      setScreenThinking(ctx, label);
+    },
+    onMessage(m) {
+      const tokens = m.usage ? ` · ${ctx.usage.formatUsage(m.usage)}` : '';
+      log(ctx, `**${m.speaker}** — summary turn${m.error ? ', failed' : ''} (${((Date.now() - started) / 1000).toFixed(0)}s${tokens})\n\n${m.text}\n\n`);
+      stopThinking();
+      setScreenThinking(ctx, null);
+      turns++;
+      if (m.usage) {
+        used = ctx.usage.addUsage(used, m.usage);
+        ctx.totals[m.speaker] = ctx.usage.addUsage(ctx.totals[m.speaker], m.usage);
+      }
+      if (m.error) note(ctx, `✗ ${m.speaker} failed: ${m.text}`, true);
+    },
+  });
+  if (result) {
+    const label = result.outcome === 'agreed' ? `agreed, by ${result.by}` : `not agreed: the last version, by ${result.by}`;
+    log(ctx, `**Summary** — ${label}\n\n${result.text}\n\n`);
+    console.log(`\n${bold('Summary')} ${dim(`(${label})`)} ›\n${result.text}\n`);
+    toScreen(ctx, { type: 'message', message: ctx.docs.messageView(result) });
+  }
+  if (status === 'empty') note(ctx, 'Nothing to summarize yet.');
+  if (status === 'failed') note(ctx, 'The summary stopped because a turn failed.', true);
+  const secs = Math.round((Date.now() - t0) / 1000);
+  const parts = [`summary ${status === 'failed' ? 'stopped' : status}`, `${turns} agent turn${turns === 1 ? '' : 's'}`, `${secs}s`, ctx.usage.formatUsage(used)];
+  console.log(dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
+  toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
 }
 
 async function runRound(line, ctx) {

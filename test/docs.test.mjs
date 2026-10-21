@@ -187,3 +187,10 @@ test('in terminal mode the page only watches: /__say is refused and the reset sa
   for (const c of screen.clients) c.end();
   s.close();
 });
+
+test('messageView hides summary turns and labels a summary\'s result', () => {
+  assert.equal(messageView({ speaker: 'A', text: 'draft', summary: true }).hidden, true);
+  const agreed = messageView({ speaker: 'Summary', text: '- x', outcome: 'agreed', by: 'A' });
+  assert.deepEqual([agreed.speaker, agreed.outcome, agreed.hidden], ['Summary — agreed, by A', 'agreed', undefined]);
+  assert.equal(messageView({ speaker: 'Summary', text: '- y', outcome: 'not agreed', by: 'B' }).speaker, 'Summary — not agreed: the last version, by B');
+});
