@@ -1,8 +1,8 @@
 # Tooling for vibecoded maths & science educational apps
 
-> **Deferred research — 2026-11-02.** Kept for possible future work, not the current implementation plan. Product descriptions and external research below are historical and have not been rechecked. See [the discussions index](../README.md) for current work.
+> **Deferred research — 2026-11-02.** Kept for possible future work, not the current implementation plan. Product descriptions and external research below are historical and have not been rechecked. See [the discussions index](../../README.md) for current work.
 
-> Outside the current implementation cycle (2026-10-20); see `../2026-10-20-discussion-ide/discussion-ide.md`.
+> Outside the current implementation cycle (2026-10-20); see `../../archive/2026-10-20-discussion-ide/discussion-ide.md`.
 
 ## Goal (from User)
 Build engaging educational apps, especially for maths and science, entirely by vibecoding.

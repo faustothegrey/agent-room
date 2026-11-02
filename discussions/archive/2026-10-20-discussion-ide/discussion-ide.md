@@ -1,9 +1,9 @@
 # Discussion IDE: chat on the left, a document on the right when you want one
 
-> **Historical archive — 2026-11-02.** The basic interface is implemented. The README describes current behavior, including automatic summaries and discussion folders. Earlier status labels and next steps below describe the original discussion, not current work. See [the discussions index](../README.md).
+> **Historical archive — 2026-11-02.** The basic interface is implemented. The README describes current behavior, including automatic summaries and discussion folders. Earlier status labels and next steps below describe the original discussion, not current work. See [the discussions index](../../README.md).
 
 Discussion of 2026-10-20 between the User, Claude and Codex. A first version is built (see
-Built). Related: `../2026-10-20-educational-app-tooling/core-and-ui.md` (one codebase, future web UI).
+Built). Related: `../../deferred/2026-10-20-educational-app-tooling/core-and-ui.md` (one codebase, future web UI).
 
 ![the screen](drawings/5-ide-hypothesis.svg)
 (Checked rendered in Chrome on 2026-10-20, through agent-room's `/docs` viewer: both panes and

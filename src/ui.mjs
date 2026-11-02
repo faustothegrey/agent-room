@@ -33,7 +33,9 @@ discussion in DIR/discussions/<date>-<title>/ (its documents, drawings and trans
 /reopen <name> picked an existing one first.
 Type a message to start a round; start it with @name to address one agent.
 Commands: /docs (pick a document to view in the browser), /reopen <name> (re-open that
-discussion: a fresh session there, starting from its handoff), /summary (the agents agree a short
+discussion: a fresh session there, starting from its handoff; one in archive/ or deferred/ is made
+active first), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
+/summary (the agents agree a short
 summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
 in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
 /reload (load edited code and both agent rulebooks; conversation continues), /quit
@@ -183,6 +185,47 @@ const hhmm = (d) => `${pad(d.getHours())}${pad(d.getMinutes())}`;
 export const slug = (title) => title.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
   .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50).replace(/-+$/, '');
 
+// Finished discussions move, whole, into discussions/archive/, postponed ones into discussions/deferred/
+// (/move); both folders are created when first needed.
+const SECTIONS = ['archive', 'deferred'];
+const DATED = /^\d{4}-\d{2}-\d{2}-/;
+
+// A discussion named by the User or the page: "<date>-<title>" (active) or "archive/<date>-<title>" /
+// "deferred/<date>-<title>". Resolves to { section: null | 'archive' | 'deferred', name } or null.
+function discussionRef(parent, ref) {
+  const parts = ref.split('/');
+  const [section, name] = parts.length === 2 ? parts : [null, parts[0]];
+  if (parts.length > 2 || (section && !SECTIONS.includes(section)) || !DATED.test(name ?? '') || /[\\]/.test(name)) return null;
+  return existsSync(join(parent, section ?? '', name)) ? { section, name } : null;
+}
+
+// /move <discussion> active|archive|deferred: the whole folder moves (documents and transcripts).
+// Not the discussion this session is using (its transcript is open there).
+function moveDiscussion(ctx, ref, to) {
+  const parent = join(ctx.cwd, 'discussions');
+  const d = discussionRef(parent, ref ?? '');
+  if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent}.`, true), null;
+  const target = to === 'active' ? null : to;
+  if (to !== 'active' && !SECTIONS.includes(to)) return note(ctx, '✗ Move it to active, archive or deferred.', true), null;
+  if (d.section === target) return { name: d.name }; // already there
+  const from = join(parent, d.section ?? '', d.name);
+  if (ctx.discussion?.dir === from) return note(ctx, `✗ ${d.name} is the discussion in use in this room: it can't move now.`, true), null;
+  const dest = join(parent, target ?? '', d.name);
+  if (existsSync(dest)) return note(ctx, `✗ There is already a discussion ${d.name} in ${target ?? 'discussions'}/.`, true), null;
+  mkdirSync(dirname(dest), { recursive: true });
+  renameSync(from, dest);
+  const rel = (section) => ['discussions', ...(section ? [section] : []), d.name].join('/');
+  // A page showing a file in it follows the move.
+  if (ctx.screen.doc?.startsWith(rel(d.section) + '/')) {
+    ctx.screen.doc = rel(target) + ctx.screen.doc.slice(rel(d.section).length);
+    toScreen(ctx, { type: 'doc', file: ctx.screen.doc });
+  }
+  toScreen(ctx, { type: 'moved', from: rel(d.section), to: rel(target) });
+  log(ctx, `_(moved the discussion ${d.name} to ${target ?? 'active'})_\n\n`);
+  note(ctx, `Moved the discussion ${d.name} to ${target ? `${target}/` : 'the active discussions'}.`);
+  return { name: d.name };
+}
+
 // Creates the folder (and discussions/ if needed) and returns its name. mkdir itself is the check
 // that the name is free, so two rooms naming a discussion at once can't both get it.
 export function createDiscussionFolder(parent, title, now = new Date()) {
@@ -190,6 +233,7 @@ export function createDiscussionFolder(parent, title, now = new Date()) {
   mkdirSync(parent, { recursive: true });
   for (let n = 1; ; n++) {
     const name = n === 1 ? base : `${base}-${n}`;
+    if (SECTIONS.some((s) => existsSync(join(parent, s, name)))) continue; // taken by an archived or deferred one
     try { mkdirSync(join(parent, name)); return name; } catch (err) { if (err.code !== 'EEXIST') throw err; }
   }
 }
@@ -265,9 +309,11 @@ function briefing(ctx) {
 async function reopenDiscussion(ctx, name) {
   const parent = join(ctx.cwd, 'discussions');
   // A discussion is a folder named <date>-<title>; other folders there are the room's own material.
-  if (!name || /[/\\]/.test(name) || !/^\d{4}-\d{2}-\d{2}-/.test(name) || !existsSync(join(parent, name))) {
-    return note(ctx, `✗ No discussion "${name}" in ${parent} (discussions are folders named <date>-<title>).`, true);
-  }
+  // One in archive/ or deferred/ is made active first.
+  const d = discussionRef(parent, name ?? '');
+  if (!d) return note(ctx, `✗ No discussion "${name}" in ${parent} (discussions are folders named <date>-<title>).`, true);
+  if (d.section && !moveDiscussion(ctx, name, 'active')) return;
+  name = d.name;
   if (ctx.logPath) {
     await ctx.workQueue; // let a running worker instruction finish in this session
     log(ctx, `_(session ended: re-opening the discussion ${name})_\n\n`);
@@ -414,6 +460,8 @@ export async function handleLine(line, ctx) {
   if (line === '/docs') return showDocs(ctx);
   const reopen = /^\/(?:reopen|continue)(?:\s+(.*))?$/.exec(line); // /continue: its former name
   if (reopen) return reopenDiscussion(ctx, (reopen[1] ?? '').trim());
+  const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
+  if (move) return void moveDiscussion(ctx, move[1], move[2]);
   if (line === '/summary') { ctx.agentsStarted = true; return runSummary(ctx); }
   const auto = /^\/autosummary(?:\s+(on|off))?$/.exec(line);
   if (auto) return setAuto(ctx, auto[1] ? auto[1] === 'on' : !autoOn(ctx));

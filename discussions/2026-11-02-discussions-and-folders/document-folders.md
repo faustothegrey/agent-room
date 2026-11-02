@@ -3,7 +3,7 @@
 > **Historical archive — 2026-11-02.** The basic feature is implemented. Remaining and deferred items are tracked in [the current discussion proposal](discussions.md). Earlier status labels and next steps below describe the original discussion, not current work. See [the discussions index](../README.md).
 
 Status: mostly decided by the User (2026-11-02), not implemented; some details still proposed.
-Started 2026-11-02. Builds on `../2026-10-20-discussion-ide/discussion-ide.md` (first cycle: chat on the
+Started 2026-11-02. Builds on `../archive/2026-10-20-discussion-ide/discussion-ide.md` (first cycle: chat on the
 left, the chosen document on the right). Drawing: `drawings/6-new-room.svg` (updated to reflect the decisions below).
 
 **`discussions-original.md` takes precedence** wherever the two documents conflict (User, 2026-11-02).

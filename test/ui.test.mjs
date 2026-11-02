@@ -237,3 +237,40 @@ test('agent settings persist, apply before startup, and leave active sessions un
   await assert.rejects(saveSettings(ctx, { ...settings, worker: settings.agents[0] }, file), /different name/);
   assert.equal(readFileSync(file, 'utf8'), before);
 });
+
+test('/move: a whole discussion into archive/ or deferred/ and back; never the one in use', async () => {
+  const { existsSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const ctx = await freshSession([], async () => ({ title: 'In use' }));
+  const root = `${ctx.cwd}/discussions`;
+  mkdirSync(`${root}/2026-11-01-old/transcripts`, { recursive: true });
+  writeFileSync(`${root}/2026-11-01-old/notes.md`, 'n');
+  await handleLine('/move 2026-11-01-old archive', ctx);
+  assert.ok(existsSync(`${root}/archive/2026-11-01-old/notes.md`)); // archive/ created when first needed
+  assert.ok(!existsSync(`${root}/2026-11-01-old`));
+  await handleLine('/move archive/2026-11-01-old deferred', ctx);
+  assert.ok(existsSync(`${root}/deferred/2026-11-01-old/transcripts`));
+  await handleLine('/move deferred/2026-11-01-old active', ctx);
+  assert.ok(existsSync(`${root}/2026-11-01-old/notes.md`));
+  await handleLine('/move 2026-11-01-old elsewhere', ctx); // not a place
+  await handleLine('/move nosuch archive', ctx);
+  assert.ok(existsSync(`${root}/2026-11-01-old`));
+
+  await handleLine('/autosummary off', ctx);
+  await handleLine('hello', ctx); // creates the discussion in use
+  await handleLine(`/move ${ctx.discussion.name} archive`, ctx);
+  assert.ok(existsSync(ctx.discussion.dir));
+});
+
+test('/reopen of an archived discussion makes it active first; new names skip archived ones', async () => {
+  const { existsSync, mkdirSync } = await import('node:fs');
+  const { createDiscussionFolder } = await import('../src/ui.mjs');
+  const ctx = await freshSession([], async () => { throw new Error('no title should be asked'); });
+  const root = `${ctx.cwd}/discussions`;
+  mkdirSync(`${root}/archive/2026-11-01-old`, { recursive: true });
+  await handleLine('/reopen archive/2026-11-01-old', ctx);
+  assert.equal(ctx.discussion.dir, `${root}/2026-11-01-old`);
+  assert.ok(existsSync(`${root}/2026-11-01-old`) && !existsSync(`${root}/archive/2026-11-01-old`));
+
+  mkdirSync(`${root}/deferred/2026-11-02-topic`, { recursive: true });
+  assert.equal(createDiscussionFolder(root, 'Topic', new Date(2026, 10, 2)), '2026-11-02-topic-2');
+});

@@ -367,7 +367,7 @@ function showDoc(file) {
   // the agents to read it as background; its old sessions are not resumed.
   const feed = $('feed');
   const p = doc ? doc.split('/') : [];
-  const transcript = (p.length === 3 || p.length === 4) && p[0] === 'discussions' && p.at(-2) === 'transcripts' && p.at(-1).endsWith('.md');
+  const transcript = p.length >= 3 && p.length <= 5 && p[0] === 'discussions' && p.at(-2) === 'transcripts' && p.at(-1).endsWith('.md');
   feed.hidden = !transcript || !room || doc === room.transcript || $('composer').hidden;
   feed.onclick = () => {
     showTab('talk');
@@ -376,18 +376,31 @@ function showDoc(file) {
   };
   $('current').textContent = doc ? doc : 'No document shown.';
   if (!doc) return;
+  listed = null;
   pane.innerHTML = '<iframe id="doc"></iframe>';
   pane.firstChild.src = urlFor(doc);
   document.title = doc + ' · agent-room';
 }
 const post = (path, body) => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-// Discussions: the room's discussions (newest first); open one to see its documents, and its
-// subfolders (drawings/, transcripts/, …) one level at a time. Looking is not switching: Re-open
-// this discussion is a separate action. A discussion is a folder named <date>-<title> (as ui.mjs
+// Discussions: the room's active discussions (newest first), then its own documents, then archive/
+// and deferred/ (always shown, at the bottom), which hold whole discussions moved there. Open a
+// discussion to see its documents, and its subfolders (drawings/, transcripts/, …) one level at a
+// time. Looking is not switching: Re-open this discussion is a separate action, and Archive / Defer /
+// Make active move the whole discussion. A discussion is a folder named <date>-<title> (as ui.mjs
 // creates them); anything else directly in discussions/ is the room's own material (in agent-room
-// itself: the index of its discussions), listed after them.
+// itself: the index of its discussions).
 const isDiscussion = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(name);
+const SECTIONS = { archive: 'Archive', deferred: 'Deferred' };
+// The discussion a list path shows, as /reopen and /move name it ("<name>" or "archive/<name>"), or null.
+function discussionOf(parts) {
+  if (parts.length === 2 && isDiscussion(parts[1])) return { ref: parts[1], section: null };
+  if (parts.length === 3 && SECTIONS[parts[1]] && isDiscussion(parts[2])) return { ref: parts[1] + '/' + parts[2], section: parts[1] };
+  return null;
+}
+let listed = null; // the list path shown in the pane ('' for the top), or null when a document is shown
 async function openFiles(group) {
+  if (typeof group !== 'string') group = ''; // as a click handler, group is the event
+  listed = group;
   $('feed').hidden = true;
   const files = await (await fetch('/__files')).json();
   pane.innerHTML = '<div id="files"></div>';
@@ -398,21 +411,47 @@ async function openFiles(group) {
     list.append(b);
     return b;
   };
-  if (typeof group === 'string') { // a discussion or one of its folders (as a click handler, group is the event)
-    const parts = group.split('/'); // discussions, <name>, folders…
-    const parent = parts.length > 2 ? parts.slice(0, -1).join('/') : undefined;
+  const heading = (text) => { const h = document.createElement('h3'); h.textContent = text; list.append(h); };
+  const inUse = (path) => (path === room?.active ? '  (in use)' : '');
+  const discussionsIn = (prefix) => [...new Set(files.filter((f) => f.startsWith(prefix + '/'))
+    .map((f) => f.slice(prefix.length + 1)).filter((r) => r.includes('/')).map((r) => r.split('/')[0]))]
+    .filter(isDiscussion).sort((a, b) => b.localeCompare(a));
+  const canAct = room && !$('composer').hidden;
+
+  if (group === 'discussions/archive' || group === 'discussions/deferred') { // archive/ or deferred/: their discussions
+    const section = group.split('/')[1];
+    add('← All discussions', () => openFiles(''));
+    heading(section + '/');
+    const found = discussionsIn(group);
+    if (!found.length) { const e = document.createElement('span'); e.className = 'hint'; e.textContent = section === 'archive' ? 'No archived discussions.' : 'No deferred discussions.'; list.append(e); }
+    for (const d of found) add(d, () => openFiles(group + '/' + d));
+    return;
+  }
+  if (group) { // a discussion or one of its folders
+    const parts = group.split('/');
+    const parent = parts.length > 2 ? parts.slice(0, -1).join('/') : '';
     add(parent ? '← ' + parts.at(-2) + '/' : '← All discussions', () => openFiles(parent));
-    const h = document.createElement('h3'); h.textContent = parts.slice(1).join('/') + (group === room?.active ? '  (active)' : ''); list.append(h);
-    // Re-open: not for the active discussion before anything was said in it (nothing to restart).
-    if (parts.length === 2 && isDiscussion(parts[1]) && room && !$('composer').hidden && !(group === room.active && !room.started)) {
-      const b = add('Re-open this discussion', () => {
-        // Once this session has started, re-opening ends it (the chat clears): two clicks, like Quit.
-        if (room.started && !b.dataset.armed) {
-          b.dataset.armed = '1'; b.textContent = 'Click again: this session ends and the chat clears';
-          return setTimeout(() => { delete b.dataset.armed; b.textContent = 'Re-open this discussion'; }, 4000);
-        }
-        send('/reopen ' + parts[1]);
-      }, 'A fresh session in this discussion: the agents start from its handoff. Its documents and transcripts stay.');
+    heading(parts.slice(1).join('/') + inUse(group));
+    const disc = discussionOf(parts);
+    if (disc && canAct) {
+      // Re-open: not for the discussion in use before anything was said in it (nothing to restart).
+      if (!(group === room.active && !room.started)) {
+        const label = disc.section ? 'Re-open this discussion (makes it active)' : 'Re-open this discussion';
+        const b = add(label, () => {
+          // Once this session has started, re-opening ends it (the chat clears): two clicks, like Quit.
+          if (room.started && !b.dataset.armed) {
+            b.dataset.armed = '1'; b.textContent = 'Click again: this session ends and the chat clears';
+            return setTimeout(() => { delete b.dataset.armed; b.textContent = label; }, 4000);
+          }
+          send('/reopen ' + disc.ref);
+        }, 'A fresh session in this discussion: the agents start from its handoff. Its documents and transcripts stay.');
+      }
+      // Moving the whole discussion; not the one in use (its transcript is open there).
+      if (group !== room.active) {
+        if (disc.section) add('Make active', () => send('/move ' + disc.ref + ' active'), 'Move it back to the active discussions');
+        if (disc.section !== 'archive') add('Archive', () => send('/move ' + disc.ref + ' archive'), 'Move the whole discussion into archive/');
+        if (disc.section !== 'deferred') add('Defer', () => send('/move ' + disc.ref + ' deferred'), 'Move the whole discussion into deferred/');
+      }
     }
     const rel = files.filter((f) => f.startsWith(group + '/')).map((f) => f.slice(group.length + 1));
     for (const d of [...new Set(rel.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))].sort()) {
@@ -424,20 +463,26 @@ async function openFiles(group) {
     }
     return;
   }
-  const top = files.filter((f) => f.startsWith('discussions/')).map((f) => f.slice('discussions/'.length));
-  const folders = [...new Set(top.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))];
-  const discussions = folders.filter(isDiscussion).sort((a, b) => b.localeCompare(a));
+  // The top: active discussions, the room's own documents, then archive/ and deferred/.
+  const discussions = discussionsIn('discussions');
   const hint = document.createElement('span'); hint.className = 'hint';
-  if (!discussions.length) hint.textContent = room?.started ? '' : 'No discussions yet: your first message starts one.';
-  else if (room && !room.started && !$('composer').hidden) hint.textContent = 'Your first message starts a new discussion. To go back to one instead, open it and choose Re-open this discussion.';
+  if (!discussions.length) hint.textContent = room?.started ? '' : 'No active discussions: your first message starts one.';
+  else if (room && !room.started && canAct) hint.textContent = 'Your first message starts a new discussion. To go back to one instead, open it and choose Re-open this discussion.';
   list.append(hint);
-  for (const d of discussions) add(d + ('discussions/' + d === room?.active ? '  (active)' : ''), () => openFiles('discussions/' + d));
-  const own = folders.filter((n) => !isDiscussion(n)).sort();
+  for (const d of discussions) add(d + inUse('discussions/' + d), () => openFiles('discussions/' + d));
+  const top = files.filter((f) => f.startsWith('discussions/')).map((f) => f.slice('discussions/'.length));
+  const own = [...new Set(top.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))].filter((n) => !isDiscussion(n) && !SECTIONS[n]).sort();
   const loose = top.filter((r) => !r.includes('/'));
-  if (!own.length && !loose.length) return;
-  const h = document.createElement('h3'); h.textContent = "This room's own documents"; list.append(h);
-  for (const d of own) add(d + '/', () => openFiles('discussions/' + d), 'Open this folder');
-  for (const r of loose) add(r + ('discussions/' + r === doc ? '  (shown)' : ''), () => post('/__show', { file: 'discussions/' + r }));
+  if (own.length || loose.length) {
+    heading("This room's own documents");
+    for (const d of own) add(d + '/', () => openFiles('discussions/' + d), 'Open this folder');
+    for (const r of loose) add(r + ('discussions/' + r === doc ? '  (shown)' : ''), () => post('/__show', { file: 'discussions/' + r }));
+  }
+  heading('Archive and deferred');
+  for (const s of Object.keys(SECTIONS)) {
+    const n = discussionsIn('discussions/' + s).length;
+    add(s + '/  (' + n + ')', () => openFiles('discussions/' + s), s === 'archive' ? 'Finished discussions' : 'Postponed discussions');
+  }
 }
 // The header: the room's full root path and its active discussion, if one has been selected.
 let room = null;
@@ -624,6 +669,9 @@ events.onmessage = (e) => {
   if (ev.type === 'note') status(ev.text, ev.error);
   if (ev.type === 'doc') showDoc(ev.file);
   if (ev.type === 'files') openFiles();
+  if (ev.type === 'moved' && listed !== null) {
+    openFiles(listed === ev.from || listed.startsWith(ev.from + '/') ? ev.to + listed.slice(ev.from.length) : listed);
+  }
   if (ev.type === 'ended') { ended = true; status('The room has ended. You can close this tab.'); events.close(); box.disabled = true; wbox.disabled = true; }
 };
 </script></body></html>`;

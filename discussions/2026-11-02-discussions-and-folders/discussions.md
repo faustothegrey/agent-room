@@ -32,6 +32,10 @@ Current agent provider/model settings and automatic persistence are also documen
   discussion. agent-room's own earlier proposals and room logs were each moved into the
   discussion they belong to (five discussions, indexed in `discussions/README.md`); seven empty
   logs were deleted.
+- **Archive and deferred hold whole discussions.** A finished discussion moves, as a bundle
+  (documents and transcripts), into `discussions/archive/`; a postponed one into
+  `discussions/deferred/`. Both are listed at the bottom of Discussions and created only when
+  first needed. Archive / Defer / Make active buttons move them; re-opening one makes it active.
 - **The worker works within the active discussion.** It is told the active discussion's folder
   and writes its implementation notes and plans there; the work itself stays in the root.
 

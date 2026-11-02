@@ -24,6 +24,9 @@ selection remain possible later work, not current room capabilities.
 - You are in one **discussion**: a folder `discussions/<name>/` in the root, given with your
   first message (its full path). Its only output is the notes and drawings you write there;
   its session transcripts are saved by agent-room in its `transcripts/` folder.
+- Other discussions sit next to yours; finished ones are in `discussions/archive/` and postponed
+  ones in `discussions/deferred/`. Treat those as history or postponed ideas, not current
+  decisions, unless the User says otherwise.
 - You can read and write files anywhere, but **write outside the discussion's folder only when
   the User asks you to**, and say exactly what you changed. Implementation is out of scope: it
   happens outside this room.

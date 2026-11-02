@@ -1,6 +1,6 @@
 # Proposal: start agent-room from a Dock icon
 
-> **Historical archive — 2026-11-02.** The launcher and --open are implemented; the approval request below is historical. Earlier status labels and next steps below describe the original discussion, not current work. See [the discussions index](../README.md).
+> **Historical archive — 2026-11-02.** The launcher and --open are implemented; the approval request below is historical. Earlier status labels and next steps below describe the original discussion, not current work. See [the discussions index](../../README.md).
 
 **Status:** proposed, awaiting the User's approval.
 **Prepared by:** Claude, with Codex, 2026-10-21.

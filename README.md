@@ -55,11 +55,11 @@ subscription usage, and **New room in folder…**. Agent settings live inside th
 - **Quit:** click twice to end the room. Discussion commands, including Quit and Reload,
   wait behind an ongoing round and its automatic summary; they are not immediate cancellation.
 
-In this project (the agent-room room itself), its design history is five discussions, from
-`2026-10-18-first-rooms/` to `2026-11-02-discussions-and-folders/`, each with its documents and its
-transcripts; [`discussions/README.md`](discussions/README.md) is their index. Files directly in
-`discussions/` that aren't dated folders (here, just that index) are listed under "This room's
-own documents", with no Re-open button.
+In this project (the agent-room room itself), its design history is five discussions, each with
+its documents and its transcripts: `2026-11-02-discussions-and-folders/` is active, three are in
+`archive/` and one in `deferred/`; [`discussions/README.md`](discussions/README.md) is their index.
+Files directly in `discussions/` that aren't dated folders (here, just that index) are listed
+under "This room's own documents", with no Re-open button.
 
 ## Discussions and saved files
 
@@ -82,10 +82,22 @@ and is not delivered to the agents.
       handoff.md               # optional, prepared for the next session
       transcripts/
         session-2026-11-02-1014.md
+    archive/                   # finished discussions, moved here whole
+      2026-10-21-another-topic/
+    deferred/                  # postponed discussions, moved here whole
 ```
 
+**Archive and deferred.** A discussion's page in **Discussions** has **Archive** and **Defer**
+buttons (or `/move <folder-name> archive|deferred`), which move the whole discussion, documents and
+transcripts, into `discussions/archive/` or `discussions/deferred/`; **Make active**
+(`/move archive/<folder-name> active`) moves it back. `archive/` and `deferred/` are created when
+first needed, and always listed at the bottom of **Discussions**, after the active discussions.
+The discussion in use in this room can't be moved. New discussion names also skip names already
+taken in `archive/` and `deferred/`.
+
 To go back to an existing discussion, open it in **Discussions** and choose **Re-open this discussion**,
-or use `/reopen <folder-name>`. It works at any time between rounds. No title is requested; the
+or use `/reopen <folder-name>`. It works at any time between rounds. An archived or deferred
+discussion (`/reopen archive/<folder-name>`) is moved back to the active discussions first. No title is requested; the
 next message creates a new session transcript in that discussion. If this room's session had
 already started, it ends first: its transcript is kept and closed, the chat clears (the button
 asks for a second click), and the discussion agents and the worker get fresh CLI sessions. The
@@ -93,7 +105,7 @@ agents are instructed to read the handoff; old conversations are not automatical
 discussions don't keep their own agent memory. Preparing and consuming handoffs is an agent convention described
 in [the brainstorming rulebook](README-for-brainstorming-agents.md), not automatic app behavior.
 
-Looking at another discussion does not switch the active one; only Re-open does. Display-title
+Looking at another discussion does not switch the one in use (marked "in use" in the list); only Re-open does. Display-title
 editing is not available yet; see [remaining decisions](discussions/2026-11-02-discussions-and-folders/discussions.md).
 
 Worker turns and other log entries before the first discussion message remain in memory until
@@ -175,7 +187,8 @@ node src/cli.mjs --help
 | Command | Effect |
 |---|---|
 | `/docs` | Browse documents; in terminal mode, ↑/↓ selects, Enter opens, Esc leaves the picker. |
-| `/reopen <folder-name>` | Re-open an existing discussion: a fresh session there, from its handoff. |
+| `/reopen <folder-name>` | Re-open an existing discussion: a fresh session there, from its handoff. `archive/…` or `deferred/…` is made active first. |
+| `/move <folder-name> active\|archive\|deferred` | Move a whole discussion (not the one in use) into `archive/` or `deferred/`, or back. |
 | `/summary` | Request an agreed summary. |
 | `/autosummary [on\|off]` | Toggle automatic summaries, or set them explicitly. |
 | `/usage` | Show session tokens and subscription quotas. |
