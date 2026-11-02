@@ -143,14 +143,15 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 :root { color-scheme: light dark; --line: #8884; --dim: #888; }
 * { box-sizing: border-box; }
 body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: var(--left, 38%) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
-#header { grid-column: 1 / -1; display: flex; gap: .8rem; align-items: baseline; padding: .45rem .8rem; border-bottom: 1px solid var(--line); font-size: .9rem; }
+#header { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .8rem; align-items: baseline; padding: .45rem .8rem; border-bottom: 1px solid var(--line); font-size: .9rem; }
 #header .who { color: var(--dim); }
-#gauges { margin-left: auto; display: flex; gap: .9rem; align-items: center; font-size: .8rem; color: var(--dim); }
-.gauge { display: inline-flex; gap: .3rem; align-items: center; }
+#gauges { margin-left: auto; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; align-items: center; font-size: .8rem; color: var(--dim); }
+.gauge { display: inline-flex; gap: .3rem; align-items: center; } .quota { display: inline-flex; gap: .8rem; align-items: center; }
 .gauge .bar { width: 46px; height: 6px; border-radius: 3px; background: #8883; overflow: hidden; }
 .gauge .bar i { display: block; height: 100%; background: #10b981; }
 .gauge.warn .bar i { background: #f59e0b; } .gauge.high .bar i { background: #ef4444; }
-.gauge b { color: CanvasText; font-weight: 600; }
+.quota b { color: CanvasText; font-weight: 600; }
+.gauge .resets { opacity: .8; white-space: nowrap; }
 .tools label { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); }
 #left { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 #tabs { display: flex; border-bottom: 1px solid var(--line); }
@@ -395,17 +396,19 @@ function showQuota(gauges) {
   for (const g of gauges) {
     if (g.provider !== provider) {
       provider = g.provider;
-      group = document.createElement('span'); group.className = 'gauge';
+      group = document.createElement('span'); group.className = 'quota';
       group.innerHTML = '<b></b>'; group.firstChild.textContent = provider;
       box.append(group);
     }
     const el = document.createElement('span');
     el.className = 'gauge' + (g.used >= 80 ? ' high' : g.used >= 50 ? ' warn' : '');
     el.title = provider + ' ' + g.label + ': ' + g.used + '% used' + (g.resets ? ', resets ' + g.resets : '');
-    el.innerHTML = '<span></span><span class="bar"><i></i></span><span></span>';
+    el.innerHTML = '<span></span><span class="bar"><i></i></span><span></span><span class="resets"></span>';
     el.children[0].textContent = g.label;
     el.children[1].firstChild.style.width = Math.min(100, Math.max(0, g.used)) + '%';
     el.children[2].textContent = g.used + '%';
+    // As the meter reports it (each CLI has its own format), without the time zone.
+    if (g.resets) el.children[3].textContent = 'resets ' + g.resets.split(' (')[0];
     group.append(el);
   }
 }

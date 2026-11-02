@@ -90,7 +90,7 @@ the checkout moves. The launcher runs `node src/cli.mjs --open`, the same entry 
   pick the file on the right at any time, even mid-round. A screen
   opened later catches up on the whole chat. Only the room's own page can send it input.
   A header at the top names the room's folder, its agents and its worker, and shows the
-  subscription quotas as gauges (5h and week, per provider), refreshed every minute and after
+  subscription quotas as gauges (5h and week, per provider, with when each resets), refreshed every minute and after
   each turn. Transcripts, next to
   Documents, lists the saved rooms (newest first, with each room's first message) and shows one
   on the right, read-only; this room's transcript follows along as it grows. Send to agents, on
