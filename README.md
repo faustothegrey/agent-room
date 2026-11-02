@@ -34,6 +34,29 @@ node src/cli.mjs --log-dir ~/room-logs        # transcripts elsewhere (default: 
 npm test
 ```
 
+## Start from the macOS Dock
+
+`~/Applications/Agent Room.app` is the small AppleScript launcher. Drag it from Finder into
+the Dock, then click it to start a room in `/Users/fausto/Software/agent-room` and open the
+discussion screen, without a terminal. Quit on the screen ends the room and the launcher.
+Opening the launcher again while it is running does not start a second room.
+
+The launcher checks for `node`, `claude` and `codex` using a login shell plus the standard
+Homebrew and `~/.local/bin` locations. Output goes to `~/Library/Logs/agent-room.log`
+(replaced on each launch); conversation transcripts still go to `transcripts/`. If the room
+cannot run, the launcher shows an alert with the end of the log.
+
+To build or replace the launcher, after quitting it:
+
+```sh
+mkdir -p "$HOME/Applications"
+osacompile -o "$HOME/Applications/Agent Room.app" scripts/dock-launcher.applescript
+```
+
+The project path is intentionally fixed in `scripts/dock-launcher.applescript`; update it if
+the checkout moves. The launcher runs `node src/cli.mjs --open`, the same entry point as
+`npm start`, with `--open` forcing the browser to open when there is no terminal.
+
 ## How it works
 
 - `src/agents.mjs` runs each CLI headlessly, once per turn, and resumes its own session
@@ -57,8 +80,9 @@ npm test
   Images show inline, plain links to images get a preview, and an open document is checked every
   2 seconds and reloaded when an agent edits it. The screen (`/__room`) does everything the
   terminal does: the chat with who is thinking and each round's end line (passes hidden), a
-  message box (with `@name`, `/docs`, `/usage`, `/reload`, `/quit`), Usage, Reload and Quit
-  buttons, and Documents to pick the file on the right at any time, even mid-round. A screen
+  message box (with `@name`, `/docs`, `/summary`, `/usage`, `/reload`, `/quit`), Summarize,
+  Usage, Reload and Quit buttons, a divider to drag between chat and document, and Documents to
+  pick the file on the right at any time, even mid-round. A screen
   opened later catches up on the whole chat. Only the room's own page can send it input.
 - `src/usage.mjs` is usage stats. Each reply shows its tokens (and, for claude, the API-price
   cost) as reported by the CLI itself; the round's end line adds the round's totals and your

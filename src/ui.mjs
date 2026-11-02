@@ -9,12 +9,13 @@ import { createServer } from 'node:http';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const USAGE = `Usage: agent-room [--agents claude,codex] [--cwd DIR] [--log-dir DIR] [--no-screen]
+export const USAGE = `Usage: agent-room [--agents claude,codex] [--cwd DIR] [--log-dir DIR] [--no-screen] [--open]
 
 Each agent is provider[:name], e.g. --agents claude:Ada,codex:Linus
 By default (npm start) the room is used from the discussion screen in the browser; the terminal
 only shows a log. --no-screen (or npm run terminal): the room is used from the terminal instead,
 and /docs opens each file alone in the browser.
+--open opens the discussion screen even without an interactive terminal (for a Dock launcher).
 Type a message to start a round; start it with @name to address one agent.
 Commands: /docs (pick a proposal/ file to view in the browser), /summary (the agents agree a short
 summary by points; only the result is shown), /usage (tokens this session and subscription quotas),
@@ -52,7 +53,7 @@ export const promptText = () => (tty ? '\x1b[1;36mYou ›\x1b[0m ' : 'You › ')
 
 // Once per session: create the transcript file and print the banner.
 // UI mode (not --no-screen): the discussion screen is the room's input and output, so it is opened
-// here (only in an interactive terminal: piped runs, like scripts and tests, just print its address)
+// here (in an interactive terminal or with --open; other piped runs just print its address)
 // and lines the User sends from it go to ctx.say. The terminal then only shows a log.
 export async function start(ctx) {
   mkdirSync(ctx.logDir, { recursive: true });
@@ -65,9 +66,11 @@ export async function start(ctx) {
   }
   ctx.screen.say = (line) => ctx.say(line);
   const screenUrl = `${await viewerUrl(ctx)}__room`;
-  console.log(`Discussion screen: ${screenUrl}${tty ? ' (opening it in your browser)' : ''}`);
+  console.log(`Discussion screen: ${screenUrl}${tty || ctx.open ? ' (opening it in your browser)' : ''}`);
   console.log('Use the room from the browser. This terminal only shows a log; Quit there, or Ctrl-C here, ends the room.\n');
-  if (tty) browse(screenUrl);
+  if (ctx.open) {
+    await new Promise((done, fail) => execFile('open', [screenUrl], (err) => err ? fail(err) : done()));
+  } else if (tty) browse(screenUrl);
 }
 
 const browse = (url) => execFile('open', [url], (err) => err && console.log(red(`✗ ${err.message}`)));

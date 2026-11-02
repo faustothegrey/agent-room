@@ -72,7 +72,8 @@ enough to read in one sitting. Before proposing a new module, dependency, config
 process, ask whether the problem actually needs it.
 
 Keep three kinds of statement apart:
-- **Today:** what agent-room does now (the terminal room, `/docs`, `/usage`, `/reload`).
+- **Today:** what agent-room does now (the room used from the discussion screen in the browser,
+  or from the terminal with `npm run terminal`; `/docs`, `/summary`, `/usage`, `/reload`).
 - **The first implementation cycle** (the User's direction, 2026-10-20): the chat on the left,
   the chosen Markdown document or SVG drawing on the right, nothing else. See
   `proposal/discussion-ide.md`.
