@@ -260,3 +260,25 @@ test('the screen lists and shows transcripts, with their HTML as text, and nothi
     s.close();
   }
 });
+
+test('the auto-summarize checkbox reaches the room only from the page, and a new page gets its state and the gauges', async () => {
+  const set = [];
+  const gauges = [{ provider: 'claude', label: '5h', used: 20, resets: null }];
+  const screen = { clients: new Set(), transcript: [], say: () => {}, auto: true, quota: gauges, setAuto: (on) => set.push(on) };
+  const s = await serve(fixture(), screen);
+  try {
+    assert.equal((await postFrom(s, '/__auto', { on: false })).status, 204);
+    assert.equal((await postFrom(s, '/__auto', { on: 'no' })).status, 400);
+    assert.equal((await postFrom(s, '/__auto', { on: true }, { origin: 'https://evil.example' })).status, 403);
+    assert.deepEqual(set, [false]);
+    const next = eventReader(await s.get('/__events'));
+    const reset = await next();
+    assert.deepEqual([reset.auto, reset.quota], [true, gauges]);
+    for (const c of screen.clients) c.end();
+  } finally {
+    s.close();
+  }
+  const watcher = await serve(fixture(), { clients: new Set(), transcript: [] });
+  assert.equal((await postFrom(watcher, '/__auto', { on: true })).status, 409);
+  watcher.close();
+});

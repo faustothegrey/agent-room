@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { addUsage, fetchQuota, formatUsage, quotaSummary, usageReport } from '../src/usage.mjs';
+import { addUsage, fetchQuota, formatUsage, quotaGauges, quotaSummary, usageReport } from '../src/usage.mjs';
 
 // The shape the quota meter returned on 2026-10-20 (trimmed).
 const QUOTA = {
@@ -45,4 +45,18 @@ test('fetchQuota reads the meter, and returns null when it is down', async () =>
   assert.deepEqual(await fetchQuota(url), QUOTA);
   server.close();
   assert.equal(await fetchQuota(url, 500), null);
+});
+
+test('quota gauges: one per window, for the room\'s providers only, in their order', () => {
+  const quota = {
+    claude: { ok: true, parsed: { current_session: { used_percent: 20, resets: '2:59pm' }, current_week_all_models: { used_percent: 6 } } },
+    codex: { ok: true, parsed: { five_hour_limit: { used_percent: 8, resets: '13:31' }, weekly_limit: { used_percent: 26 } } },
+  };
+  assert.deepEqual(quotaGauges(quota, ['codex', 'claude']), [
+    { provider: 'codex', label: '5h', used: 8, resets: '13:31' },
+    { provider: 'codex', label: 'week', used: 26, resets: null },
+    { provider: 'claude', label: '5h', used: 20, resets: '2:59pm' },
+    { provider: 'claude', label: 'week', used: 6, resets: null },
+  ]);
+  assert.deepEqual(quotaGauges({ codex: { ok: false } }, ['codex']), []);
 });

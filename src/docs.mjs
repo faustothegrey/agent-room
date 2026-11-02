@@ -103,7 +103,10 @@ export function listTranscripts(logDir, currentFile) {
 //   logDir: where transcripts are saved, logFile: this room's transcript (a file name in logDir),
 //   worker: the worker tab's messages (messageView, plus meta: time and tokens),
 //   working: the worker's name while it works, else null,
-//   say: (line) => void and work: (text) => void, set only when the page is the input (UI mode) }.
+//   auto: whether auto-summarize is on, quota: the header's gauges ([{ provider, label, used,
+//   resets }], null if the meter can't be read, undefined until first read),
+//   say: (line) => void, work: (text) => void and setAuto: (on) => void, set only when the page is
+//   the input (UI mode) }.
 
 // A transcript entry as the page shows it: the text rendered as Markdown. Summary turns are
 // hidden (only the summary's result is shown); the result carries its label.
@@ -142,6 +145,13 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: var(--left, 38%) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 #header { grid-column: 1 / -1; display: flex; gap: .8rem; align-items: baseline; padding: .45rem .8rem; border-bottom: 1px solid var(--line); font-size: .9rem; }
 #header .who { color: var(--dim); }
+#gauges { margin-left: auto; display: flex; gap: .9rem; align-items: center; font-size: .8rem; color: var(--dim); }
+.gauge { display: inline-flex; gap: .3rem; align-items: center; }
+.gauge .bar { width: 46px; height: 6px; border-radius: 3px; background: #8883; overflow: hidden; }
+.gauge .bar i { display: block; height: 100%; background: #10b981; }
+.gauge.warn .bar i { background: #f59e0b; } .gauge.high .bar i { background: #ef4444; }
+.gauge b { color: CanvasText; font-weight: 600; }
+.tools label { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); }
 #left { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 #tabs { display: flex; border-bottom: 1px solid var(--line); }
 .tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: .45rem .9rem; font-size: .9rem; }
@@ -175,7 +185,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #files button { display: block; width: 100%; text-align: left; margin: 0 0 .3rem; }
 #files .first { display: block; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style></head><body>
-<header id="header"><b>agent-room</b><span id="folder"></span><span class="who" id="who"></span></header>
+<header id="header"><b>agent-room</b><span id="folder"></span><span class="who" id="who"></span><span id="gauges"></span></header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
   <div class="view" id="talk">
@@ -183,6 +193,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <div class="composer" id="composer">
       <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit"></textarea>
       <div class="tools"><span class="hint" id="hint"></span>
+        <label title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label>
         <button id="summary">Summarize</button><button id="usage">Usage</button><button id="reload">Reload</button><button id="quit">Quit</button></div>
     </div>
   </div>
@@ -374,6 +385,34 @@ async function sendWork(text) {
 wbox.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendWork(wbox.value); wbox.value = ''; }
 });
+// The header's quota gauges: one bar per window (5h, week) for each provider.
+function showQuota(gauges) {
+  const box = $('gauges');
+  box.textContent = '';
+  if (gauges === undefined) return; // not read yet
+  if (gauges === null || !gauges.length) { box.textContent = 'quota meter not reachable'; return; }
+  let provider = null, group = null;
+  for (const g of gauges) {
+    if (g.provider !== provider) {
+      provider = g.provider;
+      group = document.createElement('span'); group.className = 'gauge';
+      group.innerHTML = '<b></b>'; group.firstChild.textContent = provider;
+      box.append(group);
+    }
+    const el = document.createElement('span');
+    el.className = 'gauge' + (g.used >= 80 ? ' high' : g.used >= 50 ? ' warn' : '');
+    el.title = provider + ' ' + g.label + ': ' + g.used + '% used' + (g.resets ? ', resets ' + g.resets : '');
+    el.innerHTML = '<span></span><span class="bar"><i></i></span><span></span>';
+    el.children[0].textContent = g.label;
+    el.children[1].firstChild.style.width = Math.min(100, Math.max(0, g.used)) + '%';
+    el.children[2].textContent = g.used + '%';
+    group.append(el);
+  }
+}
+$('auto').onchange = async (e) => {
+  const res = await post('/__auto', { on: e.target.checked });
+  if (!res.ok) { status(await res.text(), true); e.target.checked = !e.target.checked; }
+};
 $('docs').onclick = openFiles;
 $('logs').onclick = openTranscripts;
 $('summary').onclick = () => send('/summary');
@@ -401,12 +440,16 @@ events.onmessage = (e) => {
     ev.worker.forEach((m) => workMessage(m, false));
     setWorking(ev.working);
     if (!ev.workInput) { $('wcomposer').hidden = true; }
+    showQuota(ev.quota);
+    $('auto').checked = !!ev.auto;
     if (ev.room) {
       $('folder').textContent = ev.room.folder;
       $('who').textContent = ev.room.agents.join(', ') + ' · worker: ' + ev.room.worker;
     }
   }
   if (ev.type === 'work') workMessage(ev.message, true);
+  if (ev.type === 'quota') showQuota(ev.gauges);
+  if (ev.type === 'auto') $('auto').checked = ev.on;
   if (ev.type === 'working') setWorking(ev.name);
   if (ev.type === 'message') message(ev.message);
   if (ev.type === 'thinking') setThinking(ev.name);
@@ -447,7 +490,7 @@ function handleScreen(req, res, url, dir, screen) {
     send(200, 'application/json', JSON.stringify(files));
     return true;
   }
-  if (url.pathname === '/__say' || url.pathname === '/__show' || url.pathname === '/__work') {
+  if (['/__say', '/__show', '/__work', '/__auto'].includes(url.pathname)) {
     if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain; charset=utf-8', 'Refused: only the room page can send input.'); return true; }
     readJson(req).then((body) => {
       if (url.pathname === '/__show') {
@@ -455,6 +498,12 @@ function handleScreen(req, res, url, dir, screen) {
         if (!file) return send(404, 'text/plain; charset=utf-8', 'No such file in proposal/.');
         screen.doc = file;
         broadcast(screen, { type: 'doc', file });
+        return send(204, 'text/plain', '');
+      }
+      if (url.pathname === '/__auto') {
+        if (!screen.setAuto) return send(409, 'text/plain; charset=utf-8', 'This room is typed in the terminal: use /autosummary there.');
+        if (typeof body?.on !== 'boolean') return send(400, 'text/plain; charset=utf-8', 'Expected { on: true | false }.');
+        screen.setAuto(body.on);
         return send(204, 'text/plain', '');
       }
       if (url.pathname === '/__work') {
@@ -490,7 +539,8 @@ function handleScreen(req, res, url, dir, screen) {
   // A page that (re)connects first gets everything so far, so it never shows a partial room.
   const reset = { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc,
     thinking: screen.thinking, status: screen.status, input: !!screen.say,
-    room: screen.room ?? null, worker: screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work };
+    room: screen.room ?? null, worker: screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work,
+    auto: screen.auto ?? false, quota: screen.quota };
   res.write(`data: ${JSON.stringify(reset)}\n\n`);
   return true;
 }

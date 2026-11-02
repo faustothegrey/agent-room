@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { load } from '../src/ui.mjs';
+import { handleLine, load } from '../src/ui.mjs';
 
 const freshCtx = () => ({ cwd: '/tmp', agentSpecs: 'claude:A,codex:B', state: { transcript: [], seen: new Map() }, sessions: new Map() });
 
@@ -39,4 +39,43 @@ test('the worker is a separate claude agent with its own session, kept across re
   assert.equal(ctx.sessions.get('worker:Worker'), session);
   ctx.workerSpec = 'claude:A'; // taken by a room agent
   await assert.rejects(load(ctx, '?v=7'), /worker's name "A" is taken/);
+});
+
+// A room on scripted fake agents, run through handleLine as the screen or terminal would.
+async function scriptedCtx(replies) {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { createRoom } = await import('../src/room.mjs');
+  const docs = await import('../src/docs.mjs');
+  const usage = await import('../src/usage.mjs');
+  const fake = (name) => ({ name, provider: 'claude', turn: async () => replies.shift() ?? 'PASS' });
+  const state = { transcript: [], seen: new Map() };
+  return {
+    state, room: createRoom([fake('A'), fake('B')], state), worker: fake('W'), docs, totals: {},
+    usage: { ...usage, fetchQuota: async () => null }, // never the real meter
+    screen: { clients: new Set(), transcript: state.transcript, worker: [] },
+    logPath: join(mkdtempSync(join(tmpdir(), 'ui-test-')), 'room.md'), cwd: '/tmp',
+  };
+}
+
+test('auto-summarize: on by default, a summary follows a round in which an agent spoke', async () => {
+  const ctx = await scriptedCtx(['an idea', 'PASS', 'PASS', '- the idea', 'PASS']);
+  await handleLine('hello', ctx);
+  const result = ctx.state.transcript.at(-1);
+  assert.deepEqual([result.speaker, result.outcome, result.text], ['Summary', 'agreed', '- the idea']);
+});
+
+test('auto-summarize: no summary after a round of passes, or when turned off', async () => {
+  const quiet = await scriptedCtx([]);
+  await handleLine('hello', quiet);
+  assert.ok(!quiet.state.transcript.some((m) => m.speaker === 'Summary'));
+
+  const off = await scriptedCtx(['an idea']);
+  await handleLine('/autosummary off', off);
+  assert.equal(off.autoSummary, false);
+  await handleLine('hello', off);
+  assert.ok(!off.state.transcript.some((m) => m.speaker === 'Summary'));
+  await handleLine('/autosummary', off); // toggles
+  assert.equal(off.autoSummary, true);
 });

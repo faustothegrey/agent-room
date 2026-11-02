@@ -51,6 +51,12 @@ export function quotaSummary(quota, providers) {
     .join(' · ');
 }
 
+// The quota windows as gauges for the screen's header: [{ provider, label, used, resets }], in the
+// order of providers; [] if the meter had nothing for them.
+export function quotaGauges(quota, providers) {
+  return providers.flatMap((p) => windows(quota, p).map(([label, x]) => ({ provider: p, label, used: x.used_percent, resets: x.resets ?? null })));
+}
+
 // The full /usage report: session totals per agent, then the quotas.
 export function usageReport({ totals, agents, quota, url = METER_URL }) {
   const lines = ['Usage this session (from the CLIs\' own reports):'];

@@ -72,7 +72,9 @@ the checkout moves. The launcher runs `node src/cli.mjs --open`, the same entry 
   turns each. One drafts (taking turns from one summary to the next); writing or revising a
   version counts as accepting it, and the summary is agreed when every other agent passes on it.
   Otherwise the last revision is shown, marked "not agreed". Only the result is shown; every
-  turn is in the transcript.
+  turn is in the transcript. **Auto-summarize** (on by default; the checkbox on the screen, or
+  `/autosummary [on|off]`) runs it after every round in which an agent spoke and none failed,
+  covering what was said since the last summary. It costs up to three more turns per agent.
 - `src/cli.mjs` is a small shell that never reloads: arguments, the input loop, `/reload`, `/quit`.
 - `src/ui.mjs` is everything else: building the room, the display, the commands, and the
   transcript (every room is saved to `transcripts/` as markdown). In the terminal, `/docs` lists
@@ -87,7 +89,9 @@ the checkout moves. The launcher runs `node src/cli.mjs --open`, the same entry 
   Usage, Reload and Quit buttons, a divider to drag between chat and document, and Documents to
   pick the file on the right at any time, even mid-round. A screen
   opened later catches up on the whole chat. Only the room's own page can send it input.
-  A header at the top names the room's folder, its agents and its worker. Transcripts, next to
+  A header at the top names the room's folder, its agents and its worker, and shows the
+  subscription quotas as gauges (5h and week, per provider), refreshed every minute and after
+  each turn. Transcripts, next to
   Documents, lists the saved rooms (newest first, with each room's first message) and shows one
   on the right, read-only; this room's transcript follows along as it grows. Send to agents, on
   a past transcript, sends a normal message asking the agents to read it in full (by its path),

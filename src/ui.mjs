@@ -21,7 +21,8 @@ and /docs opens each file alone in the browser.
 --port: the screen's port on 127.0.0.1 (default 5566); if it is taken, any free port is used.
 Type a message to start a round; start it with @name to address one agent.
 Commands: /docs (pick a proposal/ file to view in the browser), /summary (the agents agree a short
-summary by points; only the result is shown), /usage (tokens this session and subscription quotas),
+summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
+in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
 /reload (load edited code and README-for-brainstorming-agents.md; the conversation continues), /quit`;
 
 // How long one worker instruction may run before it is stopped (a room turn gets 5 minutes).
@@ -68,7 +69,31 @@ function wire(ctx) {
   ctx.screen.room = { folder: basename(ctx.cwd), agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name };
   ctx.screen.logDir = ctx.logDir;
   ctx.screen.logFile = basename(ctx.logPath);
-  if (!ctx.noScreen) ctx.screen.work = (text) => queueWork(ctx, text);
+  ctx.screen.auto = autoOn(ctx);
+  if (ctx.noScreen) return;
+  ctx.screen.work = (text) => queueWork(ctx, text);
+  // The screen's checkbox: applied at once, not queued behind a round, so it can stop the next summary.
+  ctx.screen.setAuto = (on) => setAuto(ctx, on);
+}
+
+// Auto-summarize: on unless turned off (ctx.autoSummary, so it survives a reload).
+const autoOn = (ctx) => ctx.autoSummary !== false;
+function setAuto(ctx, on) {
+  ctx.autoSummary = on;
+  ctx.screen.auto = on;
+  toScreen(ctx, { type: 'auto', on });
+  log(ctx, `_(auto-summarize ${on ? 'on' : 'off'})_\n\n`);
+  note(ctx, `Auto-summarize is ${on ? 'on: a summary follows every round in which an agent spoke' : 'off'}.`);
+}
+
+// The header's quota gauges, for the room's and the worker's providers: refreshed every minute and
+// after each turn. screen.quota is null when the meter can't be read.
+async function refreshQuota(ctx, quota) {
+  quota ??= await ctx.usage.fetchQuota();
+  const providers = [...new Set([...ctx.room.agents, ctx.worker].map((a) => a.provider))];
+  ctx.screen.quota = quota ? ctx.usage.quotaGauges(quota, providers) : null;
+  toScreen(ctx, { type: 'quota', gauges: ctx.screen.quota });
+  return quota;
 }
 
 export const promptText = () => (tty ? '\x1b[1;36mYou ›\x1b[0m ' : 'You › ');
@@ -84,6 +109,10 @@ export async function start(ctx) {
   console.log(`Room: ${describe(ctx.room)} · worker ${ctx.worker.name} (${ctx.worker.provider}) · cwd ${ctx.cwd}`);
   console.log(`Transcript: ${ctx.logPath}`);
   wire(ctx);
+  // Calls through ctx, so after a reload it runs the new code.
+  ctx.quotaTimer ??= setInterval(() => ctx.refreshQuota?.(), 60_000).unref();
+  ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
+  ctx.refreshQuota();
   if (ctx.noScreen) {
     return console.log('Type a message, /docs to see the proposals, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
   }
@@ -106,6 +135,7 @@ export function note(ctx, text, error = false) {
 
 export function reloaded(ctx) {
   wire(ctx);
+  ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   log(ctx, '_(code reloaded)_\n\n');
   note(ctx, 'Reloaded the code and the agents\' rulebook; the conversation continues.\n');
 }
@@ -119,6 +149,8 @@ export async function handleLine(line, ctx) {
   if (!line) return;
   if (line === '/docs') return showDocs(ctx);
   if (line === '/summary') return runSummary(ctx);
+  const auto = /^\/autosummary(?:\s+(on|off))?$/.exec(line);
+  if (auto) return setAuto(ctx, auto[1] ? auto[1] === 'on' : !autoOn(ctx));
   if (line === '/usage') {
     const quota = await ctx.usage.fetchQuota();
     return note(ctx, `${ctx.usage.usageReport({ totals: ctx.totals, agents: [...ctx.room.agents, ctx.worker], quota })}\n`);
@@ -149,13 +181,13 @@ function setScreenThinking(ctx, name) {
 }
 
 // /summary: only the result is shown; every turn goes to the transcript file, marked as a summary
-// turn, and its tokens count like any other turn.
-async function runSummary(ctx) {
+// turn, and its tokens count like any other turn. `auto`: started by auto-summarize after a round.
+async function runSummary(ctx, auto = false) {
   const t0 = Date.now();
   let started = 0;
   let turns = 0;
   let used;
-  log(ctx, '_(summary requested)_\n\n');
+  log(ctx, auto ? '_(auto-summary)_\n\n' : '_(summary requested)_\n\n');
   const { status, result } = await ctx.room.summary({
     onTurnStart(agent, { turn, of }) {
       started = Date.now();
@@ -182,10 +214,11 @@ async function runSummary(ctx) {
     console.log(`\n${bold('Summary')} ${dim(`(${label})`)} ›\n${result.text}\n`);
     toScreen(ctx, { type: 'message', message: ctx.docs.messageView(result) });
   }
-  if (status === 'empty') note(ctx, 'Nothing to summarize yet.');
+  if (status === 'empty' && !auto) note(ctx, 'Nothing to summarize yet.');
   if (status === 'failed') note(ctx, 'The summary stopped because a turn failed.', true);
   const secs = Math.round((Date.now() - t0) / 1000);
-  const parts = [`summary ${status === 'failed' ? 'stopped' : status}`, `${turns} agent turn${turns === 1 ? '' : 's'}`, `${secs}s`, ctx.usage.formatUsage(used)];
+  const parts = [`${auto ? 'auto-summary' : 'summary'} ${status === 'failed' ? 'stopped' : status}`, `${turns} agent turn${turns === 1 ? '' : 's'}`, `${secs}s`, ctx.usage.formatUsage(used)];
+  refreshQuota(ctx).catch(() => {});
   console.log(dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
   toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
 }
@@ -196,6 +229,7 @@ async function runRound(line, ctx) {
   let turns = 0;
   let ending = 'all passed';
   let roundUsage;
+  let spoke = 0; // agent replies that weren't passes or failures
   try {
     await ctx.room.round(line, {
       onTurnStart(agent) {
@@ -218,6 +252,7 @@ async function runRound(line, ctx) {
         }
         if (m.error) ending = `${m.speaker} failed`;
         if (m.pass) return; // passes are logged, not shown
+        if (!m.error) spoke++;
         console.log(m.error ? red(`\n✗ ${m.speaker} failed${secs}: ${m.text}\n`) : `\n${bold(m.speaker)}${dim(secs)} › ${m.text}\n`);
       },
       onNotice(text) {
@@ -229,8 +264,15 @@ async function runRound(line, ctx) {
     });
     const secs = Math.round((Date.now() - roundStart) / 1000);
     const providers = [...new Set(ctx.room.agents.map((a) => a.provider))];
-    const quota = ctx.usage.quotaSummary(await ctx.usage.fetchQuota(), providers);
+    const quota = ctx.usage.quotaSummary(await refreshQuota(ctx).catch(() => null), providers);
     const parts = [ending, `${turns} agent turn${turns === 1 ? '' : 's'}`, `${secs}s`, ctx.usage.formatUsage(roundUsage), quota];
+    // Auto-summarize: after a round in which an agent spoke and none failed. Its own end line is
+    // then the "your turn" one; this round's line is just a note.
+    if (autoOn(ctx) && spoke && !ending.endsWith('failed')) {
+      console.log(dim(`── round over · ${parts.filter(Boolean).join(' · ')} · summarizing ──`));
+      toScreen(ctx, { type: 'note', text: `round over · ${parts.filter(Boolean).join(' · ')} · summarizing` });
+      return runSummary(ctx, true);
+    }
     console.log(dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
     toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
   } catch (err) {
@@ -275,6 +317,7 @@ async function runWork(ctx, text) {
   screen.working = null;
   toScreen(ctx, { type: 'working', name: null });
   show(entry, meta);
+  refreshQuota(ctx).catch(() => {});
 }
 
 // The proposal viewer and discussion screen: a local-only HTTP server kept in ctx, started at
