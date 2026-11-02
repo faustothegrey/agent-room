@@ -1,6 +1,6 @@
 // Usage stats: token counts per turn (from the CLIs' own output, via agent.lastUsage) and
-// subscription quotas from the local quota meter (~/Software/scripts-ai/quota-monitoring, the
-// service AgentTalk read too). The meter is best-effort: if it is down, quotas are simply left out.
+// subscription quotas from an optional local quota meter (AGENT_ROOM_METER, or port 9899).
+// Missing quota data does not prevent the room from running.
 // Loaded by ui.mjs, so /reload swaps it too.
 
 export const METER_URL = process.env.AGENT_ROOM_METER ?? 'http://127.0.0.1:9899';

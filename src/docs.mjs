@@ -1,6 +1,7 @@
-// Proposal viewer: handle() serves proposal/ over local HTTP, rendering Markdown with marked so
-// images (and plain links to images) show inline; pick() is the terminal list behind /docs.
-// It also serves the discussion screen (/__room, historical design: proposal/archive/discussion-ide.md): the
+// Document viewer: handle() serves the room's discussions/ and legacy proposal/ over local HTTP,
+// rendering Markdown with marked. Images (and links to images) show inline; pick() is the
+// terminal document picker behind /docs.
+// It also serves the discussion screen (/__room): the
 // header with the root and active discussion; on the left two tabs, the discussion and the worker
 // (one agent outside the round that carries out the User's instructions), each with a message box
 // in UI mode; and on the right, when the User picks one, a document watched live (Documents lists the

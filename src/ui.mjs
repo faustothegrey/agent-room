@@ -14,7 +14,12 @@ import { fileURLToPath } from 'node:url';
 
 export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--log-dir DIR] [--port 5566] [--no-screen] [--open]
 
-Each agent is provider[:name[:model]], e.g. --agents claude:Ada,codex:Linus
+Each agent is provider[:name[:model]], e.g. --agents claude:Ada:opus,codex:Linus
+Without saved defaults: discussion claude,codex; worker claude:Worker.
+The provider/model sections in the Discussion and Worker tabs save changes automatically to
+~/.config/agent-room/defaults.json. CLI flags override the corresponding defaults for this launch.
+Settings changes apply to this room only before discussion, summary or worker work starts;
+after that they set defaults for future rooms.
 The worker (the screen's Worker tab) is one more agent, outside the discussion: it carries out the
 instructions sent from that tab, sees only those, and can edit files and run commands.
 By default (npm start) the room is used from the discussion screen in the browser; the terminal
@@ -30,7 +35,8 @@ Commands: /docs (pick a document to view in the browser), /continue <name> (befo
 message: continue that discussion instead of starting one), /summary (the agents agree a short
 summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
 in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
-/reload (load edited code and README-for-brainstorming-agents.md; the conversation continues), /quit`;
+/reload (load edited code and both agent rulebooks; conversation continues), /quit
+Refresh the browser after /reload to see page changes.`;
 
 // How long one worker instruction may run before it is stopped (a room turn gets 5 minutes).
 const WORKER_TIMEOUT_MS = 30 * 60 * 1000;
@@ -281,7 +287,8 @@ const freePort = () => new Promise((done, fail) => {
   s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => done(port)); });
 });
 
-// A separate agent-room process in the chosen folder, with the same agents, on a port of its own,
+// A separate agent-room process in the chosen folder, using saved defaults (or this room's agents
+// if none are saved), on a port of its own,
 // so each window keeps its own address. It runs on its own: quitting this room doesn't end it.
 // Its output goes to a log file in the temp folder, shown here if it stops at once.
 // Resolves to { url, folder } once it answers, or { cancelled: true }.

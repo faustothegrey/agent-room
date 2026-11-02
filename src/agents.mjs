@@ -4,8 +4,8 @@
 // `instructions` (the brainstorming rulebook) go in as system-level instructions on every turn.
 // Agents get full filesystem access (the owner's call): claude can read and write any path but has
 // no shell; codex runs with no sandbox. Keeping to the active discussion's folder is left to their instructions.
-// Set on every turn (not just the first). The worker (ui.mjs) is a claude agent created with
-// `shell: true`: it also gets Bash, pre-approved, so it can run commands and tests.
+// Access settings apply on every turn. The worker (ui.mjs) can use either provider;
+// a Claude worker is created with `shell: true` to add pre-approved Bash.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 

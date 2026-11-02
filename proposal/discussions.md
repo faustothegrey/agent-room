@@ -6,22 +6,12 @@ The original discussions and folder-opening proposals are preserved in
 [archive/discussions.md](archive/discussions.md) and
 [archive/document-folders.md](archive/document-folders.md).
 
-## Already implemented
+## Current baseline
 
-A room shows its full root path and active discussion. The first message gets a title from
-Claude with no tools, then creates `discussions/<date>-<title>/` and its session transcript
-before the discussion agents receive it. Title generation has a 30-second timeout and a
-date-and-time fallback; occupied names get numeric suffixes. Opening a room creates no records.
-
-Documents groups discussions and this project's older `proposal/` files. Viewing documents
-does not switch the conversation or tell the agents what is being viewed. Before the first
-message, Continue selects an existing discussion without generating a title; the fresh agents
-are instructed to start from its handoff. Handoff consumption is an agent convention, not
-an enforced session lock.
-
-New room in folder… uses the Mac folder chooser and starts an independent room on its own
-port. The existing room keeps running. These are code-inspection findings, not a new live
-UI or provider verification. See [the project README](../README.md) for current usage.
+The [project README](../README.md#discussions-and-saved-files) describes the implemented room,
+discussion creation, continuation, handoffs, file browsing and independent new-room behavior.
+The basic feature is built; the archived proposals' “not implemented” labels are historical.
+Current agent provider/model settings and automatic persistence are also documented there.
 
 ## Approved but unfinished
 
@@ -42,7 +32,9 @@ UI or provider verification. See [the project README](../README.md) for current 
 ## Deferred by the User
 
 - **Better document browsing:** expandable folders, a filename filter, and an optional
-  recently-changed order were proposed by the agents. Improving the explorer was deferred.
+  recently-changed order were proposed by the agents. General explorer improvements remain
+  deferred. The User subsequently requested grouping archived and deferred proposal files;
+  those two folder entries are implemented and do not imply a general expandable tree.
 - **Discuss this document:** a button that sends the viewed file's path to the agents.
   Selecting a document alone must continue to affect only the view.
 - **Migrating older records:** possibly group the old proposals and transcripts into one
