@@ -71,6 +71,23 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, s
   return agent;
 }
 
+// A short title for a new discussion, from the User's first message: one claude call with no tools
+// at all (so it can't write anything) and no saved session. Resolves to { title, usage }.
+export async function claudeTitle(message, { runner = run, cwd, timeoutMs = TITLE_TIMEOUT_MS } = {}) {
+  const prompt = [
+    'Suggest a short title, at most 6 words, for a discussion that starts with the message below.',
+    'Reply with the title only, with no quotes and no full stop.', '', 'Message:', message,
+  ].join('\n');
+  const args = ['-p', '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config', '--tools', ''];
+  const result = JSON.parse(await runner('claude', args, { input: prompt, cwd, timeoutMs }));
+  if (result.is_error) throw new Error(`claude: ${result.result || 'title failed'}`);
+  const title = String(result.result ?? '').split('\n')[0].replace(/^["'*\s]+|["'*.\s]+$/g, '').slice(0, 80);
+  if (!title) throw new Error('claude gave an empty title');
+  return { title, usage: claudeUsage(result) };
+}
+// One measured title took 4.5s (2026-11-02); past this the date-and-time name is used instead.
+const TITLE_TIMEOUT_MS = 30 * 1000;
+
 // Every adapter reports a turn's usage as { input, cached, output, cost? }: input counts all prompt
 // tokens (cached ones included), cost is claude's API-price equivalent in USD, not a subscription bill.
 function claudeUsage({ usage: u, total_cost_usd: cost }) {

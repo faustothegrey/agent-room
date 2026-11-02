@@ -79,3 +79,89 @@ test('auto-summarize: no summary after a round of passes, or when turned off', a
   await handleLine('/autosummary', off); // toggles
   assert.equal(off.autoSummary, true);
 });
+
+// ── Discussions ──
+const tmp = async (prefix) => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  return mkdtempSync(join(tmpdir(), prefix));
+};
+
+test('discussion folders: date + title, date and time without a title, -2 when taken', async () => {
+  const { createDiscussionFolder, slug } = await import('../src/ui.mjs');
+  const parent = `${await tmp('disc-test-')}/discussions`;
+  const now = new Date(2026, 10, 2, 9, 5);
+  assert.equal(slug('Organising discussions: É/è & more!'), 'organising-discussions-e-e-more');
+  assert.equal(createDiscussionFolder(parent, 'Organising discussions', now), '2026-11-02-organising-discussions');
+  assert.equal(createDiscussionFolder(parent, 'Organising discussions', now), '2026-11-02-organising-discussions-2');
+  assert.equal(createDiscussionFolder(parent, null, now), '2026-11-02-0905');
+  assert.equal(createDiscussionFolder(parent, '!!!', now), '2026-11-02-0905-2'); // nothing left of the title
+});
+
+test('session transcripts: session-<date>-<time>.md, -2 when taken, never overwritten', async () => {
+  const { createSessionFile } = await import('../src/ui.mjs');
+  const { readFileSync } = await import('node:fs');
+  const dir = `${await tmp('sess-test-')}/transcripts`;
+  const now = new Date(2026, 10, 2, 10, 14);
+  const first = createSessionFile(dir, 'one', now);
+  const second = createSessionFile(dir, 'two', now);
+  assert.match(first, /transcripts\/session-2026-11-02-1014\.md$/);
+  assert.match(second, /session-2026-11-02-1014-2\.md$/);
+  assert.equal(readFileSync(first, 'utf8'), 'one');
+});
+
+// A scripted room whose session hasn't started: no transcript yet, a root folder, a fake title.
+async function freshSession(replies, suggestTitle) {
+  const ctx = await scriptedCtx(replies);
+  delete ctx.logPath;
+  ctx.cwd = await tmp('root-test-');
+  ctx.suggestTitle = suggestTitle;
+  return ctx;
+}
+
+test('the first message creates the discussion (titled by Claude) and its transcript before the agents see it', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const prompts = [];
+  const ctx = await freshSession([], async (text) => ({ title: `About ${text}` }));
+  ctx.room.agents[0].turn = async (p) => { prompts.push(p); return 'PASS'; };
+  await handleLine('/autosummary off', ctx); // said before the folder exists: kept for the transcript
+  assert.deepEqual(readdirSync(ctx.cwd), []); // nothing written yet
+  await handleLine('pendulums', ctx);
+  const [name] = readdirSync(`${ctx.cwd}/discussions`);
+  assert.match(name, /^\d{4}-\d{2}-\d{2}-about-pendulums$/);
+  assert.equal(ctx.discussion.title, 'About pendulums');
+  assert.match(prompts[0], new RegExp(`Its folder is ${ctx.cwd}/discussions/${name}: write your notes`));
+  const text = readFileSync(ctx.logPath, 'utf8');
+  assert.match(text, /^# About pendulums — session of/);
+  assert.match(text, /auto-summarize off[\s\S]*title by Claude[\s\S]*\*\*User\*\*\n\npendulums/);
+  assert.match(ctx.logPath, new RegExp(`discussions/${name}/transcripts/session-.*\\.md$`));
+});
+
+test('if the title fails, the folder is named after the date and time; an unknown @name creates nothing', async () => {
+  const { readdirSync } = await import('node:fs');
+  const ctx = await freshSession([], async () => { throw new Error('timed out'); });
+  await handleLine('@nobody hi', ctx);
+  assert.deepEqual(readdirSync(ctx.cwd), []);
+  await handleLine('hi', ctx);
+  assert.match(readdirSync(`${ctx.cwd}/discussions`)[0], /^\d{4}-\d{2}-\d{2}-\d{4}$/);
+});
+
+test('/continue: only before the first message; no title asked, the transcript goes in that discussion', async () => {
+  const { mkdirSync, readdirSync } = await import('node:fs');
+  const prompts = [];
+  const ctx = await freshSession([], async () => { throw new Error('no title should be asked'); });
+  ctx.room.agents[0].turn = async (p) => { prompts.push(p); return 'PASS'; };
+  mkdirSync(`${ctx.cwd}/discussions/2026-11-01-old`, { recursive: true });
+  await handleLine('/continue nosuch', ctx);
+  await handleLine('/continue ../x', ctx);
+  assert.equal(ctx.discussion, undefined);
+  await handleLine('/continue 2026-11-01-old', ctx);
+  await handleLine('where were we?', ctx);
+  assert.deepEqual(readdirSync(`${ctx.cwd}/discussions`), ['2026-11-01-old']);
+  assert.equal(readdirSync(`${ctx.cwd}/discussions/2026-11-01-old/transcripts`).length, 1);
+  assert.match(prompts[0], /continues the discussion in .*2026-11-01-old.*Start from its handoff/);
+  mkdirSync(`${ctx.cwd}/discussions/2026-11-02-other`);
+  await handleLine('/continue 2026-11-02-other', ctx); // too late: the session has started
+  assert.equal(ctx.discussion.name, '2026-11-01-old');
+});

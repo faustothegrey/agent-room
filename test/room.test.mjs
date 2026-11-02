@@ -265,3 +265,13 @@ test('summary: with a single agent, its draft is the summary', async () => {
   const room = createRoom([fakeAgent('A', ['solo'])]);
   assert.deepEqual([(await room.summary()).status, room.transcript.at(-1).text], ['agreed', 'solo']);
 });
+
+test('state.briefing goes with each agent\'s first prompt only', async () => {
+  const a = fakeAgent('A');
+  const state = { transcript: [], seen: new Map(), briefing: 'Write in /x/discussions/d.' };
+  const room = createRoom([a, fakeAgent('B')], state);
+  await room.round('one');
+  await room.round('two');
+  assert.match(a.prompts[0], /You are A[\s\S]*Write in \/x\/discussions\/d\.\n\nNew messages/);
+  assert.doesNotMatch(a.prompts[1], /Write in/);
+});

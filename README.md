@@ -7,7 +7,7 @@ software for maths and science by vibecoding, with costs under control.
 
 **First implementation cycle** (decided by the owner, 2026-10-20; **first version built**): the
 discussion screen, a browser page with the chat between you and the agents on the left and, when
-you want one, a Markdown document or SVG drawing from `proposal/` on the right, watched live.
+you want one, a Markdown document or SVG drawing from the room's discussions on the right, watched live.
 `npm start` opens it and you use the room from there: you type in its message box, the agents
 discuss freely, and at any time Documents (or `/docs`) lets you pick a file. The terminal you
 started it from only shows a log. `npm run terminal` keeps the room in the terminal instead. See
@@ -23,7 +23,23 @@ Each round, you speak, then the agents take turns in a fixed order until every o
 replied `PASS` in a row (passes are hidden on screen, kept in the transcript). A round is capped at
 8 agent turns, and a failed turn ends it. Start a message with `@name` to address one agent only.
 Each agent sees everything said since its last turn. The room is for brainstorming: its output
-is documents in `proposal/`, and agents write elsewhere only when you ask them to.
+is notes and drawings in the active discussion's folder, and agents write elsewhere only when
+you ask them to.
+
+**Discussions** (`proposal/discussions.md`, `proposal/document-folders.md`). The folder a room
+runs in (`--cwd`, default the current one) is its **root**, shown in full in the header. Opening a
+room writes nothing there. Your first message starts a **new discussion**: Claude, with no tools,
+suggests a short title, then agent-room creates `discussions/<date>-<title>/` (`-2`, `-3`… if
+taken; date and time if the title fails within 30s) with the session's transcript in its
+`transcripts/`, and only then do the agents get the message, told where to write. You wait for
+the title before the first reply (one measured title took 4.5s). To **continue** a discussion
+instead, open it in Documents before your first message and choose Continue (or
+`/continue <name>`): no title, the new session's transcript goes in that discussion, and the
+agents start fresh from its `handoff.md`. Documents lists the discussions (newest first) and,
+in this repo, the older `proposal/` folder; looking at a discussion doesn't switch to it.
+**New room in folder…** (in the header) opens the Mac's folder chooser and starts a separate
+room in the chosen folder, with the same agents, on its own port, in a new browser window. Both
+rooms keep running; quitting one doesn't end the other.
 
 ```sh
 npm install                                   # once: installs marked
@@ -31,7 +47,7 @@ npm start                                     # claude + codex, in the current d
 npm run terminal                              # the same, used from the terminal: /docs opens files alone
 node src/cli.mjs --agents claude:Ada,codex:Linus --cwd ~/Software/some-project
 node src/cli.mjs --worker claude:Bob          # the worker's provider and name (default claude:Worker)
-node src/cli.mjs --log-dir ~/room-logs        # transcripts elsewhere (default: ./transcripts)
+node src/cli.mjs --log-dir ~/room-logs        # where Transcripts lists older rooms from (default: ./transcripts)
 node src/cli.mjs --port 6000                  # the screen's port (default 5566: http://127.0.0.1:5566/__room)
 npm test
 ```
@@ -45,7 +61,7 @@ Opening the launcher again while it is running does not start a second room.
 
 The launcher checks for `node`, `claude` and `codex` using a login shell plus the standard
 Homebrew and `~/.local/bin` locations. Output goes to `~/Library/Logs/agent-room.log`
-(replaced on each launch); conversation transcripts still go to `transcripts/`. If the room
+(replaced on each launch); conversation transcripts go in each discussion's `transcripts/`. If the room
 cannot run, the launcher shows an alert with the end of the log.
 
 To build or replace the launcher, after quitting it:
@@ -77,8 +93,9 @@ the checkout moves. The launcher runs `node src/cli.mjs --open`, the same entry 
   covering what was said since the last summary. It costs up to three more turns per agent.
 - `src/cli.mjs` is a small shell that never reloads: arguments, the input loop, `/reload`, `/quit`.
 - `src/ui.mjs` is everything else: building the room, the display, the commands, and the
-  transcript (every room is saved to `transcripts/` as markdown). In the terminal, `/docs` lists
-  the room's `proposal/` files: move with ↑/↓, and Enter opens one alone in the browser.
+  transcript (each session is saved as markdown in its discussion's `transcripts/`), the
+  discussions and "New room in folder…". In the terminal, `/docs` lists the room's documents
+  (discussions, and `proposal/` if any): move with ↑/↓, and Enter opens one alone in the browser.
 - `src/docs.mjs` is the viewer and the discussion screen: a local-only web server (127.0.0.1,
   port 5566, or any free port if that one is taken)
   that renders Markdown with [marked](https://marked.js.org), the project's one dependency.
@@ -89,11 +106,12 @@ the checkout moves. The launcher runs `node src/cli.mjs --open`, the same entry 
   Usage, Reload and Quit buttons, a divider to drag between chat and document, and Documents to
   pick the file on the right at any time, even mid-round. A screen
   opened later catches up on the whole chat. Only the room's own page can send it input.
-  A header at the top names the room's folder, its agents and its worker, and shows the
-  subscription quotas as gauges (5h and week, per provider, with when each resets), refreshed every minute and after
+  A header at the top shows the room's full root path, its active discussion, its agents and its worker, and the
+  subscription quotas as gauges (5h and week, per provider, with when each resets; yellow under 30% left, red under 10%), refreshed every minute and after
   each turn. Transcripts, next to
-  Documents, lists the saved rooms (newest first, with each room's first message) and shows one
-  on the right, read-only; this room's transcript follows along as it grows. Send to agents, on
+  Documents, lists the rooms saved in `--log-dir` before discussions (newest first, with each
+  room's first message) and shows one on the right, read-only; a discussion's own transcripts are
+  under Documents, and the current one follows along as it grows. Send to agents, on
   a past transcript, sends a normal message asking the agents to read it in full (by its path),
   as background: the old sessions are not resumed.
 - **The worker** (the screen's Worker tab, next to Discussion): one more agent, outside the round,
@@ -117,7 +135,8 @@ the checkout moves. The launcher runs `node src/cli.mjs --open`, the same entry 
 ## Current limits (deliberate)
 
 - **Full filesystem access; no shell for claude.** Both agents can read and write anywhere on
-  disk, and only their instructions keep them to `proposal/` unless you ask otherwise. Claude:
+  disk, and only their instructions keep them to the discussion's folder unless you ask otherwise.
+  This matters more in a room opened on another folder (Notes, Documents…). Claude:
   the file tools (`Read`/`Grep`/`Glob`/`Edit`/`Write` pre-approved for any path), web search
   and fetch, sub-agents, skills, and the look-and-click part of Claude in Chrome (to see
   rendered pages); no Bash; your claude.ai connectors (Gmail, Calendar, Drive) left out. Codex: `sandbox_mode="danger-full-access"`

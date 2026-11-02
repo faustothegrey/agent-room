@@ -2,7 +2,8 @@
 // of them has passed in a row (or the turn cap is hit, or a turn fails). And /summary: the agents
 // agree a short summary by points, in a few turns each.
 // Each agent is sent only what it has not yet seen; its own CLI session holds the rest.
-// The transcript and `seen` live in `state`, owned by the caller, so they survive a code reload.
+// The transcript and `seen` live in `state`, owned by the caller, so they survive a code reload;
+// so does state.briefing, read when an agent gets its first prompt.
 
 export const MAX_TURNS = 8;
 export const SUMMARY_TURNS_EACH = 3;
@@ -64,7 +65,8 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
   // `task`: extra instructions for this turn only (used by /summary).
   function promptFor(agent, task) {
     const parts = [];
-    if (seen.get(agent.name) === 0) parts.push(introduction(agent, agents));
+    // state.briefing (set by ui.mjs once the discussion folder exists): where to write, and so on.
+    if (seen.get(agent.name) === 0) parts.push(introduction(agent, agents), ...(state.briefing ? [state.briefing] : []));
     parts.push('New messages since your last turn:', formatMessages(unseenFor(agent)));
     if (task) parts.push(task);
     parts.push(`Your reply as ${agent.name}:`);

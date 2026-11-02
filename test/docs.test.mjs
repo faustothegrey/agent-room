@@ -282,3 +282,30 @@ test('the auto-summarize checkbox reaches the room only from the page, and a new
   assert.equal((await postFrom(watcher, '/__auto', { on: true })).status, 409);
   watcher.close();
 });
+
+test('a room serves only its sections of the root: discussions/ and proposal/, with transcripts as text', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'root-test-'));
+  mkdirSync(join(root, 'discussions', '2026-11-02-a', 'transcripts'), { recursive: true });
+  mkdirSync(join(root, 'proposal'));
+  mkdirSync(join(root, 'src'));
+  writeFileSync(join(root, 'discussions', '2026-11-02-a', 'notes.md'), '# Notes');
+  writeFileSync(join(root, 'discussions', '2026-11-02-a', 'transcripts', 'session-2026-11-02-1014.md'), '**B**\n\n<script>alert(1)</script>\n');
+  writeFileSync(join(root, 'proposal', 'old.md'), '# Old');
+  writeFileSync(join(root, 'src', 'code.mjs'), 'secret');
+  const screen = { clients: new Set(), transcript: [], sections: ['discussions', 'proposal'] };
+  const s = await serve(root, screen);
+  try {
+    assert.deepEqual(await (await s.get('/__files')).json(),
+      ['discussions/2026-11-02-a/notes.md', 'discussions/2026-11-02-a/transcripts/session-2026-11-02-1014.md', 'proposal/old.md']);
+    assert.match(await (await s.get('/discussions/2026-11-02-a/notes.md')).text(), /<h1>Notes<\/h1>/);
+    const transcript = await (await s.get('/discussions/2026-11-02-a/transcripts/session-2026-11-02-1014.md')).text();
+    assert.match(transcript, /&lt;script&gt;alert/);
+    assert.doesNotMatch(transcript, /<script>alert/);
+    assert.equal((await s.get('/src/code.mjs')).status, 404);
+    assert.equal((await postFrom(s, '/__show', { file: 'src/code.mjs' })).status, 404);
+    assert.equal((await postFrom(s, '/__show', { file: 'proposal/old.md' })).status, 204);
+    assert.equal((await postFrom(s, '/__newroom', {})).status, 409); // only where the room offers it
+  } finally {
+    s.close();
+  }
+});

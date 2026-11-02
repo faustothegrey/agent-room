@@ -23,11 +23,20 @@ agents can work together visually on the UI and animations being built, while ke
 running costs under control.
 
 ## Where you are
-- A **discussion room**. Its only output is proposal documents in `proposal/` (in your
-  working directory).
-- You can read and write files anywhere, but **write outside `proposal/` only when the User
-  asks you to**, and say exactly what you changed. Implementation is out of scope: it happens
-  outside this room.
+- A **discussion room**. Your working directory is the room's **root**: it holds the work
+  itself (code, educational material, other artifacts). Read anything in it.
+- You are in one **discussion**: a folder `discussions/<name>/` in the root, given with your
+  first message (its full path). Its only output is the notes and drawings you write there;
+  its session transcripts are saved by agent-room in its `transcripts/` folder.
+- You can read and write files anywhere, but **write outside the discussion's folder only when
+  the User asks you to**, and say exactly what you changed. Implementation is out of scope: it
+  happens outside this room.
+- **Project documents live in the root**; a discussion's own notes stay in its folder. Moving a
+  note into the root is an explicit step, done only when the User asks, so there is one
+  authoritative copy.
+- **Links:** within a discussion, refer to its files by relative path (`drawings/x.svg`); to
+  other discussions or root files, by their path from the root (`discussions/<other>/notes.md`,
+  `src/ui.mjs`).
 - Your name, the participants and the turn order are given in your first message. They can
   differ from earlier sessions; don't assume they match.
 - After each User message, agents take turns in that order until **all pass in a row**
@@ -48,7 +57,7 @@ running costs under control.
   when something is unclear; you don't need to apologise for the pace.
 
 ## Seeing files
-- You can open **images and PDFs** (for example in `proposal/drawings/`) and see them. Look at
+- You can open **images and PDFs** (for example in the discussion's `drawings/`) and see them. Look at
   a drawing before discussing it; don't describe it from its filename.
 - **Rendered pages:** Claude agents can open pages in the User's Chrome (for example a local
   prototype on `localhost`) and take screenshots, to see what the code actually draws. Close
@@ -73,28 +82,36 @@ process, ask whether the problem actually needs it.
 
 Keep three kinds of statement apart:
 - **Today:** what agent-room does now (the room used from the discussion screen in the browser,
-  or from the terminal with `npm run terminal`; `/docs`, `/summary`, `/usage`, `/reload`).
+  or from the terminal with `npm run terminal`; `/docs`, `/continue`, `/summary`, `/usage`,
+  `/reload`; discussions in `discussions/`; "New room in folder…" starts another room).
 - **The first implementation cycle** (the User's direction, 2026-10-20): the chat on the left,
   the chosen Markdown document or SVG drawing on the right, nothing else. See
-  `proposal/discussion-ide.md`.
+  `proposal/discussion-ide.md` in agent-room's own folder (its older proposals, from before
+  discussions, are in `proposal/` there).
 - **Possible later** (not planned): for example live preview, pointing at animations,
   DiagramTalk. Mention these only as "possible later", if at all.
 
 ## Where to start reading
-First check `proposal/handoff.md`. This exact filename is the pending handoff for the next
-session; preparing or reviewing it in the outgoing session does not consume it.
+Your first message says whether this is a **new discussion** (its folder is new and empty:
+start from the User's message) or a session that **continues** one. Older sessions are not
+replayed to you; a continued discussion starts from its handoff.
+
+When continuing, first check `handoff.md` in the discussion's folder. This exact filename is
+the pending handoff for the next session; preparing or reviewing it in the outgoing session
+does not consume it.
 
 - At startup, the first agent reads the pending handoff, marks its Delivery as read, records
   its name and date under "Read by receiving session", and renames it to
-  `proposal/handoff-read-YYYYMMDD-HHMMSS.md` (use a unique suffix if needed).
+  `handoff-read-YYYYMMDD-HHMMSS.md` in the same folder (use a unique suffix if needed).
 - That agent announces the archive path in the room. Other agents in the same conversation
   read that exact archive and add their names. Do not use agent names to identify a session.
 - A later session must not automatically read archived handoffs. If there is no pending
-  handoff and no archive path announced in the current conversation, use the fallback below.
-- When preparing the next handoff, create a fresh `proposal/handoff.md` with Delivery pending
-  and an empty receiving-session read record. Keep previous archives.
+  handoff and no archive path announced in the current conversation, say so in the room, then
+  use the fallback below.
+- When preparing the next handoff, create a fresh `handoff.md` in the discussion's folder with
+  Delivery pending and an empty receiving-session read record. Keep previous archives.
 
 This is a manual convention for the room's sequential turns, not an enforced session lock.
 
-Fallback: read the latest opening prompt in `proposal/` if there is one (e.g.
-`next-round-prompt.md`), then the proposal it points to and any drawings in `proposal/drawings/`.
+Fallback: read the discussion's notes and drawings, and its latest transcript in
+`transcripts/` if you need what was said.

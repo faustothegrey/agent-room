@@ -4,10 +4,13 @@
 // of a local module here would stay cached and never reload.)
 // What must survive a reload lives in `ctx`, owned by cli.mjs: the conversation state, the CLI
 // sessions, the transcript path and the viewer server.
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { createServer as createNetServer } from 'node:net';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--log-dir DIR] [--port 5566] [--no-screen] [--open]
 
@@ -19,8 +22,12 @@ only shows a log. --no-screen (or npm run terminal): the room is used from the t
 and /docs opens each file alone in the browser.
 --open opens the discussion screen even without an interactive terminal (for a Dock launcher).
 --port: the screen's port on 127.0.0.1 (default 5566); if it is taken, any free port is used.
+The --cwd folder is the room's root. Opening it writes nothing: the first message starts a new
+discussion in DIR/discussions/<date>-<title>/ (its notes, drawings and transcripts/), unless
+/continue <name> picked an existing one first. --log-dir is where older transcripts are listed from.
 Type a message to start a round; start it with @name to address one agent.
-Commands: /docs (pick a proposal/ file to view in the browser), /summary (the agents agree a short
+Commands: /docs (pick a document to view in the browser), /continue <name> (before the first
+message: continue that discussion instead of starting one), /summary (the agents agree a short
 summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
 in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
 /reload (load edited code and README-for-brainstorming-agents.md; the conversation continues), /quit`;
@@ -34,7 +41,7 @@ const WORKER_TIMEOUT_MS = 30 * 60 * 1000;
 export async function load(ctx, v) {
   const instructions = readFileSync(new URL('../README-for-brainstorming-agents.md', import.meta.url), 'utf8');
   const workerInstructions = readFileSync(new URL('../README-for-worker-agents.md', import.meta.url), 'utf8');
-  const { createAgent } = await import(`./agents.mjs${v}`);
+  const { createAgent, claudeTitle } = await import(`./agents.mjs${v}`);
   const { createRoom } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
   const usage = await import(`./usage.mjs${v}`);
@@ -52,7 +59,7 @@ export async function load(ctx, v) {
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
   // ctx so they survive a reload.
   const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: [], working: null };
-  return { room: createRoom(agents, ctx.state), worker, docs, usage, totals: ctx.totals ?? {}, screen };
+  return { room: createRoom(agents, ctx.state), worker, docs, usage, totals: ctx.totals ?? {}, screen, suggestTitle: claudeTitle };
 }
 
 const tty = process.stdout.isTTY;
@@ -60,20 +67,185 @@ const style = (code) => (s) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
 const bold = style('1');
 const dim = style('2');
 const red = style('31');
-const log = (ctx, text) => appendFileSync(ctx.logPath, text);
+// Until the discussion's folder exists (at the first message), the transcript is kept in memory.
+const log = (ctx, text) => {
+  if (ctx.logPath) appendFileSync(ctx.logPath, text);
+  else ctx.pendingLog = (ctx.pendingLog ?? '') + text;
+};
 const describe = (room) => room.agents.map((a) => `${a.name} (${a.provider})`).join(', ');
+const when = (d) => d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
 // Points the screen at the code loaded now (at start and after each reload): the header's names and,
 // in UI mode, the Worker tab's input.
 function wire(ctx) {
-  ctx.screen.room = { folder: basename(ctx.cwd), agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name };
+  ctx.screen.room = header(ctx);
+  ctx.screen.sections = ['discussions', 'proposal']; // proposal/: older work, from before discussions
   ctx.screen.logDir = ctx.logDir;
-  ctx.screen.logFile = basename(ctx.logPath);
+  ctx.screen.logFile = ctx.logPath ? basename(ctx.logPath) : null;
   ctx.screen.auto = autoOn(ctx);
   if (ctx.noScreen) return;
   ctx.screen.work = (text) => queueWork(ctx, text);
   // The screen's checkbox: applied at once, not queued behind a round, so it can stop the next summary.
   ctx.screen.setAuto = (on) => setAuto(ctx, on);
+  ctx.screen.newRoom = () => newRoom(ctx);
+}
+
+// The screen's header: the full root path, the active discussion (active: its folder, under the
+// root), and whether this session has started (its first message sent, so its discussion is fixed).
+function header(ctx) {
+  const d = ctx.discussion;
+  return { folder: ctx.cwd, agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name,
+    discussion: d ? d.title : `New discussion — ${when(ctx.openedAt ?? new Date())}`,
+    active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath };
+}
+function showHeader(ctx) {
+  ctx.screen.room = header(ctx);
+  ctx.screen.logFile = ctx.logPath ? basename(ctx.logPath) : null;
+  toScreen(ctx, { type: 'room', room: ctx.screen.room });
+}
+
+// ── Discussions (proposal/discussions.md) ───────────────────────────────────────────────────────
+// A discussion is a folder in <root>/discussions/, named once as date + first title (or date and
+// time when there is no title) and never moved; -2, -3… if the name is taken.
+const pad = (n) => String(n).padStart(2, '0');
+const day = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const hhmm = (d) => `${pad(d.getHours())}${pad(d.getMinutes())}`;
+export const slug = (title) => title.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50).replace(/-+$/, '');
+
+// Creates the folder (and discussions/ if needed) and returns its name. mkdir itself is the check
+// that the name is free, so two rooms naming a discussion at once can't both get it.
+export function createDiscussionFolder(parent, title, now = new Date()) {
+  const base = `${day(now)}-${(title && slug(title)) || hhmm(now)}`;
+  mkdirSync(parent, { recursive: true });
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? base : `${base}-${n}`;
+    try { mkdirSync(join(parent, name)); return name; } catch (err) { if (err.code !== 'EEXIST') throw err; }
+  }
+}
+
+// The session's transcript, transcripts/session-<date>-<time>.md (-2, -3… if taken), created with
+// `text` in it. Returns its path.
+export function createSessionFile(dir, text, now = new Date()) {
+  mkdirSync(dir, { recursive: true });
+  for (let n = 1; ; n++) {
+    const path = join(dir, `session-${day(now)}-${hhmm(now)}${n === 1 ? '' : `-${n}`}.md`);
+    try { writeFileSync(path, text, { flag: 'wx' }); return path; } catch (err) { if (err.code !== 'EEXIST') throw err; }
+  }
+}
+
+// The first message of the session, before the agents see it: for a new discussion, a title from
+// Claude (no tools) and the folder named after it; then the transcript, holding everything said
+// so far. Returns false (the message is not sent) if the folder or transcript can't be created.
+async function openDiscussion(ctx, line) {
+  const now = new Date();
+  try {
+    if (!ctx.discussion) {
+      const label = 'Claude (choosing the discussion\'s title)';
+      startThinking(label);
+      setScreenThinking(ctx, label);
+      const t0 = Date.now();
+      let title = null;
+      let how;
+      try {
+        const got = await ctx.suggestTitle(line, { cwd: tmpdir() });
+        title = got.title;
+        how = `_(title by Claude, ${Math.round((Date.now() - t0) / 1000)}s${got.usage ? ` · ${ctx.usage.formatUsage(got.usage)}` : ''}: ${title})_\n\n`;
+      } catch (err) {
+        how = `_(no title, so the folder is named after the date and time: ${err.message})_\n\n`;
+      } finally {
+        stopThinking();
+        setScreenThinking(ctx, null);
+      }
+      const parent = join(ctx.cwd, 'discussions');
+      const name = createDiscussionFolder(parent, title, now);
+      ctx.discussion = { name, dir: join(parent, name), title: title ?? `Discussion — ${when(now)}`, continued: false };
+      log(ctx, how);
+    }
+    const { title, dir } = ctx.discussion;
+    const head = `# ${title} — session of ${when(now)}\n\nRoom: ${describe(ctx.room)} · worker ${ctx.worker.name}\n\nRoot: ${ctx.cwd}\n\n`;
+    ctx.logPath = createSessionFile(join(dir, 'transcripts'), head + (ctx.pendingLog ?? ''), now);
+    ctx.pendingLog = '';
+  } catch (err) {
+    note(ctx, `✗ Couldn't create the discussion's folder or transcript: ${err.message}\nYour message was not sent to the agents. Here it is, to send again:\n\n${line}\n`, true);
+    return false;
+  }
+  ctx.state.briefing = briefing(ctx);
+  console.log(`Discussion: ${ctx.discussion.dir}\nTranscript: ${ctx.logPath}`);
+  showHeader(ctx);
+  return true;
+}
+
+// Given to each agent with its first prompt.
+function briefing(ctx) {
+  const { dir, continued } = ctx.discussion;
+  if (continued) {
+    return `This session continues the discussion in ${dir}: write your notes and drawings there. Start from its handoff `
+      + '(see "Where to start reading" in your rulebook); you can also read its notes and its transcripts/ folder.';
+  }
+  return `This is a new discussion. Its folder is ${dir}: write your notes and drawings there. `
+    + `The room's root, ${ctx.cwd}, holds the work itself.`;
+}
+
+// /continue <name>: until the first message, make an existing discussion the active one.
+function continueDiscussion(ctx, name) {
+  if (ctx.logPath) return note(ctx, '✗ This session has started, so its discussion can\'t change now.', true);
+  const parent = join(ctx.cwd, 'discussions');
+  if (!name || /[/\\]/.test(name) || name.startsWith('.') || !existsSync(join(parent, name))) {
+    return note(ctx, `✗ No discussion "${name}" in ${parent}.`, true);
+  }
+  ctx.discussion = { name, dir: join(parent, name), title: name, continued: true };
+  showHeader(ctx);
+  note(ctx, `Continuing the discussion ${name}: your next message goes to the agents, who start from its handoff.`);
+}
+
+// ── New room in folder… (proposal/document-folders.md) ─────────────────────────────────────────
+// The Mac's own folder chooser, run by the server because it needs the full path (a browser's
+// picker gives only the name). Resolves to the path, or null if the User cancelled.
+function chooseFolder() {
+  const script = 'POSIX path of (choose folder with prompt "Choose the folder for the new room")';
+  return new Promise((done, fail) => execFile('osascript', ['-e', 'activate', '-e', script], (err, stdout, stderr) => {
+    if (err) return /-128/.test(stderr) ? done(null) : fail(new Error(`the folder chooser failed: ${stderr.trim() || err.message}`));
+    const path = stdout.trim();
+    done(path.length > 1 ? path.replace(/\/$/, '') : path || null);
+  }));
+}
+
+const freePort = () => new Promise((done, fail) => {
+  const s = createNetServer().once('error', fail);
+  s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => done(port)); });
+});
+
+// A separate agent-room process in the chosen folder, with the same agents, on a port of its own,
+// so each window keeps its own address. It runs on its own: quitting this room doesn't end it.
+// Its output goes to a log file in the temp folder, shown here if it stops at once.
+// Resolves to { url, folder } once it answers, or { cancelled: true }.
+async function newRoom(ctx) {
+  const folder = await chooseFolder();
+  if (!folder) return { cancelled: true };
+  const port = await freePort();
+  const out = join(tmpdir(), `agent-room-${port}-${Date.now()}.log`);
+  const fd = openSync(out, 'a');
+  const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', folder, '--agents', ctx.agentSpecs,
+    '--worker', ctx.workerSpec ?? 'claude:Worker', '--port', String(port)];
+  const child = spawn(process.execPath, args, { cwd: folder, detached: true, stdio: ['ignore', fd, fd] });
+  closeSync(fd);
+  child.unref();
+  let exited = false;
+  child.once('exit', () => { exited = true; });
+  const url = `http://127.0.0.1:${port}/__room`;
+  for (const t0 = Date.now(); Date.now() - t0 < 20_000;) {
+    if (exited) throw new Error(`the new room stopped at once. Its log (${out}):\n${readFileSync(out, 'utf8').trim().slice(-800)}`);
+    try {
+      if ((await fetch(url)).ok) {
+        log(ctx, `_(opened a new room in ${folder})_\n\n`);
+        console.log(`New room in ${folder}: ${url} (log: ${out})`);
+        return { url, folder };
+      }
+    } catch {} // not listening yet
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  throw new Error(`the new room didn't answer at ${url} within 20s. Its log: ${out}`);
 }
 
 // Auto-summarize: on unless turned off (ctx.autoSummary, so it survives a reload).
@@ -98,16 +270,15 @@ async function refreshQuota(ctx, quota) {
 
 export const promptText = () => (tty ? '\x1b[1;36mYou ›\x1b[0m ' : 'You › ');
 
-// Once per session: create the transcript file and print the banner.
+// Once per session: print the banner. Nothing is written in the root yet: the transcript waits in
+// memory for the first message, which creates the discussion's folder (openDiscussion).
 // UI mode (not --no-screen): the discussion screen is the room's input and output, so it is opened
 // here (in an interactive terminal or with --open; other piped runs just print its address)
 // and lines the User sends from it go to ctx.say. The terminal then only shows a log.
 export async function start(ctx) {
-  mkdirSync(ctx.logDir, { recursive: true });
-  ctx.logPath = join(ctx.logDir, `room-${new Date().toISOString().replace(/[:.]/g, '-')}.md`);
-  log(ctx, `# Room — ${describe(ctx.room)}\n\nWorking directory: ${ctx.cwd}\n\n`);
-  console.log(`Room: ${describe(ctx.room)} · worker ${ctx.worker.name} (${ctx.worker.provider}) · cwd ${ctx.cwd}`);
-  console.log(`Transcript: ${ctx.logPath}`);
+  ctx.openedAt = new Date();
+  console.log(`Room: ${describe(ctx.room)} · worker ${ctx.worker.name} (${ctx.worker.provider}) · root ${ctx.cwd}`);
+  console.log(`Transcript: in ${join(ctx.cwd, 'discussions')}/, once the first message starts a discussion`);
   wire(ctx);
   // Calls through ctx, so after a reload it runs the new code.
   ctx.quotaTimer ??= setInterval(() => ctx.refreshQuota?.(), 60_000).unref();
@@ -148,6 +319,8 @@ export function ended(ctx) {
 export async function handleLine(line, ctx) {
   if (!line) return;
   if (line === '/docs') return showDocs(ctx);
+  const cont = /^\/continue(?:\s+(.*))?$/.exec(line);
+  if (cont) return continueDiscussion(ctx, (cont[1] ?? '').trim());
   if (line === '/summary') return runSummary(ctx);
   const auto = /^\/autosummary(?:\s+(on|off))?$/.exec(line);
   if (auto) return setAuto(ctx, auto[1] ? auto[1] === 'on' : !autoOn(ctx));
@@ -155,6 +328,11 @@ export async function handleLine(line, ctx) {
     const quota = await ctx.usage.fetchQuota();
     return note(ctx, `${ctx.usage.usageReport({ totals: ctx.totals, agents: [...ctx.room.agents, ctx.worker], quota })}\n`);
   }
+  // The session's first message opens its discussion, unless it names an unknown agent (runRound
+  // then refuses it, and nothing is created).
+  const to = /^@(\w[\w-]*)/.exec(line)?.[1].toLowerCase();
+  const known = !to || ctx.room.agents.some((a) => a.name.toLowerCase() === to);
+  if (known && !ctx.logPath && !(await openDiscussion(ctx, line))) return;
   return runRound(line, ctx);
 }
 
@@ -327,7 +505,8 @@ async function runWork(ctx, text) {
 async function viewerUrl(ctx) {
   if (!ctx.server) {
     ctx.server = createServer((req, res) => {
-      try { ctx.docs.handle(req, res, join(ctx.cwd, 'proposal'), ctx.screen); } catch (err) { res.writeHead(500); res.end(String(err)); }
+      // The root, limited to ctx.screen.sections (discussions/ and proposal/).
+      try { ctx.docs.handle(req, res, ctx.cwd, ctx.screen); } catch (err) { res.writeHead(500); res.end(String(err)); }
     });
     ctx.server.on('connection', (socket) => socket.unref());
     // The fixed port gives the screen the same address every time; if another room (or anything
@@ -352,9 +531,8 @@ async function viewerUrl(ctx) {
 // Enter opens the file alone in the browser.
 async function showDocs(ctx) {
   if (!ctx.noScreen) return toScreen(ctx, { type: 'files' });
-  const dir = join(ctx.cwd, 'proposal');
-  const files = existsSync(dir) ? ctx.docs.listFiles(dir) : [];
-  if (!files.length) return console.log(`No files in ${dir} yet: they appear when an agent writes a proposal.\n`);
+  const files = ctx.screen.sections.flatMap((s) => (existsSync(join(ctx.cwd, s)) ? ctx.docs.listFiles(join(ctx.cwd, s)).map((f) => join(s, f)) : []));
+  if (!files.length) return console.log(`No documents in ${join(ctx.cwd, 'discussions')} yet: they appear when an agent writes one.\n`);
   const base = await viewerUrl(ctx);
   const open = (f) => browse(base + ctx.docs.urlPath(f));
   if (!tty) return console.log(`${files.map((f) => base + ctx.docs.urlPath(f)).join('\n')}\n`);

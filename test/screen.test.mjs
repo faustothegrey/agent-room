@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -49,6 +49,7 @@ test('UI mode: the screen is the room\'s input, its replies come back as events,
     await say('/quit');
     assert.deepEqual(await next(), { type: 'ended' });
     assert.equal(await exited, 0);
+    assert.deepEqual(readdirSync(dir), []); // opening a room, with no message sent, writes nothing in it
   } finally {
     cli.kill(); // no-op once it has exited; stops a stalled run from hanging the suite
   }

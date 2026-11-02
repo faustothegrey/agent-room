@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createClaudeAgent, createCodexAgent, parseCodexEvents } from '../src/agents.mjs';
+import { claudeTitle, createClaudeAgent, createCodexAgent, parseCodexEvents } from '../src/agents.mjs';
 
 // A fake runner that records each call and returns scripted stdout.
 function fakeRunner(outputs) {
@@ -140,4 +140,16 @@ test('claude with shell (the worker): Bash is added to the tools and pre-approve
   assert.equal(args.at(-1), 'Bash');
   const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--tools'));
   assert.ok(allowed.includes('Bash'));
+});
+
+test('claudeTitle: one claude call with no tools and no saved session; the first line, unquoted', async () => {
+  const { calls, runner } = fakeRunner([JSON.stringify({ result: '"Pendulum lessons."\nextra', is_error: false })]);
+  const { title } = await claudeTitle('plan the pendulum lessons', { runner });
+  assert.equal(title, 'Pendulum lessons');
+  assert.deepEqual(calls[0].args.slice(-2), ['--tools', '']);
+  assert.ok(calls[0].args.includes('--no-session-persistence'));
+  assert.ok(!calls[0].args.includes('--allowedTools'));
+  assert.match(calls[0].input, /plan the pendulum lessons/);
+  await assert.rejects(claudeTitle('x', { runner: async () => JSON.stringify({ result: '  ', is_error: false }) }), /empty title/);
+  await assert.rejects(claudeTitle('x', { runner: async () => JSON.stringify({ result: 'no', is_error: true }) }), /claude: no/);
 });
