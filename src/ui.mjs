@@ -9,10 +9,10 @@ import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--log-dir DIR] [--port 5566] [--no-screen] [--open]
+export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--port 5566] [--no-screen] [--open]
 
 Each agent is provider[:name[:model]], e.g. --agents claude:Ada:opus,codex:Linus
 Without saved defaults: discussion claude,codex; worker claude:Worker.
@@ -21,18 +21,19 @@ The provider/model sections in the Discussion and Worker tabs save changes autom
 Settings changes apply to this room only before discussion, summary or worker work starts;
 after that they set defaults for future rooms.
 The worker (the screen's Worker tab) is one more agent, outside the discussion: it carries out the
-instructions sent from that tab, sees only those, and can edit files and run commands.
+instructions sent from that tab, sees only those (and the active discussion's folder, for its
+notes), and can edit files and run commands.
 By default (npm start) the room is used from the discussion screen in the browser; the terminal
 only shows a log. --no-screen (or npm run terminal): the room is used from the terminal instead,
 and /docs opens each file alone in the browser.
 --open opens the discussion screen even without an interactive terminal (for a Dock launcher).
 --port: the screen's port on 127.0.0.1 (default 5566); if it is taken, any free port is used.
 The --cwd folder is the room's root. Opening it writes nothing: the first message starts a new
-discussion in DIR/discussions/<date>-<title>/ (its notes, drawings and transcripts/), unless
-/continue <name> picked an existing one first. --log-dir is where older transcripts are listed from.
+discussion in DIR/discussions/<date>-<title>/ (its documents, drawings and transcripts/), unless
+/reopen <name> picked an existing one first.
 Type a message to start a round; start it with @name to address one agent.
-Commands: /docs (pick a document to view in the browser), /continue <name> (before the first
-message: continue that discussion instead of starting one), /summary (the agents agree a short
+Commands: /docs (pick a document to view in the browser), /reopen <name> (re-open that
+discussion: a fresh session there, starting from its handoff), /summary (the agents agree a short
 summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
 in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
 /reload (load edited code and both agent rulebooks; conversation continues), /quit
@@ -148,9 +149,7 @@ const when = (d) => d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 
 // in UI mode, the Worker tab's input.
 function wire(ctx) {
   ctx.screen.room = header(ctx);
-  ctx.screen.sections = ['discussions', 'proposal']; // proposal/: older work, from before discussions
-  ctx.screen.logDir = ctx.logDir;
-  ctx.screen.logFile = ctx.logPath ? basename(ctx.logPath) : null;
+  ctx.screen.sections = ['discussions'];
   ctx.screen.auto = autoOn(ctx);
   if (ctx.noScreen) return;
   ctx.screen.work = (text) => queueWork(ctx, text);
@@ -167,15 +166,15 @@ function header(ctx) {
   const d = ctx.discussion;
   return { folder: ctx.cwd, agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name,
     discussion: d ? d.title : 'No discussion started',
-    active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath };
+    active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath,
+    transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null };
 }
 function showHeader(ctx) {
   ctx.screen.room = header(ctx);
-  ctx.screen.logFile = ctx.logPath ? basename(ctx.logPath) : null;
   toScreen(ctx, { type: 'room', room: ctx.screen.room });
 }
 
-// ── Discussions (proposal/discussions.md) ───────────────────────────────────────────────────────
+// ── Discussions ───────────────────────────────────────────────────────
 // A discussion is a folder in <root>/discussions/, named once as date + first title (or date and
 // time when there is no title) and never moved; -2, -3… if the name is taken.
 const pad = (n) => String(n).padStart(2, '0');
@@ -251,26 +250,47 @@ async function openDiscussion(ctx, line) {
 function briefing(ctx) {
   const { dir, continued } = ctx.discussion;
   if (continued) {
-    return `This session continues the discussion in ${dir}: write your notes and drawings there. Start from its handoff `
+    return `This session continues the discussion in ${dir}: create, read and write this discussion's documents (notes, drawings) there. Start from its handoff `
       + '(see "Where to start reading" in your rulebook); you can also read its notes and its transcripts/ folder.';
   }
-  return `This is a new discussion. Its folder is ${dir}: write your notes and drawings there. `
+  return `This is a new discussion. Its folder is ${dir}: create, read and write this discussion's documents (notes, drawings) there. `
     + `The room's root, ${ctx.cwd}, holds the work itself.`;
 }
 
-// /continue <name>: until the first message, make an existing discussion the active one.
-function continueDiscussion(ctx, name) {
-  if (ctx.logPath) return note(ctx, '✗ This session has started, so its discussion can\'t change now.', true);
+// /reopen <name> (Re-open this discussion): make an existing discussion the active one. It runs
+// between rounds (commands are queued). Once this session has started, the session ends first: its
+// transcript is closed, the chat is cleared, and the agents and the worker get fresh CLI sessions;
+// the next message starts a new session in the re-opened discussion, from its handoff. Discussions
+// don't keep their own agent memory (decided by the User, 2026-11-02).
+async function reopenDiscussion(ctx, name) {
   const parent = join(ctx.cwd, 'discussions');
-  if (!name || /[/\\]/.test(name) || name.startsWith('.') || !existsSync(join(parent, name))) {
-    return note(ctx, `✗ No discussion "${name}" in ${parent}.`, true);
+  // A discussion is a folder named <date>-<title>; other folders there are the room's own material.
+  if (!name || /[/\\]/.test(name) || !/^\d{4}-\d{2}-\d{2}-/.test(name) || !existsSync(join(parent, name))) {
+    return note(ctx, `✗ No discussion "${name}" in ${parent} (discussions are folders named <date>-<title>).`, true);
+  }
+  if (ctx.logPath) {
+    await ctx.workQueue; // let a running worker instruction finish in this session
+    log(ctx, `_(session ended: re-opening the discussion ${name})_\n\n`);
+    for (const a of [...ctx.room.agents, ctx.worker]) a.reset?.();
+    const { state, screen } = ctx;
+    state.transcript.length = 0; // emptied in place: the room and the screen hold this array
+    for (const a of ctx.room.agents) state.seen.set(a.name, 0);
+    state.summaries = 0;
+    state.briefing = null;
+    screen.worker.length = 0;
+    Object.assign(screen, { doc: null, thinking: null, working: null, status: null });
+    ctx.logPath = null;
+    ctx.pendingLog = '';
+    ctx.agentsStarted = false;
+    ctx.workerBriefed = null;
   }
   ctx.discussion = { name, dir: join(parent, name), title: name, continued: true };
   showHeader(ctx);
-  note(ctx, `Continuing the discussion ${name}: your next message goes to the agents, who start from its handoff.`);
+  toScreen(ctx, ctx.docs.resetEvent(ctx.screen)); // open pages start over with the empty chat
+  note(ctx, `Re-opened the discussion ${name}: your next message starts a fresh session there; the agents start from its handoff.`);
 }
 
-// ── New room in folder… (proposal/archive/document-folders.md) ─────────────────────────────────────────
+// ── New room in folder… ─────────────────────────────────────────
 // The Mac's own folder chooser, run by the server because it needs the full path (a browser's
 // picker gives only the name). Resolves to the path, or null if the User cancelled.
 function chooseFolder() {
@@ -358,7 +378,7 @@ export async function start(ctx) {
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   ctx.refreshQuota();
   if (ctx.noScreen) {
-    return console.log('Type a message, /docs to see the proposals, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
+    return console.log('Type a message, /docs to browse the discussions, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
   }
   ctx.screen.say = (line) => ctx.say(line);
   const screenUrl = `${await viewerUrl(ctx)}__room`;
@@ -392,8 +412,8 @@ export function ended(ctx) {
 export async function handleLine(line, ctx) {
   if (!line) return;
   if (line === '/docs') return showDocs(ctx);
-  const cont = /^\/continue(?:\s+(.*))?$/.exec(line);
-  if (cont) return continueDiscussion(ctx, (cont[1] ?? '').trim());
+  const reopen = /^\/(?:reopen|continue)(?:\s+(.*))?$/.exec(line); // /continue: its former name
+  if (reopen) return reopenDiscussion(ctx, (reopen[1] ?? '').trim());
   if (line === '/summary') { ctx.agentsStarted = true; return runSummary(ctx); }
   const auto = /^\/autosummary(?:\s+(on|off))?$/.exec(line);
   if (auto) return setAuto(ctx, auto[1] ? auto[1] === 'on' : !autoOn(ctx));
@@ -537,7 +557,7 @@ async function runRound(line, ctx) {
 // discussion (they don't wait for a round, and a round doesn't wait for them). The queue is in ctx,
 // so it carries over a reload. The worker is sent only the instruction itself; its CLI session holds
 // the earlier ones.
-function queueWork(ctx, text) {
+export function queueWork(ctx, text) {
   ctx.agentsStarted = true;
   // A bug here must not jam the queue: report it, and the next instruction still runs.
   ctx.workQueue = (ctx.workQueue ?? Promise.resolve()).then(() => runWork(ctx, text))
@@ -559,7 +579,13 @@ async function runWork(ctx, text) {
   const t0 = Date.now();
   let entry;
   try {
-    entry = { speaker: worker.name, text: (await worker.turn(text)) || '(no reply)' };
+    // The worker learns the active discussion's folder (for its notes) with its first instruction there.
+    const d = ctx.discussion;
+    const brief = d && ctx.workerBriefed !== d.dir
+      ? `The active discussion's folder is ${d.dir}: create, read and write this discussion's documents there, including your implementation notes and plans. The work itself goes in the root, ${ctx.cwd}.\n\n`
+      : '';
+    entry = { speaker: worker.name, text: (await worker.turn(brief + text)) || '(no reply)' };
+    if (d) ctx.workerBriefed = d.dir;
     if (worker.lastUsage) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
   } catch (err) {
     entry = { speaker: worker.name, text: err.message, error: true };
@@ -573,14 +599,14 @@ async function runWork(ctx, text) {
   refreshQuota(ctx).catch(() => {});
 }
 
-// The proposal viewer and discussion screen: a local-only HTTP server kept in ctx, started at
+// The document viewer and discussion screen: a local-only HTTP server kept in ctx, started at
 // start-up in UI mode and on the first /docs in terminal mode. It calls ctx.docs on every request,
 // so a reload applies to it too. Its connections (open screens hold one) never keep the process
 // alive; in terminal mode the server doesn't either, while in UI mode it is the room's input.
 async function viewerUrl(ctx) {
   if (!ctx.server) {
     ctx.server = createServer((req, res) => {
-      // The root, limited to ctx.screen.sections (discussions/ and proposal/).
+      // The root, limited to ctx.screen.sections (discussions/).
       try { ctx.docs.handle(req, res, ctx.cwd, ctx.screen); } catch (err) { res.writeHead(500); res.end(String(err)); }
     });
     ctx.server.on('connection', (socket) => socket.unref());

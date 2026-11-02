@@ -1,12 +1,12 @@
 # Exploring documents and opening other folders
 
-> **Historical archive — 2026-11-02.** The basic feature is implemented. Remaining and deferred items are tracked in [the current discussion proposal](../discussions.md). Earlier status labels and next steps below describe the original discussion, not current work. See [the proposal index](../README.md).
+> **Historical archive — 2026-11-02.** The basic feature is implemented. Remaining and deferred items are tracked in [the current discussion proposal](discussions.md). Earlier status labels and next steps below describe the original discussion, not current work. See [the discussions index](../README.md).
 
 Status: mostly decided by the User (2026-11-02), not implemented; some details still proposed.
-Started 2026-11-02. Builds on `discussion-ide.md` (first cycle: chat on the
+Started 2026-11-02. Builds on `../2026-10-20-discussion-ide/discussion-ide.md` (first cycle: chat on the
 left, the chosen document on the right). Drawing: `drawings/6-new-room.svg` (updated to reflect the decisions below).
 
-**`discussions.md` takes precedence** wherever the two documents conflict (User, 2026-11-02).
+**`discussions-original.md` takes precedence** wherever the two documents conflict (User, 2026-11-02).
 In particular: a room's records go in `<root>/discussions/<name>/`, not `<root>/proposal/`, and
 the list shows only the discussions, not the whole folder.
 
@@ -18,12 +18,12 @@ the list shows only the discussions, not the whole folder.
 - The **root directory is clearly visible** (its full path shown).
 - **New rooms are exactly like this one, only with a different root directory**: same rules,
   including the writing rule (now pointing at the active discussion's folder, see
-  `discussions.md`).
+  `discussions-original.md`).
 - **The current room keeps running** alongside the new one. Consequences (Claude; from how
   turns work, unmeasured): a quiet room costs nothing, since agents run only when a message
   arrives; two active rooms cost roughly double; the path at the top tells windows apart.
 - **Opening a room offers "New discussion" or "Continue discussion"** (decided in
-  `discussions.md`, which takes precedence). Either way the chat starts empty; continuing uses
+  `discussions-original.md`, which takes precedence). Either way the chat starts empty; continuing uses
   the discussion's handoff. Continuing skips the title and folder-creation steps below: the
   folder already exists, and the new session's transcript is added to it.
 - **Exploring stays as it is for now**: the file list is "a bit rough", but improving it is
@@ -61,7 +61,7 @@ the list shows only the discussions, not the whole folder.
 - The header shows only the folder's last name (`basename(ctx.cwd)`, `src/ui.mjs:69`), so
   "full path shown" needs a code change. (Worker review.)
 - Transcripts go to `transcripts/` under the directory the room was launched from, not under
-  `--cwd` (`src/cli.mjs:16`). `discussions.md` puts them in the discussion's folder, so this
+  `--cwd` (`src/cli.mjs:16`). `discussions-original.md` puts them in the discussion's folder, so this
   needs a code change. (Worker review.)
 - The server's port is fixed (5566).
 - Writing rule (`README-for-brainstorming-agents.md`): agents write in `proposal/`, and
@@ -106,4 +106,4 @@ the list shows only the discussions, not the whole folder.
 ## Unresolved disagreements
 - None open. Superseded: Claude's limit "browse only the starting folder"; Codex's "browse
   another folder without changing the room" (the User chose a new room); Codex's "the new room
-  browses the whole chosen folder" (replaced by `discussions.md`: only discussions).
+  browses the whole chosen folder" (replaced by `discussions-original.md`: only discussions).

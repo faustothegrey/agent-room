@@ -38,22 +38,28 @@ subscription usage, and **New room in folder…**. Agent settings live inside th
   Passes are hidden in the chat and retained in the transcript. Replies appear when complete.
 - **Worker:** send implementation instructions to a separate agent. It receives only the
   instructions in this tab and remembers its earlier worker turns; it does not receive the
-  Discussion chat. Supply the relevant file paths and decisions yourself. Instructions run
+  Discussion chat. Supply the relevant file paths and decisions yourself. Once a discussion is
+  active, its first instruction there also tells it the discussion's folder, where it writes its
+  implementation notes and plans; the work itself goes in the root. Instructions run
   one at a time alongside the discussion, with a 30-minute timeout per instruction.
-- **Documents:** browse discussions, then choose a Markdown document, SVG drawing or other
-  supported file for the right pane. The chosen document stays selected when agents edit
+- **Discussions** (right pane): browse discussions, then choose a Markdown document, SVG drawing, transcript
+  or other supported file for the right pane. Inside a discussion, each subfolder (`drawings/`,
+  `transcripts/`, …) opens to its files. The chosen document stays selected when agents edit
   other files. Open documents check for changes every two seconds. Drag the divider to resize
   the panes. Browsing is available during agent turns and does not notify the agents.
-- **Transcripts:** browse older `room-*.md` logs from `--log-dir`, read-only. **Send to agents**
-  asks the discussion agents to read that file as background; it does not resume its sessions.
-  New discussion transcripts are found under **Documents**, in their discussion's `transcripts/`.
+- **Transcripts** are in each discussion's `transcripts/` folder, under **Discussions**. On an
+  earlier session's transcript, **Send to agents** asks the discussion agents to read it as
+  background; it does not resume its sessions.
 - **Reload:** load code and rulebook edits between discussion commands without losing the
   current conversation. Refresh the browser afterward for HTML/CSS/JavaScript changes.
 - **Quit:** click twice to end the room. Discussion commands, including Quit and Reload,
   wait behind an ongoing round and its automatic summary; they are not immediate cancellation.
 
-In this project's Documents list, `proposal/` contains the current proposal index and remaining
-work. `archive/` and `deferred/` each appear as a folder entry; their files stay hidden until opened.
+In this project (the agent-room room itself), its design history is five discussions, from
+`2026-10-18-first-rooms/` to `2026-11-02-discussions-and-folders/`, each with its documents and its
+transcripts; [`discussions/README.md`](discussions/README.md) is their index. Files directly in
+`discussions/` that aren't dated folders (here, just that index) are listed under "This room's
+own documents", with no Re-open button.
 
 ## Discussions and saved files
 
@@ -78,16 +84,17 @@ and is not delivered to the agents.
         session-2026-11-02-1014.md
 ```
 
-To **continue** an existing discussion, open it in Documents and choose **Continue this discussion**
-before sending the first discussion message, or use `/continue <folder-name>`. No title is
-requested. The next message creates a new session transcript in that discussion. Provider
-sessions start fresh and the agents are instructed to read the handoff; old conversations are
-not automatically replayed. Preparing and consuming handoffs is an agent convention described
+To go back to an existing discussion, open it in **Discussions** and choose **Re-open this discussion**,
+or use `/reopen <folder-name>`. It works at any time between rounds. No title is requested; the
+next message creates a new session transcript in that discussion. If this room's session had
+already started, it ends first: its transcript is kept and closed, the chat clears (the button
+asks for a second click), and the discussion agents and the worker get fresh CLI sessions. The
+agents are instructed to read the handoff; old conversations are not automatically replayed, and
+discussions don't keep their own agent memory. Preparing and consuming handoffs is an agent convention described
 in [the brainstorming rulebook](README-for-brainstorming-agents.md), not automatic app behavior.
 
-Looking at another discussion does not switch the active one. Once the first discussion message
-creates a transcript, this session's discussion cannot change. Display-title editing and
-switching among started discussions are not available; see [remaining decisions](proposal/discussions.md).
+Looking at another discussion does not switch the active one; only Re-open does. Display-title
+editing is not available yet; see [remaining decisions](discussions/2026-11-02-discussions-and-folders/discussions.md).
 
 Worker turns and other log entries before the first discussion message remain in memory until
 that message creates the transcript. A worker-only session therefore has no saved transcript
@@ -157,20 +164,18 @@ Without saved defaults or overrides, they are `claude,codex` and the worker is `
 ```sh
 node src/cli.mjs --cwd ~/Software/some-project
 node src/cli.mjs --agents claude:Ada:opus,codex:Linus --worker codex:Worker
-node src/cli.mjs --log-dir ~/room-logs --port 6000
+node src/cli.mjs --port 6000
 node src/cli.mjs --no-screen
 node src/cli.mjs --open
 node src/cli.mjs --help
 ```
 
-`--log-dir` selects the source of older transcripts, not the destination of new discussion
-transcripts. Its default is `./transcripts` relative to the launch directory, independently
-of `--cwd`. `--port 0` requests any available port; the usual default is 5566.
+`--port 0` requests any available port; the usual default is 5566.
 
 | Command | Effect |
 |---|---|
 | `/docs` | Browse documents; in terminal mode, ↑/↓ selects, Enter opens, Esc leaves the picker. |
-| `/continue <folder-name>` | Select an existing discussion before the first discussion message. |
+| `/reopen <folder-name>` | Re-open an existing discussion: a fresh session there, from its handoff. |
 | `/summary` | Request an agreed summary. |
 | `/autosummary [on\|off]` | Toggle automatic summaries, or set them explicitly. |
 | `/usage` | Show session tokens and subscription quotas. |
@@ -233,5 +238,5 @@ leaves the previous code running. `cli.mjs` changes require a process restart. B
 are embedded in `docs.mjs`, so reload the room and refresh the page to see their changes.
 
 For unfinished decisions, historical designs and deferred research, start at
-[the proposal index](proposal/README.md). Archived status labels describe their original date,
+[the discussions index](discussions/README.md). Archived status labels describe their original date,
 not today's implementation or a fresh instruction to work.

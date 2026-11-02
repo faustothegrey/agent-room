@@ -1,6 +1,6 @@
 # Proposal: agent-room as an Electron app
 
-> **Historical archive — 2026-11-02.** Deferred in favor of the implemented Dock launcher; this is not an active implementation request. Earlier status labels and next steps below describe the original discussion, not current work. See [the proposal index](../README.md).
+> **Historical archive — 2026-11-02.** Deferred in favor of the implemented Dock launcher; this is not an active implementation request. Earlier status labels and next steps below describe the original discussion, not current work. See [the discussions index](../README.md).
 
 **Status:** proposed, awaiting the User's approval.
 **Prepared by:** Codex, 2026-10-21, following discussion with the User.

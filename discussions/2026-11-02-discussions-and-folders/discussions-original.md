@@ -1,6 +1,6 @@
 # Discussions: keeping a topic's documents and transcripts together
 
-> **Historical archive — 2026-11-02.** The basic feature is implemented. Remaining decisions are tracked in [the current discussion proposal](../discussions.md). Earlier status labels and next steps below describe the original discussion, not current work. See [the proposal index](../README.md).
+> **Historical archive — 2026-11-02.** The basic feature is implemented. Remaining decisions are tracked in [the current discussion proposal](discussions.md). Earlier status labels and next steps below describe the original discussion, not current work. See [the discussions index](../README.md).
 
 Status: design approved by the User (2026-11-02), not implemented. Started 2026-11-02. Follows `document-folders.md` (new room in another
 folder). Nothing here is implemented.
@@ -36,7 +36,7 @@ folder). Nothing here is implemented.
 <root>/                          ← the work: src/, test/, …
   discussions/
     2026-11-02-organising-discussions/
-      discussions.md
+      discussions-original.md
       drawings/
       transcripts/
         session-2026-11-02-1014.md

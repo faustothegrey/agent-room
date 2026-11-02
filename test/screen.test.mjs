@@ -9,7 +9,7 @@ import { join } from 'node:path';
 // the page drives it. Output is piped, so no browser opens; nothing here starts an agent.
 test('UI mode: the screen is the room\'s input, its replies come back as events, Quit ends the room', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'screen-test-'));
-  const cli = spawn('node', [new URL('../src/cli.mjs', import.meta.url).pathname, '--cwd', dir, '--log-dir', join(dir, 'logs')]);
+  const cli = spawn('node', [new URL('../src/cli.mjs', import.meta.url).pathname, '--cwd', dir]);
   const exited = new Promise((done) => cli.on('exit', done));
   try {
     let out = '';

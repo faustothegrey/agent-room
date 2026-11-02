@@ -5,7 +5,7 @@
 // The conversation lives in `ctx`, so it carries over. Keep this file small: changes here need a
 // restart.
 import { createInterface } from 'node:readline/promises';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 const { values } = parseArgs({
@@ -13,7 +13,6 @@ const { values } = parseArgs({
     agents: { type: 'string' },
     worker: { type: 'string' },
     cwd: { type: 'string', default: process.cwd() },
-    'log-dir': { type: 'string', default: join(process.cwd(), 'transcripts') },
     port: { type: 'string', default: '5566' },
     'no-screen': { type: 'boolean' },
     open: { type: 'boolean' },
@@ -30,7 +29,6 @@ const ctx = {
   cwd: resolve(values.cwd),
   agentSpecs: values.agents,
   workerSpec: values.worker,
-  logDir: values['log-dir'],
   port: Number(values.port),
   noScreen: !!values['no-screen'],
   open: !!values.open,

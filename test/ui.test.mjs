@@ -131,7 +131,7 @@ test('the first message creates the discussion (titled by Claude) and its transc
   const [name] = readdirSync(`${ctx.cwd}/discussions`);
   assert.match(name, /^\d{4}-\d{2}-\d{2}-about-pendulums$/);
   assert.equal(ctx.discussion.title, 'About pendulums');
-  assert.match(prompts[0], new RegExp(`Its folder is ${ctx.cwd}/discussions/${name}: write your notes`));
+  assert.match(prompts[0], new RegExp(`Its folder is ${ctx.cwd}/discussions/${name}: create, read and write this discussion's documents`));
   const text = readFileSync(ctx.logPath, 'utf8');
   assert.match(text, /^# About pendulums — session of/);
   assert.match(text, /auto-summarize off[\s\S]*title by Claude[\s\S]*\*\*User\*\*\n\npendulums/);
@@ -161,9 +161,55 @@ test('/continue: only before the first message; no title asked, the transcript g
   assert.deepEqual(readdirSync(`${ctx.cwd}/discussions`), ['2026-11-01-old']);
   assert.equal(readdirSync(`${ctx.cwd}/discussions/2026-11-01-old/transcripts`).length, 1);
   assert.match(prompts[0], /continues the discussion in .*2026-11-01-old.*Start from its handoff/);
-  mkdirSync(`${ctx.cwd}/discussions/2026-11-02-other`);
-  await handleLine('/continue 2026-11-02-other', ctx); // too late: the session has started
+});
+
+test('/reopen after the session started: a fresh session in that discussion, from its handoff', async () => {
+  const { mkdirSync, readdirSync, readFileSync } = await import('node:fs');
+  const prompts = [];
+  const ctx = await freshSession([], async () => ({ title: 'First topic' }));
+  const resets = [];
+  for (const a of [...ctx.room.agents, ctx.worker]) a.reset = () => resets.push(a.name);
+  ctx.room.agents[0].turn = async (p) => { prompts.push(p); return 'PASS'; };
+  await handleLine('/autosummary off', ctx);
+  await handleLine('hello', ctx);
+  const first = ctx.logPath;
+  const [name] = readdirSync(`${ctx.cwd}/discussions`);
+  mkdirSync(`${ctx.cwd}/discussions/2026-11-01-old`);
+
+  await handleLine('/reopen 2026-11-01-old', ctx);
   assert.equal(ctx.discussion.name, '2026-11-01-old');
+  assert.deepEqual(resets, ['A', 'B', 'W']); // fresh CLI sessions for the agents and the worker
+  assert.equal(ctx.logPath, null);
+  assert.deepEqual(ctx.state.transcript, []); // the chat starts over (the same array, emptied)
+  assert.equal(ctx.screen.transcript, ctx.state.transcript);
+  assert.match(readFileSync(first, 'utf8'), /session ended: re-opening the discussion 2026-11-01-old/);
+
+  await handleLine('back to it', ctx);
+  assert.match(ctx.logPath, /discussions\/2026-11-01-old\/transcripts\/session-/);
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /You are A, one of several AI agents/); // introduced again, as in a new session
+  assert.match(prompts[1], /continues the discussion in .*2026-11-01-old.*Start from its handoff/);
+  assert.equal(readdirSync(`${ctx.cwd}/discussions/${name}/transcripts`).length, 1); // the first discussion keeps its transcript
+
+  await handleLine('/reopen ../x', ctx);
+  mkdirSync(`${ctx.cwd}/discussions/archive`); // the room's own material, not a discussion
+  await handleLine('/reopen archive', ctx);
+  assert.equal(ctx.discussion.name, '2026-11-01-old');
+});
+
+test('the worker is told the active discussion\'s folder with its first instruction there', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const got = [];
+  const ctx = await freshSession([], async () => ({ title: 'Topic' }));
+  ctx.worker.turn = async (p) => { got.push(p); return 'done'; };
+  await handleLine('/autosummary off', ctx);
+  await handleLine('hello', ctx);
+  queueWork(ctx, 'fix the bug'); // as the Worker tab sends it
+  queueWork(ctx, 'and the test');
+  await ctx.workQueue;
+  assert.match(got[0], new RegExp(`^The active discussion's folder is ${ctx.discussion.dir}: create, read and write this discussion's documents`));
+  assert.match(got[0], /fix the bug$/);
+  assert.equal(got[1], 'and the test');
 });
 
 test('agent settings persist, apply before startup, and leave active sessions unchanged', async () => {

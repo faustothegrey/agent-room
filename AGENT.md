@@ -6,7 +6,7 @@ together. Keep it small enough to read in one sitting.** Before adding a module,
 config system or a process, ask the owner whether the problem actually needs it.
 
 Current setup, behavior and the source map are in `README.md`. Remaining decisions and
-historical material are indexed in `proposal/README.md`.
+historical material are in `discussions/` (start at `discussions/README.md`).
 
 **Brainstorming agents** (the discussion agents agent-room starts in a room) follow
 `README-for-brainstorming-agents.md`: it is their main reference, sent to them as system

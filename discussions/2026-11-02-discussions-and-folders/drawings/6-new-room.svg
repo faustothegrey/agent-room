@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" font-family="Helvetica, Arial, sans-serif" font-size="14">
-  <metadata>Historical design archived 2026-11-02. Status labels describe the original proposal; see ../../README.md and ../../discussions.md for current status.</metadata>
+  <metadata>Historical design archived 2026-11-02. Status labels describe the original proposal; see ../../README.md and ../discussions.md for current status.</metadata>
   <rect x="0" y="0" width="960" height="520" fill="#ffffff"/>
   <text x="480" y="28" text-anchor="middle" font-size="18" font-weight="bold">"New room in folder…": approved flow; not implemented</text>
 

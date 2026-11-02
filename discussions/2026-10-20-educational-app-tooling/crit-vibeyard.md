@@ -1,8 +1,8 @@
 # Crit and Vibeyard: preview ideas
 
-> **Deferred research — 2026-11-02.** Kept for possible future work, not the current implementation plan. Product descriptions and external research below are historical and have not been rechecked. See [the proposal index](../README.md) for current work.
+> **Deferred research — 2026-11-02.** Kept for possible future work, not the current implementation plan. Product descriptions and external research below are historical and have not been rechecked. See [the discussions index](../README.md) for current work.
 
-> Outside the current implementation cycle (2026-10-20); see `../archive/discussion-ide.md`.
+> Outside the current implementation cycle (2026-10-20); see `../2026-10-20-discussion-ide/discussion-ide.md`.
 
 Research by Codex, 2026-10-20. Official documentation checked online; neither app installed or exercised. Costs remain unmeasured. This is a proposal, not a User decision.
 

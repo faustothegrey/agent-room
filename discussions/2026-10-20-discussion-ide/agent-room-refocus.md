@@ -1,6 +1,6 @@
 # Worker brief: refocus agent-room's documentation
 
-> **Historical archive — 2026-11-02.** The documentation refocus is complete; the work order below is historical. Earlier status labels and next steps below describe the original discussion, not current work. See [the proposal index](../README.md).
+> **Historical archive — 2026-11-02.** The documentation refocus is complete; the work order below is historical. Earlier status labels and next steps below describe the original discussion, not current work. See [the discussions index](../README.md).
 
 **Status: drafted by Claude and Codex, 2026-10-20. The User approved the goal sentence (§1)
 and the file list (§4) on 2026-10-20.**
@@ -32,7 +32,7 @@ decision needed unless the User wants to change it. (Codex)
 | `AGENT.md`, `CLAUDE.md` | Replace "basic multi-agent conversation" with the approved goal; keep the rules |
 | `README.md` | Goal and first cycle at the top; current behaviour stays accurate |
 | `README-for-brainstorming-agents.md` | Update "The overarching goal" and "Project constraint" to match |
-| `proposal/agent-room-visual-harness.md`, `../deferred/core-and-ui.md`, `../deferred/crit-vibeyard.md`, `../deferred/edu-app-tooling.md` | Add a notice at the top: "Outside the current implementation cycle (2026-10-20); see `discussion-ide.md`." Earlier User decisions keep their status; don't rewrite content |
+| `proposal/agent-room-visual-harness.md`, `../2026-10-20-educational-app-tooling/core-and-ui.md`, `../2026-10-20-educational-app-tooling/crit-vibeyard.md`, `../2026-10-20-educational-app-tooling/edu-app-tooling.md` | Add a notice at the top: "Outside the current implementation cycle (2026-10-20); see `discussion-ide.md`." Earlier User decisions keep their status; don't rewrite content |
 
 This list is a starting inventory. The worker also searches the repository for other
 conflicting scope statements, and checks documented commands against the code. Report

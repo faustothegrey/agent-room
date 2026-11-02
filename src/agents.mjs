@@ -50,6 +50,8 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, s
     name,
     provider: 'claude',
     lastUsage: null,
+    // A fresh CLI session from the next turn on (re-opening a discussion); `session` is kept, emptied.
+    reset() { session.id = randomUUID(); session.started = false; },
     async turn(prompt) {
       agent.lastUsage = null;
       const args = ['-p', '--output-format', 'json'];
@@ -102,6 +104,7 @@ export function createCodexAgent({ name, model, cwd, timeoutMs, instructions, ru
     name,
     provider: 'codex',
     lastUsage: null,
+    reset() { delete session.threadId; },
     async turn(prompt) {
       agent.lastUsage = null;
       // `exec resume` has no -s flag, so the sandbox is set through -c on every call: none at all

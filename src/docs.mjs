@@ -1,13 +1,12 @@
-// Document viewer: handle() serves the room's discussions/ and legacy proposal/ over local HTTP,
+// Document viewer: handle() serves the room's discussions/ over local HTTP,
 // rendering Markdown with marked. Images (and links to images) show inline; pick() is the
 // terminal document picker behind /docs.
 // It also serves the discussion screen (/__room): the
 // header with the root and active discussion; on the left two tabs, the discussion and the worker
 // (one agent outside the round that carries out the User's instructions), each with a message box
-// in UI mode; and on the right, when the User picks one, a document watched live (Documents lists the
-// room's discussions, and its older proposal/ folder if any). In terminal
-// mode (npm run terminal) the page only watches. Transcripts (on the right too) lists the rooms
-// saved in the log folder and shows one, read-only.
+// in UI mode; and on the right, when the User picks one, a document watched live (Discussions lists the
+// room's discussions: their documents, drawings and transcripts). In terminal
+// mode (npm run terminal) the page only watches.
 // cli.mjs loads this module in load(), so /reload swaps it too.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
@@ -59,7 +58,7 @@ function inside(dir, rel) {
   try { return statSync(file).isFile() ? file : null; } catch { return null; }
 }
 
-// A room serves only some folders of its root (screen.sections, e.g. discussions/ and proposal/);
+// A room serves only some folders of its root (screen.sections: discussions/);
 // without sections (the plain viewer), all of dir.
 const inSection = (screen, rel) => !screen?.sections || screen.sections.includes(rel.split('/')[0]);
 const servable = (dir, rel, screen) => (inSection(screen, rel) ? inside(dir, rel) : null);
@@ -69,7 +68,7 @@ function docFiles(dir, screen) {
 }
 
 // The page polls the file's mtime and reloads when an agent changes it.
-function page(title, body, watch, home = '<a href="/">proposal/</a>', mtime = '/__mtime?f=') {
+function page(title, body, watch, home = '<a href="/">all files</a>', mtime = '/__mtime?f=') {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>${esc(title)}</title><style>
 :root { color-scheme: light dark; }
@@ -89,31 +88,14 @@ setInterval(async () => {
 </script></body></html>`;
 }
 
-// The saved rooms in logDir, newest first: { file, path (absolute, for the agents to read), title
-// (the agents), date (ISO), first (the start of the User's first message, to tell rooms apart), current }.
-// A room's file is named after the time it started (ui.mjs), e.g. room-2026-11-02T09-15-56-854Z.md.
-export function listTranscripts(logDir, currentFile) {
-  let names = [];
-  try { names = readdirSync(logDir).filter((f) => /^room-.*\.md$/.test(f)); } catch { return []; } // no log folder yet
-  return names.sort().reverse().map((file) => {
-    const m = /^room-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z/.exec(file);
-    let text = '';
-    try { text = readFileSync(join(logDir, file), 'utf8'); } catch {}
-    const title = text.split('\n', 1)[0].replace(/^# Room — /, '');
-    const said = /^\*\*User\*\*\n\n(.+)/m.exec(text)?.[1] ?? '';
-    const first = said.length > 100 ? `${said.slice(0, 100)}…` : said;
-    return { file, path: resolve(logDir, file), title, first, date: m ? `${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z` : null, current: file === currentFile };
-  });
-}
-
 // ── The discussion screen ────────────────────────────────────────────────────────────────────
 // `screen` is plain state kept by the caller across reloads:
 // { clients: Set of open event streams, transcript: the room's entries, doc: file or null,
 //   thinking: name or null, status: the last round's end line or null,
 //   room: { folder (the full root path), agents: [names], worker: name, discussion: its title,
-//     active: its folder under the root or null, started: first message sent } for the header,
-//   sections: the root's folders a room serves (discussions/, proposal/),
-//   logDir: where transcripts are saved, logFile: this room's transcript (a file name in logDir),
+//     active: its folder under the root or null, started: first message sent, transcript: this
+//     session's transcript, under the root, or null } for the header,
+//   sections: the root's folders a room serves (discussions/),
 //   worker: the worker tab's messages (messageView, plus meta: time and tokens),
 //   working: the worker's name while it works, else null,
 //   auto: whether auto-summarize is on, quota: the header's gauges ([{ provider, label, used,
@@ -279,8 +261,8 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </div>
 <div id="split" role="separator" aria-orientation="vertical" aria-label="Resize the chat and the document" tabindex="0" title="Drag to resize"></div>
 <div id="right">
-  <div id="bar"><button id="docs">Documents</button><button id="logs">Transcripts</button><span id="current">No document shown.</span><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
-  <div id="pane"><div class="empty">The agents can talk without a document. Pick one with Documents (or /docs) to watch it live.</div></div>
+  <div id="bar"><button id="docs">Discussions</button><span id="current">No document shown.</span><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
+  <div id="pane"><div class="empty">The agents can talk without a document. Pick one with Discussions (or /docs) to watch it live.</div></div>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -381,7 +363,17 @@ function setThinking(name) {
 const urlFor = (file) => '/' + file.split('/').map(encodeURIComponent).join('/');
 function showDoc(file) {
   doc = file || null;
-  $('feed').hidden = true;
+  // Send to agents, on a transcript of an earlier session (not this one): a normal message asking
+  // the agents to read it as background; its old sessions are not resumed.
+  const feed = $('feed');
+  const p = doc ? doc.split('/') : [];
+  const transcript = (p.length === 3 || p.length === 4) && p[0] === 'discussions' && p.at(-2) === 'transcripts' && p.at(-1).endsWith('.md');
+  feed.hidden = !transcript || !room || doc === room.transcript || $('composer').hidden;
+  feed.onclick = () => {
+    showTab('talk');
+    const root = room.folder.endsWith('/') ? room.folder : room.folder + '/';
+    send('Please read this transcript of an earlier session in full, as background for our discussion: ' + root + file);
+  };
   $('current').textContent = doc ? doc : 'No document shown.';
   if (!doc) return;
   pane.innerHTML = '<iframe id="doc"></iframe>';
@@ -389,43 +381,12 @@ function showDoc(file) {
   document.title = doc + ' · agent-room';
 }
 const post = (path, body) => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-// Transcripts are shown in this page only (picking a document is shared by every open page).
-const when = (iso) => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
-function showTranscript(t) {
-  doc = null;
-  // Send to agents: a normal message asking them to read the file (the old sessions aren't resumed).
-  // Only where the page is the room's input, and not for this room's own transcript.
-  const feed = $('feed');
-  feed.hidden = $('composer').hidden || t.current;
-  feed.onclick = () => {
-    showTab('talk');
-    send('Please read this transcript of an earlier room in full, as background for our discussion: ' + t.path);
-  };
-  const label = when(t.date) + (t.current ? ' (this room)' : '');
-  $('current').textContent = 'Transcript: ' + label;
-  pane.innerHTML = '<iframe id="doc"></iframe>';
-  pane.firstChild.src = '/__transcript/' + encodeURIComponent(t.file);
-  document.title = 'Transcript ' + label + ' · agent-room';
-}
-async function openTranscripts() {
-  $('feed').hidden = true;
-  const list = await (await fetch('/__transcripts')).json();
-  pane.innerHTML = '<div id="files"></div>';
-  const box = pane.firstChild;
-  if (!list.length) { box.innerHTML = '<div class="empty">No saved transcripts yet.</div>'; return; }
-  for (const t of list) {
-    const b = document.createElement('button');
-    b.innerHTML = '<b></b><span class="first"></span>';
-    b.firstChild.textContent = when(t.date) + ' · ' + t.title + (t.current ? '  (this room)' : '');
-    b.lastChild.textContent = t.first || '(nothing said)';
-    b.onclick = () => showTranscript(t);
-    box.append(b);
-  }
-}
-// Documents: the room's discussions (newest first), then its older proposal/ folder if it has one;
-// open one to see its files. Looking is not switching: "Continue this discussion" is a separate
-// action, offered until the first message is sent.
-const groupOf = (f) => f.startsWith('discussions/') ? f.split('/').slice(0, 2).join('/') : f.split('/')[0];
+// Discussions: the room's discussions (newest first); open one to see its documents, and its
+// subfolders (drawings/, transcripts/, …) one level at a time. Looking is not switching: Re-open
+// this discussion is a separate action. A discussion is a folder named <date>-<title> (as ui.mjs
+// creates them); anything else directly in discussions/ is the room's own material (in agent-room
+// itself: the index of its discussions), listed after them.
+const isDiscussion = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(name);
 async function openFiles(group) {
   $('feed').hidden = true;
   const files = await (await fetch('/__files')).json();
@@ -435,35 +396,48 @@ async function openFiles(group) {
     const b = document.createElement('button'); b.textContent = label; b.onclick = onclick;
     if (title) b.title = title;
     list.append(b);
+    return b;
   };
-  if (typeof group === 'string') { // one discussion (openFiles is also a click handler: then group is the event)
-    const collection = ['proposal/archive', 'proposal/deferred'].includes(group);
-    add(collection ? '← proposal/' : '← All discussions', () => openFiles(collection ? 'proposal' : undefined));
-    const h = document.createElement('h3'); h.textContent = group + (group === room?.active ? '  (active)' : ''); list.append(h);
-    if (group.startsWith('discussions/') && room && !room.started && group !== room.active && !$('composer').hidden) {
-      add('Continue this discussion', () => send('/continue ' + group.split('/')[1]), 'Make it the active discussion; the agents start from its handoff');
+  if (typeof group === 'string') { // a discussion or one of its folders (as a click handler, group is the event)
+    const parts = group.split('/'); // discussions, <name>, folders…
+    const parent = parts.length > 2 ? parts.slice(0, -1).join('/') : undefined;
+    add(parent ? '← ' + parts.at(-2) + '/' : '← All discussions', () => openFiles(parent));
+    const h = document.createElement('h3'); h.textContent = parts.slice(1).join('/') + (group === room?.active ? '  (active)' : ''); list.append(h);
+    // Re-open: not for the active discussion before anything was said in it (nothing to restart).
+    if (parts.length === 2 && isDiscussion(parts[1]) && room && !$('composer').hidden && !(group === room.active && !room.started)) {
+      const b = add('Re-open this discussion', () => {
+        // Once this session has started, re-opening ends it (the chat clears): two clicks, like Quit.
+        if (room.started && !b.dataset.armed) {
+          b.dataset.armed = '1'; b.textContent = 'Click again: this session ends and the chat clears';
+          return setTimeout(() => { delete b.dataset.armed; b.textContent = 'Re-open this discussion'; }, 4000);
+        }
+        send('/reopen ' + parts[1]);
+      }, 'A fresh session in this discussion: the agents start from its handoff. Its documents and transcripts stay.');
     }
-    const collections = ['proposal/archive', 'proposal/deferred'];
-    if (group === 'proposal') {
-      for (const folder of collections) {
-        if (files.some((f) => f.startsWith(folder + '/')))
-          add(folder.slice(group.length + 1) + '/', () => openFiles(folder), 'Open this folder');
-      }
+    const rel = files.filter((f) => f.startsWith(group + '/')).map((f) => f.slice(group.length + 1));
+    for (const d of [...new Set(rel.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))].sort()) {
+      add(d + '/', () => openFiles(group + '/' + d), 'Open this folder');
     }
-    for (const f of files.filter((f) => collection ? f.startsWith(group + '/') : groupOf(f) === group)) {
-      if (group === 'proposal' && collections.some((folder) => f.startsWith(folder + '/'))) continue;
-      add(f.slice(group.length + 1) + (f === doc ? '  (shown)' : ''), () => post('/__show', { file: f }));
+    for (const r of rel.filter((r) => !r.includes('/'))) {
+      const f = group + '/' + r;
+      add(r + (f === doc ? '  (shown)' : '') + (f === room?.transcript ? '  (this session)' : ''), () => post('/__show', { file: f }));
     }
     return;
   }
-  const groups = [...new Set(files.map(groupOf))].sort((a, b) => (a === 'proposal') - (b === 'proposal') || b.localeCompare(a));
+  const top = files.filter((f) => f.startsWith('discussions/')).map((f) => f.slice('discussions/'.length));
+  const folders = [...new Set(top.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))];
+  const discussions = folders.filter(isDiscussion).sort((a, b) => b.localeCompare(a));
   const hint = document.createElement('span'); hint.className = 'hint';
-  if (!groups.some((g) => g !== 'proposal')) hint.textContent = room?.started ? '' : 'No discussions yet: your first message starts one.';
-  else if (room && !room.started && !$('composer').hidden) hint.textContent = 'Your first message starts a new discussion. To continue one instead, open it and choose Continue.';
+  if (!discussions.length) hint.textContent = room?.started ? '' : 'No discussions yet: your first message starts one.';
+  else if (room && !room.started && !$('composer').hidden) hint.textContent = 'Your first message starts a new discussion. To go back to one instead, open it and choose Re-open this discussion.';
   list.append(hint);
-  for (const g of groups) {
-    add(g === 'proposal' ? 'proposal/ (older work, before discussions)' : g.split('/')[1] + (g === room?.active ? '  (active)' : ''), () => openFiles(g));
-  }
+  for (const d of discussions) add(d + ('discussions/' + d === room?.active ? '  (active)' : ''), () => openFiles('discussions/' + d));
+  const own = folders.filter((n) => !isDiscussion(n)).sort();
+  const loose = top.filter((r) => !r.includes('/'));
+  if (!own.length && !loose.length) return;
+  const h = document.createElement('h3'); h.textContent = "This room's own documents"; list.append(h);
+  for (const d of own) add(d + '/', () => openFiles('discussions/' + d), 'Open this folder');
+  for (const r of loose) add(r + ('discussions/' + r === doc ? '  (shown)' : ''), () => post('/__show', { file: 'discussions/' + r }));
 }
 // The header: the room's full root path and its active discussion, if one has been selected.
 let room = null;
@@ -610,7 +584,6 @@ $('auto').onchange = async (e) => {
   if (!res.ok) { status(await res.text(), true); e.target.checked = !e.target.checked; }
 };
 $('docs').onclick = openFiles;
-$('logs').onclick = openTranscripts;
 $('summary').onclick = () => send('/summary');
 $('usage').onclick = () => send('/usage');
 $('reload').onclick = () => send('/reload');
@@ -680,7 +653,7 @@ function handleScreen(req, res, url, dir, screen) {
   if (url.pathname === '/__room') { send(200, 'text/html; charset=utf-8', SCREEN); return true; }
   if (url.pathname === '/__files') {
     let files = [];
-    try { files = docFiles(dir, screen); } catch {} // no proposal/ yet
+    try { files = docFiles(dir, screen); } catch {} // no discussions/ yet
     send(200, 'application/json', JSON.stringify(files));
     return true;
   }
@@ -728,30 +701,22 @@ function handleScreen(req, res, url, dir, screen) {
     });
     return true;
   }
-  if (url.pathname === '/__transcripts') {
-    send(200, 'application/json', JSON.stringify(screen.logDir ? listTranscripts(screen.logDir, screen.logFile) : []));
-    return true;
-  }
-  if (url.pathname.startsWith('/__transcript/') || url.pathname === '/__tmtime') {
-    const name = url.pathname === '/__tmtime' ? url.searchParams.get('f') ?? '' : decodeURIComponent(url.pathname.slice('/__transcript/'.length));
-    const file = screen.logDir && /^room-[^/]*\.md$/.test(name) ? inside(screen.logDir, name) : null;
-    if (!file) { send(404, 'text/plain; charset=utf-8', `No such transcript: ${name}`); return true; }
-    if (url.pathname === '/__tmtime') { send(200, 'text/plain', String(statSync(file).mtimeMs)); return true; }
-    // The page reloads as the room's transcript grows, like a document.
-    send(200, 'text/html; charset=utf-8', page(name, mdText.parse(readFileSync(file, 'utf8')), name, 'transcripts', '/__tmtime?f='));
-    return true;
-  }
   if (url.pathname !== '/__events') return false;
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
   screen.clients.add(res);
   req.on('close', () => screen.clients.delete(res));
   // A page that (re)connects first gets everything so far, so it never shows a partial room.
-  const reset = { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc,
+  res.write(`data: ${JSON.stringify(resetEvent(screen))}\n\n`);
+  return true;
+}
+
+// Everything a page shows, to start over from: sent to a page that (re)connects, and to every open
+// page when a discussion is re-opened.
+export function resetEvent(screen) {
+  return { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc,
     thinking: screen.thinking, status: screen.status, input: !!screen.say,
     room: screen.room ?? null, worker: screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work,
     auto: screen.auto ?? false, quota: screen.quota, newRoom: !!screen.newRoom };
-  res.write(`data: ${JSON.stringify(reset)}\n\n`);
-  return true;
 }
 
 export function handle(req, res, dir, screen) {
@@ -770,7 +735,7 @@ export function handle(req, res, dir, screen) {
   }
   const file = servable(dir, rel, screen);
   if (!file) return send(404, 'text/plain; charset=utf-8', `Not found: ${rel}`);
-  // A session transcript quotes whatever was said: its HTML is shown as text, as in Transcripts.
+  // A session transcript quotes whatever was said: its HTML is shown as text, never run.
   if (/\.md$/i.test(file)) return send(200, 'text/html; charset=utf-8', page(rel, ((/(^|\/)transcripts\//.test(rel)) ? mdText : md).parse(readFileSync(file, 'utf8')), rel));
   send(200, TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream', readFileSync(file));
 }
