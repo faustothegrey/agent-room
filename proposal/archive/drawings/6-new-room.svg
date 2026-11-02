@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <metadata>Historical design archived 2026-11-02. Status labels describe the original proposal; see ../../README.md and ../../discussions.md for current status.</metadata>
+  <rect x="0" y="0" width="960" height="520" fill="#ffffff"/>
+  <text x="480" y="28" text-anchor="middle" font-size="18" font-weight="bold">"New room in folder…": approved flow; not implemented</text>
+
+  <!-- Step 1: current room -->
+  <text x="150" y="62" text-anchor="middle" font-weight="bold">① The room you're in</text>
+  <rect x="20" y="75" width="260" height="200" rx="8" fill="#f4f4f6" stroke="#888"/>
+  <rect x="20" y="75" width="260" height="26" rx="8" fill="#dde3ea"/>
+  <text x="30" y="93" font-size="12">📁 /Users/fausto/Software/agent-room</text>
+  <rect x="32" y="112" width="110" height="150" rx="4" fill="#fff" stroke="#bbb"/>
+  <text x="42" y="132" font-size="12">chat</text>
+  <rect x="150" y="112" width="118" height="150" rx="4" fill="#fff" stroke="#bbb"/>
+  <text x="160" y="132" font-size="12">document</text>
+  <rect x="140" y="236" width="128" height="22" rx="4" fill="#e8f0fe" stroke="#4a7bd0"/>
+  <text x="204" y="251" text-anchor="middle" font-size="11">New room in folder…</text>
+
+  <!-- arrow 1 -->
+  <line x1="282" y1="175" x2="335" y2="175" stroke="#333" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- Step 2: Mac chooser -->
+  <text x="480" y="62" text-anchor="middle" font-weight="bold">② Choose folder (Mac picker proposed)</text>
+  <rect x="345" y="75" width="270" height="200" rx="8" fill="#fbfbfb" stroke="#888"/>
+  <text x="360" y="100" font-size="12" fill="#555">Finder-style window</text>
+  <text x="365" y="128" font-size="13">📁 Documents</text>
+  <rect x="358" y="138" width="240" height="22" fill="#cfe0fb"/>
+  <text x="365" y="154" font-size="13">📁 Notes</text>
+  <text x="365" y="180" font-size="13">📁 Software</text>
+  <rect x="520" y="236" width="80" height="24" rx="4" fill="#4a7bd0"/>
+  <text x="560" y="252" text-anchor="middle" font-size="12" fill="#fff">Choose</text>
+  <text x="480" y="300" text-anchor="middle" font-size="12">Proposed: server opens the picker and gets the full path</text>
+  <text x="480" y="318" text-anchor="middle" font-size="12" font-weight="bold">/Users/fausto/Notes</text>
+  <text x="480" y="336" text-anchor="middle" font-size="11" fill="#c0392b">Mac picker route untested; cancel leaves room ① as it is</text>
+
+  <!-- arrow 2 -->
+  <line x1="617" y1="175" x2="670" y2="175" stroke="#333" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- Step 3: new room -->
+  <text x="810" y="62" text-anchor="middle" font-weight="bold">③ A new window, a new room</text>
+  <rect x="680" y="75" width="260" height="200" rx="8" fill="#f4f4f6" stroke="#888"/>
+  <rect x="680" y="75" width="260" height="34" rx="8" fill="#ffe9a8"/>
+  <text x="690" y="93" font-size="12" font-weight="bold">📁 /Users/fausto/Notes</text>
+  <text x="690" y="105" font-size="10">Active: Physics (Continue example)</text>
+  <rect x="692" y="112" width="110" height="150" rx="4" fill="#fff" stroke="#bbb"/>
+  <text x="702" y="132" font-size="12">new chat</text>
+  <text x="702" y="150" font-size="11" fill="#555">(empty)</text>
+  <rect x="810" y="112" width="118" height="150" rx="4" fill="#fff" stroke="#bbb"/>
+  <text x="818" y="132" font-size="11">Discussions</text>
+  <text x="828" y="150" font-size="11">▸ Physics</text>
+  <text x="828" y="168" font-size="11">▸ Maths</text>
+  <text x="828" y="186" font-size="11">(if existing)</text>
+  <text x="818" y="210" font-size="10" fill="#555">discussion files</text>
+  <text x="818" y="224" font-size="10" fill="#555">only; not root files</text>
+
+  <text x="810" y="294" text-anchor="middle" font-size="12" font-weight="bold">On opening: choose a discussion</text>
+  <text x="810" y="313" text-anchor="middle" font-size="12">New discussion / Continue discussion</text>
+  <text x="810" y="332" text-anchor="middle" font-size="11">Continue: select an existing discussion</text>
+  <text x="810" y="349" text-anchor="middle" font-size="11">Both start with an empty chat</text>
+
+  <!-- Notes below -->
+  <rect x="20" y="370" width="920" height="130" rx="8" fill="#fafafa" stroke="#ccc"/>
+  <text x="35" y="395" font-weight="bold">Decided layout, writing rules and creation order</text>
+  <text x="35" y="420" font-size="13">• Decided: room ① keeps running; each room shows its full root path and active discussion name.</text>
+  <text x="35" y="442" font-size="13">• Decided: notes, drawings and transcripts go in /Users/fausto/Notes/discussions/&lt;name&gt;/.</text>
+  <text x="35" y="464" font-size="13">• Decided: other files change only when you ask. This is an instruction to agents, not filesystem enforcement.</text>
+  <text x="35" y="486" font-size="13">• Decided: title (no writing tools) → folder + transcript → discussion agents. Title failure: date and time.</text>
+
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+</svg>

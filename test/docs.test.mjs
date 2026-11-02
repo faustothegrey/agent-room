@@ -309,3 +309,27 @@ test('a room serves only its sections of the root: discussions/ and proposal/, w
     s.close();
   }
 });
+
+test('agent settings endpoint reads choices and protects saves with the same-origin check', async () => {
+  let saved;
+  const screen = { getSettings: () => ({ models: { claude: [], codex: [] } }), saveSettings: async (body) => {
+    if (!body?.agents) throw new Error('Missing agents');
+    saved = body; return { applied: false };
+  } };
+  const s = await serve(fixture(), screen);
+  try {
+    assert.deepEqual(await (await s.get('/__settings')).json(), { models: { claude: [], codex: [] } });
+    const post = (body, origin = s.base) => fetch(s.base + '/__settings', { method: 'POST',
+      headers: { 'content-type': 'application/json', origin }, body: JSON.stringify(body) });
+    assert.equal((await post({ agents: [] }, 'http://elsewhere.test')).status, 403);
+    assert.equal(saved, undefined);
+    assert.equal((await post({})).status, 400);
+    const res = await post({ agents: [] });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { applied: false });
+    assert.deepEqual(saved, { agents: [] });
+    // Check the inline browser program parses as JavaScript, rather than only the server module.
+    const html = await (await s.get('/__room')).text();
+    new Function(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
+  } finally { s.close(); }
+});

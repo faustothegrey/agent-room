@@ -3,7 +3,7 @@
 // That id lives in `session`, a plain object owned by the caller, so it survives a code reload.
 // `instructions` (the brainstorming rulebook) go in as system-level instructions on every turn.
 // Agents get full filesystem access (the owner's call): claude can read and write any path but has
-// no shell; codex runs with no sandbox. Keeping to proposal/ is left to their instructions.
+// no shell; codex runs with no sandbox. Keeping to the active discussion's folder is left to their instructions.
 // Set on every turn (not just the first). The worker (ui.mjs) is a claude agent created with
 // `shell: true`: it also gets Bash, pre-approved, so it can run commands and tests.
 import { spawn } from 'node:child_process';

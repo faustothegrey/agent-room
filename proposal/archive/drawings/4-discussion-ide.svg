@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <metadata>Historical design archived 2026-11-02. Status labels describe the original proposal; see ../../README.md and ../../discussions.md for current status.</metadata>
+  <rect x="0" y="0" width="900" height="520" fill="#ffffff"/>
+  <text x="450" y="28" text-anchor="middle" font-size="18" font-weight="bold">Discussion IDE: a sketch to discuss (proposed, nothing built)</text>
+
+  <!-- Left pane: conversation -->
+  <rect x="20" y="50" width="360" height="450" rx="8" fill="#f4f4f6" stroke="#888"/>
+  <text x="200" y="74" text-anchor="middle" font-weight="bold">Conversation</text>
+  <rect x="35" y="90" width="300" height="44" rx="6" fill="#ffffff" stroke="#bbb"/>
+  <text x="45" y="108">User: "this should let me edit"</text>
+  <text x="45" y="126" fill="#c0392b" font-size="12">→ pointing at [B] document pane</text>
+  <rect x="65" y="146" width="300" height="44" rx="6" fill="#e8f0fe" stroke="#9ab"/>
+  <text x="75" y="164">Claude: suggests change ①</text>
+  <text x="75" y="182" font-size="12" fill="#555">(shows as Proposed on the right)</text>
+  <rect x="65" y="202" width="300" height="44" rx="6" fill="#eaf7ea" stroke="#9b9"/>
+  <text x="75" y="220">Codex: suggests change ②</text>
+  <text x="75" y="238" font-size="12" fill="#555">(shows as Proposed on the right)</text>
+  <rect x="35" y="440" width="330" height="44" rx="6" fill="#ffffff" stroke="#888"/>
+  <text x="45" y="467" fill="#888">Type a message…</text>
+
+  <!-- Right pane: the shared object -->
+  <rect x="400" y="50" width="480" height="450" rx="8" fill="#fffdf5" stroke="#888"/>
+  <text x="640" y="74" text-anchor="middle" font-weight="bold">The shared object (one, chosen by the User)</text>
+  <text x="640" y="94" text-anchor="middle" font-size="12" fill="#555">a sketch, a diagram of options, or a short proposal</text>
+
+  <!-- the object being discussed: a mini drawing of the two panes -->
+  <rect x="440" y="115" width="150" height="190" rx="6" fill="#f4f4f6" stroke="#888"/>
+  <text x="515" y="215" text-anchor="middle">[A] chat</text>
+  <rect x="600" y="115" width="240" height="190" rx="6" fill="#fff" stroke="#c0392b" stroke-width="3"/>
+  <text x="720" y="215" text-anchor="middle">[B] document</text>
+  <circle cx="830" cy="125" r="11" fill="#c0392b"/>
+  <text x="830" y="130" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">!</text>
+
+  <!-- pending changes -->
+  <rect x="440" y="325" width="400" height="56" rx="6" fill="#e8f0fe" stroke="#9ab" stroke-dasharray="6 4"/>
+  <text x="452" y="347">① Proposed (Claude): "B is editable by the User"</text>
+  <text x="452" y="369" font-size="12" fill="#555">stays labelled "Proposed" until the User decides in the chat</text>
+  <rect x="440" y="391" width="400" height="56" rx="6" fill="#eaf7ea" stroke="#9b9" stroke-dasharray="6 4"/>
+  <text x="452" y="413">② Proposed (Codex): "note what changed since you looked"</text>
+  <text x="452" y="435" font-size="12" fill="#555">alternatives and disagreements stay visible side by side</text>
+  <text x="640" y="480" text-anchor="middle" font-size="12" fill="#555">Decided (by the User) = solid. Proposed = dashed. Pointed-at = red.</text>
+</svg>

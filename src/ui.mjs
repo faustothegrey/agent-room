@@ -7,14 +7,14 @@
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--log-dir DIR] [--port 5566] [--no-screen] [--open]
 
-Each agent is provider[:name], e.g. --agents claude:Ada,codex:Linus
+Each agent is provider[:name[:model]], e.g. --agents claude:Ada,codex:Linus
 The worker (the screen's Worker tab) is one more agent, outside the discussion: it carries out the
 instructions sent from that tab, sees only those, and can edit files and run commands.
 By default (npm start) the room is used from the discussion screen in the browser; the terminal
@@ -35,10 +35,73 @@ in which an agent spoke; on by default), /usage (tokens this session and subscri
 // How long one worker instruction may run before it is stopped (a room turn gets 5 minutes).
 const WORKER_TIMEOUT_MS = 30 * 60 * 1000;
 
+// Shared defaults are read only at startup; explicit CLI choices take precedence.
+export const defaultsFile = () => join(homedir(), '.config', 'agent-room', 'defaults.json');
+const parseSpec = (spec, worker = false) => {
+  const [provider, name = worker ? 'Worker' : provider[0].toUpperCase() + provider.slice(1), model = ''] = spec.trim().split(':');
+  return { provider, name, model };
+};
+const specFor = ({ provider, name, model }) => `${provider}:${name}:${model}`;
+export function validateSettings(value) {
+  if (!value || !Array.isArray(value.agents) || !value.agents.length || value.agents.length > 8)
+    throw new Error('Choose between 1 and 8 discussion agents.');
+  const names = new Set();
+  const agent = (a) => {
+    if (!a || !['claude', 'codex'].includes(a.provider)) throw new Error('Choose Claude or Codex.');
+    if (typeof a.name !== 'string' || !/^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(a.name)) throw new Error('Names must use letters, numbers, underscores or hyphens.');
+    if (names.has(a.name.toLowerCase())) throw new Error('Each agent and the worker need a different name.');
+    names.add(a.name.toLowerCase());
+    if (typeof a.model !== 'string' || !/^[A-Za-z0-9._[\]()-]*$/.test(a.model) || a.model.length > 150) throw new Error('Invalid model ID.');
+    return { provider: a.provider, name: a.name, model: a.model };
+  };
+  return { agents: value.agents.map(agent), worker: agent(value.worker) };
+}
+export function readDefaults(file = defaultsFile()) {
+  try { return validateSettings(JSON.parse(readFileSync(file, 'utf8'))); }
+  catch (err) {
+    if (err.code !== 'ENOENT') console.error(`Could not read agent defaults (${file}): ${err.message}. Using CLI defaults.`);
+    return null;
+  }
+}
+function currentSettings(ctx) {
+  return { agents: ctx.agentSpecs.split(',').map((s) => parseSpec(s)), worker: parseSpec(ctx.workerSpec, true) };
+}
+export function modelChoices() {
+  // Codex maintains this catalog itself; unavailable catalogs still allow a custom model ID.
+  let codex = [];
+  try {
+    const cache = JSON.parse(readFileSync(join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'models_cache.json'), 'utf8'));
+    codex = cache.models.filter((m) => m.visibility === 'list' && typeof m.slug === 'string').map((m) => ({ id: m.slug, label: m.display_name || m.slug }));
+  } catch {}
+  return { claude: ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) })), codex };
+}
+export async function saveSettings(ctx, value, file = defaultsFile()) {
+  const settings = validateSettings(value);
+  const next = { ...ctx, agentSpecs: settings.agents.map(specFor).join(','), workerSpec: specFor(settings.worker), sessions: new Map(), state: { ...ctx.state, seen: new Map(ctx.state.seen) } };
+  // Build first so validation/loading errors cannot replace defaults or the running room.
+  const loaded = await load(next, '');
+  mkdirSync(dirname(file), { recursive: true });
+  const temp = `${file}.${process.pid}.tmp`;
+  writeFileSync(temp, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 });
+  renameSync(temp, file);
+  const applied = !ctx.agentsStarted && !ctx.logPath && !ctx.state.transcript.length && !ctx.screen.worker.length;
+  if (applied) {
+    Object.assign(ctx, loaded, { agentSpecs: next.agentSpecs, workerSpec: next.workerSpec, sessions: next.sessions, state: next.state });
+    wire(ctx);
+    showHeader(ctx);
+  }
+  return { applied, settings };
+}
+
 // Imports fresh copies of the modules and the two rulebooks and builds a room on ctx.state, and the worker. Returns
 // the parts to put into ctx; if anything fails it throws, leaving ctx as it was (at most an
 // unused empty session added).
 export async function load(ctx, v) {
+  if (!ctx.agentSpecs || !ctx.workerSpec) {
+    const saved = readDefaults();
+    ctx.agentSpecs ??= saved ? saved.agents.map(specFor).join(',') : 'claude,codex';
+    ctx.workerSpec ??= saved ? specFor(saved.worker) : 'claude:Worker';
+  }
   const instructions = readFileSync(new URL('../README-for-brainstorming-agents.md', import.meta.url), 'utf8');
   const workerInstructions = readFileSync(new URL('../README-for-worker-agents.md', import.meta.url), 'utf8');
   const { createAgent, claudeTitle } = await import(`./agents.mjs${v}`);
@@ -46,15 +109,15 @@ export async function load(ctx, v) {
   const docs = await import(`./docs.mjs${v}`);
   const usage = await import(`./usage.mjs${v}`);
   const agents = ctx.agentSpecs.split(',').map((spec) => {
-    const [provider, name = provider[0].toUpperCase() + provider.slice(1)] = spec.trim().split(':');
+    const { provider, name, model } = parseSpec(spec);
     if (!ctx.sessions.has(name)) ctx.sessions.set(name, {});
-    return createAgent(provider, { name, cwd: ctx.cwd, instructions, session: ctx.sessions.get(name) });
+    return createAgent(provider, { name, model, cwd: ctx.cwd, instructions, session: ctx.sessions.get(name) });
   });
   // The worker's session is kept under its own key, so it never mixes with a room agent's.
-  const [wProvider, wName = 'Worker'] = (ctx.workerSpec ?? 'claude:Worker').trim().split(':');
+  const { provider: wProvider, name: wName, model: wModel } = parseSpec(ctx.workerSpec, true);
   if (agents.some((a) => a.name === wName)) throw new Error(`The worker's name "${wName}" is taken by a room agent`);
   if (!ctx.sessions.has(`worker:${wName}`)) ctx.sessions.set(`worker:${wName}`, {});
-  const worker = createAgent(wProvider, { name: wName, cwd: ctx.cwd, instructions: workerInstructions, shell: true,
+  const worker = createAgent(wProvider, { name: wName, model: wModel, cwd: ctx.cwd, instructions: workerInstructions, shell: true,
     timeoutMs: WORKER_TIMEOUT_MS, session: ctx.sessions.get(`worker:${wName}`) });
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
   // ctx so they survive a reload.
@@ -88,6 +151,8 @@ function wire(ctx) {
   // The screen's checkbox: applied at once, not queued behind a round, so it can stop the next summary.
   ctx.screen.setAuto = (on) => setAuto(ctx, on);
   ctx.screen.newRoom = () => newRoom(ctx);
+  ctx.screen.getSettings = () => ({ settings: currentSettings(ctx), defaults: readDefaults(), models: modelChoices(), started: !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length || !!ctx.screen.worker.length });
+  ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
 }
 
 // The screen's header: the full root path, the active discussion (active: its folder, under the
@@ -95,7 +160,7 @@ function wire(ctx) {
 function header(ctx) {
   const d = ctx.discussion;
   return { folder: ctx.cwd, agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name,
-    discussion: d ? d.title : `New discussion — ${when(ctx.openedAt ?? new Date())}`,
+    discussion: d ? d.title : 'No discussion started',
     active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath };
 }
 function showHeader(ctx) {
@@ -199,7 +264,7 @@ function continueDiscussion(ctx, name) {
   note(ctx, `Continuing the discussion ${name}: your next message goes to the agents, who start from its handoff.`);
 }
 
-// ── New room in folder… (proposal/document-folders.md) ─────────────────────────────────────────
+// ── New room in folder… (proposal/archive/document-folders.md) ─────────────────────────────────────────
 // The Mac's own folder chooser, run by the server because it needs the full path (a browser's
 // picker gives only the name). Resolves to the path, or null if the User cancelled.
 function chooseFolder() {
@@ -226,8 +291,9 @@ async function newRoom(ctx) {
   const port = await freePort();
   const out = join(tmpdir(), `agent-room-${port}-${Date.now()}.log`);
   const fd = openSync(out, 'a');
-  const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', folder, '--agents', ctx.agentSpecs,
-    '--worker', ctx.workerSpec ?? 'claude:Worker', '--port', String(port)];
+  const defaults = readDefaults();
+  const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', folder, '--agents', defaults ? defaults.agents.map(specFor).join(',') : ctx.agentSpecs,
+    '--worker', defaults ? specFor(defaults.worker) : ctx.workerSpec ?? 'claude:Worker', '--port', String(port)];
   const child = spawn(process.execPath, args, { cwd: folder, detached: true, stdio: ['ignore', fd, fd] });
   closeSync(fd);
   child.unref();
@@ -321,7 +387,7 @@ export async function handleLine(line, ctx) {
   if (line === '/docs') return showDocs(ctx);
   const cont = /^\/continue(?:\s+(.*))?$/.exec(line);
   if (cont) return continueDiscussion(ctx, (cont[1] ?? '').trim());
-  if (line === '/summary') return runSummary(ctx);
+  if (line === '/summary') { ctx.agentsStarted = true; return runSummary(ctx); }
   const auto = /^\/autosummary(?:\s+(on|off))?$/.exec(line);
   if (auto) return setAuto(ctx, auto[1] ? auto[1] === 'on' : !autoOn(ctx));
   if (line === '/usage') {
@@ -332,6 +398,7 @@ export async function handleLine(line, ctx) {
   // then refuses it, and nothing is created).
   const to = /^@(\w[\w-]*)/.exec(line)?.[1].toLowerCase();
   const known = !to || ctx.room.agents.some((a) => a.name.toLowerCase() === to);
+  if (known) ctx.agentsStarted = true;
   if (known && !ctx.logPath && !(await openDiscussion(ctx, line))) return;
   return runRound(line, ctx);
 }
@@ -464,6 +531,7 @@ async function runRound(line, ctx) {
 // so it carries over a reload. The worker is sent only the instruction itself; its CLI session holds
 // the earlier ones.
 function queueWork(ctx, text) {
+  ctx.agentsStarted = true;
   // A bug here must not jam the queue: report it, and the next instruction still runs.
   ctx.workQueue = (ctx.workQueue ?? Promise.resolve()).then(() => runWork(ctx, text))
     .catch((err) => note(ctx, `✗ ${err.stack}\n`, true));

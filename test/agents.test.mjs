@@ -153,3 +153,15 @@ test('claudeTitle: one claude call with no tools and no saved session; the first
   await assert.rejects(claudeTitle('x', { runner: async () => JSON.stringify({ result: '  ', is_error: false }) }), /empty title/);
   await assert.rejects(claudeTitle('x', { runner: async () => JSON.stringify({ result: 'no', is_error: true }) }), /claude: no/);
 });
+
+test('selected models are passed to the provider on initial and resumed turns', async () => {
+  for (const [create, model, flag, outputs] of [
+    [createClaudeAgent, 'opus', '--model', ['{"result":"hi"}', '{"result":"again"}']],
+    [createCodexAgent, 'gpt-6.1-sol', '-m', ['{"type":"thread.started","thread_id":"t"}', '']],
+  ]) {
+    const { calls, runner } = fakeRunner(outputs);
+    const agent = create({ name: 'A', model, runner });
+    await agent.turn('first'); await agent.turn('second');
+    for (const call of calls) assert.equal(call.args[call.args.indexOf(flag) + 1], model);
+  }
+});

@@ -15,8 +15,9 @@ the Worker tab, and you carry them out.
   at and been asked to change.
 - Follow the project's own instructions on testing and committing. Don't commit or push unless
   the User asks.
-- The User may point you at documents in `proposal/` (the discussion's output); read them
-  before acting on them.
+- The User may point you at notes in `discussions/<name>/`, or older documents indexed in
+  `proposal/README.md`; read the relevant documents before acting on them. Archived work orders
+  and deferred research are historical context, not fresh implementation instructions.
 - **Reply briefly and in plain language:** what you changed (files), what you ran and its real
   result, and what you did not check. You get a turn only when the User sends an instruction,
   so finish the job in one turn, or say clearly where you stopped and why.

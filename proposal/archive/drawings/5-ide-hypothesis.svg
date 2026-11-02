@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <metadata>Historical design archived 2026-11-02. Status labels describe the original proposal; see ../../README.md and ../../discussions.md for current status.</metadata>
+  <rect width="1000" height="560" fill="#ffffff"/>
+  <text x="500" y="28" text-anchor="middle" font-size="18" font-weight="bold">Discussion IDE, simplified (User's direction, 2026-10-20; nothing built)</text>
+
+  <!-- Left: chat -->
+  <rect x="20" y="50" width="380" height="490" rx="8" fill="#f4f4f6" stroke="#888"/>
+  <text x="210" y="76" text-anchor="middle" font-weight="bold">Chat: the User and the two agents</text>
+  <rect x="35" y="95" width="330" height="40" rx="6" fill="#fff" stroke="#bbb"/>
+  <text x="47" y="120">User: …</text>
+  <rect x="55" y="147" width="330" height="40" rx="6" fill="#e8f0fe" stroke="#9ab"/>
+  <text x="67" y="172">Claude: …</text>
+  <rect x="55" y="199" width="330" height="40" rx="6" fill="#eaf7ea" stroke="#9b9"/>
+  <text x="67" y="224">Codex: …</text>
+  <rect x="35" y="480" width="350" height="44" rx="6" fill="#fff" stroke="#888"/>
+  <text x="47" y="507" fill="#888">Type a message…</text>
+
+  <!-- Right: the document -->
+  <rect x="420" y="50" width="560" height="490" rx="8" fill="#fffdf5" stroke="#888"/>
+  <text x="700" y="76" text-anchor="middle" font-weight="bold">The document under discussion</text>
+  <text x="700" y="96" text-anchor="middle" font-size="12" fill="#555">a Markdown page or an SVG drawing</text>
+  <rect x="445" y="115" width="510" height="400" rx="6" fill="#fff" stroke="#aaa"/>
+  <rect x="465" y="135" width="260" height="14" rx="3" fill="#bbb"/>
+  <rect x="465" y="165" width="460" height="9" rx="3" fill="#ddd"/>
+  <rect x="465" y="182" width="430" height="9" rx="3" fill="#ddd"/>
+  <rect x="465" y="199" width="450" height="9" rx="3" fill="#ddd"/>
+  <rect x="465" y="230" width="460" height="170" rx="4" fill="#f7f9fc" stroke="#ccc"/>
+  <text x="695" y="320" text-anchor="middle" fill="#999">drawing</text>
+  <rect x="465" y="420" width="440" height="9" rx="3" fill="#ddd"/>
+  <rect x="465" y="437" width="400" height="9" rx="3" fill="#ddd"/>
+</svg>

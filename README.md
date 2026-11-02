@@ -11,7 +11,7 @@ you want one, a Markdown document or SVG drawing from the room's discussions on 
 `npm start` opens it and you use the room from there: you type in its message box, the agents
 discuss freely, and at any time Documents (or `/docs`) lets you pick a file. The terminal you
 started it from only shows a log. `npm run terminal` keeps the room in the terminal instead. See
-`proposal/discussion-ide.md`.
+[the proposal index](proposal/README.md) for historical designs and deferred work.
 
 ## Today
 
@@ -26,7 +26,7 @@ Each agent sees everything said since its last turn. The room is for brainstormi
 is notes and drawings in the active discussion's folder, and agents write elsewhere only when
 you ask them to.
 
-**Discussions** (`proposal/discussions.md`, `proposal/document-folders.md`). The folder a room
+**Discussions** (remaining decisions: [proposal/discussions.md](proposal/discussions.md)). The folder a room
 runs in (`--cwd`, default the current one) is its **root**, shown in full in the header. Opening a
 room writes nothing there. Your first message starts a **new discussion**: Claude, with no tools,
 suggests a short title, then agent-room creates `discussions/<date>-<title>/` (`-2`, `-3`… if
@@ -51,6 +51,26 @@ node src/cli.mjs --log-dir ~/room-logs        # where Transcripts lists older ro
 node src/cli.mjs --port 6000                  # the screen's port (default 5566: http://127.0.0.1:5566/__room)
 npm test
 ```
+
+## Choose agents and models
+
+Open **Discussion agents · provider & model** in the Discussion tab, or **Worker · provider & model**
+in the Worker tab. Each tab saves its own choices automatically. Each agent has a provider dropdown
+(Claude or Codex) and a model dropdown. Claude offers Opus, Sonnet and Haiku; Codex uses its
+local model catalog when available. Both also offer **CLI default** and **Custom…** for a model ID.
+Names can be edited so two agents using the same provider can still be addressed separately.
+
+Changes automatically update `~/.config/agent-room/defaults.json`, shared across project folders and
+used on subsequent launches (including the Dock launcher and New room in folder…). Before any
+agent starts, changes also apply to the current room. Once a discussion or worker
+has started, changes affect future rooms only; existing sessions keep their settings.
+
+Explicit `--agents` or `--worker` arguments override that part of the saved defaults for that
+launch. Their format is `provider[:name[:model]]`, for example
+`--agents claude:Ada:opus,codex:Linus:gpt-6.1-sol --worker codex:Worker:gpt-6.1-terra`.
+Model access depends on your provider account. Selecting CLI default leaves the model argument
+unset, preserving the CLI's own choice. The separate Claude call that suggests discussion titles
+still uses its CLI default.
 
 ## Start from the macOS Dock
 

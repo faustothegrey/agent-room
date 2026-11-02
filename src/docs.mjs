@@ -1,7 +1,7 @@
 // Proposal viewer: handle() serves proposal/ over local HTTP, rendering Markdown with marked so
 // images (and plain links to images) show inline; pick() is the terminal list behind /docs.
-// It also serves the discussion screen (/__room, first cycle of proposal/discussion-ide.md): the
-// header with the room and its participants; on the left two tabs, the discussion and the worker
+// It also serves the discussion screen (/__room, historical design: proposal/archive/discussion-ide.md): the
+// header with the root and active discussion; on the left two tabs, the discussion and the worker
 // (one agent outside the round that carries out the User's instructions), each with a message box
 // in UI mode; and on the right, when the User picks one, a document watched live (Documents lists the
 // room's discussions, and its older proposal/ folder if any). In terminal
@@ -155,19 +155,34 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 :root { color-scheme: light dark; --line: #8884; --dim: #888; }
 * { box-sizing: border-box; }
 body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: var(--left, 38%) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
-#header { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .8rem; align-items: baseline; padding: .45rem .8rem; border-bottom: 1px solid var(--line); font-size: .9rem; }
-#header .who { color: var(--dim); }
-#folder { font-family: ui-monospace, monospace; font-size: .85rem; background: #eab30833; padding: 0 .35rem; border-radius: 4px; }
-#disc { font-weight: 600; }
+#header { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(180px, 1fr) auto auto; gap: .65rem 1rem; align-items: center; padding: .5rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
+#header > b { font-size: .85rem; letter-spacing: -.02em; }
+#room-location { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .15rem; }
+#newroom { font-size: .75rem; white-space: nowrap; }
+#folder { font-family: ui-monospace, monospace; font-size: .75rem; overflow-wrap: anywhere; line-height: 1.35; }
+#disc { font-size: .75rem; color: var(--dim); line-height: 1.35; }
+#disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
 #files h3 { font-size: .9rem; margin: .2rem 0 .6rem; } #files .hint { display: block; margin: 0 0 .8rem; }
-#gauges { margin-left: auto; display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; align-items: center; font-size: .8rem; color: var(--dim); }
-.gauge { display: inline-flex; gap: .3rem; align-items: center; } .quota { display: inline-flex; gap: .8rem; align-items: center; }
-.gauge .bar { width: 46px; height: 6px; border-radius: 3px; background: #8883; overflow: hidden; }
+#gauges { display: flex; gap: .8rem; align-items: center; font-size: .65rem; color: var(--dim); }
+.gauge { display: grid; grid-template-columns: 2rem 32px 2rem auto; gap: .3rem; align-items: center; line-height: 1.5; }
+.quota { display: grid; grid-template-columns: auto 1fr; gap: .05rem .55rem; align-items: center; border-left: 1px solid var(--line); padding-left: .8rem; }
+.gauge .bar { width: 32px; height: 6px; border-radius: 3px; background: #8883; overflow: hidden; }
 .gauge .bar i { display: block; height: 100%; background: #10b981; }
 .gauge.warn { color: #eab308; } .gauge.warn .bar i { background: #eab308; }
 .gauge.high { color: #ef4444; font-weight: 600; } .gauge.high .bar i { background: #ef4444; }
-.quota b { color: CanvasText; font-weight: 600; }
+.quota b { color: CanvasText; font-weight: 600; grid-column: 1; grid-row: 1 / span 2; text-transform: capitalize; font-size: .7rem; }
+.quota .gauge { grid-column: 2; }
 .gauge .resets { opacity: .8; white-space: nowrap; }
+@media (max-width: 1150px) {
+  #header { grid-template-columns: auto minmax(0, 1fr) auto; gap: .4rem .8rem; }
+  #gauges { grid-column: 1 / -1; grid-row: 2; justify-content: flex-end; flex-wrap: wrap; }
+}
+@media (max-width: 600px) {
+  #header { grid-template-columns: 1fr auto; }
+  #room-location { grid-column: 1 / -1; grid-row: 2; }
+  #gauges { grid-row: 3; justify-content: flex-start; }
+  .quota { padding-left: .5rem; }
+}
 .tools label { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); }
 #left { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 #tabs { display: flex; border-bottom: 1px solid var(--line); }
@@ -201,11 +216,41 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #files { padding: 1rem; overflow-y: auto; height: 100%; }
 #files button { display: block; width: 100%; text-align: left; margin: 0 0 .3rem; }
 #files .first { display: block; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#talk, #tab-talk { --accent: #3b82f6; --tint: #3b82f612; }
+#work, #tab-work { --accent: #a855f7; --tint: #a855f712; }
+.tab.on { border-bottom-color: var(--accent); background: var(--tint); }
+.tab.news::after { color: var(--accent); }
+#header, #bar { background: #88808; }
+.agent-settings { border-bottom: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--tint); padding: .5rem .8rem; max-height: 45%; overflow-y: auto; flex-shrink: 0; }
+.agent-settings summary { cursor: pointer; font-weight: 600; font-size: .85rem; }
+.settings-hint, .settings-status { font-size: .8rem; margin: .5rem 0; }
+.settings-hint { color: var(--dim); }
+.agent-row { display: flex; flex-wrap: wrap; gap: .5rem; padding: .6rem; margin: .6rem 0; border: 1px solid var(--line); border-left: 3px solid var(--provider); border-radius: 6px; background: Canvas; }
+.agent-row[data-provider="claude"] { --provider: #d97706; }
+.agent-row[data-provider="codex"] { --provider: #10b981; }
+.agent-row label { display: flex; flex-direction: column; font-size: .8rem; flex: 1; min-width: 100px; }
+.agent-row label[hidden] { display: none; }
+.agent-row input, .agent-row select { font: inherit; padding: .3rem; width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 4px; }
+#work .box:focus, #talk .box:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.msg { border-left: 3px solid #14b8a6; }
+.msg.user { border-left-color: #3b82f6; }
+#wchat .msg:not(.user):not(.error) { border-left-color: #a855f7; background: #a855f712; }
+.msg.error { border-left-color: #ef4444; }
+.tools { flex-wrap: wrap; }
 </style></head><body>
-<header id="header"><b>agent-room</b><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span><span class="who" id="who"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button><span id="gauges"></span></header>
+<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
   <div class="view" id="talk">
+    <details class="agent-settings" id="talk-settings">
+      <summary>Discussion agents · provider & model</summary>
+      <form id="talk-settings-form">
+        <p class="settings-hint" id="talk-settings-hint"></p>
+        <div id="talk-agent-rows"></div>
+        <p class="settings-hint">CLI default uses the provider’s settings. Custom model IDs require account access.</p>
+        <p class="settings-status" id="talk-settings-status" role="status"></p>
+      </form>
+    </details>
     <div class="chat" id="chat"></div>
     <div class="composer" id="composer">
       <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit"></textarea>
@@ -215,6 +260,15 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     </div>
   </div>
   <div class="view" id="work" hidden>
+    <details class="agent-settings" id="work-settings">
+      <summary>Worker · provider & model</summary>
+      <form id="work-settings-form">
+        <p class="settings-hint" id="work-settings-hint"></p>
+        <div id="work-agent-rows"></div>
+        <p class="settings-hint">CLI default uses the provider’s settings. Custom model IDs require account access.</p>
+        <p class="settings-status" id="work-settings-status" role="status"></p>
+      </form>
+    </details>
     <div class="chat" id="wchat"></div>
     <div class="composer" id="wcomposer">
       <textarea class="box" id="wbox" placeholder="Instructions for the worker (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands."></textarea>
@@ -382,12 +436,21 @@ async function openFiles(group) {
     list.append(b);
   };
   if (typeof group === 'string') { // one discussion (openFiles is also a click handler: then group is the event)
-    add('← All discussions', () => openFiles());
+    const collection = ['proposal/archive', 'proposal/deferred'].includes(group);
+    add(collection ? '← proposal/' : '← All discussions', () => openFiles(collection ? 'proposal' : undefined));
     const h = document.createElement('h3'); h.textContent = group + (group === room?.active ? '  (active)' : ''); list.append(h);
     if (group.startsWith('discussions/') && room && !room.started && group !== room.active && !$('composer').hidden) {
       add('Continue this discussion', () => send('/continue ' + group.split('/')[1]), 'Make it the active discussion; the agents start from its handoff');
     }
-    for (const f of files.filter((f) => groupOf(f) === group)) {
+    const collections = ['proposal/archive', 'proposal/deferred'];
+    if (group === 'proposal') {
+      for (const folder of collections) {
+        if (files.some((f) => f.startsWith(folder + '/')))
+          add(folder.slice(group.length + 1) + '/', () => openFiles(folder), 'Open this folder');
+      }
+    }
+    for (const f of files.filter((f) => collection ? f.startsWith(group + '/') : groupOf(f) === group)) {
+      if (group === 'proposal' && collections.some((folder) => f.startsWith(folder + '/'))) continue;
       add(f.slice(group.length + 1) + (f === doc ? '  (shown)' : ''), () => post('/__show', { file: f }));
     }
     return;
@@ -401,13 +464,86 @@ async function openFiles(group) {
     add(g === 'proposal' ? 'proposal/ (older work, before discussions)' : g.split('/')[1] + (g === room?.active ? '  (active)' : ''), () => openFiles(g));
   }
 }
-// The header: the room's full root path, its active discussion, its agents and worker.
+// The header: the room's full root path and its active discussion, if one has been selected.
 let room = null;
 function setRoom(r) {
   room = r;
   $('folder').textContent = r.folder;
   $('disc').textContent = r.discussion || '';
-  $('who').textContent = r.agents.join(', ') + ' · worker: ' + r.worker;
+  $('disc').dataset.active = r.active ? 'true' : 'false';
+}
+// Settings stay outside the conversation; saving never changes an active CLI session.
+const settingsRows = {};
+let settingsSave = Promise.resolve();
+function agentRow(parent, a, models, title) {
+  const row = document.createElement('div'); row.className = 'agent-row';
+  const field = (text, el) => { const label = document.createElement('label'); label.textContent = title + ' ' + text; label.append(el); row.append(label); return el; };
+  const name = field('name', document.createElement('input')); name.value = a.name; name.required = true;
+  const provider = field('provider', document.createElement('select'));
+  for (const p of ['claude', 'codex']) provider.add(new Option(p === 'claude' ? 'Claude' : 'Codex', p));
+  provider.value = a.provider;
+  const model = field('model', document.createElement('select'));
+  const custom = field('custom model ID', document.createElement('input')); custom.placeholder = 'Model ID';
+  function choices(value) {
+    row.dataset.provider = provider.value;
+    model.replaceChildren(new Option('CLI default', ''));
+    for (const m of models[provider.value]) model.add(new Option(m.label, m.id));
+    model.add(new Option('Custom…', '__custom'));
+    model.value = [...model.options].some((o) => o.value === value) ? value : '__custom';
+    custom.value = model.value === '__custom' ? value : ''; custom.parentElement.hidden = model.value !== '__custom';
+  }
+  choices(a.model);
+  provider.onchange = () => choices('');
+  model.onchange = () => { custom.parentElement.hidden = model.value !== '__custom'; };
+  parent.append(row);
+  return () => ({ name: name.value.trim(), provider: provider.value, model: model.value === '__custom' ? custom.value.trim() : model.value });
+}
+function selectedSettings(data) {
+  return data.started && data.defaults ? data.defaults : data.settings;
+}
+for (const scope of ['talk', 'work']) {
+  const panel = $(scope + '-settings'), form = $(scope + '-settings-form');
+  const hint = $(scope + '-settings-hint'), result = $(scope + '-settings-status');
+  panel.ontoggle = async () => {
+    if (!panel.open) return;
+    result.textContent = '';
+    $(scope + '-agent-rows').replaceChildren();
+    delete settingsRows[scope];
+    try {
+      await settingsSave;
+      const res = await fetch('/__settings');
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json(), selected = selectedSettings(data);
+      const parent = $(scope + '-agent-rows'); parent.replaceChildren();
+      const agents = scope === 'talk' ? selected.agents : [selected.worker];
+      settingsRows[scope] = agents.map((a, i) => agentRow(parent, a, data.models, scope === 'talk' ? 'Agent ' + (i + 1) : 'Worker'));
+      hint.textContent = data.started ? 'Changes save automatically for future rooms. Active sessions keep their settings.' : 'Changes save automatically and apply to this room before any agent starts.';
+    } catch (err) { result.textContent = 'Could not load settings: ' + err.message; }
+  };
+  function saveChanges() {
+    if (!settingsRows[scope]) return;
+    // Choosing Custom opens its text field; persist once a model ID has been entered.
+    if ([...form.querySelectorAll('.agent-row')].some((row) =>
+      row.querySelectorAll('select')[1].value === '__custom' && !row.querySelectorAll('input')[1].value.trim())) {
+      result.textContent = 'Enter a custom model ID to save this choice.';
+      return;
+    }
+    const choices = settingsRows[scope].map((get) => get());
+    result.textContent = 'Saving…';
+    // Serialize saves from both tabs so a quick second change cannot overwrite a newer choice.
+    settingsSave = settingsSave.then(async () => {
+      const latest = await fetch('/__settings');
+      if (!latest.ok) throw new Error(await latest.text());
+      const settings = selectedSettings(await latest.json());
+      if (scope === 'talk') settings.agents = choices; else settings.worker = choices[0];
+      const res = await post('/__settings', settings);
+      if (!res.ok) throw new Error(await res.text());
+      const saved = await res.json();
+      result.textContent = saved.applied ? 'Saved.' : 'Saved for future rooms. This room keeps its settings.';
+    }).catch((err) => { result.textContent = 'Could not save: ' + err.message; });
+  }
+  form.onchange = saveChanges;
+  form.onsubmit = (e) => { e.preventDefault(); saveChanges(); };
 }
 // New room in folder…: the room's server shows the Mac's folder chooser and starts the new room.
 $('newroom').onclick = async () => {
@@ -545,6 +681,15 @@ function handleScreen(req, res, url, dir, screen) {
     let files = [];
     try { files = docFiles(dir, screen); } catch {} // no proposal/ yet
     send(200, 'application/json', JSON.stringify(files));
+    return true;
+  }
+  if (url.pathname === '/__settings') {
+    if (!screen.getSettings || !screen.saveSettings) { send(409, 'text/plain', 'Settings are unavailable in this room.'); return true; }
+    if (req.method === 'GET') { send(200, 'application/json', JSON.stringify(screen.getSettings())); return true; }
+    if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain', 'Refused: only the room page can save settings.'); return true; }
+    readJson(req).then((body) => screen.saveSettings(body)).then(
+      (result) => send(200, 'application/json', JSON.stringify(result)),
+      (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
   if (['/__say', '/__show', '/__work', '/__auto', '/__newroom'].includes(url.pathname)) {

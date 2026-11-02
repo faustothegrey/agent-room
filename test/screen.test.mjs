@@ -54,3 +54,48 @@ test('UI mode: the screen is the room\'s input, its replies come back as events,
     cli.kill(); // no-op once it has exited; stops a stalled run from hanging the suite
   }
 });
+
+test('saved provider/model choices survive CLI restarts and explicit CLI flags override them', { timeout: 15000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), 'agent-defaults-test-'));
+  const settings = { agents: [
+    { provider: 'codex', name: 'One', model: 'gpt-6.1-sol' },
+    { provider: 'claude', name: 'Two', model: 'opus' },
+  ], worker: { provider: 'codex', name: 'Worker', model: 'gpt-6.1-terra' } };
+  async function room(extra, check) {
+    const cli = spawn(process.execPath, [new URL('../src/cli.mjs', import.meta.url).pathname, '--cwd', home, '--port', '0', ...extra],
+      { env: { ...process.env, HOME: home } });
+    const exited = new Promise((resolve) => cli.once('exit', resolve));
+    try {
+      let out = '', errors = '';
+      cli.stderr.on('data', (d) => { errors += d; });
+      const base = await new Promise((resolve, reject) => {
+        cli.once('error', reject);
+        cli.once('exit', (code) => reject(new Error(`CLI exited ${code}: ${errors}`)));
+        cli.stdout.on('data', (d) => {
+          out += d;
+          const match = out.match(/Discussion screen: (http:\/\/127\.0\.0\.1:\d+\/)__room/);
+          if (match) resolve(match[1]);
+        });
+      });
+      const post = (path, value) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: base.slice(0, -1) }, body: JSON.stringify(value) });
+      await check(base, post);
+      await post('__say', { text: '/quit' });
+      assert.equal(await exited, 0);
+    } finally { cli.kill(); }
+  }
+  await room([], async (base, post) => {
+    const saved = await post('__settings', settings);
+    assert.equal(saved.status, 200);
+    assert.equal((await saved.json()).applied, true);
+    assert.deepEqual((await (await fetch(base + '__settings')).json()).settings, settings);
+  });
+  await room([], async (base) => {
+    assert.deepEqual((await (await fetch(base + '__settings')).json()).settings, settings);
+  });
+  await room(['--agents', 'claude:Explicit:sonnet'], async (base) => {
+    const data = await (await fetch(base + '__settings')).json();
+    assert.deepEqual(data.settings.agents, [{ provider: 'claude', name: 'Explicit', model: 'sonnet' }]);
+    assert.deepEqual(data.settings.worker, settings.worker);
+    assert.deepEqual(data.defaults, settings); // a CLI override never rewrites saved defaults
+  });
+});

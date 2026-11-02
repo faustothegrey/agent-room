@@ -10,8 +10,8 @@ import { parseArgs } from 'node:util';
 
 const { values } = parseArgs({
   options: {
-    agents: { type: 'string', default: 'claude,codex' },
-    worker: { type: 'string', default: 'claude:Worker' },
+    agents: { type: 'string' },
+    worker: { type: 'string' },
     cwd: { type: 'string', default: process.cwd() },
     'log-dir': { type: 'string', default: join(process.cwd(), 'transcripts') },
     port: { type: 'string', default: '5566' },

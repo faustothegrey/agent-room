@@ -165,3 +165,29 @@ test('/continue: only before the first message; no title asked, the transcript g
   await handleLine('/continue 2026-11-02-other', ctx); // too late: the session has started
   assert.equal(ctx.discussion.name, '2026-11-01-old');
 });
+
+test('agent settings persist, apply before startup, and leave active sessions unchanged', async () => {
+  const { saveSettings, readDefaults } = await import('../src/ui.mjs');
+  const { readFileSync } = await import('node:fs');
+  const file = `${await tmp('settings-test-')}/config/defaults.json`;
+  const ctx = { ...freshCtx(), workerSpec: 'claude:Worker' };
+  Object.assign(ctx, await load(ctx, ''));
+  const settings = { agents: [
+    { provider: 'codex', name: 'Ada', model: 'gpt-6.1-sol' },
+    { provider: 'claude', name: 'Linus', model: 'opus' },
+  ], worker: { provider: 'codex', name: 'Worker', model: 'gpt-6.1-terra' } };
+  assert.equal((await saveSettings(ctx, settings, file)).applied, true);
+  assert.deepEqual(readDefaults(file), settings);
+  assert.equal(ctx.agentSpecs, 'codex:Ada:gpt-6.1-sol,claude:Linus:opus');
+  assert.equal(ctx.worker.provider, 'codex');
+  assert.equal(ctx.room.transcript, ctx.state.transcript);
+  const active = { room: ctx.room, worker: ctx.worker, sessions: ctx.sessions, state: ctx.state };
+  ctx.agentsStarted = true; // includes a queued worker or title lookup before a first reply
+  const future = { ...settings, worker: { provider: 'claude', name: 'Bob', model: 'haiku' } };
+  assert.equal((await saveSettings(ctx, future, file)).applied, false);
+  for (const [key, value] of Object.entries(active)) assert.equal(ctx[key], value);
+  assert.deepEqual(readDefaults(file), future);
+  const before = readFileSync(file, 'utf8');
+  await assert.rejects(saveSettings(ctx, { ...settings, worker: settings.agents[0] }, file), /different name/);
+  assert.equal(readFileSync(file, 'utf8'), before);
+});

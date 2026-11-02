@@ -86,8 +86,9 @@ Keep three kinds of statement apart:
   `/reload`; discussions in `discussions/`; "New room in folder…" starts another room).
 - **The first implementation cycle** (the User's direction, 2026-10-20): the chat on the left,
   the chosen Markdown document or SVG drawing on the right, nothing else. See
-  `proposal/discussion-ide.md` in agent-room's own folder (its older proposals, from before
-  discussions, are in `proposal/` there).
+  [the proposal index](proposal/README.md) in agent-room's own folder for archived designs,
+  deferred research, and remaining discussion decisions. The first cycle is built; use the
+  root README for current behavior.
 - **Possible later** (not planned): for example live preview, pointing at animations,
   DiagramTalk. Mention these only as "possible later", if at all.
 

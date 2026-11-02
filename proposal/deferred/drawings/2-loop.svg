@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <rect width="960" height="520" fill="#fafaf7"/>
+  <text x="30" y="38" font-size="22" font-weight="bold" fill="#222">2 · The loop: what you do, and what travels behind it</text>
+  <defs>
+    <marker id="a" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#555"/></marker>
+  </defs>
+
+  <!-- four steps in a cycle -->
+  <g>
+    <rect x="80" y="80" width="300" height="110" rx="14" fill="#e6f4ec" stroke="#2a9d5c" stroke-width="2"/>
+    <text x="100" y="112" font-size="18" font-weight="bold" fill="#222">1  Point</text>
+    <text x="100" y="138" fill="#333">You click a thing in the preview.</text>
+    <text x="100" y="164" font-size="12" fill="#2a9d5c">travels: a short reference with your message</text>
+    <text x="100" y="180" font-size="12" fill="#2a9d5c">("particle B, t=2.4 s, Scene.js:42")</text>
+  </g>
+  <g>
+    <rect x="580" y="80" width="300" height="110" rx="14" fill="#f1eefa" stroke="#8a74c8" stroke-width="2"/>
+    <text x="600" y="112" font-size="18" font-weight="bold" fill="#222">2  Discuss</text>
+    <text x="600" y="138" fill="#333">The room talks it over. No edits yet.</text>
+    <text x="600" y="164" font-size="12" fill="#6a54a8">travels: only what an agent asks for:</text>
+    <text x="600" y="180" font-size="12" fill="#6a54a8">some code, some values, rarely an image</text>
+  </g>
+  <g>
+    <rect x="580" y="320" width="300" height="110" rx="14" fill="#2c3440"/>
+    <text x="600" y="352" font-size="18" font-weight="bold" fill="#fff">3  Hand off</text>
+    <text x="600" y="378" fill="#dfe5ee">You say "do it". The worker edits.</text>
+    <text x="600" y="404" font-size="12" fill="#a9c4ff">travels: the relevant discussion + the</text>
+    <text x="600" y="420" font-size="12" fill="#a9c4ff">reference + which preview version you saw</text>
+  </g>
+  <g>
+    <rect x="80" y="320" width="300" height="110" rx="14" fill="#fdf1e4" stroke="#d08a3c" stroke-width="2"/>
+    <text x="100" y="352" font-size="18" font-weight="bold" fill="#222">4  Watch</text>
+    <text x="100" y="378" fill="#333">The preview reloads with the change.</text>
+    <text x="100" y="404" font-size="12" fill="#a0601c">travels: worker's report: what changed,</text>
+    <text x="100" y="420" font-size="12" fill="#a0601c">and whether "particle B" is still B</text>
+  </g>
+
+  <path d="M385 135 L572 135" stroke="#555" stroke-width="2.5" fill="none" marker-end="url(#a)"/>
+  <path d="M730 195 L730 312" stroke="#555" stroke-width="2.5" fill="none" marker-end="url(#a)"/>
+  <path d="M575 375 L388 375" stroke="#555" stroke-width="2.5" fill="none" marker-end="url(#a)"/>
+  <path d="M230 315 L230 198" stroke="#555" stroke-width="2.5" fill="none" marker-end="url(#a)"/>
+
+  <text x="480" y="250" text-anchor="middle" font-size="15" fill="#555">You can loop 1 → 2 → 1 as long as you like</text>
+  <text x="480" y="270" text-anchor="middle" font-size="15" fill="#555">before handing anything to the worker.</text>
+
+  <text x="30" y="490" font-size="13" fill="#777">The harness is the translator: it turns your gesture into a reference, and fetches code, values or images only on request.</text>
+</svg>

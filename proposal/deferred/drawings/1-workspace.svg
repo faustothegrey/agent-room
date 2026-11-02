@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <rect width="960" height="560" fill="#fafaf7"/>
+  <text x="30" y="38" font-size="22" font-weight="bold" fill="#222">1 · The workspace: agent-room with a live preview</text>
+
+  <!-- Preview window -->
+  <rect x="30" y="60" width="500" height="400" rx="10" fill="#fff" stroke="#888"/>
+  <rect x="30" y="60" width="500" height="30" rx="10" fill="#e9e9e4"/>
+  <circle cx="50" cy="75" r="5" fill="#e66"/><circle cx="66" cy="75" r="5" fill="#eb4"/><circle cx="82" cy="75" r="5" fill="#6b6"/>
+  <text x="110" y="80" fill="#555">Live preview — the app being built</text>
+
+  <!-- controls (DOM) -->
+  <text x="55" y="120" fill="#333">Launch angle</text>
+  <line x1="150" y1="116" x2="330" y2="116" stroke="#aaa" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="250" cy="116" r="8" fill="#4a7bd0"/>
+  <text x="345" y="120" fill="#333">45°</text>
+
+  <!-- canvas -->
+  <rect x="55" y="140" width="450" height="295" fill="#f2f6ff" stroke="#b8c8e8"/>
+  <text x="65" y="158" font-size="12" fill="#7890b8">canvas (animation)</text>
+  <line x1="55" y1="410" x2="505" y2="410" stroke="#7a6" stroke-width="3"/>
+  <path d="M90 405 Q 270 140 470 405" fill="none" stroke="#9ab" stroke-dasharray="5 5"/>
+  <circle cx="200" cy="270" r="10" fill="#e08a3c"/>
+  <circle cx="330" cy="235" r="12" fill="#c04848"/>
+  <line x1="330" y1="235" x2="385" y2="220" stroke="#333" stroke-width="2"/>
+  <polygon points="385,220 375,215 377,226" fill="#333"/>
+  <!-- selection ring + pointer -->
+  <circle cx="330" cy="235" r="22" fill="none" stroke="#2a9d5c" stroke-width="3" stroke-dasharray="6 4"/>
+  <path d="M345 252 l0 26 l7 -7 l6 12 l5 -2 l-6 -12 l10 0 z" fill="#222" stroke="#fff" stroke-width="1"/>
+  <text x="365" y="300" font-size="13" fill="#2a9d5c" font-weight="bold">you point here</text>
+
+  <!-- Chat panel -->
+  <rect x="560" y="60" width="370" height="400" rx="10" fill="#fff" stroke="#888"/>
+  <rect x="560" y="60" width="370" height="30" rx="10" fill="#e9e9e4"/>
+  <text x="580" y="80" fill="#555">agent-room conversation</text>
+
+  <rect x="580" y="105" width="330" height="88" rx="8" fill="#e6f4ec" stroke="#2a9d5c"/>
+  <text x="592" y="125" font-weight="bold" fill="#222">You</text>
+  <text x="592" y="145" fill="#222">See this? It should bounce off the</text>
+  <text x="592" y="163" fill="#222">ground, not pass through it.</text>
+  <rect x="592" y="170" width="300" height="18" rx="9" fill="#2a9d5c"/>
+  <text x="602" y="183" font-size="12" fill="#fff">attached: particle B · t = 2.4 s · Scene.js:42</text>
+
+  <rect x="580" y="203" width="330" height="58" rx="8" fill="#f1eefa" stroke="#8a74c8"/>
+  <text x="592" y="223" font-weight="bold" fill="#222">Claude</text>
+  <text x="592" y="243" fill="#222">No collision check for B. Want bounce</text>
+  <text x="592" y="258" font-size="12" fill="#555">with energy loss, or perfectly elastic?</text>
+
+  <rect x="580" y="271" width="330" height="58" rx="8" fill="#fdf1e4" stroke="#d08a3c"/>
+  <text x="592" y="291" font-weight="bold" fill="#222">Codex</text>
+  <text x="592" y="311" fill="#222">Loss looks more real; a slider could</text>
+  <text x="592" y="326" font-size="12" fill="#555">let students explore it.</text>
+
+  <rect x="580" y="339" width="330" height="40" rx="8" fill="#e6f4ec" stroke="#2a9d5c"/>
+  <text x="592" y="364" fill="#222"><tspan font-weight="bold">You</tspan>  Yes, do that.</text>
+
+  <!-- Worker bar -->
+  <rect x="30" y="480" width="900" height="56" rx="10" fill="#2c3440"/>
+  <text x="50" y="504" font-weight="bold" fill="#fff">Worker agent</text>
+  <text x="50" y="524" fill="#cfd6e0">received: discussion + "particle B" + preview version  →  edited Scene.js  →  preview reloaded  →  "B still selected ✓"</text>
+
+  <!-- arrows -->
+  <path d="M530 180 C 548 180, 548 180, 578 180" stroke="#2a9d5c" stroke-width="2.5" fill="none" marker-end="url(#g)"/>
+  <path d="M745 380 L745 476" stroke="#666" stroke-width="2" fill="none" marker-end="url(#k)"/>
+  <path d="M300 478 L300 462" stroke="#666" stroke-width="2" fill="none" marker-end="url(#k)"/>
+  <defs>
+    <marker id="g" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2a9d5c"/></marker>
+    <marker id="k" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#666"/></marker>
+  </defs>
+</svg>
