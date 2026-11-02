@@ -4,7 +4,8 @@
 // `instructions` (the brainstorming rulebook) go in as system-level instructions on every turn.
 // Agents get full filesystem access (the owner's call): claude can read and write any path but has
 // no shell; codex runs with no sandbox. Keeping to proposal/ is left to their instructions.
-// Set on every turn (not just the first).
+// Set on every turn (not just the first). The worker (ui.mjs) is a claude agent created with
+// `shell: true`: it also gets Bash, pre-approved, so it can run commands and tests.
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
@@ -43,7 +44,7 @@ export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOU
   });
 }
 
-export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, runner = run, session = {} }) {
+export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, shell = false, runner = run, session = {} }) {
   session.id ??= randomUUID();
   const agent = {
     name,
@@ -55,9 +56,10 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, r
       args.push(session.started ? '--resume' : '--session-id', session.id);
       if (model) args.push('--model', model);
       if (instructions) args.push('--append-system-prompt', instructions);
-      args.push('--chrome', '--strict-mcp-config', '--allowedTools', ...CLAUDE_ALLOWED);
+      const bash = shell ? ['Bash'] : [];
+      args.push('--chrome', '--strict-mcp-config', '--allowedTools', ...CLAUDE_ALLOWED, ...bash);
       // --tools is variadic, so it must come last: the prompt goes on stdin.
-      args.push('--tools', ...CLAUDE_TOOLS);
+      args.push('--tools', ...CLAUDE_TOOLS, ...bash);
       const out = await runner('claude', args, { input: prompt, cwd, timeoutMs });
       const result = JSON.parse(out);
       if (result.is_error) throw new Error(`claude: ${result.result || 'turn failed'}`);

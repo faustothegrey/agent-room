@@ -11,18 +11,27 @@ import { parseArgs } from 'node:util';
 const { values } = parseArgs({
   options: {
     agents: { type: 'string', default: 'claude,codex' },
+    worker: { type: 'string', default: 'claude:Worker' },
     cwd: { type: 'string', default: process.cwd() },
     'log-dir': { type: 'string', default: join(process.cwd(), 'transcripts') },
+    port: { type: 'string', default: '5566' },
     'no-screen': { type: 'boolean' },
     open: { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
   },
 });
 
+if (!/^\d+$/.test(values.port) || Number(values.port) > 65535) {
+  console.error(`--port must be a number from 0 to 65535, not "${values.port}"`);
+  process.exit(1);
+}
+
 const ctx = {
   cwd: resolve(values.cwd),
   agentSpecs: values.agents,
+  workerSpec: values.worker,
   logDir: values['log-dir'],
+  port: Number(values.port),
   noScreen: !!values['no-screen'],
   open: !!values.open,
   state: { transcript: [], seen: new Map() },

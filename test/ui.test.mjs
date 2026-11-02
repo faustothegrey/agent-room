@@ -28,3 +28,15 @@ test('a failing load leaves ctx as it was', async () => {
   await assert.rejects(load(ctx, '?v=4'), /Unknown provider/);
   assert.equal(ctx.room, room);
 });
+
+test('the worker is a separate claude agent with its own session, kept across reloads', async () => {
+  const ctx = freshCtx();
+  Object.assign(ctx, await load(ctx, '?v=5'));
+  assert.deepEqual([ctx.worker.name, ctx.worker.provider], ['Worker', 'claude']);
+  const session = ctx.sessions.get('worker:Worker');
+  assert.ok(session);
+  Object.assign(ctx, await load(ctx, '?v=6'));
+  assert.equal(ctx.sessions.get('worker:Worker'), session);
+  ctx.workerSpec = 'claude:A'; // taken by a room agent
+  await assert.rejects(load(ctx, '?v=7'), /worker's name "A" is taken/);
+});

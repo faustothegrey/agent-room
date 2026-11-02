@@ -30,7 +30,9 @@ npm install                                   # once: installs marked
 npm start                                     # claude + codex, in the current directory; used from the browser
 npm run terminal                              # the same, used from the terminal: /docs opens files alone
 node src/cli.mjs --agents claude:Ada,codex:Linus --cwd ~/Software/some-project
+node src/cli.mjs --worker claude:Bob          # the worker's provider and name (default claude:Worker)
 node src/cli.mjs --log-dir ~/room-logs        # transcripts elsewhere (default: ./transcripts)
+node src/cli.mjs --port 6000                  # the screen's port (default 5566: http://127.0.0.1:5566/__room)
 npm test
 ```
 
@@ -75,7 +77,8 @@ the checkout moves. The launcher runs `node src/cli.mjs --open`, the same entry 
 - `src/ui.mjs` is everything else: building the room, the display, the commands, and the
   transcript (every room is saved to `transcripts/` as markdown). In the terminal, `/docs` lists
   the room's `proposal/` files: move with ↑/↓, and Enter opens one alone in the browser.
-- `src/docs.mjs` is the viewer and the discussion screen: a local-only web server (127.0.0.1)
+- `src/docs.mjs` is the viewer and the discussion screen: a local-only web server (127.0.0.1,
+  port 5566, or any free port if that one is taken)
   that renders Markdown with [marked](https://marked.js.org), the project's one dependency.
   Images show inline, plain links to images get a preview, and an open document is checked every
   2 seconds and reloaded when an agent edits it. The screen (`/__room`) does everything the
@@ -84,6 +87,18 @@ the checkout moves. The launcher runs `node src/cli.mjs --open`, the same entry 
   Usage, Reload and Quit buttons, a divider to drag between chat and document, and Documents to
   pick the file on the right at any time, even mid-round. A screen
   opened later catches up on the whole chat. Only the room's own page can send it input.
+  A header at the top names the room's folder, its agents and its worker. Transcripts, next to
+  Documents, lists the saved rooms (newest first, with each room's first message) and shows one
+  on the right, read-only; this room's transcript follows along as it grows. Send to agents, on
+  a past transcript, sends a normal message asking the agents to read it in full (by its path),
+  as background: the old sessions are not resumed.
+- **The worker** (the screen's Worker tab, next to Discussion): one more agent, outside the round,
+  that carries out the instructions you send from that tab. It sees only those (not the
+  discussion), runs them one at a time alongside the discussion, and follows
+  `README-for-worker-agents.md`. It is a claude session with the same tools plus `Bash`,
+  pre-approved, so it can edit files and run commands anywhere, with 30 minutes per instruction.
+  Its turns go in the transcript and count in `/usage`. From the terminal (`npm run terminal`)
+  there is no worker input.
 - `src/usage.mjs` is usage stats. Each reply shows its tokens (and, for claude, the API-price
   cost) as reported by the CLI itself; the round's end line adds the round's totals and your
   subscription quotas, and `/usage` shows the session totals per agent. Quotas come from the

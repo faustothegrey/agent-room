@@ -7,25 +7,32 @@
 import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
-export const USAGE = `Usage: agent-room [--agents claude,codex] [--cwd DIR] [--log-dir DIR] [--no-screen] [--open]
+export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--log-dir DIR] [--port 5566] [--no-screen] [--open]
 
 Each agent is provider[:name], e.g. --agents claude:Ada,codex:Linus
+The worker (the screen's Worker tab) is one more agent, outside the discussion: it carries out the
+instructions sent from that tab, sees only those, and can edit files and run commands.
 By default (npm start) the room is used from the discussion screen in the browser; the terminal
 only shows a log. --no-screen (or npm run terminal): the room is used from the terminal instead,
 and /docs opens each file alone in the browser.
 --open opens the discussion screen even without an interactive terminal (for a Dock launcher).
+--port: the screen's port on 127.0.0.1 (default 5566); if it is taken, any free port is used.
 Type a message to start a round; start it with @name to address one agent.
 Commands: /docs (pick a proposal/ file to view in the browser), /summary (the agents agree a short
 summary by points; only the result is shown), /usage (tokens this session and subscription quotas),
 /reload (load edited code and README-for-brainstorming-agents.md; the conversation continues), /quit`;
 
-// Imports fresh copies of the modules and the rulebook and builds a room on ctx.state. Returns
+// How long one worker instruction may run before it is stopped (a room turn gets 5 minutes).
+const WORKER_TIMEOUT_MS = 30 * 60 * 1000;
+
+// Imports fresh copies of the modules and the two rulebooks and builds a room on ctx.state, and the worker. Returns
 // the parts to put into ctx; if anything fails it throws, leaving ctx as it was (at most an
 // unused empty session added).
 export async function load(ctx, v) {
   const instructions = readFileSync(new URL('../README-for-brainstorming-agents.md', import.meta.url), 'utf8');
+  const workerInstructions = readFileSync(new URL('../README-for-worker-agents.md', import.meta.url), 'utf8');
   const { createAgent } = await import(`./agents.mjs${v}`);
   const { createRoom } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
@@ -35,10 +42,16 @@ export async function load(ctx, v) {
     if (!ctx.sessions.has(name)) ctx.sessions.set(name, {});
     return createAgent(provider, { name, cwd: ctx.cwd, instructions, session: ctx.sessions.get(name) });
   });
+  // The worker's session is kept under its own key, so it never mixes with a room agent's.
+  const [wProvider, wName = 'Worker'] = (ctx.workerSpec ?? 'claude:Worker').trim().split(':');
+  if (agents.some((a) => a.name === wName)) throw new Error(`The worker's name "${wName}" is taken by a room agent`);
+  if (!ctx.sessions.has(`worker:${wName}`)) ctx.sessions.set(`worker:${wName}`, {});
+  const worker = createAgent(wProvider, { name: wName, cwd: ctx.cwd, instructions: workerInstructions, shell: true,
+    timeoutMs: WORKER_TIMEOUT_MS, session: ctx.sessions.get(`worker:${wName}`) });
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
   // ctx so they survive a reload.
-  const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null };
-  return { room: createRoom(agents, ctx.state), docs, usage, totals: ctx.totals ?? {}, screen };
+  const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: [], working: null };
+  return { room: createRoom(agents, ctx.state), worker, docs, usage, totals: ctx.totals ?? {}, screen };
 }
 
 const tty = process.stdout.isTTY;
@@ -48,6 +61,15 @@ const dim = style('2');
 const red = style('31');
 const log = (ctx, text) => appendFileSync(ctx.logPath, text);
 const describe = (room) => room.agents.map((a) => `${a.name} (${a.provider})`).join(', ');
+
+// Points the screen at the code loaded now (at start and after each reload): the header's names and,
+// in UI mode, the Worker tab's input.
+function wire(ctx) {
+  ctx.screen.room = { folder: basename(ctx.cwd), agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name };
+  ctx.screen.logDir = ctx.logDir;
+  ctx.screen.logFile = basename(ctx.logPath);
+  if (!ctx.noScreen) ctx.screen.work = (text) => queueWork(ctx, text);
+}
 
 export const promptText = () => (tty ? '\x1b[1;36mYou ›\x1b[0m ' : 'You › ');
 
@@ -59,8 +81,9 @@ export async function start(ctx) {
   mkdirSync(ctx.logDir, { recursive: true });
   ctx.logPath = join(ctx.logDir, `room-${new Date().toISOString().replace(/[:.]/g, '-')}.md`);
   log(ctx, `# Room — ${describe(ctx.room)}\n\nWorking directory: ${ctx.cwd}\n\n`);
-  console.log(`Room: ${describe(ctx.room)} · cwd ${ctx.cwd}`);
+  console.log(`Room: ${describe(ctx.room)} · worker ${ctx.worker.name} (${ctx.worker.provider}) · cwd ${ctx.cwd}`);
   console.log(`Transcript: ${ctx.logPath}`);
+  wire(ctx);
   if (ctx.noScreen) {
     return console.log('Type a message, /docs to see the proposals, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
   }
@@ -82,6 +105,7 @@ export function note(ctx, text, error = false) {
 }
 
 export function reloaded(ctx) {
+  wire(ctx);
   log(ctx, '_(code reloaded)_\n\n');
   note(ctx, 'Reloaded the code and the agents\' rulebook; the conversation continues.\n');
 }
@@ -97,7 +121,7 @@ export async function handleLine(line, ctx) {
   if (line === '/summary') return runSummary(ctx);
   if (line === '/usage') {
     const quota = await ctx.usage.fetchQuota();
-    return note(ctx, `${ctx.usage.usageReport({ totals: ctx.totals, agents: ctx.room.agents, quota })}\n`);
+    return note(ctx, `${ctx.usage.usageReport({ totals: ctx.totals, agents: [...ctx.room.agents, ctx.worker], quota })}\n`);
   }
   return runRound(line, ctx);
 }
@@ -215,6 +239,44 @@ async function runRound(line, ctx) {
   }
 }
 
+// The worker: instructions from the Worker tab run one at a time, in the order sent, alongside the
+// discussion (they don't wait for a round, and a round doesn't wait for them). The queue is in ctx,
+// so it carries over a reload. The worker is sent only the instruction itself; its CLI session holds
+// the earlier ones.
+function queueWork(ctx, text) {
+  // A bug here must not jam the queue: report it, and the next instruction still runs.
+  ctx.workQueue = (ctx.workQueue ?? Promise.resolve()).then(() => runWork(ctx, text))
+    .catch((err) => note(ctx, `✗ ${err.stack}\n`, true));
+}
+
+async function runWork(ctx, text) {
+  const { worker, screen } = ctx;
+  const show = (entry, meta) => {
+    const view = { ...ctx.docs.messageView(entry), ...(meta && { meta }) };
+    screen.worker.push(view);
+    toScreen(ctx, { type: 'work', message: view });
+  };
+  log(ctx, `**User → ${worker.name}** (worker)\n\n${text}\n\n`);
+  console.log(`\n${bold(`You → ${worker.name}`)} › ${text}\n`);
+  show({ speaker: 'User', text });
+  screen.working = worker.name;
+  toScreen(ctx, { type: 'working', name: worker.name });
+  const t0 = Date.now();
+  let entry;
+  try {
+    entry = { speaker: worker.name, text: (await worker.turn(text)) || '(no reply)' };
+    if (worker.lastUsage) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
+  } catch (err) {
+    entry = { speaker: worker.name, text: err.message, error: true };
+  }
+  const meta = [`${Math.round((Date.now() - t0) / 1000)}s`, entry.error ? '' : ctx.usage.formatUsage(worker.lastUsage)].filter(Boolean).join(' · ');
+  log(ctx, `**${worker.name}** (worker${entry.error ? ', failed' : ''}, ${meta})\n\n${entry.text}\n\n`);
+  console.log(entry.error ? red(`\n✗ ${worker.name} (worker) failed: ${entry.text}\n`) : `\n${bold(worker.name)}${dim(` (worker, ${meta})`)} › ${entry.text}\n`);
+  screen.working = null;
+  toScreen(ctx, { type: 'working', name: null });
+  show(entry, meta);
+}
+
 // The proposal viewer and discussion screen: a local-only HTTP server kept in ctx, started at
 // start-up in UI mode and on the first /docs in terminal mode. It calls ctx.docs on every request,
 // so a reload applies to it too. Its connections (open screens hold one) never keep the process
@@ -225,7 +287,19 @@ async function viewerUrl(ctx) {
       try { ctx.docs.handle(req, res, join(ctx.cwd, 'proposal'), ctx.screen); } catch (err) { res.writeHead(500); res.end(String(err)); }
     });
     ctx.server.on('connection', (socket) => socket.unref());
-    await new Promise((ok) => ctx.server.listen(0, '127.0.0.1', ok));
+    // The fixed port gives the screen the same address every time; if another room (or anything
+    // else) has it, any free port will do, and the banner shows which.
+    const listen = (port) => new Promise((ok, fail) => {
+      ctx.server.once('error', fail);
+      ctx.server.listen(port, '127.0.0.1', () => { ctx.server.off('error', fail); ok(); });
+    });
+    try {
+      await listen(ctx.port ?? 5566);
+    } catch (err) {
+      if (err.code !== 'EADDRINUSE') throw err;
+      console.log(dim(`Port ${ctx.port ?? 5566} is in use; using a free port instead.`));
+      await listen(0);
+    }
     if (ctx.noScreen) ctx.server.unref();
   }
   return `http://127.0.0.1:${ctx.server.address().port}/`;

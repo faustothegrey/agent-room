@@ -5,7 +5,7 @@ import { createServer, request } from 'node:http';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { broadcast, handle, listFiles, messageView, pick } from '../src/docs.mjs';
+import { broadcast, handle, listFiles, listTranscripts, messageView, pick } from '../src/docs.mjs';
 
 // A proposal/ folder with a doc, a drawing, a hidden file, and a file just outside it.
 function fixture() {
@@ -193,4 +193,70 @@ test('messageView hides summary turns and labels a summary\'s result', () => {
   const agreed = messageView({ speaker: 'Summary', text: '- x', outcome: 'agreed', by: 'A' });
   assert.deepEqual([agreed.speaker, agreed.outcome, agreed.hidden], ['Summary — agreed, by A', 'agreed', undefined]);
   assert.equal(messageView({ speaker: 'Summary', text: '- y', outcome: 'not agreed', by: 'B' }).speaker, 'Summary — not agreed: the last version, by B');
+});
+
+test('the Worker tab: instructions reach the worker only from the page, and a new page gets its chat', async () => {
+  const sent = [];
+  const worker = [{ speaker: 'User', html: '<p>fix</p>' }, { speaker: 'W', html: '<p>done</p>', meta: '3s' }];
+  const screen = { clients: new Set(), transcript: [], worker, working: 'W', room: { folder: 'x', agents: ['A'], worker: 'W' },
+    say: () => {}, work: (text) => sent.push(text) };
+  const s = await serve(fixture(), screen);
+  try {
+    assert.equal((await postFrom(s, '/__work', { text: '  run the tests  ' })).status, 204);
+    assert.equal((await postFrom(s, '/__work', { text: 'x' }, { origin: 'https://evil.example' })).status, 403);
+    assert.equal((await postFrom(s, '/__work', { text: '  ' })).status, 400);
+    assert.deepEqual(sent, ['run the tests']);
+    const next = eventReader(await s.get('/__events'));
+    const reset = await next();
+    assert.deepEqual([reset.workInput, reset.working, reset.room.worker], [true, 'W', 'W']);
+    assert.deepEqual(reset.worker.map((m) => m.speaker), ['User', 'W']);
+    for (const c of screen.clients) c.end();
+  } finally {
+    s.close();
+  }
+});
+
+test('without a worker input (terminal mode), /__work is refused', async () => {
+  const s = await serve(fixture(), { clients: new Set(), transcript: [] });
+  assert.equal((await postFrom(s, '/__work', { text: 'hi' })).status, 409);
+  s.close();
+});
+
+// A log folder with two saved rooms and an unrelated file.
+function logFixture() {
+  const dir = mkdtempSync(join(tmpdir(), 'logs-test-'));
+  writeFileSync(join(dir, 'room-2026-10-21T07-06-36-201Z.md'), '# Room — A (claude)\n\n**User**\n\nhello\n');
+  writeFileSync(join(dir, 'room-2026-11-02T09-15-56-854Z.md'), '# Room — A (claude), B (codex)\n\n**B**\n\n<script>alert(1)</script>\n');
+  writeFileSync(join(dir, 'notes.md'), 'not a room');
+  return dir;
+}
+
+test('listTranscripts: saved rooms only, newest first, with their date, agents and the current one marked', () => {
+  const list = listTranscripts(logFixture(), 'room-2026-10-21T07-06-36-201Z.md');
+  assert.deepEqual(list.map((t) => [t.date, t.title, t.current]), [
+    ['2026-11-02T09:15:56.854Z', 'A (claude), B (codex)', false],
+    ['2026-10-21T07:06:36.201Z', 'A (claude)', true],
+  ]);
+  assert.deepEqual(list.map((t) => t.first), ['', 'hello']);
+  assert.ok(list.every((t) => t.path.endsWith(t.file) && t.path.startsWith('/')));
+  assert.deepEqual(listTranscripts('/no/such/folder'), []);
+});
+
+test('the screen lists and shows transcripts, with their HTML as text, and nothing else from the folder', async () => {
+  const logDir = logFixture();
+  const screen = { clients: new Set(), transcript: [], logDir, logFile: 'room-2026-11-02T09-15-56-854Z.md' };
+  const s = await serve(fixture(), screen);
+  try {
+    const list = await (await s.get('/__transcripts')).json();
+    assert.equal(list.length, 2);
+    assert.equal(list[0].current, true);
+    const page = await (await s.get(`/__transcript/${list[0].file}`)).text();
+    assert.match(page, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+    assert.doesNotMatch(page, /<script>alert/);
+    assert.match(await (await s.get(`/__tmtime?f=${list[0].file}`)).text(), /^\d+(\.\d+)?$/);
+    assert.equal((await s.get('/__transcript/notes.md')).status, 404);
+    assert.equal((await s.get('/__transcript/..%2Fsecret.txt')).status, 404);
+  } finally {
+    s.close();
+  }
 });

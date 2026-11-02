@@ -131,3 +131,13 @@ test('each turn reports its usage: claude from its JSON result, codex from turn.
   await codex.turn('p2'); // no turn.completed this time: no stale usage from the previous turn
   assert.equal(codex.lastUsage, null);
 });
+
+test('claude with shell (the worker): Bash is added to the tools and pre-approved', async () => {
+  const { calls, runner } = fakeRunner([JSON.stringify({ result: 'done', is_error: false })]);
+  const agent = createClaudeAgent({ name: 'W', runner, shell: true });
+  assert.equal(await agent.turn('fix it'), 'done');
+  const { args } = calls[0];
+  assert.equal(args.at(-1), 'Bash');
+  const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--tools'));
+  assert.ok(allowed.includes('Bash'));
+});
