@@ -294,3 +294,13 @@ test('agent settings endpoint reads choices and protects saves with the same-ori
     new Function(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
   } finally { s.close(); }
 });
+
+test('the heartbeat: /__health says it is agent-room, with its process, root and discussion', async () => {
+  const dir = fixture();
+  const screen = { clients: new Set(), transcript: [], startedAt: '2026-11-03T10:00:00.000Z', room: { active: 'discussions/2026-11-03-x' } };
+  const s = await serve(dir, screen);
+  const res = await s.get('/__health');
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { app: 'agent-room', pid: process.pid, root: dir, startedAt: '2026-11-03T10:00:00.000Z', discussion: 'discussions/2026-11-03-x' });
+  s.close();
+});

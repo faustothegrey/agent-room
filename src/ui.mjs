@@ -12,7 +12,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--port 5566] [--no-screen] [--open]
+export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--port 5566] [--no-screen] [--open] [--reopen NAME]
 
 Each agent is provider[:name[:model]], e.g. --agents claude:Ada:opus,codex:Linus
 Without saved defaults: discussion claude,codex; worker claude:Worker.
@@ -30,7 +30,7 @@ and /docs opens each file alone in the browser.
 --port: the screen's port on 127.0.0.1 (default 5566); if it is taken, any free port is used.
 The --cwd folder is the room's root. Opening it writes nothing: the first message starts a new
 discussion in DIR/discussions/<date>-<title>/ (its documents, drawings and transcripts/), unless
-/reopen <name> picked an existing one first.
+/reopen <name> (or --reopen <name> at launch) picked an existing one first.
 Type a message to start a round; start it with @name to address one agent.
 Commands: /docs (pick a document to view in the browser), /reopen <name> (re-open that
 discussion: a fresh session there, starting from its handoff; one in archive/ or deferred/ is made
@@ -38,7 +38,8 @@ active first), /move <name> active|archive|deferred (move a whole discussion; no
 /summary (the agents agree a short
 summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
 in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
-/reload (load edited code and both agent rulebooks; conversation continues), /quit
+/reload (load edited code and both agent rulebooks; conversation continues), /restart (screen
+only: a new process on the same port, in the discussion in use, from its handoff), /quit
 Refresh the browser after /reload to see page changes.`;
 
 // How long one worker instruction may run before it is stopped (a room turn gets 5 minutes).
@@ -416,6 +417,7 @@ export const promptText = () => (tty ? '\x1b[1;36mYou ›\x1b[0m ' : 'You › ')
 // and lines the User sends from it go to ctx.say. The terminal then only shows a log.
 export async function start(ctx) {
   ctx.openedAt = new Date();
+  ctx.screen.startedAt = ctx.openedAt.toISOString(); // the page's and the Dock app's heartbeat show it
   console.log(`Room: ${describe(ctx.room)} · worker ${ctx.worker.name} (${ctx.worker.provider}) · root ${ctx.cwd}`);
   console.log(`Transcript: in ${join(ctx.cwd, 'discussions')}/, once the first message starts a discussion`);
   wire(ctx);
@@ -450,9 +452,28 @@ export function reloaded(ctx) {
   note(ctx, 'Reloaded the code and the agents\' rulebook; the conversation continues.\n');
 }
 
-// The room is over (after /quit): screens say so and stop reconnecting.
-export function ended(ctx) {
-  return ctx.docs.endAll(ctx.screen, { type: 'ended' });
+// The room is over (after /quit): screens say so and stop reconnecting. After /restart they wait
+// for the new process instead, and reload when it answers.
+export function ended(ctx, restarting = false) {
+  return ctx.docs.endAll(ctx.screen, { type: restarting ? 'restarting' : 'ended' });
+}
+
+// /restart: this process frees its port and a new agent-room process takes it over, with the same
+// launch flags and the discussion in use re-opened (a fresh session from its handoff, as /reopen).
+// The chat in memory doesn't carry over. The new process writes where this one did (the terminal or
+// the Dock app's log) and runs on its own once this one exits.
+export function restartArgs(ctx, values) {
+  const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', ctx.cwd, '--port', String(ctx.server.address().port)];
+  if (values.agents) args.push('--agents', values.agents);
+  if (values.worker) args.push('--worker', values.worker);
+  if (ctx.discussion) args.push('--reopen', ctx.discussion.name);
+  return args;
+}
+export async function restart(ctx, values) {
+  const args = restartArgs(ctx, values);
+  ctx.server.closeAllConnections();
+  await new Promise((done) => ctx.server.close(done));
+  spawn(process.execPath, args, { cwd: ctx.cwd, detached: true, stdio: 'inherit' }).unref();
 }
 
 export async function handleLine(line, ctx) {
@@ -463,6 +484,7 @@ export async function handleLine(line, ctx) {
   const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
   if (move) return void moveDiscussion(ctx, move[1], move[2]);
   if (line === '/summary') { ctx.agentsStarted = true; return runSummary(ctx); }
+  if (line === '/restart') return note(ctx, '/restart is for the browser screen; in the terminal, /quit and start the room again.');
   const auto = /^\/autosummary(?:\s+(on|off))?$/.exec(line);
   if (auto) return setAuto(ctx, auto[1] ? auto[1] === 'on' : !autoOn(ctx));
   if (line === '/usage') {

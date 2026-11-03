@@ -52,8 +52,14 @@ subscription usage, and **New room in folder…**. Agent settings live inside th
   background; it does not resume its sessions.
 - **Reload:** load code and rulebook edits between discussion commands without losing the
   current conversation. Refresh the browser afterward for HTML/CSS/JavaScript changes.
-- **Quit:** click twice to end the room. Discussion commands, including Quit and Reload,
+- **Restart:** click twice to replace the server process on the same address, for changes Reload
+  can't load (such as `cli.mjs`). The new process re-opens the discussion in use, a fresh session
+  from its handoff; the chat clears, its transcript is kept, and open pages reload by themselves.
+- **Quit:** click twice to end the room. Discussion commands, including Quit, Restart and Reload,
   wait behind an ongoing round and its automatic summary; they are not immediate cancellation.
+- **Server status:** under the root folder, the header shows whether the server is up, for how
+  long and on which port (hover for its process). The page asks every three seconds; it says when
+  the server stops answering, and reloads when a server answers again on that address.
 
 In this project (the agent-room room itself), its design history is five discussions, each with
 its documents and its transcripts: `2026-11-02-discussions-and-folders/` is active, three are in
@@ -193,6 +199,7 @@ node src/cli.mjs --help
 | `/autosummary [on\|off]` | Toggle automatic summaries, or set them explicitly. |
 | `/usage` | Show session tokens and subscription quotas. |
 | `/reload` | Reload source modules and both agent rulebooks; retain conversation and provider sessions. |
+| `/restart` | Screen only: a new server process on the same port, re-opening the discussion in use. |
 | `/quit` | End this room. |
 
 ## macOS Dock launcher
@@ -201,16 +208,38 @@ Build or replace the launcher after quitting its existing instance:
 
 ```sh
 mkdir -p "$HOME/Applications"
-osacompile -o "$HOME/Applications/Agent Room.app" scripts/dock-launcher.applescript
+rm -rf "$HOME/Applications/Agent Room.app" # osacompile ignores -s (stay open) when updating an app
+osacompile -s -o "$HOME/Applications/Agent Room.app" scripts/dock-launcher.applescript
 ```
 
-Drag the app into the Dock. It runs `node src/cli.mjs --open` in the fixed project path
-`/Users/fausto/Software/agent-room`; edit the script if the checkout moves. Reopening the running
-launcher does not start a second room. Quit in the screen ends the room and launcher.
+Then give it the room's icon, drawn in `scripts/icon.svg` (needs `rsvg-convert`:
+`brew install librsvg`). Re-signing is required after changing the bundle:
+
+```sh
+app="$HOME/Applications/Agent Room.app"; icons="$(mktemp -d)/applet.iconset"; mkdir "$icons"
+for s in 16 32 128 256 512; do
+  rsvg-convert -w $s -h $s scripts/icon.svg -o "$icons/icon_${s}x${s}.png"
+  rsvg-convert -w $((s*2)) -h $((s*2)) scripts/icon.svg -o "$icons/icon_${s}x${s}@2x.png"
+done
+iconutil -c icns "$icons" -o "$app/Contents/Resources/applet.icns"
+plutil -remove CFBundleIconName "$app/Contents/Info.plist"
+codesign --force --sign - "$app"
+```
+
+Drag the app into the Dock. If an agent-room room already answers on port 5566 (wherever it was
+started, and in whatever folder), the app opens that room's page. Otherwise it runs
+`node src/cli.mjs --open` in the fixed project path `/Users/fausto/Software/agent-room`; edit the
+script if the checkout moves. Only the app reuses a running room: `npm start` still moves to a free
+port when 5566 is taken.
+
+The app then follows the room's heartbeat every three seconds. The room keeps running when you
+close its browser window: clicking the Dock icon again opens its page in a new tab. Restart keeps
+the app running. When the room stops (Quit in the screen), the app quits too; quitting the app
+from the Dock quits the room the same way.
 
 The script checks for `node`, `claude` and `codex` through a login shell with Homebrew and
 `~/.local/bin` paths. Its log is `~/Library/Logs/agent-room.log`, replaced on each launch.
-Startup failures show an alert with the log's tail. Discussion transcripts remain in their
+If a room the app started fails to start or ends with an error, an alert shows the log's tail. Discussion transcripts remain in their
 own folders.
 
 ## Access and limits
@@ -224,7 +253,7 @@ Claude uses strict MCP configuration rather than your claude.ai connectors. Code
 agents and workers run without a sandbox and with live web search configured.
 
 The server listens only on `127.0.0.1`. Browser input endpoints require the room's own origin
-when supplied and JSON requests. There is no remote-access interface, restart recovery,
+when supplied and JSON requests. There is no remote-access interface, crash recovery,
 streaming reply display, live app preview, or automatic discussion-to-worker handoff.
 
 ## Working on the project
@@ -235,7 +264,7 @@ agent-room's source.
 
 | Source | Responsibility |
 |---|---|
-| `src/cli.mjs` | Arguments, shared session context, input queue, Reload and Quit. |
+| `src/cli.mjs` | Arguments, shared session context, input queue, Reload, Restart and Quit. |
 | `src/agents.mjs` | CLI processes, session resumption, model arguments, title generation and usage parsing. |
 | `src/room.mjs` | Discussion turns, unseen messages, passes and summary agreement. |
 | `src/ui.mjs` | Room setup, persistent defaults, commands, discussions, worker queue, logging and launch integration. |

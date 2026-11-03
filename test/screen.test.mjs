@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -98,4 +98,45 @@ test('saved provider/model choices survive CLI restarts and explicit CLI flags o
     assert.deepEqual(data.settings.worker, settings.worker);
     assert.deepEqual(data.defaults, settings); // a CLI override never rewrites saved defaults
   });
+});
+
+// /restart: a new process takes over the same address, in the discussion in use; the old one exits.
+test('Restart: a new server process on the same port, re-opening the discussion in use', { timeout: 20000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'restart-test-'));
+  mkdirSync(join(dir, 'discussions', '2026-11-03-a-topic'), { recursive: true });
+  const cli = spawn(process.execPath, [new URL('../src/cli.mjs', import.meta.url).pathname, '--cwd', dir, '--port', '0'],
+    { env: { ...process.env, HOME: dir } });
+  const exited = new Promise((done) => cli.once('exit', done));
+  let newPid = null;
+  try {
+    let out = '';
+    const base = await new Promise((done) => cli.stdout.on('data', (d) => {
+      out += d;
+      const m = out.match(/Discussion screen: (http:\/\/127\.0\.0\.1:\d+\/)__room/);
+      if (m) done(m[1]);
+    }));
+    const health = async () => { try { return await (await fetch(base + '__health')).json(); } catch { return null; } };
+    const say = (text) => fetch(base + '__say', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+    const until = async (check) => { for (const t0 = Date.now(); Date.now() - t0 < 10000;) { const h = await health(); if (check(h)) return h; await new Promise((r) => setTimeout(r, 100)); } assert.fail('timed out'); };
+
+    const before = await health();
+    assert.equal(before.app, 'agent-room');
+    assert.equal(before.pid, cli.pid);
+    await say('/reopen 2026-11-03-a-topic');
+    await until((h) => h?.discussion === 'discussions/2026-11-03-a-topic');
+
+    await say('/restart');
+    assert.equal(await exited, 0);
+    const after = await until((h) => h && h.pid !== before.pid);
+    newPid = after.pid;
+    assert.equal(after.discussion, 'discussions/2026-11-03-a-topic'); // re-opened there
+    assert.match(out, /Restarting: a new process takes over this room\./);
+
+    await say('/quit');
+    await until((h) => h === null);
+    newPid = null;
+  } finally {
+    cli.kill();
+    if (newPid) try { process.kill(newPid); } catch {}
+  }
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The only part of agent-room that never reloads: arguments, the input loop (terminal or screen),
-// /reload and /quit. Everything else is in ui.mjs (and what it loads), which /reload swaps between
+// /reload, /quit and /restart. Everything else is in ui.mjs (and what it loads), which /reload swaps between
 // rounds.
 // The conversation lives in `ctx`, so it carries over. Keep this file small: changes here need a
 // restart.
@@ -16,6 +16,7 @@ const { values } = parseArgs({
     port: { type: 'string', default: '5566' },
     'no-screen': { type: 'boolean' },
     open: { type: 'boolean' },
+    reopen: { type: 'string' },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -78,10 +79,15 @@ if (ctx.noScreen) {
 const report = (text) => { try { ui.note(ctx, text, true); } catch { console.log(text); } };
 
 await ui.start(ctx);
+// --reopen <discussion>: start in that discussion, as /reopen would (a restart passes the one in use).
+if (values.reopen) { try { await ui.handleLine(`/reopen ${values.reopen}`, ctx); } catch (err) { report(`✗ ${err.message}\n`); } }
 prompt();
+let restart = false;
 for await (const raw of input) {
   const line = raw.trim();
   if (line === '/quit') break;
+  // UI mode: a new process takes over this room's port, so the page and the Dock app keep their address.
+  if (line === '/restart' && !ctx.noScreen) { restart = true; break; }
   if (line === '/reload') {
     try {
       await load();
@@ -95,8 +101,15 @@ for await (const raw of input) {
   }
   prompt();
 }
-try { await ui.ended(ctx); } catch {}
+try { await ui.ended(ctx, restart); } catch {}
 rl?.close();
+// "Room ended." is the log's last line after a normal Quit: the Dock app shows the log otherwise.
+let last = 'Room ended.';
+if (restart) {
+  try { await ui.restart(ctx, values); last = 'Restarting: a new process takes over this room.'; }
+  catch (err) { last = `✗ Restart failed, the room has ended: ${err.message}`; }
+}
+console.log(last);
 // In UI mode the viewer server is what kept the process running, so end it explicitly.
 process.exit(0);
 

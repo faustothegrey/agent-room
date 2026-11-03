@@ -145,6 +145,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #folder { font-family: ui-monospace, monospace; font-size: .75rem; overflow-wrap: anywhere; line-height: 1.35; }
 #disc { font-size: .75rem; color: var(--dim); line-height: 1.35; }
 #disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
+#server { font-size: .7rem; color: var(--dim); } #server[data-state="down"] { color: #ef4444; font-weight: 600; }
 #files .hint { display: block; margin: 0 0 .8rem; }
 #gauges { display: flex; gap: .8rem; align-items: center; font-size: .65rem; color: var(--dim); }
 .gauge { display: grid; grid-template-columns: 2rem 32px 2rem auto; gap: .3rem; align-items: center; line-height: 1.5; }
@@ -233,7 +234,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .msg.error { border-left-color: #ef4444; }
 .tools { flex-wrap: wrap; }
 </style></head><body>
-<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
+<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span><span id="server" data-state="up"></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
   <div class="view" id="talk">
@@ -251,7 +252,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit"></textarea>
       <div class="tools" style="justify-content: flex-end">
         <label title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label>
-        <button id="summary">Summarize</button><button id="usage">Usage</button><button id="reload">Reload</button><button id="quit">Quit</button></div>
+        <button id="summary">Summarize</button><button id="usage">Usage</button><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, in the discussion in use, from its handoff. The chat clears.">Restart</button><button id="quit">Quit</button></div>
     </div>
   </div>
   <div class="view" id="work" hidden>
@@ -665,6 +666,34 @@ $('quit').onclick = (e) => {
   b.dataset.armed = '1'; b.textContent = 'Click again to quit';
   setTimeout(() => { delete b.dataset.armed; b.textContent = 'Quit'; }, 3000);
 };
+$('restart').onclick = (e) => {
+  const b = e.currentTarget;
+  if (b.dataset.armed) return send('/restart');
+  b.dataset.armed = '1'; b.textContent = 'Click again: the chat clears';
+  setTimeout(() => { delete b.dataset.armed; b.textContent = 'Restart'; }, 3000);
+};
+// The heartbeat: every 3 s the page asks the server how it is, and says so in the header. When a
+// different server answers on this address (after Restart, or the Dock app starting it again), the
+// page reloads, so it also gets that server's page code.
+let serverPid = null, restarting = false;
+const upFor = (t) => { const m = Math.max(0, Math.floor((Date.now() - Date.parse(t)) / 60000)); return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h ' + (m % 60) + 'm'; };
+async function heartbeat() {
+  let h = null;
+  try { h = await (await fetch('/__health', { cache: 'no-store', signal: AbortSignal.timeout(2500) })).json(); } catch {}
+  const el = $('server');
+  if (!h) {
+    el.dataset.state = 'down';
+    el.textContent = restarting ? '● Restarting the server…' : ended ? '● Server stopped' : '● Server not responding';
+    el.title = 'Start it again from the Dock app (or npm start): this page reloads when it answers.';
+    return;
+  }
+  if (serverPid && h.pid !== serverPid) return location.reload();
+  serverPid = h.pid;
+  el.dataset.state = 'up';
+  el.textContent = '● Server up' + (h.startedAt ? ' ' + upFor(h.startedAt) : '') + ' · port ' + location.port;
+  el.title = 'Process ' + h.pid + (h.startedAt ? ', started ' + new Date(h.startedAt).toLocaleString() : '');
+}
+heartbeat(); setInterval(heartbeat, 3000);
 const events = new EventSource('/__events');
 events.onmessage = (e) => {
   const ev = JSON.parse(e.data);
@@ -699,6 +728,7 @@ events.onmessage = (e) => {
     openFiles(listed === ev.from || listed.startsWith(ev.from + '/') ? ev.to + listed.slice(ev.from.length) : listed);
   }
   if (ev.type === 'ended') { ended = true; status('The room has ended. You can close this tab.'); events.close(); box.disabled = true; wbox.disabled = true; }
+  if (ev.type === 'restarting') { restarting = true; status('Restarting the server: this page reloads when the new one answers.'); events.close(); box.disabled = true; wbox.disabled = true; }
 };
 </script></body></html>`;
 
@@ -725,6 +755,12 @@ function readJson(req, limit = 100_000) {
 function handleScreen(req, res, url, dir, screen) {
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
   if (url.pathname === '/__room') { send(200, 'text/html; charset=utf-8', SCREEN); return true; }
+  // The heartbeat: the page and the Dock app ask every few seconds; a new pid means a new process.
+  if (url.pathname === '/__health') {
+    send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, root: dir,
+      startedAt: screen.startedAt ?? null, discussion: screen.room?.active ?? null }));
+    return true;
+  }
   if (url.pathname === '/__files') {
     let files = [];
     try { files = docFiles(dir, screen); } catch {} // no discussions/ yet
