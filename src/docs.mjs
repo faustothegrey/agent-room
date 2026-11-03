@@ -145,7 +145,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #folder { font-family: ui-monospace, monospace; font-size: .75rem; overflow-wrap: anywhere; line-height: 1.35; }
 #disc { font-size: .75rem; color: var(--dim); line-height: 1.35; }
 #disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
-#files h3 { font-size: .9rem; margin: .2rem 0 .6rem; } #files .hint { display: block; margin: 0 0 .8rem; }
+#files .hint { display: block; margin: 0 0 .8rem; }
 #gauges { display: flex; gap: .8rem; align-items: center; font-size: .65rem; color: var(--dim); }
 .gauge { display: grid; grid-template-columns: 2rem 32px 2rem auto; gap: .3rem; align-items: center; line-height: 1.5; }
 .quota { display: grid; grid-template-columns: auto 1fr; gap: .05rem .55rem; align-items: center; border-left: 1px solid var(--line); padding-left: .8rem; }
@@ -197,8 +197,20 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #doc { border: 0; width: 100%; height: 100%; }
 .empty { display: grid; place-items: center; color: var(--dim); height: 100%; padding: 1rem; text-align: center; }
 #files { padding: 1rem; overflow-y: auto; height: 100%; }
-#files button { display: block; width: 100%; text-align: left; margin: 0 0 .3rem; }
-#files .first { display: block; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#files .entry { display: block; width: 100%; text-align: left; margin: 0; padding: .3rem .5rem; border: 0; border-radius: 4px; background: none; font-size: .9rem; }
+#files .entry:hover { background: #8882; }
+#files .entry::before { display: inline-block; width: 1.5em; }
+#files .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.discussion::before { content: '💬'; }
+#files .entry .tag { color: var(--dim); font-size: .8rem; margin-left: .5rem; }
+#files .back { border: 0; background: none; padding: 0; color: var(--dim); font-size: .85rem; margin: 0 0 .4rem; }
+#files .back:hover { color: CanvasText; text-decoration: underline; }
+#files .title { font-size: 1.05rem; font-weight: 600; margin: 0 0 .5rem; }
+#files .status { font-size: .75rem; font-weight: 400; padding: .05rem .45rem; border-radius: 9px; background: #8883; margin-left: .5rem; vertical-align: middle; }
+#files .status.archive { background: #8882; } #files .status.deferred { background: #eab30833; } #files .status.inuse { background: #3b82f633; }
+#files .actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; padding: 0 0 .8rem; border-bottom: 1px solid var(--line); }
+#files .actions .primary { background: #3b82f6; border-color: #3b82f6; color: white; }
+#files .actions .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 .3rem; }
+#files h3 { color: var(--dim); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; margin: .9rem 0 .3rem; }
 #talk, #tab-talk { --accent: #3b82f6; --tint: #3b82f612; }
 #work, #tab-work { --accent: #a855f7; --tint: #a855f712; }
 .tab.on { border-bottom-color: var(--accent); background: var(--tint); }
@@ -405,83 +417,97 @@ async function openFiles(group) {
   const files = await (await fetch('/__files')).json();
   pane.innerHTML = '<div id="files"></div>';
   const list = pane.firstChild;
-  const add = (label, onclick, title) => {
-    const b = document.createElement('button'); b.textContent = label; b.onclick = onclick;
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+  // A row in the list: a discussion, a folder or a file, with an optional grey tag after its name.
+  const entry = (kind, label, onclick, tag, title) => {
+    const b = el('button', 'entry ' + kind, label); b.onclick = onclick;
+    if (tag) b.append(el('span', 'tag', tag));
     if (title) b.title = title;
     list.append(b);
-    return b;
   };
-  const heading = (text) => { const h = document.createElement('h3'); h.textContent = text; list.append(h); };
-  const inUse = (path) => (path === room?.active ? '  (in use)' : '');
+  const heading = (text) => list.append(el('h3', '', text));
+  const inUse = (path) => path === room?.active;
   const discussionsIn = (prefix) => [...new Set(files.filter((f) => f.startsWith(prefix + '/'))
     .map((f) => f.slice(prefix.length + 1)).filter((r) => r.includes('/')).map((r) => r.split('/')[0]))]
     .filter(isDiscussion).sort((a, b) => b.localeCompare(a));
   const canAct = room && !$('composer').hidden;
+  const back = (label, to) => { const b = el('button', 'back', '← ' + label); b.onclick = () => openFiles(to); list.append(b); };
+  const title = (text, status, cls) => { const t = el('div', 'title', text); if (status) t.append(el('span', 'status ' + (cls || ''), status)); list.append(t); };
 
   if (group === 'discussions/archive' || group === 'discussions/deferred') { // archive/ or deferred/: their discussions
     const section = group.split('/')[1];
-    add('← All discussions', () => openFiles(''));
-    heading(section + '/');
+    back('All discussions', '');
+    title(section === 'archive' ? 'Archive' : 'Deferred');
     const found = discussionsIn(group);
-    if (!found.length) { const e = document.createElement('span'); e.className = 'hint'; e.textContent = section === 'archive' ? 'No archived discussions.' : 'No deferred discussions.'; list.append(e); }
-    for (const d of found) add(d, () => openFiles(group + '/' + d));
+    if (!found.length) list.append(el('span', 'hint', section === 'archive' ? 'No archived discussions.' : 'No deferred discussions.'));
+    for (const d of found) entry('discussion', d, () => openFiles(group + '/' + d));
     return;
   }
   if (group) { // a discussion or one of its folders
     const parts = group.split('/');
-    const parent = parts.length > 2 ? parts.slice(0, -1).join('/') : '';
-    add(parent ? '← ' + parts.at(-2) + '/' : '← All discussions', () => openFiles(parent));
-    heading(parts.slice(1).join('/') + inUse(group));
     const disc = discussionOf(parts);
+    const parent = parts.length > 2 ? parts.slice(0, -1).join('/') : '';
+    back(parent ? (SECTIONS[parent.split('/')[1]] && parts.length === 3 ? SECTIONS[parent.split('/')[1]] : parts.at(-2) + '/') : 'All discussions', parent);
+    if (disc) {
+      const status = inUse(group) ? ['in use', 'inuse'] : disc.section ? [disc.section === 'archive' ? 'archived' : 'deferred', disc.section] : ['active', ''];
+      title(parts.at(-1), status[0], status[1]);
+    } else title(parts.slice(1).join('/'));
     if (disc && canAct) {
+      // Actions, apart from the files: Re-open, then moving the whole discussion.
+      const actions = el('div', 'actions');
+      const action = (label, onclick, tip, cls) => { const b = el('button', cls || '', label); b.onclick = onclick; b.title = tip; actions.append(b); return b; };
       // Re-open: not for the discussion in use before anything was said in it (nothing to restart).
-      if (!(group === room.active && !room.started)) {
-        const label = disc.section ? 'Re-open this discussion (makes it active)' : 'Re-open this discussion';
-        const b = add(label, () => {
+      if (!(inUse(group) && !room.started)) {
+        const label = disc.section ? 'Re-open (makes it active)' : 'Re-open';
+        const b = action(label, () => {
           // Once this session has started, re-opening ends it (the chat clears): two clicks, like Quit.
           if (room.started && !b.dataset.armed) {
             b.dataset.armed = '1'; b.textContent = 'Click again: this session ends and the chat clears';
             return setTimeout(() => { delete b.dataset.armed; b.textContent = label; }, 4000);
           }
           send('/reopen ' + disc.ref);
-        }, 'A fresh session in this discussion: the agents start from its handoff. Its documents and transcripts stay.');
+        }, 'A fresh session in this discussion: the agents start from its handoff. Its documents and transcripts stay.', 'primary');
       }
       // Moving the whole discussion; not the one in use (its transcript is open there).
-      if (group !== room.active) {
-        if (disc.section) add('Make active', () => send('/move ' + disc.ref + ' active'), 'Move it back to the active discussions');
-        if (disc.section !== 'archive') add('Archive', () => send('/move ' + disc.ref + ' archive'), 'Move the whole discussion into archive/');
-        if (disc.section !== 'deferred') add('Defer', () => send('/move ' + disc.ref + ' deferred'), 'Move the whole discussion into deferred/');
+      if (!inUse(group)) {
+        if (actions.children.length) actions.append(el('span', 'sep'));
+        if (disc.section) action('Make active', () => send('/move ' + disc.ref + ' active'), 'Move it back to the active discussions');
+        if (disc.section !== 'archive') action('Archive', () => send('/move ' + disc.ref + ' archive'), 'Move the whole discussion into archive/');
+        if (disc.section !== 'deferred') action('Defer', () => send('/move ' + disc.ref + ' deferred'), 'Move the whole discussion into deferred/');
       }
+      if (actions.children.length) list.append(actions);
     }
     const rel = files.filter((f) => f.startsWith(group + '/')).map((f) => f.slice(group.length + 1));
-    for (const d of [...new Set(rel.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))].sort()) {
-      add(d + '/', () => openFiles(group + '/' + d), 'Open this folder');
-    }
-    for (const r of rel.filter((r) => !r.includes('/'))) {
+    const folders = [...new Set(rel.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))].sort();
+    const own = rel.filter((r) => !r.includes('/'));
+    heading('Files');
+    if (!folders.length && !own.length) list.append(el('span', 'hint', 'No files yet.'));
+    for (const d of folders) entry('folder', d + '/', () => openFiles(group + '/' + d), '', 'Open this folder');
+    for (const r of own) {
       const f = group + '/' + r;
-      add(r + (f === doc ? '  (shown)' : '') + (f === room?.transcript ? '  (this session)' : ''), () => post('/__show', { file: f }));
+      entry('file', r, () => post('/__show', { file: f }), f === room?.transcript ? 'this session' : f === doc ? 'shown' : '');
     }
     return;
   }
   // The top: active discussions, the room's own documents, then archive/ and deferred/.
   const discussions = discussionsIn('discussions');
-  const hint = document.createElement('span'); hint.className = 'hint';
-  if (!discussions.length) hint.textContent = room?.started ? '' : 'No active discussions: your first message starts one.';
-  else if (room && !room.started && canAct) hint.textContent = 'Your first message starts a new discussion. To go back to one instead, open it and choose Re-open this discussion.';
-  list.append(hint);
-  for (const d of discussions) add(d + inUse('discussions/' + d), () => openFiles('discussions/' + d));
+  title('Discussions');
+  if (!discussions.length) list.append(el('span', 'hint', room?.started ? '' : 'No active discussions: your first message starts one.'));
+  else if (room && !room.started && canAct) list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, open it and choose Re-open.'));
+  heading('Active');
+  for (const d of discussions) entry('discussion', d, () => openFiles('discussions/' + d), inUse('discussions/' + d) ? 'in use' : '');
   const top = files.filter((f) => f.startsWith('discussions/')).map((f) => f.slice('discussions/'.length));
   const own = [...new Set(top.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))].filter((n) => !isDiscussion(n) && !SECTIONS[n]).sort();
   const loose = top.filter((r) => !r.includes('/'));
   if (own.length || loose.length) {
     heading("This room's own documents");
-    for (const d of own) add(d + '/', () => openFiles('discussions/' + d), 'Open this folder');
-    for (const r of loose) add(r + ('discussions/' + r === doc ? '  (shown)' : ''), () => post('/__show', { file: 'discussions/' + r }));
+    for (const d of own) entry('folder', d + '/', () => openFiles('discussions/' + d), '', 'Open this folder');
+    for (const r of loose) entry('file', r, () => post('/__show', { file: 'discussions/' + r }), 'discussions/' + r === doc ? 'shown' : '');
   }
   heading('Archive and deferred');
   for (const s of Object.keys(SECTIONS)) {
     const n = discussionsIn('discussions/' + s).length;
-    add(s + '/  (' + n + ')', () => openFiles('discussions/' + s), s === 'archive' ? 'Finished discussions' : 'Postponed discussions');
+    entry('folder', s + '/', () => openFiles('discussions/' + s), n + (n === 1 ? ' discussion' : ' discussions'), s === 'archive' ? 'Finished discussions' : 'Postponed discussions');
   }
 }
 // The header: the room's full root path and its active discussion, if one has been selected.
