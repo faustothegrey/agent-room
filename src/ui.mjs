@@ -404,7 +404,9 @@ async function refreshQuota(ctx, quota) {
   quota ??= await ctx.usage.fetchQuota();
   const providers = [...new Set([...ctx.room.agents, ctx.worker].map((a) => a.provider))];
   ctx.screen.quota = quota ? ctx.usage.quotaGauges(quota, providers) : null;
-  toScreen(ctx, { type: 'quota', gauges: ctx.screen.quota });
+  // When the meter measured these values, and when the room last asked it.
+  ctx.screen.quotaAt = { measured: quota?.last_update ?? null, checked: new Date().toISOString() };
+  toScreen(ctx, { type: 'quota', gauges: ctx.screen.quota, at: ctx.screen.quotaAt });
   return quota;
 }
 

@@ -145,7 +145,14 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #folder { font-family: ui-monospace, monospace; font-size: .75rem; overflow-wrap: anywhere; line-height: 1.35; }
 #disc { font-size: .75rem; color: var(--dim); line-height: 1.35; }
 #disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
-#server { font-size: .7rem; color: var(--dim); } #server[data-state="down"] { color: #ef4444; font-weight: 600; }
+#server { font-size: .7rem; color: var(--dim); display: inline-flex; align-items: center; gap: .4rem; }
+#server[data-state="down"] { color: #ef4444; font-weight: 600; }
+#beat { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; flex: none; }
+#server[data-state="up"] #beat { background: #22c55e; } #server[data-state="down"] #beat { background: #ef4444; }
+#beat.on { animation: beat 1.2s ease-out; } /* restarted on every answer, so each pulse is a real heartbeat */
+@keyframes beat { 0% { transform: scale(1.4); box-shadow: 0 0 0 0 #22c55eaa; } 100% { transform: scale(1); box-shadow: 0 0 0 8px #22c55e00; } }
+@media (prefers-reduced-motion: reduce) { #beat.on { animation: none; } }
+#gauges .updated { white-space: nowrap; }
 #files .hint { display: block; margin: 0 0 .8rem; }
 #gauges { display: flex; gap: .8rem; align-items: center; font-size: .65rem; color: var(--dim); }
 .gauge { display: grid; grid-template-columns: 2rem 32px 2rem auto; gap: .3rem; align-items: center; line-height: 1.5; }
@@ -234,7 +241,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .msg.error { border-left-color: #ef4444; }
 .tools { flex-wrap: wrap; }
 </style></head><body>
-<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span><span id="server" data-state="up"></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
+<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span><span id="server"><i id="beat"></i><span id="server-text">Connecting to the server…</span></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
   <div class="view" id="talk">
@@ -624,11 +631,24 @@ wbox.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendWork(wbox.value); wbox.value = ''; }
 });
 // The header's quota gauges: one bar per window (5h, week) for each provider.
-function showQuota(gauges) {
+// at: { measured: the meter's own time for these values, checked: when the room last asked it }.
+const hhmm = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function quotaUpdated(at) {
+  const el = document.createElement('span'); el.className = 'updated';
+  const checked = at?.checked ? new Date(at.checked) : null;
+  // The meter reports local time as "YYYY-MM-DD HH:MM:SS"; a day other than today is shown too.
+  const m = /^(\\d{4}-\\d{2}-\\d{2})[ T](\\d{2}:\\d{2})/.exec(at?.measured ?? '');
+  const today = new Date().toLocaleDateString('sv'); // YYYY-MM-DD
+  el.textContent = m ? 'updated ' + (m[1] === today ? '' : m[1] + ' ') + m[2] : checked ? 'checked ' + hhmm(checked) : '';
+  el.title = (at?.measured ? 'Measured by the quota meter at ' + at.measured + '. ' : '') +
+    (checked ? 'The room last asked the meter at ' + hhmm(checked) + ' (every minute, and after each turn).' : '');
+  return el;
+}
+function showQuota(gauges, at) {
   const box = $('gauges');
   box.textContent = '';
   if (gauges === undefined) return; // not read yet
-  if (gauges === null || !gauges.length) { box.textContent = 'quota meter not reachable'; return; }
+  if (gauges === null || !gauges.length) { box.textContent = 'quota meter not reachable'; box.append(' · ', quotaUpdated({ checked: at?.checked })); return; }
   let provider = null, group = null;
   for (const g of gauges) {
     if (g.provider !== provider) {
@@ -650,6 +670,7 @@ function showQuota(gauges) {
     if (g.resets) el.children[3].textContent = 'resets ' + g.resets.split(' (')[0];
     group.append(el);
   }
+  box.append(quotaUpdated(at));
 }
 $('auto').onchange = async (e) => {
   const res = await post('/__auto', { on: e.target.checked });
@@ -680,17 +701,18 @@ const upFor = (t) => { const m = Math.max(0, Math.floor((Date.now() - Date.parse
 async function heartbeat() {
   let h = null;
   try { h = await (await fetch('/__health', { cache: 'no-store', signal: AbortSignal.timeout(2500) })).json(); } catch {}
-  const el = $('server');
+  const el = $('server'), text = $('server-text'), dot = $('beat');
   if (!h) {
     el.dataset.state = 'down';
-    el.textContent = restarting ? '● Restarting the server…' : ended ? '● Server stopped' : '● Server not responding';
+    text.textContent = restarting ? 'Restarting the server…' : ended ? 'Server stopped' : 'Server not responding';
     el.title = 'Start it again from the Dock app (or npm start): this page reloads when it answers.';
     return;
   }
   if (serverPid && h.pid !== serverPid) return location.reload();
   serverPid = h.pid;
   el.dataset.state = 'up';
-  el.textContent = '● Server up' + (h.startedAt ? ' ' + upFor(h.startedAt) : '') + ' · port ' + location.port;
+  dot.classList.remove('on'); void dot.offsetWidth; dot.classList.add('on'); // one pulse per answer
+  text.textContent = 'Server up' + (h.startedAt ? ' ' + upFor(h.startedAt) : '') + ' · port ' + location.port;
   el.title = 'Process ' + h.pid + (h.startedAt ? ', started ' + new Date(h.startedAt).toLocaleString() : '');
 }
 heartbeat(); setInterval(heartbeat, 3000);
@@ -708,14 +730,14 @@ events.onmessage = (e) => {
     ev.worker.forEach((m) => workMessage(m, false));
     setWorking(ev.working);
     if (!ev.workInput) { $('wcomposer').hidden = true; }
-    showQuota(ev.quota);
+    showQuota(ev.quota, ev.quotaAt);
     $('auto').checked = !!ev.auto;
     if (ev.room) setRoom(ev.room);
     $('newroom').hidden = !ev.newRoom;
   }
   if (ev.type === 'room') setRoom(ev.room);
   if (ev.type === 'work') workMessage(ev.message, true);
-  if (ev.type === 'quota') showQuota(ev.gauges);
+  if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
   if (ev.type === 'auto') $('auto').checked = ev.on;
   if (ev.type === 'working') setWorking(ev.name);
   if (ev.type === 'message') message(ev.message);
@@ -826,7 +848,7 @@ export function resetEvent(screen) {
   return { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc,
     thinking: screen.thinking, status: screen.status, input: !!screen.say,
     room: screen.room ?? null, worker: screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work,
-    auto: screen.auto ?? false, quota: screen.quota, newRoom: !!screen.newRoom };
+    auto: screen.auto ?? false, quota: screen.quota, quotaAt: screen.quotaAt ?? null, newRoom: !!screen.newRoom };
 }
 
 export function handle(req, res, dir, screen) {

@@ -58,7 +58,8 @@ subscription usage, and **New room in folder…**. Agent settings live inside th
 - **Quit:** click twice to end the room. Discussion commands, including Quit, Restart and Reload,
   wait behind an ongoing round and its automatic summary; they are not immediate cancellation.
 - **Server status:** under the root folder, the header shows whether the server is up, for how
-  long and on which port (hover for its process). The page asks every three seconds; it says when
+  long and on which port (hover for its process). Its dot pulses green on each answer and turns
+  red when the server stops. The page asks every three seconds; it says when
   the server stops answering, and reloads when a server answers again on that address.
 
 In this project (the agent-room room itself), its design history is five discussions, each with
@@ -168,7 +169,7 @@ toggles it. This setting survives Reload but is not stored as a default across l
 **Usage**, or `/usage`, reports session token totals for discussion agents and the worker.
 Claude's reported dollar value is an API-price equivalent, not your subscription bill.
 Header gauges show **percent used**, for each provider's five-hour and weekly windows, plus
-reset times. Yellow means under 30% remains; red means under 10% remains.
+reset times, and when the meter last measured them (hover for when the room last asked). Yellow means under 30% remains; red means under 10% remains.
 
 Quotas come from the optional local meter at `http://127.0.0.1:9899` (override with
 `AGENT_ROOM_METER`). They refresh every minute and after turns. If the meter is unavailable,
