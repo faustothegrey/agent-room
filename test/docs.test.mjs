@@ -292,6 +292,12 @@ test('agent settings endpoint reads choices and protects saves with the same-ori
     // Check the inline browser program parses as JavaScript, rather than only the server module.
     const html = await (await s.get('/__room')).text();
     new Function(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
+    // Over plain HTTP from another machine the browser has no crypto.randomUUID: the page still gets a client id.
+    const idLine = html.match(/const viewClient = (.*);/)[1];
+    const insecure = { getRandomValues: (a) => globalThis.crypto.getRandomValues(a) };
+    const ids = [0, 1].map(() => new Function('crypto', `return ${idLine};`)(insecure));
+    assert.match(ids[0], /^[0-9a-f]{32}$/);
+    assert.notEqual(ids[0], ids[1]);
   } finally { s.close(); }
 });
 

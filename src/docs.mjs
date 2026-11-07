@@ -312,7 +312,8 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 const $ = (id) => document.getElementById(id);
 const pane = $('pane'), box = $('box'), wbox = $('wbox');
 let replica = null, viewing = null, localMessages = [], localInput = true, localThinking = null, localWorking = null, viewExpired = false, viewNotice = null;
-const viewClient = crypto.randomUUID();
+// crypto.randomUUID exists only in secure contexts (HTTPS or localhost); over plain HTTP from another machine, use random bytes.
+const viewClient = crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 let ended = false, doc = null, tab = 'talk', page = null;
 // Refreshing the page keeps what was being typed in the two message boxes.
 function refreshPage() {
