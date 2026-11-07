@@ -4,7 +4,7 @@ A human and several AI agents discuss and revise ideas around a shared document 
 with the conversation and its subject visible together. Agents run through your installed
 Claude Code and Codex CLIs, using their existing authentication and subscriptions.
 
-The project stays deliberately small: six source modules and one dependency, `marked`.
+The project stays deliberately small: seven source modules and one dependency, `marked`.
 Its longer-term purpose is to help build educational maths and science software through
 conversation, with running costs under control.
 
@@ -267,6 +267,38 @@ The script checks for `node`, `claude` and `codex` through a login shell with Ho
 If a process the app started fails to start or ends with an error, an alert shows the log's tail. Discussion transcripts remain in their
 own folders.
 
+## Replicate discussions between nodes
+
+Start each room with a stable node name and the other room's address, for example:
+
+```sh
+node src/cli.mjs --node Mac --peer Pi=http://192.168.1.21:5566
+node src/cli.mjs --node Pi --peer Mac=http://192.168.1.20:5566
+```
+
+In **Peers**, choose **Pair with …**, check both root folders, and confirm. A different
+established room ID is refused. Node names are kept in storage and cannot be changed there.
+With `--peer`, an occupied port stops startup; without peers the usual free-port fallback applies.
+Without `--node` or `--peer`, no replication module or storage is loaded.
+
+Each round (after its automatic summary), and each manual summary, saves a commit to separate
+Git storage in `<root>/.agent-room/`. Source files and the project's Git index are not replicated.
+Transcripts are included even if the project's ignore rules exclude them. Failed rounds are
+labelled as failed. A saving error leaves discussion files in place. Sending runs in the
+background; unreachable peers retry with a delay capped at five minutes, including after restart.
+
+Received lines appear in **Discussions**. **View** opens their conversation and files read-only,
+without starting or stopping agents. **Back to <node>'s line** returns to the local conversation when that discussion has a local line.
+The bottom read-only bar retains Usage, Restart and Quit; node lines are grouped under each
+discussion, with Peers at the bottom of the Discussions pane.
+New received rounds do not change an open View. Each browser pins its selected snapshot;
+Back releases it, and closing/reloading the page releases it after two minutes without renewal.
+Keep the page connected while reading: a suspended or disconnected page must select View again
+when its lease expires. The latest snapshot and all open, leased Views are kept; older snapshot
+folders are deleted while their commits remain in Git. No Continue here, reconciliation or Fork
+is available in this slice. Replication has been tested locally; LAN and Raspberry Pi validation
+remain separate deployment checks.
+
 ## The worker's worktree
 
 The worker never edits the room's own files. It works in its own Git worktree of the room's
@@ -301,8 +333,9 @@ look-and-click Chrome tools, with no Bash. A Claude worker additionally gets pre
 Claude uses strict MCP configuration rather than your claude.ai connectors. Codex discussion
 agents and workers run without a sandbox and with live web search configured.
 
-The server listens only on `127.0.0.1`. Browser input endpoints require the room's own origin
-when supplied and JSON requests. There is no remote-access interface, crash recovery,
+The server listens on `0.0.0.0`: devices on the LAN can open its printed IP address and
+send instructions to local agents. This version has no authentication; use it on a trusted LAN. Browser input endpoints require the room's own origin
+when supplied and JSON requests. There is no remote stop, agent-session crash recovery,
 streaming reply display, live app preview, or automatic discussion-to-worker handoff.
 
 ## Working on the project
@@ -318,6 +351,7 @@ agent-room's source.
 | `src/room.mjs` | Discussion turns, unseen messages, passes and summary agreement. |
 | `src/ui.mjs` | Room setup, persistent defaults, commands, discussions, worker queue, logging and launch integration. |
 | `src/docs.mjs` | Local HTTP server handlers, document rendering, browser UI and live events. |
+| `src/replicate.mjs` | Separate discussion Git storage, pairing, background transfer and immutable received snapshots. |
 | `src/usage.mjs` | Token accounting and optional quota-meter data. |
 
 Run `npm test`. Tests exercise provider arguments with fake runners, round logic, HTTP endpoints,

@@ -6,13 +6,14 @@
 // sessions, the transcript path and the viewer server.
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { createServer as createNetServer } from 'node:net';
+import { createConnection, createServer as createNetServer } from 'node:net';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--port 5566] [--no-screen] [--open] [--reopen NAME] [--dev]
+                  [--node NAME [--peer NAME=http://ADDRESS:PORT ...]]
 
 Each agent is provider[:name[:model]], e.g. --agents claude:Ada:opus,codex:Linus
 Without saved defaults: discussion claude,codex; worker claude:Worker.
@@ -32,7 +33,11 @@ and /docs opens each file alone in the browser.
 --dev (part of npm start, which the Dock app runs too): saving a source module or a rulebook
 reloads it by itself, as /reload does; open pages refresh when their own code changed. cli.mjs
 changes still need /restart. Without --dev (node src/cli.mjs), only /reload does.
---port: the screen's port on 127.0.0.1 (default 5566); if it is taken, any free port is used.
+--port: the screen's port (default 5566), on every address of this machine, so other devices on
+the LAN can open it too; if it is taken, any free port is used (with --peer, the room stops instead).
+--node NAME: replicate this room's discussions under this node name: each round is saved as a Git
+commit in <root>/.agent-room/ (not the project's repository). --peer NAME=http://ADDRESS:PORT
+(repeatable): another node's room, to pair with once (Discussions → Peers) and send rounds to.
 The --cwd folder is the room's root. Opening it writes nothing: the first message starts a new
 discussion in DIR/discussions/<date>-<title>/ (its documents, drawings and transcripts/), unless
 /reopen <name> (or --reopen <name> at launch) picked an existing one first.
@@ -124,6 +129,8 @@ export async function load(ctx, v) {
   const { createRoom } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
   const usage = await import(`./usage.mjs${v}`);
+  // Replication is loaded only with --node.
+  const replicate = ctx.node ? await import(`./replicate.mjs${v}`) : null;
   const agents = ctx.agentSpecs.split(',').map((spec) => {
     const { provider, name, model } = parseSpec(spec);
     if (!ctx.sessions.has(name)) ctx.sessions.set(name, {});
@@ -140,7 +147,7 @@ export async function load(ctx, v) {
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
   // ctx so they survive a reload.
   const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: [], working: null };
-  return { room: createRoom(agents, ctx.state), worker, docs, usage, totals: ctx.totals ?? {}, screen, suggestTitle: claudeTitle };
+  return { room: createRoom(agents, ctx.state), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, suggestTitle: claudeTitle };
 }
 
 const tty = process.stdout.isTTY;
@@ -162,6 +169,7 @@ function wire(ctx) {
   ctx.screen.room = header(ctx);
   ctx.screen.sections = ['discussions'];
   ctx.screen.auto = autoOn(ctx);
+  if (ctx.replica) wireReplica(ctx); // its peer endpoint works in terminal mode too
   if (ctx.noScreen) return;
   ctx.screen.work = (text) => queueWork(ctx, text);
   // The screen's checkbox: applied at once, not queued behind a round, so it can stop the next summary.
@@ -470,12 +478,15 @@ export async function start(ctx) {
   ctx.screen.startedAt = ctx.openedAt.toISOString(); // the page's and the Dock app's heartbeat show it
   console.log(`Room: ${describe(ctx.room)} · worker ${ctx.worker.name} (${ctx.worker.provider}) · root ${ctx.cwd}`);
   console.log(`Transcript: in ${join(ctx.cwd, 'discussions')}/, once the first message starts a discussion`);
+  // With --node: the server first (with --peer its port must be the configured one), then the storage.
+  if (ctx.node) { await viewerUrl(ctx); await setupReplica(ctx); }
   wire(ctx);
   // Calls through ctx, so after a reload it runs the new code.
   ctx.quotaTimer ??= setInterval(() => ctx.refreshQuota?.(), 60_000).unref();
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   ctx.refreshQuota();
   ctx.code = { ...await codeInfo(), startedAt: ctx.screen.startedAt };
+  if (ctx.replica) { ctx.project = await codeInfo(ctx.cwd); await pushReplica(ctx); }
   showHeader(ctx);
   refreshWorker(ctx).catch(() => {}); // the Worker tab's line; creates nothing
   if (ctx.noScreen) {
@@ -484,6 +495,7 @@ export async function start(ctx) {
   ctx.screen.say = (line) => ctx.say(line);
   const screenUrl = `${await viewerUrl(ctx)}__room`;
   console.log(`Discussion screen: ${screenUrl}${tty || ctx.open ? ' (opening it in your browser)' : ''}`);
+  if (!ctx.node) for (const address of lanAddresses()) console.log(`  LAN: http://${address}:${ctx.server.address().port}/__room`);
   console.log('Use the room from the browser. This terminal only shows a log; Quit there, or Ctrl-C here, ends the room.\n');
   if (ctx.open) {
     await new Promise((done, fail) => execFile('open', [screenUrl], (err) => err ? fail(err) : done()));
@@ -498,7 +510,8 @@ export function note(ctx, text, error = false) {
   toScreen(ctx, { type: 'note', text, error });
 }
 
-export function reloaded(ctx) {
+export async function reloaded(ctx) {
+  if (ctx.node) await setupReplica(ctx).catch((err) => note(ctx, `✗ Replication: ${err.message}`, true));
   wire(ctx);
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   log(ctx, '_(code reloaded)_\n\n');
@@ -510,11 +523,13 @@ export function reloaded(ctx) {
     if (ctx.code) ctx.code.reloaded = { at, commit, dirty };
     showHeader(ctx);
   }).catch(() => {});
+  if (ctx.replica) codeInfo(ctx.cwd).then((p) => { ctx.project = p; pushReplica(ctx); }).catch(() => {});
 }
 
 // The room is over (after /quit): screens say so and stop reconnecting. After /restart they wait
 // for the new process instead, and reload when it answers.
 export function ended(ctx, restarting = false) {
+  if (ctx.replica) ctx.replicate.stopPeers(ctx.replica);
   return ctx.docs.endAll(ctx.screen, { type: restarting ? 'restarting' : 'ended' });
 }
 
@@ -527,6 +542,8 @@ export function restartArgs(ctx, values) {
   if (values.agents) args.push('--agents', values.agents);
   if (values.worker) args.push('--worker', values.worker);
   if (values.dev) args.push('--dev');
+  if (values.node) args.push('--node', values.node);
+  for (const p of values.peer ?? []) args.push('--peer', p);
   if (ctx.discussion) args.push('--reopen', ctx.discussion.name);
   return args;
 }
@@ -545,7 +562,12 @@ export async function handleLine(line, ctx) {
   if (line === '/new') return newDiscussion(ctx);
   const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
   if (move) return void moveDiscussion(ctx, move[1], move[2]);
-  if (line === '/summary') { ctx.agentsStarted = true; return runSummary(ctx); }
+  if (line === '/summary') {
+    ctx.agentsStarted = true;
+    const status = await runSummary(ctx);
+    if (status !== 'empty') await saveRound(ctx, { kind: 'summary', outcome: status === 'failed' ? 'failed' : 'completed', ending: `summary ${status}`, summary: status });
+    return;
+  }
   if (line === '/restart') return note(ctx, '/restart is for the browser screen; in the terminal, /quit and start the room again.');
   const auto = /^\/autosummary(?:\s+(on|off))?$/.exec(line);
   if (auto) return setAuto(ctx, auto[1] ? auto[1] === 'on' : !autoOn(ctx));
@@ -592,6 +614,7 @@ async function runSummary(ctx, auto = false) {
   let turns = 0;
   let used;
   log(ctx, auto ? '_(auto-summary)_\n\n' : '_(summary requested)_\n\n');
+  ctx.busy = true;
   const { status, result } = await ctx.room.summary({
     onTurnStart(agent, { turn, of }) {
       started = Date.now();
@@ -611,7 +634,7 @@ async function runSummary(ctx, auto = false) {
       }
       if (m.error) note(ctx, `✗ ${m.speaker} failed: ${m.text}`, true);
     },
-  });
+  }).finally(() => { ctx.busy = false; });
   if (result) {
     const label = result.outcome === 'agreed' ? `agreed, by ${result.by}` : `not agreed: the last version, by ${result.by}`;
     log(ctx, `**Summary** — ${label}\n\n${result.text}\n\n`);
@@ -625,6 +648,7 @@ async function runSummary(ctx, auto = false) {
   refreshQuota(ctx).catch(() => {});
   console.log(dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
   toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
+  return status;
 }
 
 async function runRound(line, ctx) {
@@ -635,6 +659,7 @@ async function runRound(line, ctx) {
   let roundUsage;
   let spoke = 0; // agent replies that weren't passes or failures
   try {
+    ctx.busy = true;
     await ctx.room.round(line, {
       onTurnStart(agent) {
         started = Date.now();
@@ -665,7 +690,7 @@ async function runRound(line, ctx) {
         toScreen(ctx, { type: 'turn', text });
         ending = 'turn cap reached';
       },
-    });
+    }).finally(() => { ctx.busy = false; });
     const secs = Math.round((Date.now() - roundStart) / 1000);
     const providers = [...new Set(ctx.room.agents.map((a) => a.provider))];
     const quota = ctx.usage.quotaSummary(await refreshQuota(ctx).catch(() => null), providers);
@@ -675,11 +700,14 @@ async function runRound(line, ctx) {
     if (autoOn(ctx) && spoke && !ending.endsWith('failed')) {
       console.log(dim(`── round over · ${parts.filter(Boolean).join(' · ')} · summarizing ──`));
       toScreen(ctx, { type: 'note', text: `round over · ${parts.filter(Boolean).join(' · ')} · summarizing` });
-      return runSummary(ctx, true);
+      const summary = await runSummary(ctx, true);
+      return await saveRound(ctx, { kind: 'round', outcome: summary === 'failed' ? 'failed' : 'completed', ending, summary });
     }
     console.log(dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
     toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
+    await saveRound(ctx, { kind: 'round', outcome: ending.endsWith('failed') ? 'failed' : 'completed', ending, summary: null });
   } catch (err) {
+    if (ctx.replica && ctx.state.transcript.at(-1)?.error) await saveRound(ctx, { kind: 'round', outcome: 'interrupted', ending: err.message, summary: null });
     // An unknown @name: nothing was sent or recorded.
     note(ctx, `✗ ${err.message}`, true);
   }
@@ -747,7 +775,7 @@ async function ignoreNotes(place) {
 // the commit it's based on, and uncommitted changes (the room's outside discussions/, the worktree's).
 export async function worktreeStatus(place) {
   const head = await git(place.top, 'rev-parse', 'HEAD');
-  const roomDirty = (await git(place.root, 'status', '--porcelain', '--', '.', ':(exclude)discussions')) !== '';
+  const roomDirty = (await git(place.root, 'status', '--porcelain', '--', '.', ':(exclude)discussions', ':(exclude).agent-room')) !== '';
   const exists = existsSync(place.path) && (await worktrees(place.top)).some((w) => w.path === place.path && w.branch === WORKER_BRANCH);
   if (!exists) return { exists, head, roomDirty };
   const count = async (range) => Number(await git(place.top, 'rev-list', '--count', range));
@@ -785,7 +813,7 @@ export async function codeInfo(dir = dirname(dirname(fileURLToPath(import.meta.u
   try {
     const top = await git(dir, 'rev-parse', '--show-toplevel');
     const [branch, commit, status] = await Promise.all([git(top, 'rev-parse', '--abbrev-ref', 'HEAD'), git(top, 'rev-parse', '--short', 'HEAD'),
-      git(top, 'status', '--porcelain', '--', '.', ':(exclude)discussions')]);
+      git(top, 'status', '--porcelain', '--', '.', ':(exclude)discussions', ':(exclude).agent-room')]);
     return { path: top, branch: branch === 'HEAD' ? null : branch, commit, dirty: status !== '' };
   } catch { return { path: dir, branch: null, commit: null, dirty: false }; }
 }
@@ -907,22 +935,34 @@ async function viewerUrl(ctx) {
     });
     ctx.server.on('connection', (socket) => socket.unref());
     // The fixed port gives the screen the same address every time; if another room (or anything
-    // else) has it, any free port will do, and the banner shows which.
+    // else) has it, any free port will do, and the banner shows which. With --peer the room stops
+    // instead: its peers know it by that port. It listens on every address (the LAN too).
     const listen = (port) => new Promise((ok, fail) => {
       ctx.server.once('error', fail);
-      ctx.server.listen(port, '127.0.0.1', () => { ctx.server.off('error', fail); ok(); });
+      ctx.server.listen(port, '0.0.0.0', () => { ctx.server.off('error', fail); ok(); });
     });
+    const port = ctx.port ?? 5566;
     try {
-      await listen(ctx.port ?? 5566);
+      // On macOS a listener on 127.0.0.1 alone doesn't stop one on 0.0.0.0 (measured), and would
+      // keep answering 127.0.0.1: so the port counts as taken when something answers there.
+      if (port && await answers(port)) throw Object.assign(new Error('in use'), { code: 'EADDRINUSE' });
+      await listen(port);
     } catch (err) {
       if (err.code !== 'EADDRINUSE') throw err;
-      console.log(dim(`Port ${ctx.port ?? 5566} is in use; using a free port instead.`));
+      if (ctx.peers?.length) throw new Error(`Port ${port} is in use. With --peer this room must listen on its configured port, where its peers reach it: stop whatever uses ${port}, or choose another --port (and tell the peers).`);
+      console.log(dim(`Port ${port} is in use; using a free port instead.`));
       await listen(0);
     }
     if (ctx.noScreen) ctx.server.unref();
   }
   return `http://127.0.0.1:${ctx.server.address().port}/`;
 }
+
+const answers = (port) => new Promise((ok) => {
+  const c = createConnection(port, '127.0.0.1');
+  c.once('connect', () => { c.destroy(); ok(true); });
+  c.once('error', () => ok(false));
+});
 
 // /docs. UI mode: the screen opens its own file list. Terminal mode: a list in the terminal, where
 // Enter opens the file alone in the browser.
@@ -941,4 +981,143 @@ async function showDocs(ctx) {
   } finally {
     for (const l of readlineKeys) process.stdin.on('keypress', l);
   }
+}
+
+// ── Replication (with --node; see replicate.mjs) ─────────────────────
+// This node's IPv4 addresses on the LAN, for the banner and the header.
+export const lanAddresses = () => Object.values(networkInterfaces()).flat().filter((i) => i.family === 'IPv4' && !i.internal).map((i) => i.address);
+
+// Opens the storage (recovering an interrupted receive) and starts one background loop per peer,
+// once per process: on Reload only the code changes (its state stays in ctx.replicaState).
+async function setupReplica(ctx) {
+  const R = ctx.replicate, first = !ctx.replicaState?.s;
+  ctx.replicaState ??= {};
+  const r = ctx.replica = await R.createReplica({ root: ctx.cwd, node: ctx.node, peers: ctx.peers, state: ctx.replicaState,
+    activity: () => (ctx.busy ? 'running a round' : 'idle'), project: () => ctx.project ?? null, log: (t) => console.log(red(t)) });
+  r.changed = () => pushReplica(ctx);
+  r.onReceived = (p) => { note(ctx, `Received ${p.node}'s ${p.kind} ${p.round} of "${p.title}".`); pushReplica(ctx); };
+  r.onSent = (x) => { if (x.late) R.lineRound(r.s, x.acked).then((n) => note(ctx, `Round ${n} sent to ${x.peer} ✓`), () => {}); };
+  if (!first) return;
+  const port = ctx.server.address().port, rec = r.s.recovered;
+  console.log(`agent-room on ${ctx.node}, listening on 0.0.0.0:${port} · ${r.git ?? 'git not found'}`);
+  for (const a of lanAddresses()) console.log(`  open:  http://${a}:${port}/__room`);
+  console.log(`  peers: ${ctx.peers.length ? ctx.peers.map((p) => `${p.name} ${p.url.replace(/^http:\/\//, '')}`).join(', ') : 'none'}`);
+  if (rec.tmp + rec.snapshots + rec.incomingRefs + rec.refRepaired) console.log(`  recovered an interrupted receive: ${JSON.stringify(rec)}`);
+  R.startPeers(r);
+}
+
+function wireReplica(ctx) {
+  const R = ctx.replicate, r = ctx.replica;
+  Object.assign(ctx.screen, {
+    replicaHandler: (req, res) => R.handle(r, req, res),
+    receivedFile: (d, n, c, rel) => R.snapshotFile(r.s, d, n, c, rel),
+    receivedFiles: (d, n, c) => { const dir = R.snapshotPath(r.s, d, n, c); return dir && existsSync(dir) ? ctx.docs.listFiles(dir).map((f) => f.split(sep).join('/')) : []; },
+    view: (body) => {
+      const task = (ctx.viewQueue ?? Promise.resolve()).then(() => viewLine(ctx, body));
+      ctx.viewQueue = task.catch(() => {});
+      return task;
+    },
+    isViewing: (client) => ctx.viewPins?.has(client),
+    pair: (peer, confirm) => pairWith(ctx, peer, confirm),
+  });
+  pushReplica(ctx);
+}
+
+// The page's view of replication: this node, its lines and what each peer has, the received lines,
+// and the peers (reachable, paired). Peer reachability changes are logged in the terminal too.
+async function replicaStatus(ctx) {
+  const R = ctx.replicate, r = ctx.replica, s = r.s, room = await R.roomInfo(s);
+  const names = Object.fromEntries(Object.entries(await R.discussionIds(s)).map(([name, id]) => [id, name]));
+  const own = {};
+  for (const [d, { commit }] of Object.entries(await R.ownLines(s))) {
+    const sent = {};
+    for (const p of ctx.peers) if (room.paired[p.name]) sent[p.name] = (await R.acked(s, p.name, d)) === commit;
+    own[names[d] ?? d] = { discussion: d, round: await R.lineRound(s, commit), sent };
+  }
+  const received = (await R.receivedLines(s)).map((l) => ({ ...l, local: names[l.discussion] ?? null }));
+  const peers = ctx.peers.map((p) => {
+    const st = r.state.peers[p.name] ?? {};
+    return { name: p.name, address: p.url.replace(/^http:\/\//, ''), reachable: st.reachable ?? null, since: st.since ?? null, activity: st.activity ?? null, project: st.project ?? null,
+      paired: !!room.paired[p.name], mismatch: !!(room.paired[p.name] && st.roomId && st.roomId !== room.roomId), error: st.error ?? null };
+  });
+  const port = ctx.server?.address()?.port;
+  return { node: ctx.node, addresses: lanAddresses().map((a) => `${a}:${port}`), roomId: room.roomId, project: ctx.project ?? null, own, received, peers };
+}
+async function pushReplica(ctx) {
+  if (!ctx.replica) return;
+  try {
+    const status = await replicaStatus(ctx), before = ctx.screen.replica?.peers ?? [];
+    for (const p of status.peers) {
+      const was = before.find((b) => b.name === p.name);
+      if (p.reachable !== null && was?.reachable !== p.reachable) console.log(dim(`Peer ${p.name}: ${p.reachable ? `reachable${p.paired ? ', paired' : ', not paired yet'}` : `unreachable (${p.error})`}`));
+    }
+    ctx.screen.replica = status;
+    toScreen(ctx, { type: 'replica', replica: status });
+  } catch (err) { console.log(red(`✗ replication status: ${err.message}`)); }
+}
+
+// End of a round (after its summary) or of a manual summary: one commit on this node's line, then
+// sent to the paired peers in the background. The conversation never waits for a peer.
+async function saveRound(ctx, { kind, outcome, ending, summary }) {
+  if (!ctx.replica || !ctx.discussion || !ctx.logPath) return;
+  const R = ctx.replicate, r = ctx.replica, label = kind === 'summary' ? 'Summary' : 'Round';
+  let c;
+  try {
+    const conversation = ctx.state.transcript.map(({ speaker, text, error, pass, summary: turn, outcome: o, by }) =>
+      ({ speaker, text: String(text ?? ''), ...(error && { error }), ...(pass && { pass }), ...(turn && { summary: true }), ...(o && { outcome: o, by }) }));
+    c = await R.capture(r.s, ctx.discussion, { kind, outcome, ending, summary, agents: currentSettings(ctx).agents, conversation });
+  } catch (err) {
+    return note(ctx, `✗ Could not save ${label.toLowerCase()}: ${err.message}. The discussion's files are as they were; nothing was sent.`, true);
+  }
+  const head = `${label} ${c.round} saved${outcome !== 'completed' ? ` as ${outcome} (error: ${ending})` : ''}${c.skipped.length ? ` (left out: ${c.skipped.join(', ')})` : ''}`;
+  pushReplica(ctx);
+  R.sendNow(r, c.discussion, c.commit).then((sent) => {
+    note(ctx, [head, ...sent.map((x) => (x.sent ? `sent to ${x.peer} ✓` : x.reachable ? `${x.peer} refused it (${x.error})` : `${x.peer} unreachable, will send when it's back`))].join(' · '));
+    pushReplica(ctx);
+  }, (err) => note(ctx, `${head} · ✗ sending: ${err.message}`, true));
+}
+
+// View (from the page): pins the received line's published snapshot for every page until Back, so
+// newer rounds can arrive meanwhile without changing what is shown. Never touches the local round,
+// the agents or the worker. { discussion, node } (or again, for the newer round), or { back: true }.
+async function viewLine(ctx, body) {
+  const R = ctx.replicate, s = ctx.replica.s, client = body?.client;
+  if (typeof client !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(client)) throw new Error('Missing View client.');
+  ctx.viewPins ??= new Map();
+  const was = ctx.viewPins.get(client);
+  if (was) clearTimeout(was.timer);
+  const release = async () => {
+    const pin = ctx.viewPins.get(client);
+    ctx.viewPins.delete(client);
+    if (pin) await R.unpin(s, pin.discussion, pin.node, pin.commit);
+  };
+  if (body.renew) {
+    if (!was) throw new Error('View expired. Select the line again.');
+    was.timer = setTimeout(release, 120000).unref();
+    return { viewing: true };
+  }
+  let next = null;
+  if (!body.back) {
+    const v = await R.pin(s, body.discussion, body.node);
+    if (!v) throw new Error('No such received line.');
+    const { conversation, ...rest } = v;
+    next = { ...rest, messages: conversation.map(ctx.docs.messageView) };
+  }
+  await release();
+  if (next) ctx.viewPins.set(client, { ...next, timer: setTimeout(release, 120000).unref() });
+  return { viewing: next };
+}
+
+// Pair with … (from the page): first the check, showing both rooms' folders; then, confirmed, the pairing.
+async function pairWith(ctx, peer, confirm) {
+  const R = ctx.replicate, r = ctx.replica;
+  if (!ctx.peers.some((p) => p.name === peer)) throw new Error(`No peer ${peer}.`);
+  if (!confirm) {
+    const room = await R.roomInfo(r.s);
+    return { local: { node: ctx.node, root: ctx.cwd, roomId: room.roomId }, peer: await R.peerStatus(r, peer) };
+  }
+  const result = await R.pair(r, peer);
+  note(ctx, `Paired with ${peer} (${result.peer.root}). Its rounds will arrive here, and this room's rounds will be sent there.`);
+  pushReplica(ctx);
+  return result;
 }

@@ -12,10 +12,13 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import * as R from './replica.mjs';
+import * as R from './helpers/replication.mjs';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const args = process.argv.slice(2);
+const args = [];
+test('replication protocol: B0 scenarios, immutable publication and recovery', async () => {
 const KEEP = args.includes('--keep');
 const MEASURE = args.includes('--measure') ? args[args.indexOf('--measure') + 1] : null;
 
@@ -34,7 +37,7 @@ const section = (t) => console.log(`\n── ${t}`);
 const kb = (b) => `${b} B (${(b / 1024).toFixed(1)} KiB)`;
 const measurements = [];
 let callsSeen = 0; // Git processes since the previous measurement (capture + send + receive)
-const measure = (label, r) => { const calls = R.gitCalls - callsSeen; callsSeen = R.gitCalls; measurements.push({ label, kind: r.kind, bytes: r.bytes, ms: Math.round(r.ms), calls }); console.log(`  · ${label}: ${r.kind}, ${kb(r.bytes)}, ${r.ms.toFixed(0)} ms`); };
+const measure = (label, r) => { const calls = R.gitStats.runs - callsSeen; callsSeen = R.gitStats.runs; measurements.push({ label, kind: r.kind, bytes: r.bytes, ms: Math.round(r.ms), calls }); console.log(`  · ${label}: ${r.kind}, ${kb(r.bytes)}, ${r.ms.toFixed(0)} ms`); };
 
 // ── Fixtures: generated, deterministic ───────────────────────────────────
 const words = 'round agent drawing note summary worker charon mac bundle commit snapshot line peer view'.split(' ');
@@ -89,7 +92,7 @@ async function receiverState(n) {
 const offerFor = (commit, base, over = {}) => ({ protocol: R.PROTOCOL, room: ROOM, discussion: D, node: A_ID, commit, base, ...over });
 function rawPost(url, offer, body, { cutAfter, length = body.length } = {}) { // a hand-made request: for interruption and rejection checks
   return new Promise((ok) => {
-    const req = http.request(`${url}/bundle`, { method: 'POST', headers: { ...R.offerHeader(offer), 'content-length': length } }, (res) => {
+    const req = http.request(`${url}/replica/bundle`, { method: 'POST', headers: { ...R.offerHeader(offer), 'content-type': R.BUNDLE_TYPE, 'content-length': length } }, (res) => {
       const c = []; res.on('data', (x) => c.push(x)); res.on('end', () => ok({ status: res.statusCode, ...JSON.parse(Buffer.concat(c).toString()) }));
     });
     req.on('error', (e) => ok({ clientError: e.code ?? e.message }));
@@ -98,7 +101,7 @@ function rawPost(url, offer, body, { cutAfter, length = body.length } = {}) { //
   });
 }
 async function postJson(url, path, obj) {
-  const r = await fetch(`${url}${path}`, { method: 'POST', body: JSON.stringify(obj), headers: { 'content-type': 'application/json' } });
+  const r = await fetch(`${url}/replica${path}`, { method: 'POST', body: JSON.stringify(obj), headers: { 'content-type': 'application/json' } });
   return { status: r.status, ...(await r.json()) };
 }
 
@@ -117,7 +120,7 @@ const folder = join(root, 'node-1', 'discussion');
 await fs.mkdir(folder);
 let server = await R.serve(B);
 let round = 0;
-const nextRound = async (change = typicalRound(round + 1), outcome) => { await change(folder); round++; callsSeen = R.gitCalls; return R.capture(A, D, folder, { round, outcome }); };
+const nextRound = async (change = typicalRound(round + 1), outcome) => { await change(folder); round++; callsSeen = R.gitStats.runs; return R.capture(A, D, folder, { round, outcome }); };
 const send = () => R.send(A, B_ID, server.url, D);
 const restartB = async () => { await new Promise((ok) => server.close(ok)); B = await R.openNode(B.dir, { room: ROOM, node: B_ID, peers: [A_ID] }); server = await R.serve(B); return B.recovered; };
 const snap = (commit) => join(B.dir, 'received', D, A_ID, 'snapshots', commit);
@@ -134,7 +137,7 @@ try {
     check(`round ${r}: published snapshot = offered commit, file by file (paths and bytes)`, { files: (await R.listTree(A.store, commit)).length, differing: [] }, await sameAsCommit(await R.snapshotDir(B, D, A_ID), A.store, commit));
     digests[commit] = await digest(snap(commit));
   }
-  const [c1, c2, c3, c4] = JSON.parse(await fs.readFile(join(B.dir, 'received', D, A_ID, 'published.json'), 'utf8')).history;
+  const [c1, c2, c3, c4] = (await R.readPointer(B, D, A_ID)).history;
   check('round 2 added drawings/b.svg; round 3 deleted drawings/a.svg (in the snapshots)', { r1: [true, false], r2: [true, true], r3: [false, true] }, {
     r1: [await exists(join(snap(c1), 'drawings/a.svg')), await exists(join(snap(c1), 'drawings/b.svg'))],
     r2: [await exists(join(snap(c2), 'drawings/a.svg')), await exists(join(snap(c2), 'drawings/b.svg'))],
@@ -145,7 +148,7 @@ try {
   check('earlier snapshots unchanged after later publications (content digests)', [c1, c2, c3].map((c) => digests[c]), await Promise.all([c1, c2, c3].map((c) => digest(snap(c)))));
   const mode = (await fs.stat(join(snap(c1), 'notes.md'))).mode & 0o777, dmode = (await fs.stat(join(snap(c1), 'drawings'))).mode & 0o777;
   check('snapshots are read-only (file mode, folder mode)', ['444', '555'], [mode.toString(8), dmode.toString(8)]);
-  check('round metadata of round 4', { schema: 1, room: ROOM, discussion: D, node: A_ID, round: 4, outcome: 'interrupted' }, JSON.parse(await fs.readFile(join(snap(c4), R.META), 'utf8')));
+  check('round metadata of round 4', { schema: 1, room: ROOM, discussion: D, node: A_ID, round: 4, outcome: 'interrupted' }, ((m) => Object.fromEntries(['schema','room','discussion','node','round','outcome'].map((k) => [k,m[k]])))(JSON.parse(await fs.readFile(join(snap(c4), R.META), 'utf8'))));
   for (let k = 0; k < 3; k++) { await nextRound(); measure(`typical round ${round} (transcript append + note edit)`, await send()); }
   await fs.cp(B.dir, join(root, 'node-2-backup'), { recursive: true }); // an old copy of node 2, for the missing-base case
   const backupPublished = (await receiverState(B)).published;
@@ -219,7 +222,7 @@ try {
     await new Promise((ok) => server.close(ok));
     const base = await R.acked(A, B_ID, D);
     const b = await R.makeBundle(A, D, base, join(root, 'crash.bundle'));
-    const child = spawnSync(process.execPath, [join(here, 'crash-child.mjs'), B.dir, ROOM, B_ID, A_ID, b.file, JSON.stringify(offerFor(commit, base)), point], { encoding: 'utf8' });
+    const child = spawnSync(process.execPath, [join(here, 'helpers', 'replication-crash.mjs'), B.dir, ROOM, B_ID, A_ID, b.file, JSON.stringify(offerFor(commit, base)), point], { encoding: 'utf8' });
     await fs.rm(b.file);
     const left = await receiverState(B);
     check(`${point}: the receiving process died there`, 86, child.status);
@@ -241,7 +244,7 @@ try {
   await fs.cp(A.store, evil.store, { recursive: true });
   const tip = await R.revParse(A.store, R.lineRef(D, A_ID));
   const pub = (await receiverState(B)).published;
-  const goodMeta = { schema: 1, room: ROOM, discussion: D, node: A_ID, round: round + 1, outcome: 'completed' };
+  const goodMeta = { ...JSON.parse(await R.git(A.store, ['cat-file', 'blob', `${tip}:${R.META}`])), round: round + 1, outcome: 'completed' };
   const blob = (s) => R.git(evil.store, ['hash-object', '-w', '--stdin'], { input: s });
   async function evilBundle({ extra = [], meta = goodMeta, ref = R.lineRef(D, A_ID) } = {}) {
     const top = (await R.git(evil.store, ['ls-tree', '-z', tip])).split('\0').filter((l) => l && !l.endsWith(`\t${R.META}`));
@@ -290,7 +293,7 @@ try {
   const big = await R.makeBundle(A, D, null); const bigBody = await fs.readFile(big.file); await fs.rm(big.file);
   const tooBig = await rawPost(small.url, offerFor(tip, null), bigBody);
   await new Promise((ok) => small.close(ok));
-  check(`bundle over the size limit (${bigBody.length} B > 1024 B): refused before reading it`, true, tooBig.status === 413 || !!tooBig.clientError, true);
+  check(`bundle over the size limit (${bigBody.length} B > 1024 B): refused before reading it`, true, tooBig.status === 413 || !!tooBig.clientError);
   console.log(`         (sender saw: ${show(tooBig)})`);
   for (const [name, path] of [['absolute path', '/etc/passwd'], ['backslash', 'a\\..\\b'], ['traversal inside a path', 'a/../b'], ['empty component', 'a//b']]) {
     let got = 'accepted'; try { R.validateTree([{ mode: '100644', type: 'blob', sha: 'x', size: 1, path }]); } catch (e) { got = e.code; }
@@ -319,13 +322,13 @@ try {
     const srv = await R.serve(N);
     const files = Object.keys(await filesOf(mf));
     console.log(`  copied ${files.length} files, ${kb((await Promise.all(files.map((f) => fs.stat(join(mf, f))))).reduce((s, x) => s + x.size, 0))}`);
-    callsSeen = R.gitCalls;
+    callsSeen = R.gitStats.runs;
     await R.capture(M, D, mf, { round: 1 });
     measure('real folder, first send', await R.send(M, B_ID, srv.url, D));
     const tr = (await fs.readdir(join(mf, 'transcripts')).catch(() => [])).filter((f) => f.endsWith('.md')).sort().pop();
     for (let k = 2; k <= 6; k++) {
       await fs.appendFile(tr ? join(mf, 'transcripts', tr) : join(mf, 'appended.md'), text(30 + k, 40)); // ~3.8 KB, about one exchange
-      callsSeen = R.gitCalls;
+      callsSeen = R.gitStats.runs;
       await R.capture(M, D, mf, { round: k });
       measure(`real folder, round ${k} (append ~3.8 KB)`, await R.send(M, B_ID, srv.url, D));
     }
@@ -344,7 +347,9 @@ try {
   if (KEEP) console.log(`\nKept ${root}`);
   else { for (const d of await fs.readdir(root)) await R.removeTree(join(root, d)).catch(() => {}); await fs.rm(root, { recursive: true, force: true }); }
   console.log(`\n${failed ? 'FAILED' : 'ALL PASSED'}: ${passed} passed, ${failed} failed`);
-  process.exitCode = failed ? 1 : 0;
+  assert.equal(failed, 0);
 }
+
+});
 
 async function exists(p) { return fs.access(p).then(() => true, () => false); }

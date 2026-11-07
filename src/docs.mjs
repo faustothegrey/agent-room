@@ -10,6 +10,7 @@
 // cli.mjs loads this module in load(), so /reload swaps it too.
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { hostname, networkInterfaces } from 'node:os';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { Marked } from 'marked';
 
@@ -154,7 +155,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #winfo button { align-self: flex-start; font-size: .75rem; margin-top: .2rem; }
 #back-to { border: 0; background: none; padding: 0; font-size: .75rem; color: var(--dim); }
 #back-to:hover { color: CanvasText; text-decoration: underline; }
-#server { font-size: .7rem; color: var(--dim); display: inline-flex; align-items: center; gap: .4rem; }
+#server { max-width: 100%; overflow-wrap: anywhere; font-size: .7rem; color: var(--dim); display: inline-flex; align-items: center; gap: .4rem; }
 #server[data-state="down"] { color: #ef4444; font-weight: 600; }
 #beat { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; flex: none; }
 #server[data-state="up"] #beat { background: #22c55e; } #server[data-state="down"] #beat { background: #ef4444; }
@@ -183,6 +184,15 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
   #gauges { grid-row: 3; justify-content: flex-start; }
   .quota { padding-left: .5rem; }
 }
+.discussion-lines { margin: .4rem 0; min-width: 0; flex: 1; }
+.discussion-lines > summary { cursor: pointer; padding: .4rem 0; overflow-wrap: anywhere; }
+.discussion-lines .line-row { padding: .35rem .5rem .35rem 1rem; display: flex; gap: .6rem; align-items: center; justify-content: space-between; font-size: .85rem; }
+.discussion-lines .line-row span { overflow-wrap: anywhere; }
+.peer-row { padding: .35rem 0; font-size: .85rem; overflow-wrap: anywhere; }
+.peer-dot { color: #888; } .peer-dot.up { color: #22c55e; } .peer-dot.down { color: #ef4444; }
+#remote-view { border-bottom: 1px solid var(--line); padding-bottom: .5rem; margin-bottom: .5rem; font-size: .85rem; }
+#auto-controls[hidden] { display: none; }
+#remote-view p { margin: .2rem 0; } #remote-view .local-activity { color: var(--dim); font-size: .75rem; }
 .tools label { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); }
 #left { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 #tabs { display: flex; border-bottom: 1px solid var(--line); }
@@ -253,7 +263,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .msg.error { border-left-color: #ef4444; }
 .tools { flex-wrap: wrap; }
 </style></head><body>
-<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span><button id="back-to" hidden title="Re-open the discussion you were in: a fresh session there, from its handoff"></button><span id="code"></span><span id="server"><i id="beat"></i><span id="server-text">Connecting to the server…</span></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
+<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="server"><i id="beat"></i><span><span id="server-text">Connecting to the server…</span><span id="replica-header"></span></span></span><span id="disc" title="The active discussion"></span><button id="back-to" hidden title="Re-open the discussion you were in: a fresh session there, from its handoff"></button><span id="code"></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
   <div class="view" id="talk">
@@ -268,9 +278,10 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     </details>
     <div class="chat" id="chat"></div>
     <div class="composer" id="composer">
+      <div id="remote-view" hidden></div>
       <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit"></textarea>
       <div class="tools" style="justify-content: flex-end">
-        <label title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label>
+        <label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label>
         <button id="summary">Summarize</button><button id="usage">Usage</button><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, in the discussion in use, from its handoff. The chat clears.">Restart</button><button id="quit">Quit</button></div>
     </div>
   </div>
@@ -300,6 +311,8 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <script>
 const $ = (id) => document.getElementById(id);
 const pane = $('pane'), box = $('box'), wbox = $('wbox');
+let replica = null, viewing = null, localMessages = [], localInput = true, localThinking = null, localWorking = null, viewExpired = false, viewNotice = null;
+const viewClient = crypto.randomUUID();
 let ended = false, doc = null, tab = 'talk', page = null;
 // Refreshing the page keeps what was being typed in the two message boxes.
 function refreshPage() {
@@ -362,6 +375,7 @@ function setWorkerInfo(info) {
   if (info.disabled) wbox.placeholder = info.lines[0];
 }
 function setWorking(name) {
+  localWorking = name; updateReplicaView();
   work.think(name ? '… ' + name + ' is working' : null);
   $('whint').textContent = name ? 'The worker is busy: what you send now waits for it to finish.' : '';
   $('tab-work').textContent = name ? 'Worker …' : 'Worker';
@@ -403,11 +417,15 @@ split.addEventListener('keydown', (e) => {
 // A narrower window must not squeeze one side below MIN.
 window.addEventListener('resize', () => { if (document.body.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width); });
 function message(m) {
+  localMessages.push(m);
+  if (viewing) return;
   if (m.pass || m.hidden) return; // passes and summary turns are hidden, as in the terminal
   talk.add(bubble(m));
 }
-function status(text, error) { talk.add(statusEl(text, error)); }
+function status(text, error) { if (viewing) { viewNotice = text; updateReplicaView(); return; } talk.add(statusEl(text, error)); }
 function setThinking(name) {
+  localThinking = name; updateReplicaView();
+  if (viewing) return;
   talk.think(name ? '… ' + name + ' is thinking' : null);
 }
 const urlFor = (file) => '/' + file.split('/').map(encodeURIComponent).join('/');
@@ -418,7 +436,7 @@ function showDoc(file) {
   const feed = $('feed');
   const p = doc ? doc.split('/') : [];
   const transcript = p.length >= 3 && p.length <= 5 && p[0] === 'discussions' && p.at(-2) === 'transcripts' && p.at(-1).endsWith('.md');
-  feed.hidden = !transcript || !room || doc === room.transcript || $('composer').hidden;
+  feed.hidden = !transcript || !room || doc === room.transcript || !!viewing || $('composer').hidden;
   feed.onclick = () => {
     showTab('talk');
     const root = room.folder.endsWith('/') ? room.folder : room.folder + '/';
@@ -431,7 +449,104 @@ function showDoc(file) {
   pane.firstChild.src = urlFor(doc);
   document.title = doc + ' · agent-room';
 }
-const post = (path, body) => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const post = (path, body) => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': viewClient }, body: JSON.stringify(body) });
+// Each browser owns a leased View pin, independent of other browsers and local agents.
+async function viewRemote(line) {
+  const res = await post('/__view', line ? { discussion: line.discussion, node: line.node } : { back: true });
+  if (!res.ok) return status(await res.text(), true);
+  viewing = (await res.json()).viewing;
+  viewExpired = false; viewNotice = null;
+  updateReplicaView();
+  talk.clear();
+  if (viewing) {
+    viewing.messages.forEach((m) => { if (!m.pass && !m.hidden) talk.add(bubble(m)); });
+    await remoteFiles();
+  } else {
+    localMessages.forEach((m) => { if (!m.pass && !m.hidden) talk.add(bubble(m)); });
+    setThinking(localThinking); openFiles();
+  }
+}
+const receivedTime = (at) => at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'time unavailable';
+const peerActivity = (name) => {
+  const p = replica?.peers.find((p) => p.name === name);
+  if (!p) return 'unreachable (not configured)';
+  return p?.reachable === false ? 'unreachable' + (p.since ? ' since ' + receivedTime(p.since) : '') : p?.activity || 'checking';
+};
+function updateReplicaHeader() {
+  const el = $('replica-header');
+  if (!el || !replica) { if (el) el.textContent = ''; return; }
+  const r = replica, own = r.own[room?.active?.split('/').at(-1)];
+  const project = r.project?.commit ? 'Project ' + r.project.commit + (r.project.dirty ? ' + uncommitted' : '') : 'Version unavailable';
+  const line = viewing ? '[Viewing ' + viewing.node + "'s line, round " + viewing.round + ', received ' + receivedTime(viewing.receivedAt) + ' · read-only] · ' + viewing.node + ': ' + peerActivity(viewing.node)
+    : r.node + "'s line" + (own ? ', round ' + own.round : ', no saved round') + ' · agents run on ' + r.node;
+  el.textContent = ' · ' + r.node + ' ' + (r.addresses[0] || '127.0.0.1:' + location.port) + ' · ' + line + ' · ' + project;
+}
+function updateReplicaView() {
+  updateReplicaHeader();
+  if (room) { $('disc').textContent = viewing ? viewing.title : room.discussion; $('disc').dataset.active = !viewing && room.active ? 'true' : 'false'; }
+  const panel = $('remote-view'); panel.hidden = !viewing; panel.replaceChildren();
+  $('composer').hidden = !viewing && !localInput;
+  box.hidden = !!viewing;
+  $('talk-settings').hidden = !!viewing;
+  $('summary').hidden = !!viewing;
+  $('auto').parentElement.hidden = !!viewing;
+  $('reload').hidden = !!viewing;
+  if (!viewing) return;
+  const label = document.createElement('p');
+  label.textContent = viewExpired ? 'View expired. Select the received line again.' : viewing.node + "'s line, round " + viewing.round + ', received ' + receivedTime(viewing.receivedAt) + '. Read-only.';
+  panel.append(label);
+  const local = document.createElement('p'); local.className = 'local-activity';
+  local.textContent = 'Local ' + replica.node + ': ' + (localThinking ? localThinking + ' is thinking' : 'discussion idle') + ' · ' + (localWorking ? 'Worker ' + localWorking + ' is working' : 'worker idle'); panel.append(local);
+  if (viewNotice) { const note = document.createElement('p'); note.className = 'local-activity'; note.textContent = 'Local status: ' + viewNotice; panel.append(note); }
+  const own = Object.values(replica.own).find((l) => l.discussion === viewing.discussion);
+  if (own) {
+    const back = document.createElement('button'); back.textContent = 'Back to ' + replica.node + "'s line"; back.onclick = () => viewRemote(null); panel.append(back);
+  }
+  const latest = replica.received.find((l) => l.discussion === viewing.discussion && l.node === viewing.node);
+  if (latest && latest.commit !== viewing.commit) {
+    const newer = document.createElement('button'); newer.textContent = 'View newer received round ' + latest.round; newer.onclick = () => viewRemote(latest); panel.append(newer);
+  }
+}
+async function remoteFiles() {
+  if (!viewing) return;
+  const v = viewing;
+  const files = await (await fetch('/__rfiles?d=' + v.discussion + '&n=' + v.node + '&c=' + v.commit)).json();
+  pane.replaceChildren(); listed = null;
+  const title = document.createElement('p'); title.textContent = v.node + ' · round ' + v.round + ' · received files'; pane.append(title);
+  for (const f of files) {
+    const b = document.createElement('button'); b.className = 'entry file'; b.textContent = f;
+    b.onclick = () => showDoc('__received/' + v.discussion + '/' + v.node + '/' + v.commit + '/' + f); pane.append(b);
+  }
+}
+function showReplica(r) {
+  replica = r;
+  updateReplicaView();
+  if (listed !== null) openFiles(listed);
+}
+function appendPeers(list) {
+  if (!replica) return;
+  const title = document.createElement('h3'); title.textContent = 'Peers'; list.append(title);
+  for (const peer of replica.peers) {
+    const row = document.createElement('div'); row.className = 'peer-row';
+    const dot = document.createElement('span'); dot.className = 'peer-dot ' + (peer.reachable === true ? 'up' : peer.reachable === false ? 'down' : ''); dot.textContent = '● '; row.append(dot);
+    row.append(document.createTextNode(peer.name + ' · ' + peer.address + ' · ' + peerActivity(peer.name) + (peer.paired ? ' · paired' : ' · not paired')));
+    if (!peer.paired) {
+      const b = document.createElement('button'); b.textContent = 'Pair with ' + peer.name + '…';
+      b.onclick = async () => {
+        const check = await post('/__pair', { peer: peer.name });
+        if (!check.ok) return status(await check.text(), true);
+        const x = await check.json();
+        if (!confirm('Pair these room folders?\\n' + x.local.node + ': ' + x.local.root + '\\n' + x.peer.node + ': ' + x.peer.root)) return;
+        const result = await post('/__pair', { peer: peer.name, confirm: true });
+        if (!result.ok) status(await result.text(), true);
+      }; row.append(b);
+    }
+    row.append(document.createTextNode(' · project ' + (peer.project?.commit ? peer.project.commit + (peer.project.dirty ? '+' : '') : 'version unavailable')));
+    if (peer.error) row.title = peer.error;
+    list.append(row);
+  }
+}
+setInterval(async () => { if (viewing) { try { const r = await post('/__view', { renew: true }); if (!r.ok) { viewExpired = true; updateReplicaView(); } } catch {} } }, 30000);
 // Discussions: the room's active discussions (newest first), then its own documents, then archive/
 // and deferred/ (always shown, at the bottom), which hold whole discussions moved there. Open a
 // discussion to see its documents, and its subfolders (drawings/, transcripts/, …) one level at a
@@ -461,6 +576,7 @@ function confirmed(b, run) {
     run();
   };
 }
+const expandedLines = new Set();
 let listed = null; // the list path shown in the pane ('' for the top), or null when a document is shown
 async function openFiles(group) {
   if (typeof group !== 'string') group = ''; // as a click handler, group is the event
@@ -478,11 +594,31 @@ async function openFiles(group) {
     list.append(b);
   };
   const heading = (text) => list.append(el('h3', '', text));
+  const discussionRow = (name, path, id = replica?.own[name]?.discussion) => {
+    if (!replica) return entry('discussion', name, () => openFiles(path), path === room?.active ? 'in use' : '');
+    const remote = replica.received.filter((l) => id ? l.discussion === id : l.local === name);
+    const key = path || id;
+    const details = el('details', 'discussion-lines');
+    details.open = expandedLines.has(key);
+    details.ontoggle = () => { if (details.open) expandedLines.add(key); else expandedLines.delete(key); };
+    const summary = el('summary', '', '💬 ' + name + (path && path === room?.active ? ' · in use' : '')); details.append(summary);
+    if (path) {
+      const own = replica.own[name];
+      const label = replica.node + ' (this node) · ' + (own ? 'round ' + own.round : 'no saved round') + (own ? Object.entries(own.sent).map(([n, sent]) => ' · ' + (sent ? 'sent to ' + n + ' ✓' : n + ' pending')).join('') : '');
+      const b = el('button', 'entry', '● ' + label);
+      b.onclick = async () => { if (viewing) await viewRemote(null); openFiles(path); }; details.append(b);
+    }
+    for (const line of remote) {
+      const row = el('div', 'line-row'); row.append(el('span', '', '● ' + line.node + ' · round ' + line.round + ' · received ' + receivedTime(line.receivedAt) + ' · ' + line.node + ' ' + peerActivity(line.node)));
+      const b = el('button', '', 'View'); b.onclick = () => viewRemote(line); row.append(b); details.append(row);
+    }
+    list.append(details);
+  };
   const inUse = (path) => path === room?.active;
   const discussionsIn = (prefix) => [...new Set(files.filter((f) => f.startsWith(prefix + '/'))
     .map((f) => f.slice(prefix.length + 1)).filter((r) => r.includes('/')).map((r) => r.split('/')[0]))]
     .filter(isDiscussion).sort((a, b) => b.localeCompare(a));
-  const canAct = room && !$('composer').hidden;
+  const canAct = room && localInput && !viewing;
   const back = (label, to) => { const b = el('button', 'back', '← ' + label); b.onclick = () => openFiles(to); list.append(b); };
   const title = (text, status, cls) => { const t = el('div', 'title', text); if (status) t.append(el('span', 'status ' + (cls || ''), status)); list.append(t); };
 
@@ -492,7 +628,7 @@ async function openFiles(group) {
     title(section === 'archive' ? 'Archive' : 'Deferred');
     const found = discussionsIn(group);
     if (!found.length) list.append(el('span', 'hint', section === 'archive' ? 'No archived discussions.' : 'No deferred discussions.'));
-    for (const d of found) entry('discussion', d, () => openFiles(group + '/' + d));
+    for (const d of found) discussionRow(d, group + '/' + d);
     return;
   }
   if (group) { // a discussion or one of its folders
@@ -546,12 +682,12 @@ async function openFiles(group) {
     actions.append(b);
     list.append(actions);
   }
-  if (!discussions.length) list.append(el('span', 'hint', room?.started ? '' : 'No active discussions: your first message starts one.'));
+  if (!discussions.length && !replica?.received.some((l) => !l.local)) list.append(el('span', 'hint', room?.started ? '' : 'No active discussions: your first message starts one.'));
   else if (room && !room.started && canAct) list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Re-open on its row.'));
   heading('Active');
   for (const d of discussions) {
     const path = 'discussions/' + d;
-    entry('discussion', d, () => openFiles(path), inUse(path) ? 'in use' : '');
+    discussionRow(d, path);
     // Re-open on the row itself, as on its page; not for the one in use before anything was said.
     if (!canAct || (inUse(path) && !room.started)) continue;
     const row = el('div', 'row'), b = el('button', 'reopen', 'Re-open');
@@ -559,6 +695,10 @@ async function openFiles(group) {
     confirmed(b, () => send('/reopen ' + d));
     row.append(list.lastChild, b);
     list.append(row);
+  }
+  if (replica) {
+    const remoteOnly = new Map(replica.received.filter((l) => !l.local).map((l) => [l.discussion, l]));
+    for (const [id, line] of remoteOnly) discussionRow(line.name, null, id);
   }
   const top = files.filter((f) => f.startsWith('discussions/')).map((f) => f.slice('discussions/'.length));
   const own = [...new Set(top.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))].filter((n) => !isDiscussion(n) && !SECTIONS[n]).sort();
@@ -573,6 +713,7 @@ async function openFiles(group) {
     const n = discussionsIn('discussions/' + s).length;
     entry('folder', s + '/', () => openFiles('discussions/' + s), n + (n === 1 ? ' discussion' : ' discussions'), s === 'archive' ? 'Finished discussions' : 'Postponed discussions');
   }
+  appendPeers(list);
 }
 // The header: the room's full root path and its active discussion, if one has been selected.
 let room = null;
@@ -582,10 +723,11 @@ function setRoom(r) {
   $('disc').textContent = r.discussion || '';
   $('disc').dataset.active = r.active ? 'true' : 'false';
   showVersion(r.code);
+  updateReplicaView();
   // After New discussion or Re-open, until the next one starts: the way back to the one before.
   // Nothing has been said since, so no second click is needed.
   const back = $('back-to');
-  back.hidden = !(r.back && !ended && !$('composer').hidden);
+  back.hidden = !(r.back && !ended && !viewing && !$('composer').hidden);
   if (r.back) { back.textContent = '← back to "' + r.back.title + '"'; back.onclick = () => send('/reopen ' + r.back.name); }
 }
 // The version the server runs: the commit its checkout was at when it started, and at the last
@@ -805,10 +947,11 @@ events.onmessage = (e) => {
     page = ev.page;
   }
   if (ev.type === 'reset') {
+    localMessages = []; localInput = ev.input;
     talk.clear();
     ev.messages.forEach(message);
     if (ev.status) status(ev.status);
-    setThinking(ev.thinking); showDoc(ev.doc);
+    setThinking(ev.thinking); if (!viewing) showDoc(ev.doc);
     if (!ev.input) { $('composer').hidden = true; } // terminal mode: the page only watches
     work.clear();
     if (!ev.worker.length) work.add(statusEl('Give the worker instructions here. It works alongside the discussion and sees only what you send it.'));
@@ -820,7 +963,9 @@ events.onmessage = (e) => {
     $('auto').checked = !!ev.auto;
     if (ev.room) setRoom(ev.room);
     $('newroom').hidden = !ev.newRoom;
+    showReplica(ev.replica);
   }
+  if (ev.type === 'replica') showReplica(ev.replica);
   if (ev.type === 'room') { setRoom(ev.room); if (listed !== null) openFiles(listed); } // its buttons and "in use" follow
   if (ev.type === 'work') workMessage(ev.message, true);
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
@@ -831,7 +976,7 @@ events.onmessage = (e) => {
   if (ev.type === 'thinking') setThinking(ev.name);
   if (ev.type === 'turn') status(ev.text);
   if (ev.type === 'note') status(ev.text, ev.error);
-  if (ev.type === 'doc') showDoc(ev.file);
+  if (ev.type === 'doc' && !viewing) showDoc(ev.file);
   if (ev.type === 'files') openFiles();
   if (ev.type === 'moved' && listed !== null) {
     openFiles(listed === ev.from || listed.startsWith(ev.from + '/') ? ev.to + listed.slice(ev.from.length) : listed);
@@ -844,9 +989,16 @@ events.onmessage = (e) => {
 // Input endpoints accept only the page itself: same host, JSON. A page on another site can't send
 // a JSON POST here without a CORS preflight, which this server never approves, and the Host check
 // stops DNS-rebinding tricks. That matters because the agents act on what the User says.
+// The room listens on the LAN too: this machine's own addresses and names count as its own host.
+function ownHost(host) {
+  const name = host.replace(/:\d+$/, '').toLowerCase();
+  const mine = ['127.0.0.1', 'localhost', hostname().toLowerCase(), `${hostname().toLowerCase().replace(/\.local$/, '')}.local`,
+    ...Object.values(networkInterfaces()).flat().filter((i) => i.family === 'IPv4').map((i) => i.address)];
+  return mine.includes(name);
+}
 function fromOwnPage(req) {
   const host = req.headers.host ?? '';
-  if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return false;
+  if (!ownHost(host)) return false;
   if (req.headers.origin && req.headers.origin !== `http://${host}`) return false;
   return (req.headers['content-type'] ?? '').startsWith('application/json');
 }
@@ -885,6 +1037,21 @@ function handleScreen(req, res, url, dir, screen) {
       (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
+  // A received snapshot's files, while its line is open in View (or still its latest round).
+  if (url.pathname === '/__rfiles') {
+    const q = url.searchParams;
+    send(200, 'application/json', JSON.stringify(screen.receivedFiles?.(q.get('d') ?? '', q.get('n') ?? '', q.get('c') ?? '') ?? []));
+    return true;
+  }
+  if (['/__view', '/__pair'].includes(url.pathname)) {
+    if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain; charset=utf-8', 'Refused: only the room page can do this.'); return true; }
+    const act = url.pathname === '/__view' ? screen.view : screen.pair;
+    if (!act) { send(409, 'text/plain; charset=utf-8', 'This room doesn\'t replicate (start it with --node).'); return true; }
+    readJson(req).then((body) => (url.pathname === '/__view' ? act({ ...body, client: req.headers['x-view-client'] }) : act(String(body?.peer ?? ''), !!body?.confirm))).then(
+      (result) => send(200, 'application/json', JSON.stringify(result)),
+      (err) => send(400, 'text/plain; charset=utf-8', err.message));
+    return true;
+  }
   if (['/__say', '/__show', '/__work', '/__auto', '/__newroom'].includes(url.pathname)) {
     if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain; charset=utf-8', 'Refused: only the room page can send input.'); return true; }
     readJson(req).then((body) => {
@@ -915,6 +1082,8 @@ function handleScreen(req, res, url, dir, screen) {
       }
       if (!screen.say) return send(409, 'text/plain; charset=utf-8', 'This room is typed in the terminal; the page only watches.');
       if (typeof body?.text !== 'string' || !body.text.trim()) return send(400, 'text/plain; charset=utf-8', 'Nothing to send.');
+      // While another node's line is open in View, it is read-only: only these commands pass.
+      if (screen.isViewing?.(req.headers['x-view-client']) && !VIEW_COMMANDS.includes(body.text.trim())) return send(409, 'text/plain; charset=utf-8', `Read-only: you are viewing a received line. Go back to this node's line first.`);
       screen.say(body.text.trim());
       send(204, 'text/plain', '');
     });
@@ -935,18 +1104,26 @@ export function resetEvent(screen) {
   return { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc,
     thinking: screen.thinking, status: screen.status, input: !!screen.say,
     room: screen.room ?? null, worker: screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
-    auto: screen.auto ?? false, quota: screen.quota, quotaAt: screen.quotaAt ?? null, newRoom: !!screen.newRoom, page: PAGE };
+    auto: screen.auto ?? false, quota: screen.quota, quotaAt: screen.quotaAt ?? null, newRoom: !!screen.newRoom, page: PAGE,
+    replica: screen.replica ?? null, viewing: screen.viewing ?? null };
 }
+
+// What the page can still send while viewing another node's line.
+const VIEW_COMMANDS = ['/usage', '/reload', '/restart', '/quit'];
 
 // The page's own code, as a short hash: after a reload, open pages refresh only if it changed.
 export const PAGE = createHash('sha1').update(SCREEN).digest('hex').slice(0, 12);
 
 export function handle(req, res, dir, screen) {
   const url = new URL(req.url, 'http://localhost');
-  if (screen && handleScreen(req, res, url, dir, screen)) return;
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
+  // Other nodes' rooms (replicate.mjs), with --node only.
+  if (url.pathname.startsWith('/replica/') && (!ownHost(req.headers.host ?? '') || req.headers.origin)) return send(403, 'text/plain', 'Refused peer origin or Host.');
+  if (url.pathname.startsWith('/replica/')) return screen?.replicaHandler ? screen.replicaHandler(req, res) : send(404, 'text/plain', 'This room doesn\'t replicate.');
+  if (screen && handleScreen(req, res, url, dir, screen)) return;
   if (url.pathname === '/__mtime') {
     const rel = url.searchParams.get('f') ?? '';
+    if (rel.startsWith('__received/')) return send(200, 'text/plain', 'fixed'); // a received snapshot never changes
     const stamp = rel ? servable(dir, rel, screen) && statSync(inside(dir, rel)).mtimeMs : docFiles(dir, screen).join('\n');
     return send(200, 'text/plain', String(stamp));
   }
@@ -955,7 +1132,9 @@ export function handle(req, res, dir, screen) {
     const items = docFiles(dir, screen).map((f) => `<li><a href="/${urlPath(f)}">${esc(f)}</a></li>`).join('');
     return send(200, 'text/html; charset=utf-8', page('all files', `<ul>${items}</ul>`, ''));
   }
-  const file = servable(dir, rel, screen);
+  // __received/<discussion>/<node>/<commit>/<path>: a file of a received snapshot, read-only.
+  const got = /^__received\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(rel);
+  const file = got ? screen?.receivedFile?.(got[1], got[2], got[3], got[4]) : servable(dir, rel, screen);
   if (!file) return send(404, 'text/plain; charset=utf-8', `Not found: ${rel}`);
   // A session transcript quotes whatever was said: its HTML is shown as text, never run.
   if (/\.md$/i.test(file)) return send(200, 'text/html; charset=utf-8', page(rel, ((/(^|\/)transcripts\//.test(rel)) ? mdText : md).parse(readFileSync(file, 'utf8')), rel));

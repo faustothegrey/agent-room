@@ -19,12 +19,20 @@ const { values } = parseArgs({
     open: { type: 'boolean' },
     reopen: { type: 'string' },
     dev: { type: 'boolean' },
+    node: { type: 'string' },
+    peer: { type: 'string', multiple: true },
     help: { type: 'boolean', short: 'h' },
   },
 });
 
 if (!/^\d+$/.test(values.port) || Number(values.port) > 65535) {
   console.error(`--port must be a number from 0 to 65535, not "${values.port}"`);
+  process.exit(1);
+}
+// --peer <name>=http://<address>:<port>, repeatable; only with --node (replicate.mjs checks the rest).
+const peers = (values.peer ?? []).map((p) => { const at = p.indexOf('='); return { name: p.slice(0, at), url: p.slice(at + 1).replace(/\/+$/, '') }; });
+if ((peers.length && !values.node) || peers.some((p) => !p.name)) {
+  console.error('--peer needs --node, and is written --peer <name>=http://<address>:<port>');
   process.exit(1);
 }
 
@@ -35,6 +43,8 @@ const ctx = {
   port: Number(values.port),
   noScreen: !!values['no-screen'],
   open: !!values.open,
+  node: values.node ?? null,
+  peers,
   state: { transcript: [], seen: new Map() },
   sessions: new Map(),
 };
@@ -80,7 +90,8 @@ if (ctx.noScreen) {
 // Messages from this shell: on the screen too, when the loaded code can still show them.
 const report = (text) => { try { ui.note(ctx, text, true); } catch { console.log(text); } };
 
-await ui.start(ctx);
+// A start that can't go on (a taken port with --peer, a bad --node or --peer) ends with its reason.
+try { await ui.start(ctx); } catch (err) { console.error(`✗ ${err.message}`); process.exit(1); }
 // --reopen <discussion>: start in that discussion, as /reopen would (a restart passes the one in use).
 if (values.reopen) { try { await ui.handleLine(`/reopen ${values.reopen}`, ctx); } catch (err) { report(`✗ ${err.message}\n`); } }
 if (values.dev && !ctx.noScreen) watchSource();
@@ -94,7 +105,7 @@ for await (const raw of input) {
   if (line === '/reload') {
     try {
       await load();
-      ui.reloaded(ctx);
+      await ui.reloaded(ctx);
     } catch (err) {
       report(`✗ Reload failed, still running the previous code: ${err.message}\n`);
     }
