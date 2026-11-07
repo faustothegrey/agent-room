@@ -8,7 +8,7 @@
     "agent-room": "src/cli.mjs"
   },
   "scripts": {
-    "start": "node src/cli.mjs",
+    "start": "node src/cli.mjs --dev",
     "terminal": "node src/cli.mjs --no-screen",
     "test": "node --test 'test/*.test.mjs'"
   },

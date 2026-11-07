@@ -8,6 +8,7 @@
 // room's discussions: their documents, drawings and transcripts). In terminal
 // mode (npm run terminal) the page only watches.
 // cli.mjs loads this module in load(), so /reload swaps it too.
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { Marked } from 'marked';
@@ -287,7 +288,14 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <script>
 const $ = (id) => document.getElementById(id);
 const pane = $('pane'), box = $('box'), wbox = $('wbox');
-let ended = false, doc = null, tab = 'talk';
+let ended = false, doc = null, tab = 'talk', page = null;
+// Refreshing the page keeps what was being typed in the two message boxes.
+function refreshPage() {
+  sessionStorage.setItem('drafts', JSON.stringify([box.value, wbox.value]));
+  location.reload();
+}
+try { [box.value, wbox.value] = JSON.parse(sessionStorage.getItem('drafts')) ?? ['', '']; } catch {}
+sessionStorage.removeItem('drafts');
 
 // A chat list that keeps its "is thinking" line last and follows new messages when already at the bottom.
 function makeChat(list) {
@@ -708,7 +716,7 @@ async function heartbeat() {
     el.title = 'Start it again from the Dock app (or npm start): this page reloads when it answers.';
     return;
   }
-  if (serverPid && h.pid !== serverPid) return location.reload();
+  if (serverPid && h.pid !== serverPid) return refreshPage();
   serverPid = h.pid;
   el.dataset.state = 'up';
   dot.classList.remove('on'); void dot.offsetWidth; dot.classList.add('on'); // one pulse per answer
@@ -719,6 +727,11 @@ heartbeat(); setInterval(heartbeat, 3000);
 const events = new EventSource('/__events');
 events.onmessage = (e) => {
   const ev = JSON.parse(e.data);
+  // A reload that changed the page's code: refresh, so the page runs the new code too.
+  if ((ev.type === 'reset' || ev.type === 'reloaded') && ev.page) {
+    if (page && ev.page !== page) return refreshPage();
+    page = ev.page;
+  }
   if (ev.type === 'reset') {
     talk.clear();
     ev.messages.forEach(message);
@@ -848,8 +861,11 @@ export function resetEvent(screen) {
   return { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc,
     thinking: screen.thinking, status: screen.status, input: !!screen.say,
     room: screen.room ?? null, worker: screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work,
-    auto: screen.auto ?? false, quota: screen.quota, quotaAt: screen.quotaAt ?? null, newRoom: !!screen.newRoom };
+    auto: screen.auto ?? false, quota: screen.quota, quotaAt: screen.quotaAt ?? null, newRoom: !!screen.newRoom, page: PAGE };
 }
+
+// The page's own code, as a short hash: after a reload, open pages refresh only if it changed.
+export const PAGE = createHash('sha1').update(SCREEN).digest('hex').slice(0, 12);
 
 export function handle(req, res, dir, screen) {
   const url = new URL(req.url, 'http://localhost');

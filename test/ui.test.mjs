@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handleLine, load } from '../src/ui.mjs';
+import { handleLine, load, restartArgs } from '../src/ui.mjs';
 
 const freshCtx = () => ({ cwd: '/tmp', agentSpecs: 'claude:A,codex:B', state: { transcript: [], seen: new Map() }, sessions: new Map() });
 
@@ -273,4 +273,12 @@ test('/reopen of an archived discussion makes it active first; new names skip ar
 
   mkdirSync(`${root}/deferred/2026-11-02-topic`, { recursive: true });
   assert.equal(createDiscussionFolder(root, 'Topic', new Date(2026, 10, 2)), '2026-11-02-topic-2');
+});
+
+test('Restart keeps the launch flags that matter: the same port, agents, worker and dev mode, in the discussion in use', () => {
+  const ctx = { cwd: '/r', server: { address: () => ({ port: 5566 }) }, discussion: { name: '2026-11-03-a-topic' } };
+  const args = restartArgs(ctx, { agents: 'claude:Ada', worker: 'codex:W', dev: true, open: true });
+  assert.match(args[0], /src\/cli\.mjs$/);
+  assert.deepEqual(args.slice(1), ['--cwd', '/r', '--port', '5566', '--agents', 'claude:Ada', '--worker', 'codex:W', '--dev', '--reopen', '2026-11-03-a-topic']);
+  assert.deepEqual(restartArgs({ ...ctx, discussion: null }, {}).slice(1), ['--cwd', '/r', '--port', '5566']);
 });

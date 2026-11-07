@@ -304,3 +304,12 @@ test('the heartbeat: /__health says it is agent-room, with its process, root and
   assert.deepEqual(await res.json(), { app: 'agent-room', pid: process.pid, root: dir, startedAt: '2026-11-03T10:00:00.000Z', discussion: 'discussions/2026-11-03-x' });
   s.close();
 });
+
+test('a page learns its code version, so it can refresh after a reload that changed it', async () => {
+  const screen = { clients: new Set(), transcript: [] };
+  const s = await serve(fixture(), screen);
+  const reset = await eventReader(await s.get('/__events'))();
+  assert.match(reset.page, /^[0-9a-f]{12}$/);
+  for (const c of screen.clients) c.end();
+  s.close();
+});

@@ -4,6 +4,7 @@
 // rounds.
 // The conversation lives in `ctx`, so it carries over. Keep this file small: changes here need a
 // restart.
+import { watch } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -17,6 +18,7 @@ const { values } = parseArgs({
     'no-screen': { type: 'boolean' },
     open: { type: 'boolean' },
     reopen: { type: 'string' },
+    dev: { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -81,6 +83,7 @@ const report = (text) => { try { ui.note(ctx, text, true); } catch { console.log
 await ui.start(ctx);
 // --reopen <discussion>: start in that discussion, as /reopen would (a restart passes the one in use).
 if (values.reopen) { try { await ui.handleLine(`/reopen ${values.reopen}`, ctx); } catch (err) { report(`✗ ${err.message}\n`); } }
+if (values.dev && !ctx.noScreen) watchSource();
 prompt();
 let restart = false;
 for await (const raw of input) {
@@ -112,6 +115,25 @@ if (restart) {
 console.log(last);
 // In UI mode the viewer server is what kept the process running, so end it explicitly.
 process.exit(0);
+
+// --dev: saving a module in src/ or a rulebook queues /reload (after a round in progress, like the
+// button); an editor's burst of events makes one reload. This file can't reload: it asks for Restart.
+function watchSource() {
+  let timer = null;
+  const files = new Set();
+  const changed = (file) => {
+    files.add(file);
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (files.has('cli.mjs')) report('cli.mjs changed: Restart to apply it (Reload can\'t).\n');
+      if ([...files].some((f) => f !== 'cli.mjs')) input.push('/reload');
+      files.clear();
+    }, 300);
+  };
+  watch(new URL('./', import.meta.url), (_, f) => f?.endsWith('.mjs') && changed(f));
+  watch(new URL('../', import.meta.url), (_, f) => /^README-for-.+\.md$/.test(f ?? '') && changed(f));
+  console.log('Dev mode: saved source and rulebook edits reload by themselves.');
+}
 
 // Lines pushed in from elsewhere, read with for await.
 function lineQueue() {

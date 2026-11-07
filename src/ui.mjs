@@ -12,7 +12,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--port 5566] [--no-screen] [--open] [--reopen NAME]
+export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--port 5566] [--no-screen] [--open] [--reopen NAME] [--dev]
 
 Each agent is provider[:name[:model]], e.g. --agents claude:Ada:opus,codex:Linus
 Without saved defaults: discussion claude,codex; worker claude:Worker.
@@ -27,6 +27,9 @@ By default (npm start) the room is used from the discussion screen in the browse
 only shows a log. --no-screen (or npm run terminal): the room is used from the terminal instead,
 and /docs opens each file alone in the browser.
 --open opens the discussion screen even without an interactive terminal (for a Dock launcher).
+--dev (part of npm start, which the Dock app runs too): saving a source module or a rulebook
+reloads it by itself, as /reload does; open pages refresh when their own code changed. cli.mjs
+changes still need /restart. Without --dev (node src/cli.mjs), only /reload does.
 --port: the screen's port on 127.0.0.1 (default 5566); if it is taken, any free port is used.
 The --cwd folder is the room's root. Opening it writes nothing: the first message starts a new
 discussion in DIR/discussions/<date>-<title>/ (its documents, drawings and transcripts/), unless
@@ -452,6 +455,7 @@ export function reloaded(ctx) {
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   log(ctx, '_(code reloaded)_\n\n');
   note(ctx, 'Reloaded the code and the agents\' rulebook; the conversation continues.\n');
+  toScreen(ctx, { type: 'reloaded', page: ctx.docs.PAGE }); // pages refresh if their code changed
 }
 
 // The room is over (after /quit): screens say so and stop reconnecting. After /restart they wait
@@ -468,6 +472,7 @@ export function restartArgs(ctx, values) {
   const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', ctx.cwd, '--port', String(ctx.server.address().port)];
   if (values.agents) args.push('--agents', values.agents);
   if (values.worker) args.push('--worker', values.worker);
+  if (values.dev) args.push('--dev');
   if (ctx.discussion) args.push('--reopen', ctx.discussion.name);
   return args;
 }

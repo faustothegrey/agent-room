@@ -1,7 +1,9 @@
 -- Compile with the README commands (osacompile -s: a stay-open app). This launcher intentionally
--- uses this project only. If an agent-room room answers on port 5566 it opens that one; otherwise
--- it starts one. Then it follows the room's heartbeat (/__health): clicking the Dock icon again
--- reopens the page, Quit stops the room, and the app quits once the room has stopped.
+-- uses this project only. It serves nothing itself: if agent-room's process (its web server,
+-- conversation and agents) answers on port 5566 it opens that page; otherwise it starts the
+-- process with npm start, the project's default. Then it follows the heartbeat (/__health):
+-- clicking the Dock icon again reopens the page, Quit stops the process, and the app quits once
+-- the process has stopped.
 -- Globals, not properties: an applet saves properties into itself, which would break its signature.
 global roomUrl, misses, startedHere
 
@@ -35,7 +37,7 @@ on run
         return
     end if
     set projectDir to "/Users/fausto/Software/agent-room"
-    set roomCommand to "export PATH=\"/usr/local/bin:/opt/homebrew/bin:$HOME/.local/bin:$PATH\"; cd " & quoted form of projectDir & " || exit; for tool in node claude codex; do command -v \"$tool\" >/dev/null || { echo \"Missing required CLI: $tool\"; exit 1; }; done; exec node src/cli.mjs --open"
+    set roomCommand to "export PATH=\"/usr/local/bin:/opt/homebrew/bin:$HOME/.local/bin:$PATH\"; cd " & quoted form of projectDir & " || exit; for tool in node claude codex; do command -v \"$tool\" >/dev/null || { echo \"Missing required CLI: $tool\"; exit 1; }; done; exec npm start -- --open"
     -- Start it in the background, then read its address from the log: 5566, unless something
     -- other than agent-room holds that port. Empty if it stopped before printing one.
     set roomUrl to do shell script "/bin/zsh -lc " & quoted form of roomCommand & " > " & quoted form of logFile() & " 2>&1 < /dev/null & pid=$!; for i in $(seq 100); do u=$(/usr/bin/sed -nE 's#^Discussion screen: (http://[^/]+)/__room.*#\\1#p' " & quoted form of logFile() & "); [ -n \"$u\" ] && { echo \"$u\"; exit 0; }; kill -0 $pid 2>/dev/null || exit 0; sleep .2; done"

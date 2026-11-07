@@ -19,6 +19,9 @@ npm install
 npm start
 ```
 
+`npm start` runs in dev mode (see [Working on the project](#working-on-the-project)); the Dock
+app runs it too. Without dev mode, use `node src/cli.mjs`.
+
 The browser opens the discussion screen, normally at `http://127.0.0.1:5566/__room`.
 If that port is occupied, the room uses a free one and prints its address. The starting
 terminal shows a log; interact with the room in the browser. When output is piped, the
@@ -51,7 +54,8 @@ subscription usage, and **New room in folder…**. Agent settings live inside th
   earlier session's transcript, **Send to agents** asks the discussion agents to read it as
   background; it does not resume its sessions.
 - **Reload:** load code and rulebook edits between discussion commands without losing the
-  current conversation. Refresh the browser afterward for HTML/CSS/JavaScript changes.
+  current conversation. Open pages refresh by themselves when the page's own code changed,
+  keeping what you were typing.
 - **Restart:** click twice to replace the server process on the same address, for changes Reload
   can't load (such as `cli.mjs`). The new process re-opens the discussion in use, a fresh session
   from its handoff; the chat clears, its transcript is kept, and open pages reload by themselves.
@@ -227,20 +231,22 @@ plutil -remove CFBundleIconName "$app/Contents/Info.plist"
 codesign --force --sign - "$app"
 ```
 
-Drag the app into the Dock. If an agent-room room already answers on port 5566 (wherever it was
-started, and in whatever folder), the app opens that room's page. Otherwise it runs
-`node src/cli.mjs --open` in the fixed project path `/Users/fausto/Software/agent-room`; edit the
-script if the checkout moves. Only the app reuses a running room: `npm start` still moves to a free
-port when 5566 is taken.
+Drag the app into the Dock. The app serves nothing itself: a room is one agent-room process
+(`node src/cli.mjs`), which is the web server, the conversation and the agents' sessions together.
+If such a process already answers on port 5566 (wherever it was started, and in whatever folder),
+the app opens its page. Otherwise it runs `npm start -- --open`, the project's default start, in
+the fixed project path `/Users/fausto/Software/agent-room`; edit the script if the checkout moves.
+Only the app reuses a running process: `npm start` in a terminal still moves to a free port when
+5566 is taken.
 
-The app then follows the room's heartbeat every three seconds. The room keeps running when you
-close its browser window: clicking the Dock icon again opens its page in a new tab. Restart keeps
-the app running. When the room stops (Quit in the screen), the app quits too; quitting the app
-from the Dock quits the room the same way.
+The app then follows the process's heartbeat every three seconds. The process keeps running when
+you close the browser window: clicking the Dock icon again opens its page in a new tab. Restart
+keeps the app running. When the process stops (Quit in the screen), the app quits too; quitting
+the app from the Dock stops the process the same way.
 
 The script checks for `node`, `claude` and `codex` through a login shell with Homebrew and
 `~/.local/bin` paths. Its log is `~/Library/Logs/agent-room.log`, replaced on each launch.
-If a room the app started fails to start or ends with an error, an alert shows the log's tail. Discussion transcripts remain in their
+If a process the app started fails to start or ends with an error, an alert shows the log's tail. Discussion transcripts remain in their
 own folders.
 
 ## Access and limits
@@ -277,8 +283,15 @@ settings persistence across CLI restarts, and screen/terminal coordination; they
 live provider access or browser appearance.
 
 Edits outside `cli.mjs` can be loaded with Reload; both rulebooks are reread too. A failed load
-leaves the previous code running. `cli.mjs` changes require a process restart. Browser assets
-are embedded in `docs.mjs`, so reload the room and refresh the page to see their changes.
+leaves the previous code running. `cli.mjs` changes require Restart. Browser assets are embedded
+in `docs.mjs`; after a Reload, open pages refresh by themselves when they changed.
+
+**Dev mode** (`--dev`, part of `npm start` and so of the Dock app) reloads by itself whenever a
+module in `src/` or a rulebook is saved, as if you had pressed Reload: the conversation continues,
+and the page refreshes only when its own code changed. Saving `cli.mjs` shows a reminder to
+Restart instead. Restart keeps dev mode. Saves by anyone count, including the worker's or another
+agent's edits to agent-room itself; a half-finished save that doesn't load leaves the previous
+code running.
 
 For unfinished decisions, historical designs and deferred research, start at
 [the discussions index](discussions/README.md). Archived status labels describe their original date,
