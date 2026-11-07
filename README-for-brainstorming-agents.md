@@ -106,6 +106,9 @@ does not consume it.
   Delivery pending and an empty receiving-session read record. Keep previous archives.
 - A handoff carries, word for word, any instruction for the worker the User hasn't confirmed as
   sent, replaced or withdrawn.
+- Keep the latest version of each unsent worker instruction word for word in the discussion's
+  `pending-instructions.md`. When the User confirms it was sent or withdrawn, remove it. When
+  replaced, keep the replacement word for word.
 
 This is a manual convention for the room's sequential turns, not an enforced session lock.
 
