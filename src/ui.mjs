@@ -18,7 +18,7 @@ Each agent is provider[:name[:model]], e.g. --agents claude:Ada:opus,codex:Linus
 Without saved defaults: discussion claude,codex; worker claude:Worker.
 The provider/model sections in the Discussion and Worker tabs save changes automatically to
 ~/.config/agent-room/defaults.json. CLI flags override the corresponding defaults for this launch.
-Settings changes apply to this room only before discussion, summary or worker work starts;
+Worker changes apply to the next instruction. Discussion changes apply before work starts;
 after that they set defaults for future rooms.
 The worker (the screen's Worker tab) is one more agent, outside the discussion: it carries out the
 instructions sent from that tab, sees only those (and the active discussion's folder, for its
@@ -95,18 +95,38 @@ export async function saveSettings(ctx, value, file = defaultsFile()) {
   const settings = validateSettings(value);
   const next = { ...ctx, agentSpecs: settings.agents.map(specFor).join(','), workerSpec: specFor(settings.worker), sessions: new Map(), state: { ...ctx.state, seen: new Map(ctx.state.seen) } };
   // Build first so validation/loading errors cannot replace defaults or the running room.
+  const applied = !ctx.agentsStarted && !ctx.logPath && !ctx.state.transcript.length && !ctx.screen.worker.length;
+  const workerChanged = next.workerSpec !== ctx.workerSpec;
+  const previous = parseSpec(ctx.workerSpec, true);
+  const freshWorker = previous.provider !== settings.worker.provider || previous.name !== settings.worker.name;
+  if (!applied) {
+    // Validate against the running discussion names, not just future defaults.
+    if (ctx.room.agents.some((a) => a.name.toLowerCase() === settings.worker.name.toLowerCase()))
+      throw new Error('The worker needs a different name from the running discussion agents.');
+    next.sessions = new Map(ctx.sessions);
+    if (freshWorker) next.sessions.set(`worker:${settings.worker.name}`, {});
+  }
   const loaded = await load(next, '');
   mkdirSync(dirname(file), { recursive: true });
   const temp = `${file}.${process.pid}.tmp`;
   writeFileSync(temp, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 });
   renameSync(temp, file);
-  const applied = !ctx.agentsStarted && !ctx.logPath && !ctx.state.transcript.length && !ctx.screen.worker.length;
   if (applied) {
     Object.assign(ctx, loaded, { agentSpecs: next.agentSpecs, workerSpec: next.workerSpec, sessions: next.sessions, state: next.state });
     wire(ctx);
     showHeader(ctx);
+  } else if (workerChanged) {
+    ctx.worker = loaded.worker;
+    ctx.workerSpec = next.workerSpec;
+    ctx.sessions.set(`worker:${settings.worker.name}`, next.sessions.get(`worker:${settings.worker.name}`));
+    if (freshWorker) {
+      ctx.workerBriefed = null;
+      ctx.workerTree = null;
+      ctx.workerHandoff = true;
+    }
+    showHeader(ctx);
   }
-  return { applied, settings };
+  return { applied, workerApplied: true, settings };
 }
 
 // Imports fresh copies of the modules and the two rulebooks and builds a room on ctx.state, and the worker. Returns
@@ -827,6 +847,8 @@ export function queueWork(ctx, text) {
 
 async function runWork(ctx, text) {
   const { worker, screen } = ctx;
+  const history = ctx.workerHandoff ? screen.worker.filter((m) => m.speaker).map((m) =>
+    `${m.speaker}${m.error ? ' (failed)' : ''}:\n${m.html}`).join('\n\n') : '';
   // The task's context, read once, here, before anything awaits: its discussion (for the briefing
   // and the /move lock) and its transcript. If New discussion or Re-open changes the room's
   // meanwhile, the task keeps its own; the reply still goes into its transcript.
@@ -869,9 +891,12 @@ async function runWork(ctx, text) {
       const tree = ctx.workerTree !== place.cwd
         ? `Your working directory is ${place.cwd}, your own Git worktree of the project, on the branch ${WORKER_BRANCH}. Make your changes there, never in the room's root, ${ctx.cwd}: that is the User's working copy (only the discussion folder there is yours, for notes). Commit on ${WORKER_BRANCH} only when asked; the User reviews and merges it. Your scratch notes go in ${join(place.path, NOTES)}/<task>/, one folder per task: Git ignores them, never commit them, and delete them only when the User says "stage accepted". Plans and notes for the User's review still go in the discussion's folder.\n\n`
         : '';
-      entry = { speaker: worker.name, text: (await worker.turn(brief + tree + text)) || '(no reply)' };
-      if (brief) ctx.workerBriefed = d?.dir ?? null;
-      ctx.workerTree = place.cwd;
+      entry = { speaker: worker.name, text: (await worker.turn(brief + tree + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
+      if (ctx.worker === worker) {
+        if (brief) ctx.workerBriefed = d?.dir ?? null;
+        ctx.workerTree = place.cwd;
+        ctx.workerHandoff = false;
+      }
       if (worker.lastUsage) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
     } catch (err) {
       entry = { speaker: worker.name, text: err.message, error: true };

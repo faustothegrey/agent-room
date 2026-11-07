@@ -153,9 +153,14 @@ folders and subsequent launches, including the Dock launcher. Dropdown selection
 text edits save when committed, such as by leaving the field. A custom model choice waits for
 its model ID. Invalid choices show a save error and do not replace the saved defaults.
 
-Before work starts, changes also apply to the current room. After you submit a discussion
+Worker provider and model changes apply to the next instruction, including after a failed turn.
+A running instruction finishes with its original settings; resend a failed instruction yourself.
+Changing models keeps the provider session. Changing provider or worker name starts a fresh
+session supplied with the previous Worker-tab conversation and its worktree/discussion context.
+
+Before work starts, discussion changes also apply to the current room. After you submit a discussion
 message, request a summary, or send worker instructions, changes are saved for **future rooms**;
-active agents keep their settings. Settings shown then may describe future defaults rather
+discussion agents keep their settings. Settings shown then may describe future defaults rather
 than the running sessions. Each tab saves its own choices without replacing the other tab's.
 
 - **Provider:** Claude or Codex, for both discussion agents and the worker.

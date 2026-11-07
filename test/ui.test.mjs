@@ -30,7 +30,7 @@ test('a failing load leaves ctx as it was', async () => {
 });
 
 test('the worker is a separate claude agent with its own session, kept across reloads', async () => {
-  const ctx = freshCtx();
+  const ctx = { ...freshCtx(), workerSpec: 'claude:Worker' };
   Object.assign(ctx, await load(ctx, '?v=5'));
   assert.deepEqual([ctx.worker.name, ctx.worker.provider], ['Worker', 'claude']);
   const session = ctx.sessions.get('worker:Worker');
@@ -226,7 +226,7 @@ test('the worker is told the active discussion\'s folder with its first instruct
   assert.equal(got[1], 'and the test');
 });
 
-test('agent settings persist, apply before startup, and leave active sessions unchanged', async () => {
+test('agent settings persist, apply before startup, and switch only the active worker after startup', async () => {
   const { saveSettings, readDefaults } = await import('../src/ui.mjs');
   const { readFileSync } = await import('node:fs');
   const file = `${await tmp('settings-test-')}/config/defaults.json`;
@@ -245,7 +245,12 @@ test('agent settings persist, apply before startup, and leave active sessions un
   ctx.agentsStarted = true; // includes a queued worker or title lookup before a first reply
   const future = { ...settings, worker: { provider: 'claude', name: 'Bob', model: 'haiku' } };
   assert.equal((await saveSettings(ctx, future, file)).applied, false);
-  for (const [key, value] of Object.entries(active)) assert.equal(ctx[key], value);
+  for (const key of ['room', 'sessions', 'state']) assert.equal(ctx[key], active[key]);
+  assert.notEqual(ctx.worker, active.worker);
+  assert.equal(ctx.worker.provider, 'claude');
+  assert.equal(ctx.worker.name, 'Bob');
+  assert.equal(ctx.workerSpec, 'claude:Bob:haiku');
+  assert.equal(ctx.workerHandoff, true);
   assert.deepEqual(readDefaults(file), future);
   const before = readFileSync(file, 'utf8');
   await assert.rejects(saveSettings(ctx, { ...settings, worker: settings.agents[0] }, file), /different name/);
@@ -644,4 +649,48 @@ test('the worker is told about its scratch notes; .worker-notes is ignored by Gi
   const exclude = git('-C', path, 'rev-parse', '--path-format=absolute', '--git-path', 'info/exclude');
   const { readFileSync } = await import('node:fs');
   assert.equal(readFileSync(exclude, 'utf8').split('\n').filter((l) => l === '.worker-notes/').length, 1);
+});
+
+
+test('worker switches after a running failure, carries history, and retains its session on model changes', async () => {
+  const { queueWork, saveSettings } = await import('../src/ui.mjs');
+  const ctx = await freshSession([], async () => ({ title: 'Topic' }));
+  await gitRoom(ctx.cwd);
+  ctx.workerSpec = 'claude:W';
+  ctx.sessions = new Map();
+  let release, began;
+  const started = new Promise((resolve) => { began = resolve; });
+  ctx.worker.turn = async () => {
+    began();
+    await new Promise((resolve) => { release = resolve; });
+    throw new Error('quota exhausted');
+  };
+  queueWork(ctx, 'implement the feature');
+  await started;
+  const settings = { agents: ctx.room.agents.map((a) => ({ name: a.name, provider: 'claude', model: '' })),
+    worker: { name: 'W', provider: 'codex', model: 'model-one' } };
+  const file = `${ctx.cwd}/defaults.json`;
+  await saveSettings(ctx, settings, file);
+  const session = ctx.sessions.get('worker:W');
+  session.threadId = 'new-provider-thread';
+  assert.equal(ctx.worker.provider, 'codex');
+  assert.equal(ctx.screen.working, 'W');
+  release();
+  await ctx.workQueue;
+  assert.equal(ctx.workerHandoff, true);
+  assert.equal(ctx.workerTree, null); // the old task cannot mark the new session briefed
+  let prompt;
+  ctx.worker.turn = async (p) => { prompt = p; return 'completed'; };
+  queueWork(ctx, 'retry the feature');
+  await ctx.workQueue;
+  assert.match(prompt, /Previous Worker-tab conversation/);
+  assert.match(prompt, /implement the feature/);
+  assert.match(prompt, /quota exhausted/);
+  assert.match(prompt, /Your working directory is/);
+  assert.match(prompt, /Current instruction:\nretry the feature$/);
+  assert.equal(ctx.workerHandoff, false);
+  await saveSettings(ctx, { ...settings, worker: { ...settings.worker, model: 'model-two' } }, file);
+  assert.equal(ctx.workerSpec, 'codex:W:model-two');
+  assert.equal(ctx.sessions.get('worker:W'), session);
+  assert.equal(session.threadId, 'new-provider-thread');
 });
