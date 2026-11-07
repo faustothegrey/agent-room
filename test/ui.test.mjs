@@ -282,3 +282,146 @@ test('Restart keeps the launch flags that matter: the same port, agents, worker 
   assert.deepEqual(args.slice(1), ['--cwd', '/r', '--port', '5566', '--agents', 'claude:Ada', '--worker', 'codex:W', '--dev', '--reopen', '2026-11-03-a-topic']);
   assert.deepEqual(restartArgs({ ...ctx, discussion: null }, {}).slice(1), ['--cwd', '/r', '--port', '5566']);
 });
+
+test('/new: nothing to end before the first message; it creates nothing and changes nothing', async () => {
+  const { readdirSync } = await import('node:fs');
+  const ctx = await freshSession([], async () => ({ title: 'Topic' }));
+  await handleLine('/new', ctx);
+  assert.equal(ctx.discussion, undefined);
+  assert.deepEqual(readdirSync(ctx.cwd), []);
+});
+
+test('/new after a round: the session ends as with Re-open; the next message starts a new titled discussion', async () => {
+  const { mkdirSync, readdirSync, readFileSync, chmodSync } = await import('node:fs');
+  const ctx = await freshSession([], async (text) => ({ title: text === 'hello' ? 'First topic' : 'Second topic' }));
+  const resets = [];
+  for (const a of [...ctx.room.agents, ctx.worker]) a.reset = () => resets.push(a.name);
+  const prompts = [];
+  ctx.room.agents[0].turn = async (p) => { prompts.push(p); return 'PASS'; };
+  await handleLine('/autosummary off', ctx);
+  await handleLine('hello', ctx);
+  const first = ctx.logPath;
+  const [name] = readdirSync(`${ctx.cwd}/discussions`);
+
+  await handleLine('/new', ctx);
+  assert.deepEqual(resets, ['A', 'B']); // fresh discussion sessions; the worker's is kept
+  assert.equal(ctx.discussion, null);
+  assert.equal(ctx.logPath, null);
+  assert.deepEqual(ctx.state.transcript, []);
+  assert.equal(ctx.screen.room.discussion, 'No discussion started');
+  assert.deepEqual(ctx.screen.room.back, { name, title: 'First topic' });
+  assert.match(readFileSync(first, 'utf8'), /session ended: starting a new discussion/);
+  assert.deepEqual(readdirSync(`${ctx.cwd}/discussions`), [name]); // nothing created yet
+
+  // A failed folder creation sends nothing and keeps the way back.
+  chmodSync(`${ctx.cwd}/discussions`, 0o555);
+  try { await handleLine('second', ctx); } finally { chmodSync(`${ctx.cwd}/discussions`, 0o755); }
+  assert.equal(prompts.length, 1);
+  assert.deepEqual(ctx.screen.room.back, { name, title: 'First topic' });
+
+  await handleLine('second', ctx);
+  assert.equal(ctx.discussion.title, 'Second topic');
+  assert.equal(ctx.screen.room.back, null); // the link lasts until the new discussion starts
+  assert.match(ctx.logPath, /second-topic\/transcripts\/session-/);
+  assert.match(prompts[1], /You are A, one of several AI agents/); // introduced again
+  assert.match(prompts[1], /This is a new discussion/);
+  assert.equal(readdirSync(`${ctx.cwd}/discussions/${name}/transcripts`).length, 1);
+
+  // Going back: Re-open the first one (it remembers this one in turn).
+  mkdirSync(`${ctx.cwd}/discussions/x`, { recursive: true });
+  await handleLine(`/reopen ${name}`, ctx);
+  assert.equal(ctx.discussion.name, name);
+  assert.equal(ctx.screen.room.back.title, 'Second topic');
+});
+
+test('/new leaves the worker alone: a running task keeps its transcript, its log stays, the next instruction learns the new folder', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const { readFileSync } = await import('node:fs');
+  const titles = ['First topic', 'Second topic'];
+  const ctx = await freshSession([], async () => ({ title: titles.shift() }));
+  let resetWorker = false;
+  ctx.worker.reset = () => { resetWorker = true; };
+  const got = [];
+  let finish;
+  ctx.worker.turn = async (p) => { got.push(p); return got.length === 2 ? new Promise((done) => { finish = done; }) : 'ok'; };
+  await handleLine('/autosummary off', ctx);
+  await handleLine('hello', ctx);
+  const first = ctx.logPath, firstDir = ctx.discussion.dir;
+  queueWork(ctx, 'one');
+  await ctx.workQueue;
+  queueWork(ctx, 'long task');
+  while (!finish) await new Promise((r) => setTimeout(r, 1));
+
+  await handleLine('/new', ctx); // returns while the worker is still busy: it doesn't wait for it
+  assert.equal(resetWorker, false);
+  assert.ok(ctx.screen.worker.some((m) => m.note?.includes('is no longer the active one')));
+  finish('long done');
+  await ctx.workQueue;
+  assert.match(readFileSync(first, 'utf8'), /long task[\s\S]*session ended[\s\S]*long done/); // in the old transcript
+  assert.equal(ctx.screen.worker.filter((m) => m.speaker === 'W').length, 2); // the log stays
+
+  queueWork(ctx, 'before the folder exists');
+  await ctx.workQueue;
+  assert.match(got[2], /^No discussion is active now: .* is no longer the active discussion's folder/);
+  assert.ok(!got[2].includes('create, read and write'));
+  assert.ok(got[2].includes(firstDir));
+
+  await handleLine('second', ctx);
+  queueWork(ctx, 'after');
+  await ctx.workQueue;
+  assert.match(got[3], new RegExp(`^The active discussion's folder is ${ctx.discussion.dir}: `));
+  assert.ok(!readFileSync(ctx.logPath, 'utf8').includes('long done'));
+});
+
+test('after New discussion, the previous one can\'t move while its worker task runs; it can once the task ends', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const { existsSync, readFileSync } = await import('node:fs');
+  const ctx = await freshSession([], async () => ({ title: 'First topic' }));
+  let finish;
+  ctx.worker.turn = () => new Promise((done) => { finish = done; });
+  await handleLine('/autosummary off', ctx);
+  await handleLine('hello', ctx);
+  const name = ctx.discussion.name, first = ctx.logPath;
+  queueWork(ctx, 'long task');
+  while (!finish) await new Promise((r) => setTimeout(r, 1));
+  await handleLine('/new', ctx);
+  const notes = [];
+  ctx.docs = { ...ctx.docs, broadcast: (screen, ev) => { if (ev.type === 'note') notes.push(ev); } };
+
+  await handleLine(`/move ${name} archive`, ctx);
+  assert.ok(existsSync(`${ctx.cwd}/discussions/${name}`)); // not moved
+  assert.match(notes.at(-1).text, /A worker task is still writing to .*; try again when it finishes/);
+  assert.equal(notes.at(-1).error, true);
+
+  finish('done');
+  await ctx.workQueue;
+  assert.equal(ctx.screen.working, null);
+  assert.match(readFileSync(first, 'utf8'), /done/); // saved in its own transcript
+  await handleLine(`/move ${name} archive`, ctx);
+  assert.ok(existsSync(`${ctx.cwd}/discussions/archive/${name}`));
+});
+
+test('a transcript that can\'t be written keeps the worker\'s reply visible, reports the error and ends the busy state', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const { rmSync } = await import('node:fs');
+  const ctx = await freshSession([], async () => ({ title: 'First topic' }));
+  let finish;
+  ctx.worker.turn = () => new Promise((done) => { finish = done; });
+  const events = [];
+  ctx.docs = { ...ctx.docs, broadcast: (screen, ev) => events.push(ev) };
+  await handleLine('/autosummary off', ctx);
+  await handleLine('hello', ctx);
+  queueWork(ctx, 'task');
+  while (!finish) await new Promise((r) => setTimeout(r, 1));
+  rmSync(ctx.discussion.dir, { recursive: true }); // the transcript's folder is gone
+
+  finish('the reply');
+  await ctx.workQueue;
+  const shown = ctx.screen.worker;
+  assert.ok(shown.some((m) => m.speaker === 'W' && m.html.includes('the reply')));
+  assert.match(shown.at(-1).note, /couldn't save to the transcript: .*ENOENT/);
+  assert.equal(shown.at(-1).error, true);
+  assert.equal(ctx.screen.working, null);
+  assert.deepEqual(events.filter((e) => e.type === 'working').at(-1), { type: 'working', name: null });
+  assert.equal(ctx.workingIn, null);
+});

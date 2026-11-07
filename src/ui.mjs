@@ -37,7 +37,8 @@ discussion in DIR/discussions/<date>-<title>/ (its documents, drawings and trans
 Type a message to start a round; start it with @name to address one agent.
 Commands: /docs (pick a document to view in the browser), /reopen <name> (re-open that
 discussion: a fresh session there, starting from its handoff; one in archive/ or deferred/ is made
-active first), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
+active first), /new (end this session; your next message starts a new discussion; the worker
+carries on), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
 /summary (the agents agree a short
 summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
 in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
@@ -173,7 +174,8 @@ function header(ctx) {
   return { folder: ctx.cwd, agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name,
     discussion: d ? d.title : 'No discussion started',
     active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath,
-    transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null };
+    transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
+    back: ctx.previous ?? null }; // the discussion before the last switch, until the next one starts
 }
 function showHeader(ctx) {
   ctx.screen.room = header(ctx);
@@ -214,6 +216,7 @@ function moveDiscussion(ctx, ref, to) {
   if (d.section === target) return { name: d.name }; // already there
   const from = join(parent, d.section ?? '', d.name);
   if (ctx.discussion?.dir === from) return note(ctx, `✗ ${d.name} is the discussion in use in this room: it can't move now.`, true), null;
+  if (ctx.workingIn === from) return note(ctx, `✗ A worker task is still writing to ${d.name}; try again when it finishes.`, true), null;
   const dest = join(parent, target ?? '', d.name);
   if (existsSync(dest)) return note(ctx, `✗ There is already a discussion ${d.name} in ${target ?? 'discussions'}/.`, true), null;
   mkdirSync(dirname(dest), { recursive: true });
@@ -284,6 +287,7 @@ async function openDiscussion(ctx, line) {
     const head = `# ${title} — session of ${when(now)}\n\nRoom: ${describe(ctx.room)} · worker ${ctx.worker.name}\n\nRoot: ${ctx.cwd}\n\n`;
     ctx.logPath = createSessionFile(join(dir, 'transcripts'), head + (ctx.pendingLog ?? ''), now);
     ctx.pendingLog = '';
+    ctx.previous = null; // the "← back to …" link lasts until this discussion starts
   } catch (err) {
     note(ctx, `✗ Couldn't create the discussion's folder or transcript: ${err.message}\nYour message was not sent to the agents. Here it is, to send again:\n\n${line}\n`, true);
     return false;
@@ -320,24 +324,59 @@ async function reopenDiscussion(ctx, name) {
   name = d.name;
   if (ctx.logPath) {
     await ctx.workQueue; // let a running worker instruction finish in this session
-    log(ctx, `_(session ended: re-opening the discussion ${name})_\n\n`);
-    for (const a of [...ctx.room.agents, ctx.worker]) a.reset?.();
-    const { state, screen } = ctx;
-    state.transcript.length = 0; // emptied in place: the room and the screen hold this array
-    for (const a of ctx.room.agents) state.seen.set(a.name, 0);
-    state.summaries = 0;
-    state.briefing = null;
-    screen.worker.length = 0;
-    Object.assign(screen, { doc: null, thinking: null, working: null, status: null });
-    ctx.logPath = null;
-    ctx.pendingLog = '';
-    ctx.agentsStarted = false;
+    endSession(ctx, `re-opening the discussion ${name}`);
+    ctx.worker.reset?.();
+    ctx.screen.worker.length = 0;
+    ctx.screen.working = null;
     ctx.workerBriefed = null;
   }
-  ctx.discussion = { name, dir: join(parent, name), title: name, continued: true };
+  switchTo(ctx, { name, dir: join(parent, name), title: name, continued: true });
+  note(ctx, `Re-opened the discussion ${name}: your next message starts a fresh session there; the agents start from its handoff.`);
+}
+
+// Ends this room's discussion session (Re-open and New discussion): a last line in its transcript,
+// which is then closed; the chat clears and the discussion agents get fresh CLI sessions. The worker
+// is left alone here: Re-open resets it itself, New discussion doesn't.
+function endSession(ctx, why) {
+  log(ctx, `_(session ended: ${why})_\n\n`);
+  for (const a of ctx.room.agents) a.reset?.();
+  const { state, screen } = ctx;
+  state.transcript.length = 0; // emptied in place: the room and the screen hold this array
+  for (const a of ctx.room.agents) state.seen.set(a.name, 0);
+  state.summaries = 0;
+  state.briefing = null;
+  Object.assign(screen, { doc: null, thinking: null, status: null });
+  ctx.logPath = null;
+  ctx.pendingLog = '';
+  ctx.agentsStarted = false;
+}
+
+// Makes `next` (or no discussion) the one in use. The one it replaces is remembered for the header's
+// "← back to …" link, until the next message opens a discussion.
+function switchTo(ctx, next) {
+  const was = ctx.discussion;
+  if (was && was.dir !== next?.dir) ctx.previous = { name: was.name, title: was.title };
+  if (next && ctx.previous?.name === next.name) ctx.previous = null; // went back to it
+  ctx.discussion = next;
   showHeader(ctx);
   toScreen(ctx, ctx.docs.resetEvent(ctx.screen)); // open pages start over with the empty chat
-  note(ctx, `Re-opened the discussion ${name}: your next message starts a fresh session there; the agents start from its handoff.`);
+}
+
+// /new (New discussion): between rounds, like every command. The discussion session ends as with
+// Re-open; the next message names and creates the new discussion, as in a fresh room. Nothing is
+// created until then. The worker is not affected: a task already running keeps its target, its log
+// stays (with a marker line), and its session is kept (decided by the User, 2026-11-07).
+function newDiscussion(ctx) {
+  const was = ctx.discussion;
+  if (!was && !ctx.logPath) return note(ctx, 'No discussion started yet: your next message starts a new one.');
+  if (ctx.logPath) endSession(ctx, 'starting a new discussion');
+  if (was && ctx.screen.worker.length) {
+    const view = { note: `New discussion: ${was.name} is no longer the active one. The next instruction gets the new discussion's folder once your first message creates it.` };
+    ctx.screen.worker.push(view);
+    toScreen(ctx, { type: 'work', message: view });
+  }
+  switchTo(ctx, null);
+  note(ctx, `New discussion: your next message names it and starts it.${was ? ` To go back, /reopen ${was.name}.` : ''}`);
 }
 
 // ── New room in folder… ─────────────────────────────────────────
@@ -488,6 +527,7 @@ export async function handleLine(line, ctx) {
   if (line === '/docs') return showDocs(ctx);
   const reopen = /^\/(?:reopen|continue)(?:\s+(.*))?$/.exec(line); // /continue: its former name
   if (reopen) return reopenDiscussion(ctx, (reopen[1] ?? '').trim());
+  if (line === '/new') return newDiscussion(ctx);
   const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
   if (move) return void moveDiscussion(ctx, move[1], move[2]);
   if (line === '/summary') { ctx.agentsStarted = true; return runSummary(ctx); }
@@ -643,36 +683,60 @@ export function queueWork(ctx, text) {
 
 async function runWork(ctx, text) {
   const { worker, screen } = ctx;
+  // The task belongs to the session it started in: if New discussion closes that transcript
+  // meanwhile, the reply still goes there, not into the next discussion's.
+  const started = ctx.logPath;
+  // A transcript that can't be written to doesn't lose the reply: it is still shown, with the error.
+  let saveError = null;
+  const workLog = (t) => {
+    try { if (started && started !== ctx.logPath) appendFileSync(started, t); else log(ctx, t); }
+    catch (err) { saveError ??= err; }
+  };
   const show = (entry, meta) => {
     const view = { ...ctx.docs.messageView(entry), ...(meta && { meta }) };
     screen.worker.push(view);
     toScreen(ctx, { type: 'work', message: view });
   };
-  log(ctx, `**User → ${worker.name}** (worker)\n\n${text}\n\n`);
-  console.log(`\n${bold(`You → ${worker.name}`)} › ${text}\n`);
-  show({ speaker: 'User', text });
+  // The discussion this task writes to (transcript, notes): /move refuses it until the task ends.
+  ctx.workingIn = ctx.discussion?.dir ?? null;
   screen.working = worker.name;
-  toScreen(ctx, { type: 'working', name: worker.name });
-  const t0 = Date.now();
-  let entry;
   try {
-    // The worker learns the active discussion's folder (for its notes) with its first instruction there.
-    const d = ctx.discussion;
-    const brief = d && ctx.workerBriefed !== d.dir
-      ? `The active discussion's folder is ${d.dir}: create, read and write this discussion's documents there, including your implementation notes and plans. The work itself goes in the root, ${ctx.cwd}.\n\n`
-      : '';
-    entry = { speaker: worker.name, text: (await worker.turn(brief + text)) || '(no reply)' };
-    if (d) ctx.workerBriefed = d.dir;
-    if (worker.lastUsage) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
-  } catch (err) {
-    entry = { speaker: worker.name, text: err.message, error: true };
+    workLog(`**User → ${worker.name}** (worker)\n\n${text}\n\n`);
+    console.log(`\n${bold(`You → ${worker.name}`)} › ${text}\n`);
+    show({ speaker: 'User', text });
+    toScreen(ctx, { type: 'working', name: worker.name });
+    const t0 = Date.now();
+    let entry;
+    try {
+      // The worker learns the active discussion's folder (for its notes) with its first instruction there.
+      // After New discussion, until the next one exists, it learns only that the old one is closed.
+      const d = ctx.discussion;
+      const brief = d && ctx.workerBriefed !== d.dir
+        ? `The active discussion's folder is ${d.dir}: create, read and write this discussion's documents there, including your implementation notes and plans. The work itself goes in the root, ${ctx.cwd}.\n\n`
+        : !d && ctx.workerBriefed
+          ? `No discussion is active now: ${ctx.workerBriefed} is no longer the active discussion's folder. You will be told the next one's folder once it exists.\n\n`
+          : '';
+      entry = { speaker: worker.name, text: (await worker.turn(brief + text)) || '(no reply)' };
+      if (brief) ctx.workerBriefed = d?.dir ?? null;
+      if (worker.lastUsage) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
+    } catch (err) {
+      entry = { speaker: worker.name, text: err.message, error: true };
+    }
+    const meta = [`${Math.round((Date.now() - t0) / 1000)}s`, entry.error ? '' : ctx.usage.formatUsage(worker.lastUsage)].filter(Boolean).join(' · ');
+    workLog(`**${worker.name}** (worker${entry.error ? ', failed' : ''}, ${meta})\n\n${entry.text}\n\n`);
+    console.log(entry.error ? red(`\n✗ ${worker.name} (worker) failed: ${entry.text}\n`) : `\n${bold(worker.name)}${dim(` (worker, ${meta})`)} › ${entry.text}\n`);
+    show(entry, meta);
+    if (saveError) {
+      const view = { note: `✗ ${worker.name}: couldn't save to the transcript: ${saveError.message}`, error: true };
+      screen.worker.push(view);
+      toScreen(ctx, { type: 'work', message: view });
+      console.log(red(view.note));
+    }
+  } finally {
+    ctx.workingIn = null;
+    screen.working = null;
+    toScreen(ctx, { type: 'working', name: null });
   }
-  const meta = [`${Math.round((Date.now() - t0) / 1000)}s`, entry.error ? '' : ctx.usage.formatUsage(worker.lastUsage)].filter(Boolean).join(' · ');
-  log(ctx, `**${worker.name}** (worker${entry.error ? ', failed' : ''}, ${meta})\n\n${entry.text}\n\n`);
-  console.log(entry.error ? red(`\n✗ ${worker.name} (worker) failed: ${entry.text}\n`) : `\n${bold(worker.name)}${dim(` (worker, ${meta})`)} › ${entry.text}\n`);
-  screen.working = null;
-  toScreen(ctx, { type: 'working', name: null });
-  show(entry, meta);
   refreshQuota(ctx).catch(() => {});
 }
 

@@ -146,6 +146,8 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #folder { font-family: ui-monospace, monospace; font-size: .75rem; overflow-wrap: anywhere; line-height: 1.35; }
 #disc { font-size: .75rem; color: var(--dim); line-height: 1.35; }
 #disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
+#back-to { border: 0; background: none; padding: 0; font-size: .75rem; color: var(--dim); }
+#back-to:hover { color: CanvasText; text-decoration: underline; }
 #server { font-size: .7rem; color: var(--dim); display: inline-flex; align-items: center; gap: .4rem; }
 #server[data-state="down"] { color: #ef4444; font-weight: 600; }
 #beat { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; flex: none; }
@@ -218,6 +220,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #files .status.archive { background: #8882; } #files .status.deferred { background: #eab30833; } #files .status.inuse { background: #3b82f633; }
 #files .actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; padding: 0 0 .8rem; border-bottom: 1px solid var(--line); }
 #files .actions .primary { background: #3b82f6; border-color: #3b82f6; color: white; }
+#files .row { display: flex; align-items: center; gap: .3rem; }
+#files .row .entry { flex: 1; min-width: 0; }
+#files .row .reopen { font-size: .75rem; padding: .1rem .5rem; }
 #files .actions .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 .3rem; }
 #files h3 { color: var(--dim); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; margin: .9rem 0 .3rem; }
 #talk, #tab-talk { --accent: #3b82f6; --tint: #3b82f612; }
@@ -242,7 +247,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .msg.error { border-left-color: #ef4444; }
 .tools { flex-wrap: wrap; }
 </style></head><body>
-<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span><span id="server"><i id="beat"></i><span id="server-text">Connecting to the server…</span></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
+<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span><button id="back-to" hidden title="Re-open the discussion you were in: a fresh session there, from its handoff"></button><span id="server"><i id="beat"></i><span id="server-text">Connecting to the server…</span></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
   <div class="view" id="talk">
@@ -336,6 +341,7 @@ function showTab(name) {
 $('tab-talk').onclick = () => showTab('talk');
 $('tab-work').onclick = () => showTab('work');
 function workMessage(m, live) {
+  if (m.note) return work.add(statusEl(m.note, m.error)); // a marker (New discussion) or an error
   work.add(bubble(m));
   if (live && m.speaker !== 'User' && tab !== 'work') $('tab-work').classList.add('news');
 }
@@ -425,6 +431,20 @@ function discussionOf(parts) {
   if (parts.length === 3 && SECTIONS[parts[1]] && isDiscussion(parts[2])) return { ref: parts[1] + '/' + parts[2], section: parts[1] };
   return null;
 }
+const REOPEN_TIP = 'A fresh session in this discussion: the agents start from its handoff. Its documents and transcripts stay.';
+// Re-open and New discussion: once this session has started, they end it (the chat clears), so they
+// take two clicks, like Quit.
+function confirmed(b, run) {
+  const label = b.textContent;
+  b.onclick = (e) => {
+    e.stopPropagation();
+    if (room?.started && !b.dataset.armed) {
+      b.dataset.armed = '1'; b.textContent = 'Click again: this session ends and the chat clears';
+      return setTimeout(() => { delete b.dataset.armed; b.textContent = label; }, 4000);
+    }
+    run();
+  };
+}
 let listed = null; // the list path shown in the pane ('' for the top), or null when a document is shown
 async function openFiles(group) {
   if (typeof group !== 'string') group = ''; // as a click handler, group is the event
@@ -474,15 +494,8 @@ async function openFiles(group) {
       const action = (label, onclick, tip, cls) => { const b = el('button', cls || '', label); b.onclick = onclick; b.title = tip; actions.append(b); return b; };
       // Re-open: not for the discussion in use before anything was said in it (nothing to restart).
       if (!(inUse(group) && !room.started)) {
-        const label = disc.section ? 'Re-open (makes it active)' : 'Re-open';
-        const b = action(label, () => {
-          // Once this session has started, re-opening ends it (the chat clears): two clicks, like Quit.
-          if (room.started && !b.dataset.armed) {
-            b.dataset.armed = '1'; b.textContent = 'Click again: this session ends and the chat clears';
-            return setTimeout(() => { delete b.dataset.armed; b.textContent = label; }, 4000);
-          }
-          send('/reopen ' + disc.ref);
-        }, 'A fresh session in this discussion: the agents start from its handoff. Its documents and transcripts stay.', 'primary');
+        const b = action(disc.section ? 'Re-open (makes it active)' : 'Re-open', null, REOPEN_TIP, 'primary');
+        confirmed(b, () => send('/reopen ' + disc.ref));
       }
       // Moving the whole discussion; not the one in use (its transcript is open there).
       if (!inUse(group)) {
@@ -508,10 +521,29 @@ async function openFiles(group) {
   // The top: active discussions, the room's own documents, then archive/ and deferred/.
   const discussions = discussionsIn('discussions');
   title('Discussions');
+  // New discussion: ends this session (as Re-open does); the next message starts the new one.
+  if (canAct && room.active) {
+    const actions = el('div', 'actions');
+    const b = el('button', 'primary', 'New discussion');
+    b.title = 'End this session: the chat clears and your next message starts a new discussion. The worker carries on.';
+    confirmed(b, () => send('/new'));
+    actions.append(b);
+    list.append(actions);
+  }
   if (!discussions.length) list.append(el('span', 'hint', room?.started ? '' : 'No active discussions: your first message starts one.'));
-  else if (room && !room.started && canAct) list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, open it and choose Re-open.'));
+  else if (room && !room.started && canAct) list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Re-open on its row.'));
   heading('Active');
-  for (const d of discussions) entry('discussion', d, () => openFiles('discussions/' + d), inUse('discussions/' + d) ? 'in use' : '');
+  for (const d of discussions) {
+    const path = 'discussions/' + d;
+    entry('discussion', d, () => openFiles(path), inUse(path) ? 'in use' : '');
+    // Re-open on the row itself, as on its page; not for the one in use before anything was said.
+    if (!canAct || (inUse(path) && !room.started)) continue;
+    const row = el('div', 'row'), b = el('button', 'reopen', 'Re-open');
+    b.title = REOPEN_TIP;
+    confirmed(b, () => send('/reopen ' + d));
+    row.append(list.lastChild, b);
+    list.append(row);
+  }
   const top = files.filter((f) => f.startsWith('discussions/')).map((f) => f.slice('discussions/'.length));
   const own = [...new Set(top.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))].filter((n) => !isDiscussion(n) && !SECTIONS[n]).sort();
   const loose = top.filter((r) => !r.includes('/'));
@@ -533,6 +565,11 @@ function setRoom(r) {
   $('folder').textContent = r.folder;
   $('disc').textContent = r.discussion || '';
   $('disc').dataset.active = r.active ? 'true' : 'false';
+  // After New discussion or Re-open, until the next one starts: the way back to the one before.
+  // Nothing has been said since, so no second click is needed.
+  const back = $('back-to');
+  back.hidden = !(r.back && !ended && !$('composer').hidden);
+  if (r.back) { back.textContent = '← back to "' + r.back.title + '"'; back.onclick = () => send('/reopen ' + r.back.name); }
 }
 // Settings stay outside the conversation; saving never changes an active CLI session.
 const settingsRows = {};
@@ -748,7 +785,7 @@ events.onmessage = (e) => {
     if (ev.room) setRoom(ev.room);
     $('newroom').hidden = !ev.newRoom;
   }
-  if (ev.type === 'room') setRoom(ev.room);
+  if (ev.type === 'room') { setRoom(ev.room); if (listed !== null) openFiles(listed); } // its buttons and "in use" follow
   if (ev.type === 'work') workMessage(ev.message, true);
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
   if (ev.type === 'auto') $('auto').checked = ev.on;

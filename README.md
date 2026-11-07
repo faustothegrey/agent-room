@@ -106,8 +106,17 @@ first needed, and always listed at the bottom of **Discussions**, after the acti
 The discussion in use in this room can't be moved. New discussion names also skip names already
 taken in `archive/` and `deferred/`.
 
-To go back to an existing discussion, open it in **Discussions** and choose **Re-open this discussion**,
-or use `/reopen <folder-name>`. It works at any time between rounds. An archived or deferred
+**New discussion** (at the top of **Discussions**, or `/new`) works between rounds. It ends this
+room's session the way Re-open does (below), except for the worker: its running task, log and CLI
+session carry on, and its log gets a marker line. Nothing is created yet: your next message gets
+a title and creates the new discussion's folder, as in a fresh room. The worker's next instruction
+then gets the new folder; until it exists, the worker is told no discussion is active.
+
+After New discussion or Re-open, the header shows **← back to "<title>"**, which re-opens the
+previous discussion, until the next message starts a discussion.
+
+To go back to an existing discussion, choose **Re-open** on its row in **Discussions** (or on its
+page), or use `/reopen <folder-name>`. It works at any time between rounds. An archived or deferred
 discussion (`/reopen archive/<folder-name>`) is moved back to the active discussions first. No title is requested; the
 next message creates a new session transcript in that discussion. If this room's session had
 already started, it ends first: its transcript is kept and closed, the chat clears (the button
@@ -199,6 +208,7 @@ node src/cli.mjs --help
 |---|---|
 | `/docs` | Browse documents; in terminal mode, ↑/↓ selects, Enter opens, Esc leaves the picker. |
 | `/reopen <folder-name>` | Re-open an existing discussion: a fresh session there, from its handoff. `archive/…` or `deferred/…` is made active first. |
+| `/new` | End this session; your next message starts a new discussion. The worker carries on. |
 | `/move <folder-name> active\|archive\|deferred` | Move a whole discussion (not the one in use) into `archive/` or `deferred/`, or back. |
 | `/summary` | Request an agreed summary. |
 | `/autosummary [on\|off]` | Toggle automatic summaries, or set them explicitly. |
