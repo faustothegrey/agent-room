@@ -285,8 +285,10 @@ codesign --force --sign - "$app"
 Drag the app into the Dock. The app serves nothing itself: a room is one agent-room process
 (`node src/cli.mjs`), which is the web server, the conversation and the agents' sessions together.
 If such a process already answers on port 5566 (wherever it was started, and in whatever folder),
-the app opens its page. Otherwise it runs `npm start -- --open`, the project's default start, in
-the fixed project path `/Users/fausto/Software/agent-room`; edit the script if the checkout moves.
+the app opens its page. Otherwise it runs
+`npm start -- --open --node Mac --peer charon=http://192.168.178.70:5566` in the fixed project
+path `/Users/fausto/Software/agent-room`, enabling replication with charon and reusing the saved
+pairing. Edit the script and rebuild the app if the checkout or peer address changes.
 Only the app reuses a running process: `npm start` in a terminal still moves to a free port when
 5566 is taken.
 
