@@ -694,3 +694,99 @@ test('worker switches after a running failure, carries history, and retains its 
   assert.equal(ctx.sessions.get('worker:W'), session);
   assert.equal(session.threadId, 'new-provider-thread');
 });
+
+test('room discovery finds independent listeners and excludes other HTTP services', async () => {
+  const { createServer } = await import('node:http');
+  const { listRooms } = await import('../src/ui.mjs');
+  const room = createServer((req, res) => {
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ app: 'agent-room', root: '/tmp/discovery-room', discussion: 'discussions/test' }));
+  });
+  const other = createServer((req, res) => res.end('{"app":"other"}'));
+  try {
+    await Promise.all([room, other].map((s) => new Promise((done) => s.listen(0, '127.0.0.1', done))));
+    const rooms = await listRooms();
+    assert.deepEqual(rooms.find((r) => r.port === room.address().port), {
+      port: room.address().port, root: '/tmp/discovery-room', discussion: 'discussions/test',
+    });
+    assert.equal(rooms.some((r) => r.port === other.address().port), false);
+  } finally {
+    for (const server of [room, other]) { server.closeAllConnections(); server.close(); }
+  }
+});
+
+test('Pause preserves native sessions across New discussion; corrupt Resume leaves the checkpoint and room intact', async () => {
+  const { createHash } = await import('node:crypto');
+  const { homedir } = await import('node:os');
+  const { join, dirname } = await import('node:path');
+  const { readFileSync, writeFileSync, realpathSync, rmSync, existsSync } = await import('node:fs');
+  const ctx = { ...freshCtx(), cwd: await tmp('paused-state-test-'), workerSpec: 'claude:W' };
+  Object.assign(ctx, await load(ctx, '?pause-unit'));
+  ctx.suggestTitle = async () => ({ title: 'Saved context' });
+  for (const agent of ctx.room.agents) agent.turn = async () => 'PASS';
+  await handleLine('/autosummary off', ctx);
+  await handleLine('Remember this', ctx);
+  Object.assign(ctx.sessions.get('A'), { id: 'claude-original', started: true });
+  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-original' });
+  Object.assign(ctx.sessions.get('worker:W'), { id: 'worker-original', started: true });
+  ctx.screen.worker.push({ speaker: 'W', html: '<p>Saved worker</p>' });
+  ctx.totals.A = { input: 42, output: 10 };
+  ctx.state.summaries = 3;
+  const name = ctx.discussion.name;
+  const file = join(homedir(), '.local', 'state', 'agent-room', 'paused',
+    createHash('sha256').update(realpathSync(ctx.cwd)).digest('hex'),
+    createHash('sha256').update(name).digest('hex') + '.json');
+  try {
+    let finish;
+    ctx.workQueue = new Promise((resolve) => { finish = resolve; });
+    const pausing = handleLine('/pause', ctx);
+    assert.equal(ctx.pausing, true);
+    assert.equal(existsSync(file), false);
+    finish(); await pausing;
+    const snapshot = readFileSync(file, 'utf8');
+    const saved = JSON.parse(snapshot);
+    const before = ctx.state.transcript.length;
+    await handleLine('Blocked while paused', ctx);
+    await handleLine('/summary', ctx);
+    assert.equal(ctx.state.transcript.length, before);
+    const { queueWork } = await import('../src/ui.mjs');
+    queueWork(ctx, 'Blocked worker');
+    assert.equal(ctx.screen.worker.length, 1);
+    await handleLine('/new', ctx);
+    assert.equal(ctx.paused, false);
+    assert.equal(ctx.screen.worker.length, 0);
+    assert.notEqual(ctx.sessions.get('worker:W').id, 'worker-original');
+    assert.notEqual(ctx.sessions.get('A').id, 'claude-original');
+    const emptyState = ctx.state;
+    writeFileSync(file, JSON.stringify({ ...saved, version: 999 }));
+    await assert.rejects(handleLine('/resume ' + name, ctx), /checkpoint is invalid/);
+    assert.equal(ctx.state, emptyState);
+    assert.equal(ctx.discussion, null);
+    assert.equal(existsSync(file), true);
+    assert.equal(ctx.pausing, false);
+    writeFileSync(file, JSON.stringify({ ...saved, sessions: [] }));
+    await assert.rejects(handleLine('/resume ' + name, ctx), /provider session.*missing/);
+    assert.equal(ctx.state, emptyState);
+    assert.equal(existsSync(file), true);
+    writeFileSync(file, snapshot);
+    await handleLine('/resume ' + name, ctx);
+    assert.equal(ctx.sessions.get('A').id, 'claude-original');
+    assert.equal(ctx.sessions.get('B').threadId, 'codex-original');
+    assert.equal(ctx.sessions.get('worker:W').id, 'worker-original');
+    assert.deepEqual(ctx.state.transcript, saved.state.transcript);
+    assert.deepEqual([...ctx.state.seen], saved.state.seen);
+    assert.equal(ctx.state.summaries, 3);
+    assert.deepEqual(ctx.totals, saved.totals);
+    assert.deepEqual(ctx.screen.worker, saved.worker);
+    assert.equal(ctx.logPath, saved.logPath);
+    assert.doesNotMatch(ctx.room.promptFor(ctx.room.agents[0]), /Remember this/);
+    assert.equal(existsSync(file), false);
+  } finally { rmSync(dirname(file), { recursive: true, force: true }); }
+});
+
+
+test('Restart leaves a paused checkpoint for Resume instead of re-opening it fresh', () => {
+  const ctx = { cwd: '/r', paused: true, server: { address: () => ({ port: 5566 }) },
+    discussion: { name: '2026-11-03-paused' } };
+  assert.deepEqual(restartArgs(ctx, {}).slice(1), ['--cwd', '/r', '--port', '5566']);
+});

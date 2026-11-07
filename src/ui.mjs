@@ -4,10 +4,11 @@
 // of a local module here would stay cached and never reload.)
 // What must survive a reload lives in `ctx`, owned by cli.mjs: the conversation state, the CLI
 // sessions, the transcript path and the viewer server.
+import { createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createConnection, createServer as createNetServer } from 'node:net';
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,7 +43,8 @@ The --cwd folder is the room's root. Opening it writes nothing: the first messag
 discussion in DIR/discussions/<date>-<title>/ (its documents, drawings and transcripts/), unless
 /reopen <name> (or --reopen <name> at launch) picked an existing one first.
 Type a message to start a round; start it with @name to address one agent.
-Commands: /docs (pick a document to view in the browser), /reopen <name> (re-open that
+Commands: /pause (save discussion and worker sessions locally), /resume <name> (continue a saved session),
+/docs (pick a document to view in the browser), /reopen <name> (re-open that
 discussion: a fresh session there, starting from its handoff; one in archive/ or deferred/ is made
 active first), /new (end this session; your next message starts a new discussion; the worker
 carries on), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
@@ -97,6 +99,7 @@ export function modelChoices() {
   return { claude: ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) })), codex };
 }
 export async function saveSettings(ctx, value, file = defaultsFile()) {
+  if (ctx.paused || ctx.pausing) throw new Error('Resume the discussion before changing agent settings.');
   const settings = validateSettings(value);
   const next = { ...ctx, agentSpecs: settings.agents.map(specFor).join(','), workerSpec: specFor(settings.worker), sessions: new Map(), state: { ...ctx.state, seen: new Map(ctx.state.seen) } };
   // Build first so validation/loading errors cannot replace defaults or the running room.
@@ -195,6 +198,7 @@ function wire(ctx) {
   // The screen's checkbox: applied at once, not queued behind a round, so it can stop the next summary.
   ctx.screen.setAuto = (on) => setAuto(ctx, on);
   ctx.screen.newRoom = () => newRoom(ctx);
+  ctx.screen.listRooms = () => listRooms();
   ctx.screen.getSettings = () => ({ settings: currentSettings(ctx), defaults: readDefaults(), models: modelChoices(), started: !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length || !!ctx.screen.worker.length });
   ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
 }
@@ -207,6 +211,7 @@ function header(ctx) {
     discussion: d ? d.title : 'No discussion started',
     active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath,
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
+    paused: !!ctx.paused, pausedSessions: pausedSessions(ctx),
     back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
     code: ctx.code ?? null }; // the version this process runs (see codeInfo)
 }
@@ -249,6 +254,7 @@ function moveDiscussion(ctx, ref, to) {
   if (d.section === target) return { name: d.name }; // already there
   const from = join(parent, d.section ?? '', d.name);
   if (ctx.discussion?.dir === from) return note(ctx, `✗ ${d.name} is the discussion in use in this room: it can't move now.`, true), null;
+  if (pausedSessions(ctx).some((p) => p.name === d.name)) return note(ctx, '✗ Resume the paused discussion before moving it.', true), null;
   if (ctx.workingIn === from) return note(ctx, `✗ A worker task is still writing to ${d.name}; try again when it finishes.`, true), null;
   const dest = join(parent, target ?? '', d.name);
   if (existsSync(dest)) return note(ctx, `✗ There is already a discussion ${d.name} in ${target ?? 'discussions'}/.`, true), null;
@@ -342,11 +348,98 @@ function briefing(ctx) {
     + `The room's root, ${ctx.cwd}, holds the work itself.`;
 }
 
+// Checkpoints are local application data: never placed in the discussion's replicated files.
+const pauseDirectory = (ctx) => join(homedir(), '.local', 'state', 'agent-room', 'paused',
+  createHash('sha256').update(realpathSync(ctx.cwd)).digest('hex'));
+const pauseFile = (ctx, name) => join(pauseDirectory(ctx), createHash('sha256').update(name).digest('hex') + '.json');
+function pausedSessions(ctx) {
+  const dir = pauseDirectory(ctx);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => f.endsWith('.json')).flatMap((f) => {
+    try {
+      const saved = JSON.parse(readFileSync(join(dir, f), 'utf8'));
+      return saved.version === 1 && saved.root === realpathSync(ctx.cwd)
+        ? [{ name: saved.discussion.name, title: saved.discussion.title, at: saved.at }] : [];
+    } catch { return []; }
+  });
+}
+
+async function pauseDiscussion(ctx) {
+  if (ctx.paused) return note(ctx, 'This discussion is already paused.');
+  if (!ctx.discussion || !ctx.logPath) return note(ctx, 'Start a discussion before pausing it.', true);
+  ctx.pausing = true;
+  try {
+    await ctx.workQueue; // commands already wait for the round; also drain the independent worker
+    const snapshot = {
+      version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
+      discussion: ctx.discussion, agentSpecs: ctx.agentSpecs, workerSpec: ctx.workerSpec,
+      sessions: [...ctx.sessions], state: { ...ctx.state, seen: [...ctx.state.seen] },
+      logPath: ctx.logPath, pendingLog: ctx.pendingLog ?? '', totals: ctx.totals,
+      autoSummary: autoOn(ctx), worker: ctx.screen.worker, doc: ctx.screen.doc,
+      workerBriefed: ctx.workerBriefed ?? null, workerTree: ctx.workerTree ?? null, workerHandoff: !!ctx.workerHandoff,
+    };
+    const file = pauseFile(ctx, ctx.discussion.name);
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+    const temp = file + '.' + process.pid + '.tmp';
+    try {
+      writeFileSync(temp, JSON.stringify(snapshot), { mode: 0o600 });
+      linkSync(temp, file); // Publish without overwriting another room's saved Pause.
+    } finally { if (existsSync(temp)) unlinkSync(temp); }
+    ctx.paused = true;
+    showHeader(ctx);
+    note(ctx, 'Paused. The discussion and worker sessions are saved on this machine; you can quit or start another discussion, then Resume later.');
+  } finally { ctx.pausing = false; }
+}
+
+async function resumeDiscussion(ctx, name) {
+  name ||= ctx.paused ? ctx.discussion?.name : '';
+  if (!discussionRef(join(ctx.cwd, 'discussions'), name) || name.includes('/'))
+    throw new Error('Choose a paused active discussion to Resume.');
+  if (!ctx.paused && (ctx.logPath || ctx.state.transcript.length || ctx.screen.worker.length || ctx.screen.working))
+    throw new Error('Pause the current discussion before resuming another one.');
+  ctx.pausing = true;
+  try {
+    await ctx.workQueue;
+    const file = pauseFile(ctx, name);
+    if (!existsSync(file)) throw new Error('No saved Pause is available for this discussion on this machine.');
+    const saved = JSON.parse(readFileSync(file, 'utf8'));
+    if (saved.version !== 1 || saved.root !== realpathSync(ctx.cwd) || saved.discussion?.name !== name
+      || !Array.isArray(saved.sessions) || !Array.isArray(saved.state?.transcript) || !Array.isArray(saved.state?.seen))
+      throw new Error('The paused discussion checkpoint is invalid.');
+    const sessions = new Map(saved.sessions), seen = new Map(saved.state.seen);
+    const specs = saved.agentSpecs.split(',').map((spec) => ({ ...parseSpec(spec), worker: false }));
+    specs.push({ ...parseSpec(saved.workerSpec, true), worker: true });
+    for (const spec of specs) {
+      const session = sessions.get(spec.worker ? `worker:${spec.name}` : spec.name);
+      if (!session || typeof session !== 'object'
+        || (spec.provider === 'claude' && !session.id)
+        || (spec.provider === 'codex' && !spec.worker && seen.get(spec.name) > 0 && !session.threadId))
+        throw new Error(`The saved provider session for ${spec.name} is missing. The checkpoint was kept.`);
+    }
+    if (!existsSync(saved.logPath)) throw new Error('The paused discussion transcript is missing.');
+    const next = { ...ctx, ...saved, sessions: new Map(saved.sessions),
+      state: { ...saved.state, seen: new Map(saved.state.seen) }, paused: false,
+      screen: { ...ctx.screen, transcript: saved.state.transcript, worker: saved.worker, doc: saved.doc,
+        thinking: null, working: null, status: null }, agentsStarted: true,
+      workerDir: { path: null } };
+    // Build before consuming the checkpoint; a failed load leaves it available for retry.
+    const loaded = await load(next, `?resume=${Date.now()}`);
+    unlinkSync(file);
+    const { root, version, at, worker: workerLog, ...restored } = saved;
+    Object.assign(ctx, restored, loaded, { state: next.state, sessions: next.sessions,
+      paused: false, agentsStarted: true, workerDir: next.workerDir, previous: null });
+    wire(ctx);
+    toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
+    note(ctx, 'Resumed the saved discussion and worker sessions.');
+    refreshWorker(ctx).catch(() => {});
+  } finally { ctx.pausing = false; }
+}
+
 // /reopen <name> (Re-open this discussion): make an existing discussion the active one. It runs
 // between rounds (commands are queued). Once this session has started, the session ends first: its
 // transcript is closed, the chat is cleared, and the agents and the worker get fresh CLI sessions;
 // the next message starts a new session in the re-opened discussion, from its handoff. Discussions
-// don't keep their own agent memory (decided by the User, 2026-11-02).
+// retain native agent memory only through an explicit Pause, not through Re-open.
 async function reopenDiscussion(ctx, name) {
   const parent = join(ctx.cwd, 'discussions');
   // A discussion is a folder named <date>-<title>; other folders there are the room's own material.
@@ -355,6 +448,8 @@ async function reopenDiscussion(ctx, name) {
   if (!d) return note(ctx, `✗ No discussion "${name}" in ${parent} (discussions are folders named <date>-<title>).`, true);
   if (d.section && !moveDiscussion(ctx, name, 'active')) return;
   name = d.name;
+  const checkpoint = pauseFile(ctx, name);
+  if (existsSync(checkpoint)) unlinkSync(checkpoint); // Re-open explicitly starts fresh.
   if (ctx.logPath) {
     await ctx.workQueue; // let a running worker instruction finish in this session
     endSession(ctx, `re-opening the discussion ${name}`);
@@ -372,6 +467,7 @@ async function reopenDiscussion(ctx, name) {
 // which is then closed; the chat clears and the discussion agents get fresh CLI sessions. The worker
 // is left alone here: Re-open resets it itself, New discussion doesn't.
 function endSession(ctx, why) {
+  ctx.paused = false;
   log(ctx, `_(session ended: ${why})_\n\n`);
   for (const a of ctx.room.agents) a.reset?.();
   const { state, screen } = ctx;
@@ -403,6 +499,13 @@ function switchTo(ctx, next) {
 function newDiscussion(ctx) {
   const was = ctx.discussion;
   if (!was && !ctx.logPath) return note(ctx, 'No discussion started yet: your next message starts a new one.');
+  if (ctx.paused) {
+    // The saved worker session must not receive turns from the new discussion.
+    ctx.worker.reset?.();
+    ctx.screen.worker.length = 0;
+    ctx.workerBriefed = ctx.workerTree = null;
+    ctx.workerHandoff = false;
+  }
   if (ctx.logPath) endSession(ctx, 'starting a new discussion');
   if (was && ctx.screen.worker.length) {
     const view = { note: `New discussion: ${was.name} is no longer the active one. The next instruction gets the new discussion's folder once your first message creates it.` };
@@ -423,6 +526,25 @@ function chooseFolder() {
     const path = stdout.trim();
     done(path.length > 1 ? path.replace(/\/$/, '') : path || null);
   }));
+}
+
+// Discover local listeners, then identify rooms using their existing heartbeat. No registry
+// survives a stopped process, and rooms launched independently are found too.
+export async function listRooms() {
+  const output = await new Promise((done, fail) => execFile('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fn'],
+    { timeout: 3000 }, (err, stdout) => err && err.code !== 1 ? fail(err) : done(stdout)));
+  const ports = [...new Set([...output.matchAll(/^n.*:(\d+)$/gm)].map((m) => Number(m[1])))];
+  const rooms = await Promise.all(ports.map(async (port) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/__health`, { signal: AbortSignal.timeout(800) });
+      if (!res.ok) return null;
+      const h = await res.json();
+      if (h.app === 'agent-room' && typeof h.root === 'string')
+        return { port, root: h.root, discussion: h.discussion ?? null };
+    } catch {} // Another service, or a room that has just stopped.
+    return null;
+  }));
+  return rooms.filter(Boolean).sort((a, b) => a.root.localeCompare(b.root) || a.port - b.port);
 }
 
 const freePort = () => new Promise((done, fail) => {
@@ -555,7 +677,8 @@ export function ended(ctx, restarting = false) {
 
 // /restart: this process frees its port and a new agent-room process takes it over, with the same
 // launch flags and the discussion in use re-opened (a fresh session from its handoff, as /reopen).
-// The chat in memory doesn't carry over. The new process writes where this one did (the terminal or
+// A paused discussion instead stays saved for explicit Resume; no --reopen is passed.
+// An unpaused chat in memory doesn't carry over. The new process writes where this one did (the terminal or
 // the Dock app's log) and runs on its own once this one exits.
 export function restartArgs(ctx, values) {
   const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', ctx.cwd, '--port', String(ctx.server.address().port)];
@@ -564,7 +687,7 @@ export function restartArgs(ctx, values) {
   if (values.dev) args.push('--dev');
   if (values.node) args.push('--node', values.node);
   for (const p of values.peer ?? []) args.push('--peer', p);
-  if (ctx.discussion) args.push('--reopen', ctx.discussion.name);
+  if (ctx.discussion && !ctx.paused) args.push('--reopen', ctx.discussion.name);
   return args;
 }
 export async function restart(ctx, values) {
@@ -579,9 +702,13 @@ export async function handleLine(line, ctx) {
   if (line === '/docs') return showDocs(ctx);
   const reopen = /^\/(?:reopen|continue)(?:\s+(.*))?$/.exec(line); // /continue: its former name
   if (reopen) return reopenDiscussion(ctx, (reopen[1] ?? '').trim());
+  if (line === '/pause') return pauseDiscussion(ctx);
+  const resume = /^\/resume(?:\s+(.*))?$/.exec(line);
+  if (resume) return resumeDiscussion(ctx, (resume[1] ?? '').trim());
   if (line === '/new') return newDiscussion(ctx);
   const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
   if (move) return void moveDiscussion(ctx, move[1], move[2]);
+  if (line === '/summary' && ctx.paused) return note(ctx, 'Resume the paused discussion before requesting a summary.', true);
   if (line === '/summary') {
     ctx.agentsStarted = true;
     const status = await runSummary(ctx);
@@ -595,6 +722,7 @@ export async function handleLine(line, ctx) {
     const quota = await ctx.usage.fetchQuota();
     return note(ctx, `${ctx.usage.usageReport({ totals: ctx.totals, agents: [...ctx.room.agents, ctx.worker], quota })}\n`);
   }
+  if (ctx.paused) return note(ctx, 'This discussion is paused. Resume it before sending messages.', true);
   // The session's first message opens its discussion, unless it names an unknown agent (runRound
   // then refuses it, and nothing is created).
   const to = /^@(\w[\w-]*)/.exec(line)?.[1].toLowerCase();
@@ -866,6 +994,7 @@ export async function refreshWorker(ctx, { prepare = false } = {}) {
 // so it carries over a reload. The worker is sent only the instruction itself; its CLI session holds
 // the earlier ones.
 export function queueWork(ctx, text) {
+  if (ctx.paused || ctx.pausing) return note(ctx, 'The discussion is pausing or paused. Resume before sending worker instructions.', true);
   if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
   ctx.agentsStarted = true;
   // A bug here must not jam the queue: report it, and the next instruction still runs.

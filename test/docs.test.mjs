@@ -319,3 +319,19 @@ test('a page learns its code version, so it can refresh after a reload that chan
   for (const c of screen.clients) c.end();
   s.close();
 });
+
+test('running rooms can be listed without changing the current conversation', async () => {
+  const rooms = [{ port: 6010, root: '/tmp/other', discussion: 'discussions/example' }];
+  const screen = { clients: new Set(), transcript: [], listRooms: async () => rooms };
+  const s = await serve(fixture(), screen);
+  try {
+    const res = await s.get('/__rooms');
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), rooms);
+    assert.deepEqual(screen.transcript, []);
+    screen.listRooms = async () => { throw new Error('Discovery failed'); };
+    const failed = await s.get('/__rooms');
+    assert.equal(failed.status, 500);
+    assert.equal(await failed.text(), 'Discovery failed');
+  } finally { s.close(); }
+});

@@ -140,3 +140,118 @@ test('Restart: a new server process on the same port, re-opening the discussion 
     if (newPid) try { process.kill(newPid); } catch {}
   }
 });
+
+// Two real server processes, with fake provider CLIs: proves the app restores native session
+// identifiers and unread-message positions after Quit, rather than replaying the chat as context.
+test('Pause survives Quit: Resume restores discussion and worker provider sessions', { timeout: 20000 }, async () => {
+  const { writeFileSync, readFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const home = mkdtempSync(join(tmpdir(), 'pause-home-'));
+  const root = mkdtempSync(join(tmpdir(), 'pause-room-'));
+  const bin = join(home, 'bin'), callsFile = join(home, 'calls.jsonl');
+  mkdirSync(bin);
+  const fake = `#!${process.execPath}
+const fs = require('node:fs');
+let input = '';
+process.stdin.on('data', (d) => input += d);
+process.stdin.on('end', () => {
+  const args = process.argv.slice(2), codex = process.argv[1].endsWith('codex');
+  fs.appendFileSync(process.env.CALLS_FILE, JSON.stringify({ codex, args, input }) + '\\n');
+  if (codex) {
+    console.log(JSON.stringify({ type: 'thread.started', thread_id: 'saved-thread' }));
+    console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'PASS' } }));
+  } else console.log(JSON.stringify({ result: args.includes('--no-session-persistence') ? 'Memory test' : args.includes('Bash') ? 'Worker reply' : 'PASS' }));
+});
+`;
+  for (const name of ['claude', 'codex']) writeFileSync(join(bin, name), fake, { mode: 0o755 });
+  const git = (...args) => execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args]);
+  git('init', '-q', '-b', 'main'); git('commit', '-q', '--allow-empty', '-m', 'initial');
+  const children = [];
+  async function open(extra = []) {
+    const cli = spawn(process.execPath, [new URL('../src/cli.mjs', import.meta.url).pathname, '--cwd', root, '--port', '0', ...extra], {
+      env: { ...process.env, HOME: home, PATH: bin + ':' + process.env.PATH, CALLS_FILE: callsFile },
+    });
+    children.push(cli);
+    const exited = new Promise((done) => cli.on('exit', done));
+    let output = '';
+    cli.stderr.on('data', (d) => output += d);
+    const base = await new Promise((done, fail) => {
+      cli.once('exit', () => fail(new Error(output)));
+      cli.stdout.on('data', (d) => {
+        output += d;
+        const m = output.match(/Discussion screen: (http:\/\/127\.0\.0\.1:\d+\/)__room/);
+        if (m) done(m[1]);
+      });
+    });
+    const reader = (await fetch(base + '__events')).body.getReader();
+    let buffer = '';
+    async function next() {
+      while (!buffer.includes('\n\n')) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error('Event stream ended: ' + output);
+        buffer += new TextDecoder().decode(value);
+      }
+      const at = buffer.indexOf('\n\n'), chunk = buffer.slice(0, at);
+      buffer = buffer.slice(at + 2);
+      return JSON.parse(chunk.replace(/^data: /, ''));
+    }
+    async function until(predicate) {
+      for (;;) { const ev = await next(); if (predicate(ev)) return ev; }
+    }
+    const post = (path, body) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return { next, until, exited, say: (text) => post('__say', { text }), work: (text) => post('__work', { text }) };
+  }
+  const calls = () => readFileSync(callsFile, 'utf8').trim().split('\n').map(JSON.parse);
+  try {
+    const first = await open(['--agents', 'claude:A:sonnet,codex:B:my-model', '--worker', 'claude:W:haiku']);
+    await first.next();
+    await first.say('/autosummary off');
+    await first.say('Before pause');
+    await first.until((e) => e.type === 'message' && e.message.speaker === 'B');
+    await first.work('Worker before pause');
+    // Pause must also wait for the independent worker, even though the discussion is idle.
+    await first.say('/pause');
+    const paused = await first.until((e) => e.type === 'room' && e.room.paused);
+    const name = paused.room.active.slice('discussions/'.length);
+    const original = calls();
+    const claude = original.find((c) => c.input.includes('Before pause') && !c.args.includes('--no-session-persistence'));
+    const worker = original.find((c) => c.input.includes('Worker before pause'));
+    assert.ok(worker);
+    await first.say('Must not reach providers');
+    await first.until((e) => e.type === 'note' && /paused.*Resume/.test(e.text));
+    assert.equal(calls().length, original.length);
+    await first.say('/quit'); assert.equal(await first.exited, 0);
+
+    const second = await open(); // no original provider/model flags supplied
+    const initial = await second.next();
+    assert.equal(initial.room.pausedSessions[0].name, name);
+    await second.say('/resume ' + name);
+    const resumed = await second.until((e) => e.type === 'reset' && e.room?.active);
+    assert.equal(resumed.room.paused, false);
+    assert.ok(resumed.messages.some((m) => m.speaker === 'User' && /Before pause/.test(m.html)));
+    assert.ok(resumed.worker.some((m) => m.speaker === 'W' && /Worker reply/.test(m.html)));
+    assert.equal(resumed.auto, false);
+    assert.equal(resumed.room.pausedSessions.length, 0);
+    await second.say('After resume');
+    await second.until((e) => e.type === 'message' && e.message.speaker === 'B');
+    await second.work('Worker after resume');
+    await second.say('/pause');
+    await second.until((e) => e.type === 'room' && e.room.paused);
+    const continued = calls().slice(original.length);
+    const a = continued.find((c) => !c.codex && c.input.includes('After resume'));
+    assert.equal(a.args[a.args.indexOf('--resume') + 1], claude.args[claude.args.indexOf('--session-id') + 1]);
+    assert.equal(a.args[a.args.indexOf('--model') + 1], 'sonnet');
+    assert.doesNotMatch(a.input, /Before pause|Participants:/);
+    const b = continued.find((c) => c.codex);
+    assert.deepEqual(b.args.slice(0, 2), ['exec', 'resume']);
+    assert.ok(b.args.includes('saved-thread'));
+    assert.equal(b.args[b.args.indexOf('-m') + 1], 'my-model');
+    const w = continued.find((c) => c.input.includes('Worker after resume'));
+    assert.equal(w.args[w.args.indexOf('--resume') + 1], worker.args[worker.args.indexOf('--session-id') + 1]);
+    assert.equal(w.args[w.args.indexOf('--model') + 1], 'haiku');
+    assert.doesNotMatch(w.input, /Worker before pause|Your working directory is/);
+    await second.say('/quit'); assert.equal(await second.exited, 0);
+  } finally {
+    for (const cli of children) cli.kill();
+  }
+});

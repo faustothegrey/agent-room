@@ -117,6 +117,27 @@ session carry on, and its log gets a marker line. Nothing is created yet: your n
 a title and creates the new discussion's folder, as in a fresh room. The worker's next instruction
 then gets the new folder; until it exists, the worker is told no discussion is active.
 
+**Pause discussion** (under the active discussion in the header, or `/pause`) waits for the
+current round, including its automatic summary, and queued worker tasks to finish. It saves the
+chat, worker log, provider session IDs, unread-message positions, provider/model choices and usage
+totals on this machine. Messages, summaries, worker instructions and agent-setting changes are
+blocked while paused. You can then quit, restart the server or start another discussion.
+
+Choose **Resume** under **Paused on this machine** in **Discussions**, or `/resume <folder-name>`,
+to continue those same discussion and worker sessions with the saved chat. In the room you just
+paused, the header also offers **Resume discussion** (`/resume` with no name). Pause any current
+conversation before resuming another one. Starting a New discussion from a paused one starts a
+fresh worker too, keeping the saved worker session untouched. **Re-open** still starts fresh;
+re-opening a paused discussion asks for confirmation and discards its saved Pause.
+
+Checkpoints are private local files under `~/.local/state/agent-room/paused/`, separated by root
+folder. They are not replicated to peers. Resume needs the providers' original local session
+storage; if a provider cannot resume its session, its turn fails without a silent fresh start.
+This is native session continuation, subject to provider context compaction and changes to files,
+models or rulebooks. It is not recovery of a turn interrupted by a crash. Once resumed, Pause again
+before quitting to save the latest state. Paused discussions must be resumed before moving them
+to archive or deferred.
+
 After New discussion or Re-open, the header shows **← back to "<title>"**, which re-opens the
 previous discussion, until the next message starts a discussion.
 
@@ -136,6 +157,11 @@ editing is not available yet; see [remaining decisions](discussions/2026-11-02-d
 Worker turns and other log entries before the first discussion message remain in memory until
 that message creates the transcript. A worker-only session therefore has no saved transcript
 if the room ends before a discussion starts.
+
+**Switch room…** lists rooms already running on this machine, showing their root folders,
+active discussions and ports. Choose one to open it in the current tab; the room you leave keeps
+running with its conversation intact. The list refreshes each time you click the button.
+Discovery uses the system's `lsof` command and does not include rooms on other machines.
 
 **New room in folder…** opens the Mac folder chooser and starts an independent room in a new
 browser window on its own port. It uses saved agent defaults if present, otherwise the current
@@ -223,6 +249,8 @@ node src/cli.mjs --help
 | `/reopen <folder-name>` | Re-open an existing discussion: a fresh session there, from its handoff. `archive/…` or `deferred/…` is made active first. |
 | `/new` | End this session; your next message starts a new discussion. The worker carries on. |
 | `/move <folder-name> active\|archive\|deferred` | Move a whole discussion (not the one in use) into `archive/` or `deferred/`, or back. |
+| `/pause` | Save the discussion and worker sessions locally after their work finishes. |
+| `/resume [folder-name]` | Continue a saved Pause, including its provider sessions and chat. |
 | `/summary` | Request an agreed summary. |
 | `/autosummary [on\|off]` | Toggle automatic summaries, or set them explicitly. |
 | `/usage` | Show session tokens and subscription quotas. |

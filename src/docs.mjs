@@ -140,10 +140,12 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 :root { color-scheme: light dark; --line: #8884; --dim: #888; }
 * { box-sizing: border-box; }
 body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: var(--left, 38%) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
-#header { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(180px, 1fr) auto auto; gap: .65rem 1rem; align-items: center; padding: .5rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
-#header > b { font-size: .85rem; letter-spacing: -.02em; }
+#header { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(180px, 1fr) auto; gap: .65rem 1rem; align-items: center; padding: .5rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
+#room-controls { display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; min-width: 0; }
+#room-controls > b { font-size: .85rem; letter-spacing: -.02em; }
 #room-location { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .15rem; }
-#newroom { font-size: .75rem; white-space: nowrap; }
+#newroom, #switchroom { font-size: .75rem; white-space: nowrap; }
+#rooms { max-width: min(28rem, 80vw); font: inherit; font-size: .75rem; }
 #folder { font-family: ui-monospace, monospace; font-size: .75rem; overflow-wrap: anywhere; line-height: 1.35; }
 #disc { font-size: .75rem; color: var(--dim); line-height: 1.35; }
 #disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
@@ -263,7 +265,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .msg.error { border-left-color: #ef4444; }
 .tools { flex-wrap: wrap; }
 </style></head><body>
-<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="server"><i id="beat"></i><span><span id="server-text">Connecting to the server…</span><span id="replica-header"></span></span></span><span id="disc" title="The active discussion"></span><button id="back-to" hidden title="Re-open the discussion you were in: a fresh session there, from its handoff"></button><span id="code"></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
+<header id="header"><div id="room-controls"><b>agent-room</b><button id="switchroom">Switch room…</button><select id="rooms" aria-label="Running rooms" hidden></select><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></div><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="server"><i id="beat"></i><span><span id="server-text">Connecting to the server…</span><span id="replica-header"></span></span></span><span id="disc" title="The active discussion"></span><button id="pause-discussion" hidden>Pause discussion</button><button id="back-to" hidden title="Re-open the discussion you were in: a fresh session there, from its handoff"></button><span id="code"></span></div><span id="gauges" aria-label="Subscription usage"></span></header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
   <div class="view" id="talk">
@@ -484,9 +486,10 @@ function updateReplicaHeader() {
 }
 function updateReplicaView() {
   updateReplicaHeader();
-  if (room) { $('disc').textContent = viewing ? viewing.title : room.discussion; $('disc').dataset.active = !viewing && room.active ? 'true' : 'false'; }
+  if (room) { $('disc').textContent = viewing ? viewing.title : room.discussion + (room.paused ? ' · paused' : ''); $('disc').dataset.active = !viewing && room.active ? 'true' : 'false'; }
   const panel = $('remote-view'); panel.hidden = !viewing; panel.replaceChildren();
   $('composer').hidden = !viewing && !localInput;
+  $('pause-discussion').hidden = !room?.started || ended || !!viewing || !localInput;
   box.hidden = !!viewing;
   $('talk-settings').hidden = !!viewing;
   $('summary').hidden = !!viewing;
@@ -563,15 +566,15 @@ function discussionOf(parts) {
   if (parts.length === 3 && SECTIONS[parts[1]] && isDiscussion(parts[2])) return { ref: parts[1] + '/' + parts[2], section: parts[1] };
   return null;
 }
-const REOPEN_TIP = 'A fresh session in this discussion: the agents start from its handoff. Its documents and transcripts stay.';
+const REOPEN_TIP = 'A fresh session in this discussion: the agents start from its handoff. Its documents and transcripts stay. Any saved Pause for this discussion is discarded.';
 // Re-open and New discussion: once this session has started, they end it (the chat clears), so they
 // take two clicks, like Quit.
-function confirmed(b, run) {
+function confirmed(b, run, warning) {
   const label = b.textContent;
   b.onclick = (e) => {
     e.stopPropagation();
-    if (room?.started && !b.dataset.armed) {
-      b.dataset.armed = '1'; b.textContent = 'Click again: this session ends and the chat clears';
+    if ((room?.started || warning) && !b.dataset.armed) {
+      b.dataset.armed = '1'; b.textContent = warning || 'Click again: this session ends and the chat clears';
       return setTimeout(() => { delete b.dataset.armed; b.textContent = label; }, 4000);
     }
     run();
@@ -645,10 +648,12 @@ async function openFiles(group) {
       // Actions, apart from the files: Re-open, then moving the whole discussion.
       const actions = el('div', 'actions');
       const action = (label, onclick, tip, cls) => { const b = el('button', cls || '', label); b.onclick = onclick; b.title = tip; actions.append(b); return b; };
+      if (room.pausedSessions?.some((p) => p.name === disc.ref))
+        action('Resume', () => send('/resume ' + disc.ref), 'Continue the saved agent sessions and chat');
       // Re-open: not for the discussion in use before anything was said in it (nothing to restart).
       if (!(inUse(group) && !room.started)) {
         const b = action(disc.section ? 'Re-open (makes it active)' : 'Re-open', null, REOPEN_TIP, 'primary');
-        confirmed(b, () => send('/reopen ' + disc.ref));
+        confirmed(b, () => send('/reopen ' + disc.ref), room.pausedSessions?.some((p) => p.name === disc.ref) ? 'Click again: discard the saved Pause and start fresh' : null);
       }
       // Moving the whole discussion; not the one in use (its transcript is open there).
       if (!inUse(group)) {
@@ -674,6 +679,17 @@ async function openFiles(group) {
   // The top: active discussions, the room's own documents, then archive/ and deferred/.
   const discussions = discussionsIn('discussions');
   title('Discussions');
+  if (canAct && room.pausedSessions?.length) {
+    heading('Paused on this machine');
+    for (const saved of room.pausedSessions) {
+      const row = el('div', 'row');
+      row.append(el('span', '', saved.title));
+      const resume = el('button', 'reopen', 'Resume');
+      resume.title = 'Continue the saved discussion and worker sessions, including their chat';
+      resume.onclick = () => send('/resume ' + saved.name);
+      row.append(resume); list.append(row);
+    }
+  }
   // New discussion: ends this session (as Re-open does); the next message starts the new one.
   if (canAct && room.active) {
     const actions = el('div', 'actions');
@@ -693,7 +709,7 @@ async function openFiles(group) {
     if (!canAct || (inUse(path) && !room.started)) continue;
     const row = el('div', 'row'), b = el('button', 'reopen', 'Re-open');
     b.title = REOPEN_TIP;
-    confirmed(b, () => send('/reopen ' + d));
+    confirmed(b, () => send('/reopen ' + d), room.pausedSessions?.some((p) => p.name === d) ? 'Click again: discard the saved Pause and start fresh' : null);
     row.append(list.lastChild, b);
     list.append(row);
   }
@@ -721,7 +737,12 @@ let room = null;
 function setRoom(r) {
   room = r;
   $('folder').textContent = r.folder;
-  $('disc').textContent = r.discussion || '';
+  $('disc').textContent = (r.discussion || '') + (r.paused ? ' · paused' : '');
+  const pause = $('pause-discussion');
+  pause.hidden = !r.started || ended || viewing || $('composer').hidden;
+  pause.textContent = r.paused ? 'Resume discussion' : 'Pause discussion';
+  pause.title = r.paused ? 'Continue the saved provider sessions' : 'Wait for the round and worker tasks to finish, then save their sessions on this machine';
+  pause.onclick = () => send(r.paused ? '/resume ' + r.active.slice('discussions/'.length) : '/pause');
   $('disc').dataset.active = r.active ? 'true' : 'false';
   showVersion(r.code);
   updateReplicaView();
@@ -823,6 +844,34 @@ for (const scope of ['talk', 'work']) {
   form.onchange = saveChanges;
   form.onsubmit = (e) => { e.preventDefault(); saveChanges(); };
 }
+// Room URLs use this page's host, so switching also works from another LAN device.
+$('switchroom').onclick = async () => {
+  const button = $('switchroom'), menu = $('rooms');
+  button.disabled = true;
+  try {
+    const res = await fetch('/__rooms');
+    if (!res.ok) throw new Error(await res.text());
+    const rooms = await res.json();
+    menu.replaceChildren(new Option('Choose a running room…', ''));
+    for (const room of rooms) {
+      const current = room.port === Number(location.port);
+      const label = room.root + ' · ' + (room.discussion || 'No discussion started') + ' · port ' + room.port + (current ? ' (current)' : '');
+      const option = new Option(label, String(room.port));
+      option.disabled = current;
+      menu.add(option);
+    }
+    menu.hidden = false;
+    menu.focus();
+    if (!rooms.some((r) => r.port !== Number(location.port))) status('No other rooms are running on this machine.');
+  } catch (err) { status('✗ Switch room: ' + err.message, true); }
+  finally { button.disabled = false; }
+};
+$('rooms').onchange = () => {
+  if (!$('rooms').value) return;
+  const url = new URL('/__room', location.href);
+  url.port = $('rooms').value;
+  location.assign(url.href);
+};
 // New room in folder…: the room's server shows the Mac's folder chooser and starts the new room.
 $('newroom').onclick = async () => {
   // Opened during the click, so the browser doesn't block it; pointed at the new room below.
@@ -1022,6 +1071,13 @@ function handleScreen(req, res, url, dir, screen) {
   if (url.pathname === '/__health') {
     send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, root: dir,
       startedAt: screen.startedAt ?? null, discussion: screen.room?.active ?? null }));
+    return true;
+  }
+  if (url.pathname === '/__rooms') {
+    if (req.method !== 'GET') { send(405, 'text/plain', 'Use GET.'); return true; }
+    if (!screen.listRooms) { send(409, 'text/plain', 'Room discovery is unavailable.'); return true; }
+    screen.listRooms().then((rooms) => send(200, 'application/json', JSON.stringify(rooms)),
+      (err) => send(500, 'text/plain; charset=utf-8', err.message));
     return true;
   }
   if (url.pathname === '/__files') {
