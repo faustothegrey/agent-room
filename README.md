@@ -174,7 +174,10 @@ independently of the selected discussion and worker models.
 ## Summaries and usage
 
 **Summarize**, or `/summary`, asks the discussion agents to agree a summary under **Agreed**,
-**Not agreed**, and **Questions for the User**. The drafter rotates between summaries. Writing
+**Not agreed**, and **Questions for the User**, in at most eight points. When the discussion has
+proposed instructions for the worker, a last section, **Instructions for the Worker**, quotes the
+latest version of each word for word, marked "sending unconfirmed"; later summaries repeat it
+until you say it was sent, replaced or withdrawn. The drafter rotates between summaries. Writing
 or revising counts as accepting that version; every other agent must pass on it for agreement.
 Each agent gets at most three turns. Without agreement, the last revision is shown as
 **not agreed**. Only the result appears in the chat; the exchange is retained in the transcript.

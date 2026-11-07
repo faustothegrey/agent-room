@@ -11,7 +11,10 @@ export const SUMMARY_TURNS_EACH = 3;
 const SUMMARY_FORMAT = [
   'Write it briefly and by points, in this format (leave out a section that would be empty):',
   '**Agreed**', '- …', '**Not agreed**', '- the point: each side\'s view, by name', '**Questions for the User**', '- …',
-  'At most 8 points in all. Reply with the summary only.',
+  '**Instructions for the Worker**', '- sending unconfirmed: "the instruction, word for word"',
+  'That last section quotes the latest version of each instruction for the worker proposed in the discussion,',
+  'word for word. Later summaries repeat it until the User says it was sent, replaced or withdrawn.',
+  'At most 8 points in all, not counting Instructions for the Worker. Reply with the summary only.',
 ].join('\n');
 const draftTask = () => [
   'The User asked for a summary of the discussion since the last summary (or since the start).',

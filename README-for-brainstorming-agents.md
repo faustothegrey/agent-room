@@ -104,6 +104,8 @@ does not consume it.
   use the fallback below.
 - When preparing the next handoff, create a fresh `handoff.md` in the discussion's folder with
   Delivery pending and an empty receiving-session read record. Keep previous archives.
+- A handoff carries, word for word, any instruction for the worker the User hasn't confirmed as
+  sent, replaced or withdrawn.
 
 This is a manual convention for the room's sequential turns, not an enforced session lock.
 

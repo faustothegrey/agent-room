@@ -220,6 +220,12 @@ test('summary: the draft is agreed when the other agent passes on it', async () 
   assert.equal(r.status, 'agreed');
   assert.deepEqual(r.result, { speaker: 'Summary', text: '**Agreed**\n- blue button', outcome: 'agreed', by: 'A' });
   assert.match(a.prompts[0], /asked for a summary/);
+  // Unconfirmed worker instructions: quoted word for word, outside the 8-point limit, until the User confirms.
+  for (const p of [a.prompts[0], b.prompts[0]]) {
+    assert.match(p, /\*\*Instructions for the Worker\*\*\n- sending unconfirmed: /);
+    assert.match(p, /word for word\. Later summaries repeat it until the User says it was sent, replaced or withdrawn/);
+    assert.match(p, /At most 8 points in all, not counting Instructions for the Worker/);
+  }
   assert.match(b.prompts[0], /latest message from A above is the current version/);
   assert.match(b.prompts[0], /\[A\]: \*\*Agreed\*\*/);
   // The turns are kept, marked as summary turns; the result comes last.
