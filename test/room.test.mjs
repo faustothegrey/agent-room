@@ -220,11 +220,15 @@ test('summary: the draft is agreed when the other agent passes on it', async () 
   assert.equal(r.status, 'agreed');
   assert.deepEqual(r.result, { speaker: 'Summary', text: '**Agreed**\n- blue button', outcome: 'agreed', by: 'A' });
   assert.match(a.prompts[0], /asked for a summary/);
-  // Unconfirmed worker instructions: quoted word for word, outside the 8-point limit, until the User confirms.
+  // Both drafter and reviewer receive the action order and pending-instruction contract.
   for (const p of [a.prompts[0], b.prompts[0]]) {
-    assert.match(p, /\*\*Instructions for the Worker\*\*\n- sending unconfirmed: /);
-    assert.match(p, /word for word\. Later summaries repeat it until the User says it was sent, replaced or withdrawn/);
-    assert.match(p, /At most 8 points in all, not counting Instructions for the Worker/);
+    assert.match(p, /\*\*Next step\*\*\n- Answer: a question \/ Send to the Worker: "the instruction, word for word" \/ Do: an action of the User's own/);
+    assert.match(p, /Next step contains exactly one action for the User, labelled Answer, Send to the Worker or Do as appropriate/);
+    assert.match(p, /\*\*Later\*\*\n- the remaining actions in order, one short line each, each saying what it waits for/);
+    assert.match(p, /Keep each instruction for the worker until the User confirms it was sent, replaced or withdrawn/);
+    assert.match(p, /Quote its latest version word for word when it is the Next step; under Later refer to it by name,\nwith its full text kept in the discussion's pending-instructions\.md/);
+    assert.match(p, /At most 8 points in all under Agreed and Not agreed/);
+    assert.doesNotMatch(p, /\*\*Questions for the User\*\*|\*\*Instructions for the Worker\*\*/);
   }
   assert.match(b.prompts[0], /latest message from A above is the current version/);
   assert.match(b.prompts[0], /\[A\]: \*\*Agreed\*\*/);
