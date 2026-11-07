@@ -21,6 +21,9 @@ const CHROME_TOOLS = ['tabs_context_mcp', 'tabs_create_mcp', 'tabs_close_mcp', '
 const CLAUDE_ALLOWED = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch', ...CHROME_TOOLS];
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+// An agent's working directory: a path, or a function giving it at each turn (the worker's worktree,
+// which exists only from its first instruction on).
+const at = (cwd) => (typeof cwd === 'function' ? cwd() : cwd);
 
 // Run a command with `input` on stdin; resolve with stdout, reject on non-zero exit or timeout.
 export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
@@ -62,7 +65,7 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, s
       args.push('--chrome', '--strict-mcp-config', '--allowedTools', ...CLAUDE_ALLOWED, ...bash);
       // --tools is variadic, so it must come last: the prompt goes on stdin.
       args.push('--tools', ...CLAUDE_TOOLS, ...bash);
-      const out = await runner('claude', args, { input: prompt, cwd, timeoutMs });
+      const out = await runner('claude', args, { input: prompt, cwd: at(cwd), timeoutMs });
       const result = JSON.parse(out);
       if (result.is_error) throw new Error(`claude: ${result.result || 'turn failed'}`);
       session.started = true;
@@ -116,7 +119,7 @@ export function createCodexAgent({ name, model, cwd, timeoutMs, instructions, ru
       if (instructions) args.push('-c', `developer_instructions=${JSON.stringify(instructions)}`);
       if (session.threadId) args.push(session.threadId);
       args.push('-');
-      const out = await runner('codex', args, { input: prompt, cwd, timeoutMs });
+      const out = await runner('codex', args, { input: prompt, cwd: at(cwd), timeoutMs });
       const { threadId: id, text, usage } = parseCodexEvents(out);
       if (id) session.threadId = id;
       agent.lastUsage = usage;

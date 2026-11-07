@@ -43,7 +43,8 @@ subscription usage, and **New room in folder…**. Agent settings live inside th
   instructions in this tab and remembers its earlier worker turns; it does not receive the
   Discussion chat. Supply the relevant file paths and decisions yourself. Once a discussion is
   active, its first instruction there also tells it the discussion's folder, where it writes its
-  implementation notes and plans; the work itself goes in the root. Instructions run
+  implementation notes and plans; the work itself goes in its own worktree (see
+  [The worker's worktree](#the-workers-worktree)). Instructions run
   one at a time alongside the discussion, with a 30-minute timeout per instruction.
 - **Discussions** (right pane): browse discussions, then choose a Markdown document, SVG drawing, transcript
   or other supported file for the right pane. Inside a discussion, each subfolder (`drawings/`,
@@ -209,6 +210,7 @@ node src/cli.mjs --help
 | `/docs` | Browse documents; in terminal mode, ↑/↓ selects, Enter opens, Esc leaves the picker. |
 | `/reopen <folder-name>` | Re-open an existing discussion: a fresh session there, from its handoff. `archive/…` or `deferred/…` is made active first. |
 | `/new` | End this session; your next message starts a new discussion. The worker carries on. |
+| `/code worker` · `/code room` | Developing agent-room itself: restart this room on the worker's version of the code, or back on the room's. |
 | `/move <folder-name> active\|archive\|deferred` | Move a whole discussion (not the one in use) into `archive/` or `deferred/`, or back. |
 | `/summary` | Request an agreed summary. |
 | `/autosummary [on\|off]` | Toggle automatic summaries, or set them explicitly. |
@@ -258,6 +260,45 @@ The script checks for `node`, `claude` and `codex` through a login shell with Ho
 `~/.local/bin` paths. Its log is `~/Library/Logs/agent-room.log`, replaced on each launch.
 If a process the app started fails to start or ends with an error, an alert shows the log's tail. Discussion transcripts remain in their
 own folders.
+
+## The worker's worktree
+
+The worker never edits the room's own files. It works in its own Git worktree of the room's
+repository, in the sibling folder `<repo>.worker/` (for agent-room:
+`/Users/fausto/Software/agent-room.worker/`), on the branch `worker/main`. Its notes still go in
+the room's discussion folder. The Worker tab shows the worktree, its branch and the commit it is
+based on, and says when the room has uncommitted changes the worker can't see, or when
+`worker/main` has commits that aren't in the room. You review and merge them yourself
+(`git merge worker/main` in the room); nothing is merged automatically.
+
+- The worktree is created at the worker's first instruction, from the room's `HEAD`, and reused
+  after Reload or Restart. An existing `worker/main` is reattached. If something else is already at
+  that folder, the worker refuses to run and changes nothing.
+- Before each instruction, `worker/main` catches up with the room's `HEAD`, by fast-forward only,
+  when it is strictly behind it and its worktree is clean. Otherwise it is left as it is, and the
+  tab says why. agent-room never resets, merges, rebases or deletes the worktree or its branch, and
+  never touches the room's own index, branch or files.
+- Without a Git repository, or in one with no commit yet, the worker is disabled:
+  "Worker requires a source Git repository for its isolated worktree." Discussions work as usual.
+- The worker keeps scratch notes in `.worker-notes/<task>/` inside its worktree. Git ignores them
+  (`.gitignore` here, and the repository's local `info/exclude` for any project); they are never
+  committed, and the worker deletes them when you tell it "stage accepted".
+- A worktree separates working copies; it is not a sandbox (see below).
+
+**Trying the worker's version of agent-room live.** When the room is agent-room's own repository,
+the Worker tab offers **Run this room on the worker's version** (`/code worker`). Once the
+discussion and the worker are idle, the room restarts from the worktree's `src/cli.mjs`, with the
+same room, port and flags, so dev mode reloads the worker's edits as it saves them. It first
+installs the worktree's dependencies with `npm ci` (again only when `package.json` or
+`package-lock.json` changed); if that fails, nothing switches. As
+with Restart, the agents start fresh sessions from the handoff and the chat clears. The header's
+`code:` line shows the folder and branch the room runs from. **Back to the room's version**
+(`/code room`) restarts it from the room's own folder. If the worker's version doesn't start,
+stop it and start the stable version from a terminal:
+
+```sh
+cd /Users/fausto/Software/agent-room && npm start -- --port 5566
+```
 
 ## Access and limits
 

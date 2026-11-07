@@ -165,3 +165,19 @@ test('selected models are passed to the provider on initial and resumed turns', 
     for (const call of calls) assert.equal(call.args[call.args.indexOf(flag) + 1], model);
   }
 });
+
+test('a working directory given as a function is read at each turn (the worker\'s worktree)', async () => {
+  const seen = [];
+  const runner = async (command, args, opts) => { seen.push(opts.cwd); return command === 'claude' ? JSON.stringify({ result: 'ok', session_id: 's' }) : ''; };
+  let dir = '/one';
+  const claude = createClaudeAgent({ name: 'W', runner, cwd: () => dir });
+  const codex = createCodexAgent({ name: 'X', runner, cwd: () => dir });
+  await claude.turn('a');
+  dir = '/two';
+  await claude.turn('b');
+  await codex.turn('c');
+  assert.deepEqual(seen, ['/one', '/two', '/two']);
+  const fixed = createClaudeAgent({ name: 'A', runner, cwd: '/room' });
+  await fixed.turn('d');
+  assert.equal(seen.at(-1), '/room');
+});

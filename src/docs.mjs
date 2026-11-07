@@ -146,6 +146,12 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #folder { font-family: ui-monospace, monospace; font-size: .75rem; overflow-wrap: anywhere; line-height: 1.35; }
 #disc { font-size: .75rem; color: var(--dim); line-height: 1.35; }
 #disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
+#code { font-size: .7rem; color: var(--dim); font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+#winfo { font-size: .75rem; color: var(--dim); padding: .4rem .8rem; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: .2rem; }
+#winfo:empty { display: none; }
+#winfo .error { color: #ef4444; }
+#winfo code { font-size: .7rem; overflow-wrap: anywhere; user-select: all; }
+#winfo button { align-self: flex-start; font-size: .75rem; margin-top: .2rem; }
 #back-to { border: 0; background: none; padding: 0; font-size: .75rem; color: var(--dim); }
 #back-to:hover { color: CanvasText; text-decoration: underline; }
 #server { font-size: .7rem; color: var(--dim); display: inline-flex; align-items: center; gap: .4rem; }
@@ -247,7 +253,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .msg.error { border-left-color: #ef4444; }
 .tools { flex-wrap: wrap; }
 </style></head><body>
-<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span><button id="back-to" hidden title="Re-open the discussion you were in: a fresh session there, from its handoff"></button><span id="server"><i id="beat"></i><span id="server-text">Connecting to the server…</span></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
+<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span><button id="back-to" hidden title="Re-open the discussion you were in: a fresh session there, from its handoff"></button><span id="code" title="The code this room runs: its folder and Git branch"></span><span id="server"><i id="beat"></i><span id="server-text">Connecting to the server…</span></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
   <div class="view" id="talk">
@@ -278,6 +284,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
         <p class="settings-status" id="work-settings-status" role="status"></p>
       </form>
     </details>
+    <div id="winfo" aria-live="polite"></div>
     <div class="chat" id="wchat"></div>
     <div class="composer" id="wcomposer">
       <textarea class="box" id="wbox" placeholder="Instructions for the worker (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands."></textarea>
@@ -344,6 +351,34 @@ function workMessage(m, live) {
   if (m.note) return work.add(statusEl(m.note, m.error)); // a marker (New discussion) or an error
   work.add(bubble(m));
   if (live && m.speaker !== 'User' && tab !== 'work') $('tab-work').classList.add('news');
+}
+// The Worker tab's line: its worktree, or why the worker is disabled; when developing agent-room
+// itself, the switch between the room's version of the code and the worker's, and the way back.
+function setWorkerInfo(info) {
+  const el = $('winfo');
+  el.replaceChildren();
+  if (!info) return;
+  for (const line of info.lines) { const p = document.createElement('div'); p.textContent = line; if (info.error || info.disabled) p.className = 'error'; el.append(p); }
+  wbox.disabled = !!info.disabled;
+  if (info.disabled) wbox.placeholder = info.lines[0];
+  if (!info.switchTo || $('wcomposer').hidden) return;
+  const worker = info.switchTo === 'worker';
+  const b = document.createElement('button');
+  b.textContent = worker ? "Run this room on the worker's version" : "Back to the room's version";
+  b.title = 'Restarts this room from the ' + (worker ? "worker's worktree" : "room's own folder") + ', once the discussion and the worker are idle.';
+  b.onclick = () => {
+    if (!b.dataset.armed) {
+      b.dataset.armed = '1';
+      b.textContent = 'Click again: the room restarts; the agents start fresh sessions (the chat clears, the transcript is kept)';
+      return setTimeout(() => { delete b.dataset.armed; b.textContent = worker ? "Run this room on the worker's version" : "Back to the room's version"; }, 5000);
+    }
+    send('/code ' + info.switchTo);
+  };
+  el.append(b);
+  const back = document.createElement('div');
+  back.append("If the worker's version doesn't start: stop it, then run ");
+  const cmd = document.createElement('code'); cmd.textContent = info.wayBack; back.append(cmd);
+  el.append(back);
 }
 function setWorking(name) {
   work.think(name ? '… ' + name + ' is working' : null);
@@ -565,6 +600,7 @@ function setRoom(r) {
   $('folder').textContent = r.folder;
   $('disc').textContent = r.discussion || '';
   $('disc').dataset.active = r.active ? 'true' : 'false';
+  $('code').textContent = r.code ? 'code: ' + r.code.path + (r.code.branch ? ' · ' + r.code.branch : ' · not in Git') : '';
   // After New discussion or Re-open, until the next one starts: the way back to the one before.
   // Nothing has been said since, so no second click is needed.
   const back = $('back-to');
@@ -780,6 +816,7 @@ events.onmessage = (e) => {
     ev.worker.forEach((m) => workMessage(m, false));
     setWorking(ev.working);
     if (!ev.workInput) { $('wcomposer').hidden = true; }
+    setWorkerInfo(ev.workerInfo);
     showQuota(ev.quota, ev.quotaAt);
     $('auto').checked = !!ev.auto;
     if (ev.room) setRoom(ev.room);
@@ -790,6 +827,7 @@ events.onmessage = (e) => {
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
   if (ev.type === 'auto') $('auto').checked = ev.on;
   if (ev.type === 'working') setWorking(ev.name);
+  if (ev.type === 'workerinfo') setWorkerInfo(ev.info);
   if (ev.type === 'message') message(ev.message);
   if (ev.type === 'thinking') setThinking(ev.name);
   if (ev.type === 'turn') status(ev.text);
@@ -897,7 +935,7 @@ function handleScreen(req, res, url, dir, screen) {
 export function resetEvent(screen) {
   return { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc,
     thinking: screen.thinking, status: screen.status, input: !!screen.say,
-    room: screen.room ?? null, worker: screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work,
+    room: screen.room ?? null, worker: screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
     auto: screen.auto ?? false, quota: screen.quota, quotaAt: screen.quotaAt ?? null, newRoom: !!screen.newRoom, page: PAGE };
 }
 

@@ -7,7 +7,8 @@
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +23,9 @@ Settings changes apply to this room only before discussion, summary or worker wo
 after that they set defaults for future rooms.
 The worker (the screen's Worker tab) is one more agent, outside the discussion: it carries out the
 instructions sent from that tab, sees only those (and the active discussion's folder, for its
-notes), and can edit files and run commands.
+notes), and can edit files and run commands. It works in its own Git worktree of the room's
+repository (<repo>.worker/, branch worker/main), created at its first instruction; you review and
+merge its work. Without a Git repository the worker is disabled.
 By default (npm start) the room is used from the discussion screen in the browser; the terminal
 only shows a log. --no-screen (or npm run terminal): the room is used from the terminal instead,
 and /docs opens each file alone in the browser.
@@ -38,7 +41,8 @@ Type a message to start a round; start it with @name to address one agent.
 Commands: /docs (pick a document to view in the browser), /reopen <name> (re-open that
 discussion: a fresh session there, starting from its handoff; one in archive/ or deferred/ is made
 active first), /new (end this session; your next message starts a new discussion; the worker
-carries on), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
+carries on), /code worker|room (developing agent-room itself: restart this room on the worker's
+version of the code, or back on the room's), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
 /summary (the agents agree a short
 summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
 in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
@@ -131,7 +135,9 @@ export async function load(ctx, v) {
   const { provider: wProvider, name: wName, model: wModel } = parseSpec(ctx.workerSpec, true);
   if (agents.some((a) => a.name === wName)) throw new Error(`The worker's name "${wName}" is taken by a room agent`);
   if (!ctx.sessions.has(`worker:${wName}`)) ctx.sessions.set(`worker:${wName}`, {});
-  const worker = createAgent(wProvider, { name: wName, model: wModel, cwd: ctx.cwd, instructions: workerInstructions, shell: true,
+  // Its worktree (see refreshWorker), shared by reference so it survives reloads and settings copies.
+  const workerDir = ctx.workerDir ??= { path: null };
+  const worker = createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions, shell: true,
     timeoutMs: WORKER_TIMEOUT_MS, session: ctx.sessions.get(`worker:${wName}`) });
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
   // ctx so they survive a reload.
@@ -175,7 +181,8 @@ function header(ctx) {
     discussion: d ? d.title : 'No discussion started',
     active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath,
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
-    back: ctx.previous ?? null }; // the discussion before the last switch, until the next one starts
+    back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
+    code: ctx.code ?? null }; // the code this process runs: its folder and branch
 }
 function showHeader(ctx) {
   ctx.screen.room = header(ctx);
@@ -329,6 +336,7 @@ async function reopenDiscussion(ctx, name) {
     ctx.screen.worker.length = 0;
     ctx.screen.working = null;
     ctx.workerBriefed = null;
+    ctx.workerTree = null; // its fresh session is told about its worktree again
   }
   switchTo(ctx, { name, dir: join(parent, name), title: name, continued: true });
   note(ctx, `Re-opened the discussion ${name}: your next message starts a fresh session there; the agents start from its handoff.`);
@@ -469,6 +477,9 @@ export async function start(ctx) {
   ctx.quotaTimer ??= setInterval(() => ctx.refreshQuota?.(), 60_000).unref();
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   ctx.refreshQuota();
+  ctx.code = await codeInfo();
+  showHeader(ctx);
+  refreshWorker(ctx).catch(() => {}); // the Worker tab's line; creates nothing
   if (ctx.noScreen) {
     return console.log('Type a message, /docs to browse the discussions, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
   }
@@ -508,7 +519,8 @@ export function ended(ctx, restarting = false) {
 // The chat in memory doesn't carry over. The new process writes where this one did (the terminal or
 // the Dock app's log) and runs on its own once this one exits.
 export function restartArgs(ctx, values) {
-  const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', ctx.cwd, '--port', String(ctx.server.address().port)];
+  // /code chooses another version's cli.mjs; otherwise this one's.
+  const args = [ctx.restartFrom ?? fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', ctx.cwd, '--port', String(ctx.server.address().port)];
   if (values.agents) args.push('--agents', values.agents);
   if (values.worker) args.push('--worker', values.worker);
   if (values.dev) args.push('--dev');
@@ -528,6 +540,8 @@ export async function handleLine(line, ctx) {
   const reopen = /^\/(?:reopen|continue)(?:\s+(.*))?$/.exec(line); // /continue: its former name
   if (reopen) return reopenDiscussion(ctx, (reopen[1] ?? '').trim());
   if (line === '/new') return newDiscussion(ctx);
+  const code = /^\/code\s+(worker|room)$/.exec(line);
+  if (code) return switchCode(ctx, code[1]);
   const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
   if (move) return void moveDiscussion(ctx, move[1], move[2]);
   if (line === '/summary') { ctx.agentsStarted = true; return runSummary(ctx); }
@@ -670,11 +684,187 @@ async function runRound(line, ctx) {
   }
 }
 
+// ── The worker's worktree ─────────────────────────────────────────────
+// The worker works in its own Git worktree of the room's repository, on the branch worker/main, in
+// the sibling folder <repo>.worker/: never in the room's own files (its notes still go in the room's
+// discussion folder). The worktree is created at the first instruction and reused after Restart or
+// Reload (read back from Git; agent-room stores nothing). The only Git writes are `worktree add` and
+// a fast-forward of worker/main when it has nothing of its own: never a reset, merge, rebase or
+// deletion, and never anything in the room's own working copy. Decided by the User, 2026-11-07.
+export const WORKER_BRANCH = 'worker/main';
+const NO_GIT = 'Worker requires a source Git repository for its isolated worktree.';
+const git = (dir, ...args) => new Promise((done, fail) => execFile('git', ['-C', dir, ...args], { maxBuffer: 1 << 22 },
+  (err, out, errOut) => (err ? fail(new Error(`git ${args[0]}: ${(errOut || err.message).trim()}`)) : done(out.trim()))));
+const gitOk = (dir, ...args) => git(dir, ...args).then(() => true, () => false);
+const real = (p) => (existsSync(p) ? realpathSync(p) : p);
+
+// Where the room's worker works: { root, top, path, cwd } (cwd: the room's subfolder inside the
+// worktree, when the room isn't the repository's top), or { disabled: why }.
+export async function workerPlace(roomRoot) {
+  const root = real(roomRoot);
+  let top;
+  try { top = await git(root, 'rev-parse', '--show-toplevel'); } catch { return { disabled: NO_GIT }; }
+  if (!(await gitOk(top, 'rev-parse', '--verify', '-q', 'HEAD^{commit}'))) return { disabled: `${NO_GIT} This one has no commit yet.` };
+  const [own, common] = await Promise.all([git(top, 'rev-parse', '--absolute-git-dir'), git(top, 'rev-parse', '--path-format=absolute', '--git-common-dir')]);
+  if (real(own) !== real(common)) return { disabled: `${top} is itself a linked Git worktree (such as a worker's): open the room in the main checkout instead.` };
+  const path = join(dirname(top), `${basename(top)}.worker`);
+  return { root, top, path, cwd: join(path, relative(top, root)) };
+}
+
+// The worktrees Git knows about: [{ path, branch }].
+async function worktrees(top) {
+  return (await git(top, 'worktree', 'list', '--porcelain')).split('\n\n').map((block) => ({
+    path: real(/^worktree (.*)$/m.exec(block)?.[1] ?? ''), branch: /^branch refs\/heads\/(.*)$/m.exec(block)?.[1] ?? null }));
+}
+
+// Creates the worktree, reattaches the branch, or reuses both; refuses (changing nothing) otherwise.
+export async function ensureWorktree(place) {
+  const list = await worktrees(place.top);
+  const here = list.find((w) => w.path === place.path);
+  if (here && here.branch !== WORKER_BRANCH) throw new Error(`${place.path} is a worktree on ${here.branch ?? 'a detached HEAD'}, not ${WORKER_BRANCH}: nothing was changed.`);
+  if (here && !existsSync(place.path)) throw new Error(`Git still lists ${place.path} as a worktree, but the folder is gone: run git worktree prune in ${place.top}, then try again.`);
+  if (here) return;
+  if (existsSync(place.path)) throw new Error(`${place.path} already exists and isn't the worker's worktree: nothing was changed.`);
+  const elsewhere = list.find((w) => w.branch === WORKER_BRANCH);
+  if (elsewhere) throw new Error(`${WORKER_BRANCH} is already checked out in ${elsewhere.path}: nothing was changed.`);
+  if (await gitOk(place.top, 'rev-parse', '--verify', '-q', `refs/heads/${WORKER_BRANCH}`)) await git(place.top, 'worktree', 'add', place.path, WORKER_BRANCH);
+  else await git(place.top, 'worktree', 'add', '-b', WORKER_BRANCH, place.path, 'HEAD');
+}
+
+// The worker's scratch notes, <worktree>/.worker-notes/<task>/, are ignored by Git in any project:
+// listed in the repository's own info/exclude (local, never committed), once.
+export const NOTES = '.worker-notes';
+async function ignoreNotes(place) {
+  const file = await git(place.path, 'rev-parse', '--path-format=absolute', '--git-path', 'info/exclude');
+  const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  if (text.split('\n').some((l) => l.trim().replace(/^\/|\/$/g, '') === NOTES)) return;
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}${NOTES}/\n`);
+}
+
+// The worktree compared with the room: whether it exists, the room's HEAD, commits on each side,
+// the commit it's based on, and uncommitted changes (the room's outside discussions/, the worktree's).
+export async function worktreeStatus(place) {
+  const head = await git(place.top, 'rev-parse', 'HEAD');
+  const roomDirty = (await git(place.root, 'status', '--porcelain', '--', '.', ':(exclude)discussions')) !== '';
+  const exists = existsSync(place.path) && (await worktrees(place.top)).some((w) => w.path === place.path && w.branch === WORKER_BRANCH);
+  if (!exists) return { exists, head, roomDirty };
+  const count = async (range) => Number(await git(place.top, 'rev-list', '--count', range));
+  const [ahead, behind, base, treeDirty] = await Promise.all([count(`HEAD..${WORKER_BRANCH}`), count(`${WORKER_BRANCH}..HEAD`),
+    git(place.top, 'merge-base', 'HEAD', WORKER_BRANCH).then((sha) => sha.slice(0, 7), () => 'no common commit'),
+    git(place.path, 'status', '--porcelain').then((out) => out !== '')]);
+  return { exists, head, roomDirty, ahead, behind, base, treeDirty };
+}
+
+// Before each instruction: worker/main moves forward to the room's HEAD only when it is strictly
+// behind it, with a clean worktree. Returns the new status.
+export async function catchUp(place, s) {
+  if (!s.exists || !s.behind || s.ahead || s.treeDirty) return s;
+  await git(place.path, 'merge', '--ff-only', s.head);
+  return worktreeStatus(place);
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+function worktreeLines(place, s) {
+  if (!s.exists) return [`The worker's worktree will be created at ${place.path}, on ${WORKER_BRANCH}, from ${s.head.slice(0, 7)}, with its first instruction.`];
+  const lines = [`Worktree ${place.path} · branch ${WORKER_BRANCH} · based on ${s.base}`];
+  if (s.roomDirty) lines.push('The room has uncommitted changes: the worker doesn\'t see them.');
+  if (s.ahead) lines.push(`${WORKER_BRANCH} has ${plural(s.ahead, 'commit')} not in the room: review and merge them when ready.`);
+  if (s.behind) {
+    lines.push(`${WORKER_BRANCH} is ${plural(s.behind, 'commit')} behind the room${s.ahead ? ' and has commits of its own: it is left as it is.'
+      : s.treeDirty ? ': its worktree has uncommitted changes, so it is left as it is.' : ': it catches up with the next instruction.'}`);
+  }
+  return lines;
+}
+
+// The code this process runs: its Git top folder and branch (never assumed), and cli.mjs inside it.
+async function codeInfo() {
+  const cli = fileURLToPath(new URL('./cli.mjs', import.meta.url));
+  const dir = dirname(dirname(cli));
+  try {
+    const top = await git(dir, 'rev-parse', '--show-toplevel');
+    const branch = await git(top, 'rev-parse', '--abbrev-ref', 'HEAD');
+    return { path: top, branch: branch === 'HEAD' ? `detached at ${await git(top, 'rev-parse', '--short', 'HEAD')}` : branch, cli: relative(top, cli) };
+  } catch { return { path: dir, branch: null, cli: relative(dir, cli) }; }
+}
+
+// Developing agent-room itself: the room can run on the worker's version (its worktree's code), or
+// back on the room's own. Only when this code is the room's repository or its worker's worktree.
+function codeSwitch(ctx, place, s) {
+  if (!ctx.code?.branch || place.disabled) return null;
+  const port = ctx.server?.address()?.port ?? ctx.port ?? 5566;
+  const wayBack = `cd ${place.top} && npm start -- ${place.root === place.top ? '' : `--cwd ${place.root} `}--port ${port}`;
+  const here = real(ctx.code.path);
+  if (here === place.top && s.exists) return { switchTo: 'worker', wayBack };
+  if (here === place.path) return { switchTo: 'room', wayBack };
+  return null;
+}
+
+// Reads the worktree's state for the Worker tab; with `prepare` (before each instruction), creates
+// or reattaches the worktree and catches up first. Returns the place (disabled or not).
+export async function refreshWorker(ctx, { prepare = false } = {}) {
+  const place = await workerPlace(ctx.cwd);
+  let info;
+  try {
+    if (place.disabled) info = { lines: [place.disabled], disabled: true };
+    else {
+      if (prepare) { await ensureWorktree(place); await ignoreNotes(place); }
+      let s = await worktreeStatus(place);
+      if (prepare) s = await catchUp(place, s);
+      (ctx.workerDir ??= { path: null }).path = s.exists ? place.cwd : null;
+      info = { lines: worktreeLines(place, s), ...codeSwitch(ctx, place, s) };
+    }
+  } catch (err) {
+    info = { lines: [`✗ ${err.message}`], error: true };
+    if (prepare) throw err;
+  } finally {
+    if (info) { ctx.screen.workerInfo = info; toScreen(ctx, { type: 'workerinfo', info }); }
+  }
+  return place;
+}
+
+// Dependencies for the worker's version: npm ci in the worktree, from its tracked lockfile; rerun only
+// when package.json or package-lock.json changed since the last install.
+async function installDeps(ctx, dir) {
+  if (!existsSync(join(dir, 'package.json'))) return;
+  if (!existsSync(join(dir, 'package-lock.json'))) throw new Error(`there is no package-lock.json in ${dir} for npm ci`);
+  const stamp = createHash('sha1').update(['package.json', 'package-lock.json']
+    .map((f) => readFileSync(join(dir, f), 'utf8')).join('\0')).digest('hex');
+  const marker = join(dir, 'node_modules', '.agent-room-install');
+  if (existsSync(marker) && readFileSync(marker, 'utf8') === stamp) return;
+  note(ctx, `Installing dependencies in ${dir} (npm ci)…`);
+  await new Promise((done, fail) => execFile('npm', ['ci', '--no-audit', '--no-fund'], { cwd: dir, timeout: 5 * 60 * 1000 },
+    (err, _, errOut) => (err ? fail(new Error((errOut || err.message).trim().slice(-500))) : done())));
+  mkdirSync(dirname(marker), { recursive: true }); // none when there are no dependencies
+  writeFileSync(marker, stamp);
+}
+
+// /code worker|room: restart this room on the worker's version, or back on the room's. Commands
+// already wait for a round and its summary; this also waits for the worker.
+async function switchCode(ctx, to) {
+  if (ctx.noScreen) return note(ctx, '/code is for the browser screen.');
+  const place = await workerPlace(ctx.cwd);
+  const sw = place.disabled ? null : codeSwitch(ctx, place, await worktreeStatus(place));
+  if (sw?.switchTo !== to) return note(ctx, `✗ This room can't switch to the ${to === 'worker' ? 'worker\'s' : 'room\'s'} version now (it runs ${ctx.code?.path}).`, true);
+  if (ctx.screen.working) note(ctx, 'Waiting for the worker to finish before switching…');
+  while (ctx.screen.working) await ctx.workQueue;
+  const target = to === 'worker' ? place.path : place.top;
+  if (to === 'worker') {
+    try { await installDeps(ctx, target); } catch (err) { return note(ctx, `✗ Not switching: installing the worker's dependencies failed: ${err.message}`, true); }
+  }
+  const cli = join(target, ctx.code.cli);
+  if (!existsSync(cli)) return note(ctx, `✗ Not switching: there is no ${cli}.`, true);
+  ctx.restartFrom = cli;
+  note(ctx, `Restarting on the ${to === 'worker' ? 'worker\'s' : 'room\'s'} version (${target}): the agents start fresh sessions from the handoff; the chat clears and the transcript is kept. If it doesn't come back, stop it and run: ${sw.wayBack}`);
+  ctx.say('/restart');
+}
+
 // The worker: instructions from the Worker tab run one at a time, in the order sent, alongside the
 // discussion (they don't wait for a round, and a round doesn't wait for them). The queue is in ctx,
 // so it carries over a reload. The worker is sent only the instruction itself; its CLI session holds
 // the earlier ones.
 export function queueWork(ctx, text) {
+  if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
   ctx.agentsStarted = true;
   // A bug here must not jam the queue: report it, and the next instruction still runs.
   ctx.workQueue = (ctx.workQueue ?? Promise.resolve()).then(() => runWork(ctx, text))
@@ -683,9 +873,11 @@ export function queueWork(ctx, text) {
 
 async function runWork(ctx, text) {
   const { worker, screen } = ctx;
-  // The task belongs to the session it started in: if New discussion closes that transcript
-  // meanwhile, the reply still goes there, not into the next discussion's.
-  const started = ctx.logPath;
+  // The task's context, read once, here, before anything awaits: its discussion (for the briefing
+  // and the /move lock) and its transcript. If New discussion or Re-open changes the room's
+  // meanwhile, the task keeps its own; the reply still goes into its transcript.
+  const task = { discussion: ctx.discussion ?? null, logPath: ctx.logPath ?? null };
+  const started = task.logPath;
   // A transcript that can't be written to doesn't lose the reply: it is still shown, with the error.
   let saveError = null;
   const workLog = (t) => {
@@ -698,7 +890,7 @@ async function runWork(ctx, text) {
     toScreen(ctx, { type: 'work', message: view });
   };
   // The discussion this task writes to (transcript, notes): /move refuses it until the task ends.
-  ctx.workingIn = ctx.discussion?.dir ?? null;
+  ctx.workingIn = task.discussion?.dir ?? null;
   screen.working = worker.name;
   try {
     workLog(`**User → ${worker.name}** (worker)\n\n${text}\n\n`);
@@ -708,16 +900,24 @@ async function runWork(ctx, text) {
     const t0 = Date.now();
     let entry;
     try {
+      // Its own worktree first (created, reattached or caught up); without one it doesn't run.
+      const place = await refreshWorker(ctx, { prepare: true });
+      if (place.disabled) throw new Error(place.disabled);
       // The worker learns the active discussion's folder (for its notes) with its first instruction there.
       // After New discussion, until the next one exists, it learns only that the old one is closed.
-      const d = ctx.discussion;
+      const d = task.discussion;
       const brief = d && ctx.workerBriefed !== d.dir
-        ? `The active discussion's folder is ${d.dir}: create, read and write this discussion's documents there, including your implementation notes and plans. The work itself goes in the root, ${ctx.cwd}.\n\n`
+        ? `The active discussion's folder is ${d.dir}: create, read and write this discussion's documents there, including your implementation notes and plans. The work itself goes in your worktree, ${place.cwd}.\n\n`
         : !d && ctx.workerBriefed
           ? `No discussion is active now: ${ctx.workerBriefed} is no longer the active discussion's folder. You will be told the next one's folder once it exists.\n\n`
           : '';
-      entry = { speaker: worker.name, text: (await worker.turn(brief + text)) || '(no reply)' };
+      // And where it works, with its first instruction (again if that changes).
+      const tree = ctx.workerTree !== place.cwd
+        ? `Your working directory is ${place.cwd}, your own Git worktree of the project, on the branch ${WORKER_BRANCH}. Make your changes there, never in the room's root, ${ctx.cwd}: that is the User's working copy (only the discussion folder there is yours, for notes). Commit on ${WORKER_BRANCH} only when asked; the User reviews and merges it. Your scratch notes go in ${join(place.path, NOTES)}/<task>/, one folder per task: Git ignores them, never commit them, and delete them only when the User says "stage accepted". Plans and notes for the User's review still go in the discussion's folder.\n\n`
+        : '';
+      entry = { speaker: worker.name, text: (await worker.turn(brief + tree + text)) || '(no reply)' };
       if (brief) ctx.workerBriefed = d?.dir ?? null;
+      ctx.workerTree = place.cwd;
       if (worker.lastUsage) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
     } catch (err) {
       entry = { speaker: worker.name, text: err.message, error: true };
@@ -737,6 +937,7 @@ async function runWork(ctx, text) {
     screen.working = null;
     toScreen(ctx, { type: 'working', name: null });
   }
+  refreshWorker(ctx).catch(() => {});
   refreshQuota(ctx).catch(() => {});
 }
 

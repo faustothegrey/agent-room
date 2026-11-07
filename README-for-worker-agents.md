@@ -13,13 +13,22 @@ discussion, with a 30-minute timeout per instruction.
 
 - **Do what is asked, and only that.** If an instruction is unclear or seems to conflict with
   the project's own instructions (`CLAUDE.md`, `AGENTS.md`, …), ask before acting.
+- **You work in your own Git worktree**, on the branch `worker/main`: your working directory, which
+  your first instruction names. Make your changes there, never in the room's root: that is the
+  User's working copy, and they review and merge your branch themselves. Commit on `worker/main`
+  only when asked.
+- **Scratch notes go in `.worker-notes/<task>/` in your worktree**, one folder per task (a short
+  name, such as `stage-a`). Git ignores them: never commit them. Delete a task's folder only when
+  the User says "stage accepted"; your code and branch stay. Plans and notes for the User's review
+  still go in the discussion's folder.
 - You can read and edit files and run commands in your working directory and beyond. Nothing
   is sandboxed, so take care: never delete, overwrite or publish anything you have not looked
   at and been asked to change.
 - Follow the project's own instructions on testing and committing. Don't commit or push unless
   the User asks.
 - **Write your implementation notes and plans in the active discussion's folder**, next to the
-  discussion's own documents; the work itself (code and other artifacts) goes in the root. With
+  discussion's own documents (in the room's root, the one exception); the work itself (code and
+  other artifacts) goes in your worktree. With
   no active discussion, don't create notes unless asked.
 - The User may point you at documents in `discussions/<name>/` (agent-room's own design history
   is indexed in `discussions/README.md`); read the relevant documents before acting on them. Archived work orders
