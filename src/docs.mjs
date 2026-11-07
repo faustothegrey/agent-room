@@ -790,10 +790,11 @@ for (const scope of ['talk', 'work']) {
       const res = await fetch('/__settings');
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(), selected = selectedSettings(data);
+      if (scope === 'work') selected.worker = data.settings.worker;
       const parent = $(scope + '-agent-rows'); parent.replaceChildren();
       const agents = scope === 'talk' ? selected.agents : [selected.worker];
       settingsRows[scope] = agents.map((a, i) => agentRow(parent, a, data.models, scope === 'talk' ? 'Agent ' + (i + 1) : 'Worker'));
-      hint.textContent = data.started ? 'Changes save automatically for future rooms. Active sessions keep their settings.' : 'Changes save automatically and apply to this room before any agent starts.';
+      hint.textContent = scope === 'work' ? 'Changes apply to the next instruction. A running instruction finishes with its current settings. Switching provider carries the Worker conversation into a fresh session.' : data.started ? 'Changes save automatically for future rooms. Active sessions keep their settings.' : 'Changes save automatically and apply to this room before any agent starts.';
     } catch (err) { result.textContent = 'Could not load settings: ' + err.message; }
   };
   function saveChanges() {
@@ -815,7 +816,7 @@ for (const scope of ['talk', 'work']) {
       const res = await post('/__settings', settings);
       if (!res.ok) throw new Error(await res.text());
       const saved = await res.json();
-      result.textContent = saved.applied ? 'Saved.' : 'Saved for future rooms. This room keeps its settings.';
+      result.textContent = scope === 'work' && saved.workerApplied ? 'Saved. Applies to the next worker instruction.' : saved.applied ? 'Saved.' : 'Saved for future rooms. This room keeps its settings.';
     }).catch((err) => { result.textContent = 'Could not save: ' + err.message; });
   }
   form.onchange = saveChanges;
