@@ -253,7 +253,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .msg.error { border-left-color: #ef4444; }
 .tools { flex-wrap: wrap; }
 </style></head><body>
-<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span><button id="back-to" hidden title="Re-open the discussion you were in: a fresh session there, from its handoff"></button><span id="code" title="The code this room runs: its folder and Git branch"></span><span id="server"><i id="beat"></i><span id="server-text">Connecting to the server…</span></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
+<header id="header"><b>agent-room</b><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="disc" title="The active discussion"></span><button id="back-to" hidden title="Re-open the discussion you were in: a fresh session there, from its handoff"></button><span id="code"></span><span id="server"><i id="beat"></i><span id="server-text">Connecting to the server…</span></span></div><span id="gauges" aria-label="Subscription usage"></span><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
   <div class="view" id="talk">
@@ -352,8 +352,7 @@ function workMessage(m, live) {
   work.add(bubble(m));
   if (live && m.speaker !== 'User' && tab !== 'work') $('tab-work').classList.add('news');
 }
-// The Worker tab's line: its worktree, or why the worker is disabled; when developing agent-room
-// itself, the switch between the room's version of the code and the worker's, and the way back.
+// The Worker tab's line: its worktree, or why the worker is disabled.
 function setWorkerInfo(info) {
   const el = $('winfo');
   el.replaceChildren();
@@ -361,24 +360,6 @@ function setWorkerInfo(info) {
   for (const line of info.lines) { const p = document.createElement('div'); p.textContent = line; if (info.error || info.disabled) p.className = 'error'; el.append(p); }
   wbox.disabled = !!info.disabled;
   if (info.disabled) wbox.placeholder = info.lines[0];
-  if (!info.switchTo || $('wcomposer').hidden) return;
-  const worker = info.switchTo === 'worker';
-  const b = document.createElement('button');
-  b.textContent = worker ? "Run this room on the worker's version" : "Back to the room's version";
-  b.title = 'Restarts this room from the ' + (worker ? "worker's worktree" : "room's own folder") + ', once the discussion and the worker are idle.';
-  b.onclick = () => {
-    if (!b.dataset.armed) {
-      b.dataset.armed = '1';
-      b.textContent = 'Click again: the room restarts; the agents start fresh sessions (the chat clears, the transcript is kept)';
-      return setTimeout(() => { delete b.dataset.armed; b.textContent = worker ? "Run this room on the worker's version" : "Back to the room's version"; }, 5000);
-    }
-    send('/code ' + info.switchTo);
-  };
-  el.append(b);
-  const back = document.createElement('div');
-  back.append("If the worker's version doesn't start: stop it, then run ");
-  const cmd = document.createElement('code'); cmd.textContent = info.wayBack; back.append(cmd);
-  el.append(back);
 }
 function setWorking(name) {
   work.think(name ? '… ' + name + ' is working' : null);
@@ -600,12 +581,30 @@ function setRoom(r) {
   $('folder').textContent = r.folder;
   $('disc').textContent = r.discussion || '';
   $('disc').dataset.active = r.active ? 'true' : 'false';
-  $('code').textContent = r.code ? 'code: ' + r.code.path + (r.code.branch ? ' · ' + r.code.branch : ' · not in Git') : '';
+  showVersion(r.code);
   // After New discussion or Re-open, until the next one starts: the way back to the one before.
   // Nothing has been said since, so no second click is needed.
   const back = $('back-to');
   back.hidden = !(r.back && !ended && !$('composer').hidden);
   if (r.back) { back.textContent = '← back to "' + r.back.title + '"'; back.onclick = () => send('/reopen ' + r.back.name); }
+}
+// The version the server runs: the commit its checkout was at when it started, and at the last
+// Reload, each with + for uncommitted changes. Snapshots taken then, never read live.
+function showVersion(c) {
+  const el = $('code');
+  if (!c) { el.textContent = ''; el.title = ''; return; }
+  const hm = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const full = (t) => new Date(t).toLocaleString();
+  const at = (commit, dirty) => (commit ?? 'not in Git') + (dirty ? '+' : '');
+  let text = at(c.commit, c.dirty) + (c.startedAt ? ' · started ' + hm(c.startedAt) : '');
+  let title = 'Started ' + (c.startedAt ? full(c.startedAt) : '') + ' at ' + at(c.commit, c.dirty);
+  if (c.reloaded) {
+    text += ' · reloaded ' + hm(c.reloaded.at) + ' (' + at(c.reloaded.commit, c.reloaded.dirty) + ')';
+    title += '\\nReloaded ' + full(c.reloaded.at) + ' at ' + at(c.reloaded.commit, c.reloaded.dirty);
+  }
+  title += '\\nCheckout: ' + c.path + (c.branch ? ' (' + c.branch + ')' : '') +
+    '\\n+ means uncommitted changes (outside discussions/). These are snapshots of the checkout, taken at start and at the last Reload: after a Reload the process may run a mix of files from both.';
+  el.textContent = text; el.title = title;
 }
 // Settings stay outside the conversation; saving never changes an active CLI session.
 const settingsRows = {};

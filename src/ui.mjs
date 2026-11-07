@@ -7,7 +7,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { createHash } from 'node:crypto';
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
@@ -41,8 +40,7 @@ Type a message to start a round; start it with @name to address one agent.
 Commands: /docs (pick a document to view in the browser), /reopen <name> (re-open that
 discussion: a fresh session there, starting from its handoff; one in archive/ or deferred/ is made
 active first), /new (end this session; your next message starts a new discussion; the worker
-carries on), /code worker|room (developing agent-room itself: restart this room on the worker's
-version of the code, or back on the room's), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
+carries on), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
 /summary (the agents agree a short
 summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
 in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
@@ -182,7 +180,7 @@ function header(ctx) {
     active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath,
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
     back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
-    code: ctx.code ?? null }; // the code this process runs: its folder and branch
+    code: ctx.code ?? null }; // the version this process runs (see codeInfo)
 }
 function showHeader(ctx) {
   ctx.screen.room = header(ctx);
@@ -477,7 +475,7 @@ export async function start(ctx) {
   ctx.quotaTimer ??= setInterval(() => ctx.refreshQuota?.(), 60_000).unref();
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   ctx.refreshQuota();
-  ctx.code = await codeInfo();
+  ctx.code = { ...await codeInfo(), startedAt: ctx.screen.startedAt };
   showHeader(ctx);
   refreshWorker(ctx).catch(() => {}); // the Worker tab's line; creates nothing
   if (ctx.noScreen) {
@@ -506,6 +504,12 @@ export function reloaded(ctx) {
   log(ctx, '_(code reloaded)_\n\n');
   note(ctx, 'Reloaded the code and the agents\' rulebook; the conversation continues.\n');
   toScreen(ctx, { type: 'reloaded', page: ctx.docs.PAGE }); // pages refresh if their code changed
+  // The header's version: the checkout as it is at this Reload (the start's snapshot is kept).
+  const at = new Date().toISOString();
+  codeInfo().then(({ commit, dirty }) => {
+    if (ctx.code) ctx.code.reloaded = { at, commit, dirty };
+    showHeader(ctx);
+  }).catch(() => {});
 }
 
 // The room is over (after /quit): screens say so and stop reconnecting. After /restart they wait
@@ -519,8 +523,7 @@ export function ended(ctx, restarting = false) {
 // The chat in memory doesn't carry over. The new process writes where this one did (the terminal or
 // the Dock app's log) and runs on its own once this one exits.
 export function restartArgs(ctx, values) {
-  // /code chooses another version's cli.mjs; otherwise this one's.
-  const args = [ctx.restartFrom ?? fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', ctx.cwd, '--port', String(ctx.server.address().port)];
+  const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', ctx.cwd, '--port', String(ctx.server.address().port)];
   if (values.agents) args.push('--agents', values.agents);
   if (values.worker) args.push('--worker', values.worker);
   if (values.dev) args.push('--dev');
@@ -540,8 +543,6 @@ export async function handleLine(line, ctx) {
   const reopen = /^\/(?:reopen|continue)(?:\s+(.*))?$/.exec(line); // /continue: its former name
   if (reopen) return reopenDiscussion(ctx, (reopen[1] ?? '').trim());
   if (line === '/new') return newDiscussion(ctx);
-  const code = /^\/code\s+(worker|room)$/.exec(line);
-  if (code) return switchCode(ctx, code[1]);
   const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
   if (move) return void moveDiscussion(ctx, move[1], move[2]);
   if (line === '/summary') { ctx.agentsStarted = true; return runSummary(ctx); }
@@ -777,27 +778,16 @@ function worktreeLines(place, s) {
   return lines;
 }
 
-// The code this process runs: its Git top folder and branch (never assumed), and cli.mjs inside it.
-async function codeInfo() {
-  const cli = fileURLToPath(new URL('./cli.mjs', import.meta.url));
-  const dir = dirname(dirname(cli));
+// The checkout this process's code comes from, as it is now: its Git top folder, branch, commit and
+// whether it has uncommitted changes (outside discussions/, which hold no code). A snapshot, taken
+// at start and at each Reload, never read live: the header shows both.
+export async function codeInfo(dir = dirname(dirname(fileURLToPath(import.meta.url)))) {
   try {
     const top = await git(dir, 'rev-parse', '--show-toplevel');
-    const branch = await git(top, 'rev-parse', '--abbrev-ref', 'HEAD');
-    return { path: top, branch: branch === 'HEAD' ? `detached at ${await git(top, 'rev-parse', '--short', 'HEAD')}` : branch, cli: relative(top, cli) };
-  } catch { return { path: dir, branch: null, cli: relative(dir, cli) }; }
-}
-
-// Developing agent-room itself: the room can run on the worker's version (its worktree's code), or
-// back on the room's own. Only when this code is the room's repository or its worker's worktree.
-function codeSwitch(ctx, place, s) {
-  if (!ctx.code?.branch || place.disabled) return null;
-  const port = ctx.server?.address()?.port ?? ctx.port ?? 5566;
-  const wayBack = `cd ${place.top} && npm start -- ${place.root === place.top ? '' : `--cwd ${place.root} `}--port ${port}`;
-  const here = real(ctx.code.path);
-  if (here === place.top && s.exists) return { switchTo: 'worker', wayBack };
-  if (here === place.path) return { switchTo: 'room', wayBack };
-  return null;
+    const [branch, commit, status] = await Promise.all([git(top, 'rev-parse', '--abbrev-ref', 'HEAD'), git(top, 'rev-parse', '--short', 'HEAD'),
+      git(top, 'status', '--porcelain', '--', '.', ':(exclude)discussions')]);
+    return { path: top, branch: branch === 'HEAD' ? null : branch, commit, dirty: status !== '' };
+  } catch { return { path: dir, branch: null, commit: null, dirty: false }; }
 }
 
 // Reads the worktree's state for the Worker tab; with `prepare` (before each instruction), creates
@@ -812,7 +802,7 @@ export async function refreshWorker(ctx, { prepare = false } = {}) {
       let s = await worktreeStatus(place);
       if (prepare) s = await catchUp(place, s);
       (ctx.workerDir ??= { path: null }).path = s.exists ? place.cwd : null;
-      info = { lines: worktreeLines(place, s), ...codeSwitch(ctx, place, s) };
+      info = { lines: worktreeLines(place, s) };
     }
   } catch (err) {
     info = { lines: [`✗ ${err.message}`], error: true };
@@ -821,42 +811,6 @@ export async function refreshWorker(ctx, { prepare = false } = {}) {
     if (info) { ctx.screen.workerInfo = info; toScreen(ctx, { type: 'workerinfo', info }); }
   }
   return place;
-}
-
-// Dependencies for the worker's version: npm ci in the worktree, from its tracked lockfile; rerun only
-// when package.json or package-lock.json changed since the last install.
-async function installDeps(ctx, dir) {
-  if (!existsSync(join(dir, 'package.json'))) return;
-  if (!existsSync(join(dir, 'package-lock.json'))) throw new Error(`there is no package-lock.json in ${dir} for npm ci`);
-  const stamp = createHash('sha1').update(['package.json', 'package-lock.json']
-    .map((f) => readFileSync(join(dir, f), 'utf8')).join('\0')).digest('hex');
-  const marker = join(dir, 'node_modules', '.agent-room-install');
-  if (existsSync(marker) && readFileSync(marker, 'utf8') === stamp) return;
-  note(ctx, `Installing dependencies in ${dir} (npm ci)…`);
-  await new Promise((done, fail) => execFile('npm', ['ci', '--no-audit', '--no-fund'], { cwd: dir, timeout: 5 * 60 * 1000 },
-    (err, _, errOut) => (err ? fail(new Error((errOut || err.message).trim().slice(-500))) : done())));
-  mkdirSync(dirname(marker), { recursive: true }); // none when there are no dependencies
-  writeFileSync(marker, stamp);
-}
-
-// /code worker|room: restart this room on the worker's version, or back on the room's. Commands
-// already wait for a round and its summary; this also waits for the worker.
-async function switchCode(ctx, to) {
-  if (ctx.noScreen) return note(ctx, '/code is for the browser screen.');
-  const place = await workerPlace(ctx.cwd);
-  const sw = place.disabled ? null : codeSwitch(ctx, place, await worktreeStatus(place));
-  if (sw?.switchTo !== to) return note(ctx, `✗ This room can't switch to the ${to === 'worker' ? 'worker\'s' : 'room\'s'} version now (it runs ${ctx.code?.path}).`, true);
-  if (ctx.screen.working) note(ctx, 'Waiting for the worker to finish before switching…');
-  while (ctx.screen.working) await ctx.workQueue;
-  const target = to === 'worker' ? place.path : place.top;
-  if (to === 'worker') {
-    try { await installDeps(ctx, target); } catch (err) { return note(ctx, `✗ Not switching: installing the worker's dependencies failed: ${err.message}`, true); }
-  }
-  const cli = join(target, ctx.code.cli);
-  if (!existsSync(cli)) return note(ctx, `✗ Not switching: there is no ${cli}.`, true);
-  ctx.restartFrom = cli;
-  note(ctx, `Restarting on the ${to === 'worker' ? 'worker\'s' : 'room\'s'} version (${target}): the agents start fresh sessions from the handoff; the chat clears and the transcript is kept. If it doesn't come back, stop it and run: ${sw.wayBack}`);
-  ctx.say('/restart');
 }
 
 // The worker: instructions from the Worker tab run one at a time, in the order sent, alongside the

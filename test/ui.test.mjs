@@ -574,52 +574,35 @@ test('worker/main catches up with the room only when strictly behind with a clea
   assert.ok(ctx.screen.workerInfo.lines.some((l) => /behind the room and has commits of its own: it is left as it is/.test(l)));
 });
 
-test('/code worker: refused unless this code is the room\'s; waits for the worker; a failed install switches nothing; then restarts from the worktree', async () => {
-  const { mkdirSync, writeFileSync, existsSync, realpathSync } = await import('node:fs');
-  const { ctx } = await workerRoom();
-  const git = await gitRoom(ctx.cwd);
-  mkdirSync(`${ctx.cwd}/src`);
-  writeFileSync(`${ctx.cwd}/src/cli.mjs`, '');
-  writeFileSync(`${ctx.cwd}/package.json`, '{ not json');
-  writeFileSync(`${ctx.cwd}/package-lock.json`, '{ "name": "x", "lockfileVersion": 3, "requires": true, "packages": { "": { "name": "x" } } }\n');
-  git('add', '.'); git('commit', '-q', '-m', 'code');
-  const said = [];
-  ctx.say = (line) => said.push(line);
-  ctx.server = { address: () => ({ port: 5599 }) };
-  await work(ctx, 'start');
-  const path = `${realpathSync(ctx.cwd)}.worker`;
+test('the header\'s version: the checkout\'s commit and uncommitted changes, outside discussions/, as a snapshot', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, realpathSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { codeInfo } = await import('../src/ui.mjs');
+  const dir = realpathSync(mkdtempSync(`${tmpdir()}/ar-code-`));
+  assert.deepEqual(await codeInfo(dir), { path: dir, branch: null, commit: null, dirty: false }); // not in Git
+  const git = await gitRoom(dir);
+  const commit = git('rev-parse', '--short', 'HEAD');
+  assert.deepEqual(await codeInfo(dir), { path: dir, branch: 'main', commit, dirty: false });
+  mkdirSync(`${dir}/discussions`);
+  writeFileSync(`${dir}/discussions/notes.md`, 'x');
+  assert.equal((await codeInfo(dir)).dirty, false); // discussions hold no code
+  writeFileSync(`${dir}/code.mjs`, 'x');
+  assert.equal((await codeInfo(dir)).dirty, true);
+});
 
-  ctx.code = { path: '/somewhere/else', branch: 'main', cli: 'src/cli.mjs' };
-  await handleLine('/code worker', ctx);
-  assert.match(ctx.notes.at(-1), /can't switch to the worker's version now/);
-
-  ctx.code = { path: realpathSync(ctx.cwd), branch: 'main', cli: 'src/cli.mjs' };
-  await handleLine('/code worker', ctx);
-  assert.match(ctx.notes.at(-1), /Not switching: installing the worker's dependencies failed/);
-  assert.deepEqual(said, []);
-  assert.equal(ctx.restartFrom, undefined);
-
-  writeFileSync(`${path}/package.json`, '{ "name": "x", "private": true }\n'); // fixed in the worktree
-  let finish;
-  ctx.screen.working = 'W';
-  ctx.workQueue = new Promise((done) => { finish = done; }).then(() => { ctx.screen.working = null; });
-  const switching = handleLine('/code worker', ctx);
-  await until(() => ctx.notes.at(-1)?.startsWith('Waiting for the worker'));
-  assert.deepEqual(said, []);
-  finish();
-  await switching;
-  assert.deepEqual(said, ['/restart']);
-  assert.equal(ctx.restartFrom, `${path}/src/cli.mjs`);
-  assert.equal(restartArgs(ctx, {})[0], `${path}/src/cli.mjs`);
-  assert.match(ctx.notes.at(-1), new RegExp(`fresh sessions from the handoff.*run: cd ${realpathSync(ctx.cwd)} && npm start -- --port 5599$`));
-  assert.ok(existsSync(`${path}/node_modules/.agent-room-install`));
-  ctx.notes.length = 0;
-  await handleLine('/code worker', ctx); // installed already: no second install
-  assert.ok(!ctx.notes.some((n) => n.startsWith('Installing')));
-
-  ctx.code = { path, branch: 'worker/main', cli: 'src/cli.mjs' }; // now running the worker's version
-  await handleLine('/code room', ctx);
-  assert.equal(ctx.restartFrom, `${realpathSync(ctx.cwd)}/src/cli.mjs`);
+test('Reload adds its own snapshot of the checkout to the header, keeping the start\'s', async () => {
+  const { reloaded } = await import('../src/ui.mjs');
+  const ctx = await freshSession([], async () => ({ title: 'Topic' }));
+  const start = { path: '/x', branch: 'main', commit: 'abc1234', dirty: false, startedAt: '2026-11-07T12:28:00.000Z' };
+  ctx.code = { ...start };
+  ctx.refreshQuota = () => {};
+  reloaded(ctx);
+  await until(() => ctx.screen.room.code?.reloaded);
+  const { reloaded: r, ...kept } = ctx.screen.room.code;
+  assert.deepEqual(kept, start);
+  assert.match(r.commit, /^[0-9a-f]{7,}$/);
+  assert.equal(typeof r.dirty, 'boolean');
+  assert.ok(!Number.isNaN(Date.parse(r.at)));
 });
 
 test('a worker task keeps the discussion it started in, even if New discussion comes while it prepares its worktree', async () => {
