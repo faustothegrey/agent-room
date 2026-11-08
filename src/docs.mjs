@@ -180,14 +180,14 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #auto-controls { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); font-size: .75rem; white-space: nowrap; }
 #new-discussion { display: contents; }
 #new-discussion[hidden] { display: none; }
-#server-zone { flex-direction: row; align-items: center; gap: .8rem; }
+#server-zone { flex-direction: row; align-items: center; gap: .5rem; }
 #server-box { flex: none; display: flex; flex-direction: column; align-items: flex-start; }
 /* Under "● Server": some replication peer is unreachable (as in Peers…). Amber; red stays the server's. */
 #peer-warning { border: 0; background: none; padding: 0 .2rem; margin-left: -.2rem; font-size: .8rem; line-height: 1.1; color: light-dark(#92600a, #d6a84c); }
 #peer-warning[hidden] { display: none; }
 #server-details { flex-direction: column; }
 /* The gauges' own children join this grid, so "updated" sits above Usage, as in the drawing. */
-#monitor { display: grid; grid-template-rows: auto auto; align-items: center; gap: .1rem .8rem; flex: none; font-size: .65rem; color: var(--dim); }
+#monitor { display: grid; grid-template-rows: auto auto; align-items: center; gap: .1rem .5rem; flex: none; font-size: .65rem; color: var(--dim); }
 #gauges .quota { grid-row: 1 / span 2; }
 #gauges .updated { grid-row: 1; align-self: end; }
 #usage { grid-row: 2; justify-self: start; }
@@ -223,8 +223,8 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #gauges .updated { white-space: nowrap; }
 #files .hint { display: block; margin: 0 0 .8rem; }
 #gauges { display: contents; }
-.gauge { display: grid; grid-template-columns: 2rem 32px 2rem auto; gap: .3rem; align-items: center; line-height: 1.5; }
-.quota { display: grid; grid-template-columns: auto 1fr; gap: .05rem .55rem; align-items: center; border-left: 1px solid var(--line); padding-left: .8rem; }
+.gauge { display: grid; grid-template-columns: 1.2rem 32px 1.8rem auto; gap: .2rem; align-items: center; line-height: 1.5; }
+.quota { display: grid; grid-template-columns: auto 1fr; gap: .05rem .35rem; align-items: center; border-left: 1px solid var(--line); padding-left: .5rem; }
 .gauge .bar { width: 32px; height: 6px; border-radius: 3px; background: #8883; overflow: hidden; }
 .gauge .bar i { display: block; height: 100%; background: #10b981; }
 .gauge.warn { color: #eab308; } .gauge.warn .bar i { background: #eab308; }
@@ -1157,11 +1157,11 @@ function showQuota(gauges, at) {
     el.className = 'gauge' + (left < 10 ? ' high' : left < 30 ? ' warn' : '');
     el.title = provider + ' ' + g.label + ': ' + g.used + '% used' + (g.resets ? ', resets ' + g.resets : '');
     el.innerHTML = '<span></span><span class="bar"><i></i></span><span></span><span class="resets"></span>';
-    el.children[0].textContent = g.label;
+    el.children[0].textContent = g.label === 'week' ? 'wk' : g.label;
     el.children[1].firstChild.style.width = Math.min(100, Math.max(0, g.used)) + '%';
     el.children[2].textContent = g.used + '%';
-    // As the meter reports it (each CLI has its own format), without the time zone.
-    if (g.resets) el.children[3].textContent = 'resets ' + g.resets.split(' (')[0];
+    // Keep the meter’s date and time, omitting the time zone and redundant "at".
+    if (g.resets) el.children[3].textContent = 'at ' + g.resets.split(' (')[0].replace(' at ', ' ');
     group.append(el);
   }
   box.append(quotaUpdated(at));
