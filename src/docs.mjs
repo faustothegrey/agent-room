@@ -149,11 +149,16 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: var(--left, 38%) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 /* The header: three zones, room (left), current discussion (middle), server and monitoring (right).
    Rare room and server actions sit in the ▾ menus; the gauges never shrink. */
-#header { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(11rem, 17rem) minmax(12rem, 1fr) auto; gap: .5rem 1rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
-.zone { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; }
+#header { grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(16rem, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
+.zone { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; border: 1.5px solid var(--zone); border-radius: 6px; padding: .3rem .6rem; align-self: stretch; justify-content: center; }
+#room-zone { --zone: #5a7bd8; } #disc-zone { --zone: #4caf7a; } #server-zone { --zone: #d6a84c; }
+/* Details shown on hover or keyboard focus of the room name and of "Server" (not while their menu is open). */
+.hover-detail { display: none; position: absolute; top: 100%; left: 0; z-index: 11; flex-direction: column; gap: .1rem; width: max-content; max-width: min(26rem, 80vw); padding: .4rem .6rem; border: 1px solid var(--zone); border-radius: 6px; background: Canvas; box-shadow: 0 6px 20px #0004; font-size: .7rem; color: var(--dim); overflow-wrap: anywhere; }
+/* No gap under the trigger, and it stays while hovered, so the version's own tooltip can be reached. */
+.menu:not([open]):is(:hover, :has(> summary:focus-visible)) + .hover-detail:not(:empty), .hover-detail:not(:empty):hover { display: flex; }
+#room-zone .zone-line, #server-box { position: relative; }
 .zone-line { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .5rem; min-width: 0; max-width: 100%; }
 .zone button { font-size: .75rem; white-space: nowrap; }
-#replica-header { font-size: .7rem; color: var(--dim); overflow-wrap: anywhere; }
 .menu { position: relative; }
 .menu > summary { list-style: none; cursor: pointer; border-radius: 6px; padding: .05rem .3rem; margin-left: -.3rem; white-space: nowrap; }
 .menu > summary::-webkit-details-marker { display: none; }
@@ -165,13 +170,18 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .menu-items button:hover { background: #8882; }
 .menu-items .danger { color: #ef4444; }
 .menu-items hr { width: 100%; border: 0; border-top: 1px solid var(--line); margin: .25rem 0; }
-#disc-zone { gap: .3rem; }
-#auto-controls { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); font-size: .75rem; }
-#new-discussion { border-left: 1px dashed var(--line); padding-left: .7rem; margin-left: .2rem; }
+#disc-zone { flex-direction: row; align-items: center; gap: .3rem .8rem; justify-content: flex-start; }
+#disc-text { flex: 1 1 auto; min-width: 5rem; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+#actions-menu, #auto-controls { flex: none; }
+#disc-status { font-size: .7rem; color: var(--dim); line-height: 1.35; }
+#actions-menu > summary { border: 1px solid var(--line); background: #8882; padding: .15rem .55rem; margin-left: 0; font-size: .75rem; }
+#actions-menu[hidden] { display: none; }
+#auto-controls { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); font-size: .75rem; white-space: nowrap; }
+#new-discussion { display: contents; }
 #new-discussion[hidden] { display: none; }
-#newdisc { border-style: dashed; }
-#server-zone { gap: .2rem; }
-#server-box { display: flex; flex-wrap: wrap; align-items: center; gap: .1rem .8rem; }
+#server-zone { flex-direction: row; align-items: center; gap: .8rem; }
+#server-box { flex: none; }
+#server-details { flex-direction: column; }
 /* The gauges' own children join this grid, so "updated" sits above Usage, as in the drawing. */
 #monitor { display: grid; grid-template-rows: auto auto; align-items: center; gap: .1rem .8rem; flex: none; font-size: .65rem; color: var(--dim); }
 #gauges .quota { grid-row: 1 / span 2; }
@@ -179,6 +189,9 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #usage { grid-row: 2; justify-self: start; }
 #gauges .quota + .updated, #monitor:has(.quota) #usage { grid-column: 2; }
 #gauges .quota + .quota + .updated, #monitor:has(.quota + .quota) #usage { grid-column: 3; }
+/* Without gauges (meter not reachable), the message, its time and Usage share one line. */
+#monitor:not(:has(.quota)) { display: flex; align-items: center; gap: .3rem .8rem; white-space: nowrap; }
+#monitor:not(:has(.quota)) .updated { align-self: center; }
 #ask { max-width: min(32rem, 90vw); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.2rem; }
 #ask::backdrop { background: #0006; }
 #ask-text { margin: 0 0 1rem; overflow-wrap: anywhere; }
@@ -193,9 +206,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #winfo .error { color: #ef4444; }
 #winfo code { font-size: .7rem; overflow-wrap: anywhere; user-select: all; }
 #winfo button { align-self: flex-start; font-size: .75rem; margin-top: .2rem; }
-#back-to { border: 0; background: none; padding: 0; font-size: .75rem; color: var(--dim); white-space: normal; text-align: left; overflow-wrap: anywhere; }
-#back-to:hover { color: CanvasText; text-decoration: underline; }
-#server { max-width: 100%; overflow-wrap: anywhere; font-size: .7rem; color: var(--dim); display: inline-flex; align-items: center; gap: .4rem; }
+#server { max-width: 100%; font-size: .75rem; color: light-dark(#92600a, #d6a84c); display: inline-flex; align-items: center; gap: .4rem; }
 #server[data-state="down"] { color: #ef4444; font-weight: 600; }
 #beat { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; flex: none; }
 #server[data-state="up"] #beat { background: #22c55e; } #server[data-state="down"] #beat { background: #ef4444; }
@@ -215,7 +226,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .quota .gauge { grid-column: 2; }
 .gauge .resets { opacity: .8; white-space: nowrap; }
 @media (max-width: 1150px) {
-  #header { grid-template-columns: minmax(10rem, 20rem) minmax(0, 1fr); gap: .4rem .8rem; }
+  #header { grid-template-columns: fit-content(20rem) minmax(0, 1fr); gap: .4rem .8rem; }
   #server-zone { grid-column: 1 / -1; grid-row: 2; justify-content: space-between; flex-wrap: wrap; width: 100%; }
 }
 @media (max-width: 600px) {
@@ -304,9 +315,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .tools { flex-wrap: wrap; }
 </style></head><body>
 <header id="header">
-<div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b>agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header"></span></div><span id="folder" title="The room's root folder"></span><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Current discussion"><div class="zone-line"><span id="disc" title="The active discussion"></span><button id="back-to" hidden title="Re-open the discussion you were in: a fresh session there, from its handoff"></button></div><div class="zone-line"><button id="pause-discussion" hidden>Pause discussion</button><button id="summary">Summarize</button><label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label><span id="new-discussion" hidden><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button></span></div></div>
-<div id="server-zone" class="zone" aria-label="Server and monitoring"><div id="server-box"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i><span id="server-text">Connecting to the server…</span></span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="code"></span></div><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span><button id="usage">Usage</button></div></div>
+<div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b>agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><span id="folder" title="The room's root folder"></span><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog></div>
+<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span></div><details class="menu" id="actions-menu"><summary>Actions</summary><div class="menu-items"><button id="pause-discussion" hidden>Pause discussion</button><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button></span></div></details><label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label></div>
+<div id="server-zone" class="zone" aria-label="Server and monitoring"><div id="server-box"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></div><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span><button id="usage">Usage</button></div></div>
 </header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
@@ -352,7 +363,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <script>
 const $ = (id) => document.getElementById(id);
 const pane = $('pane'), box = $('box'), wbox = $('wbox');
-let replica = null, replicaOff = null, viewing = null, localMessages = [], localInput = true, localThinking = null, localWorking = null, viewExpired = false, viewNotice = null;
+let replica = null, replicaOff = null, viewing = null, localMessages = [], localInput = true, localThinking = null, yourTurn = false, localWorking = null, viewExpired = false, viewNotice = null;
 // crypto.randomUUID exists only in secure contexts (HTTPS or localhost); over plain HTTP from another machine, use random bytes.
 const viewClient = crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 let ended = false, doc = null, tab = 'talk', page = null;
@@ -466,7 +477,7 @@ function message(m) {
 }
 function status(text, error) { if (viewing) { viewNotice = text; updateReplicaView(); return; } talk.add(statusEl(text, error)); }
 function setThinking(name) {
-  localThinking = name; updateReplicaView();
+  localThinking = name; if (name) yourTurn = false; updateReplicaView();
   if (viewing) return;
   talk.think(name ? '… ' + name + ' is thinking' : null);
 }
@@ -525,7 +536,10 @@ function updateReplicaHeader() {
 }
 function updateReplicaView() {
   updateReplicaHeader();
-  if (room) { $('disc').textContent = viewing ? viewing.title : room.discussion + (room.paused ? ' · paused' : ''); $('disc').dataset.active = !viewing && room.active ? 'true' : 'false'; }
+  if (room) { $('disc').textContent = viewing ? viewing.title : room.discussion; $('disc').dataset.active = !viewing && room.active ? 'true' : 'false'; }
+  // Under the title, states the page already shows elsewhere: paused, who is thinking, your turn.
+  const state = !room ? '' : viewing ? 'read-only' : room.paused ? 'paused' : localThinking ? localThinking + ' is thinking' : room.started && yourTurn ? 'your turn' : '';
+  $('disc-status').textContent = state;
   const panel = $('remote-view'); panel.hidden = !viewing; panel.replaceChildren();
   $('composer').hidden = !viewing && !localInput;
   $('pause-discussion').hidden = !room?.started || ended || !!viewing || !localInput;
@@ -536,6 +550,7 @@ function updateReplicaView() {
   $('reload').hidden = !!viewing;
   // New discussion (in the header): ends this session, as Re-open does; the next message starts the new one.
   $('new-discussion').hidden = !(room && localInput && !viewing && room.active);
+  $('actions-menu').hidden = ['pause-discussion', 'summary', 'new-discussion'].every((id) => $(id).hidden);
   if (!viewing) return;
   const label = document.createElement('p');
   label.textContent = viewExpired ? 'View expired. Select the received line again.' : viewing.node + "'s line, round " + viewing.round + ', received ' + receivedTime(viewing.receivedAt) + '. Read-only.';
@@ -773,7 +788,7 @@ let room = null;
 function setRoom(r) {
   room = r;
   $('folder').textContent = r.folder;
-  $('disc').textContent = (r.discussion || '') + (r.paused ? ' · paused' : '');
+  $('disc').textContent = r.discussion || '';
   const pause = $('pause-discussion');
   pause.hidden = !r.started || ended || viewing || $('composer').hidden;
   pause.textContent = r.paused ? 'Resume discussion' : 'Pause discussion';
@@ -782,11 +797,6 @@ function setRoom(r) {
   $('disc').dataset.active = r.active ? 'true' : 'false';
   showVersion(r.code);
   updateReplicaView();
-  // After New discussion or Re-open, until the next one starts: the way back to the one before.
-  // Nothing has been said since, so no second click is needed.
-  const back = $('back-to');
-  back.hidden = !(r.back && !ended && !viewing && !$('composer').hidden);
-  if (r.back) { back.textContent = '← back to "' + r.back.title + '"'; back.onclick = () => send('/reopen ' + r.back.name); }
 }
 // The version the server runs: the commit its checkout was at when it started, and at the last
 // Reload, each with + for uncommitted changes. Snapshots taken then, never read live.
@@ -1047,7 +1057,7 @@ for (const m of menus) m.ontoggle = () => { if (m.open) menus.forEach((o) => { i
 const closeMenus = () => menus.forEach((m) => { m.open = false; });
 document.addEventListener('click', (e) => { if (!e.target.closest('details.menu')) closeMenus(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
-for (const id of ['switchroom', 'newroom', 'reload']) $(id).addEventListener('click', closeMenus);
+for (const id of ['switchroom', 'newroom', 'reload', 'pause-discussion', 'summary']) $(id).addEventListener('click', closeMenus);
 confirmed($('newdisc'), () => send('/new'));
 $('summary').onclick = () => send('/summary');
 $('usage').onclick = () => send('/usage');
@@ -1119,7 +1129,7 @@ events.onmessage = (e) => {
     talk.clear();
     ev.messages.forEach(message);
     if (ev.status) status(ev.status);
-    setThinking(ev.thinking); if (!viewing) showDoc(ev.doc);
+    yourTurn = !ev.thinking; setThinking(ev.thinking); if (!viewing) showDoc(ev.doc);
     if (!ev.input) { $('composer').hidden = true; } // terminal mode: the page only watches
     work.clear();
     if (!ev.worker.length) work.add(statusEl('Give the worker instructions here. It works alongside the discussion and sees only what you send it.'));
@@ -1143,7 +1153,7 @@ events.onmessage = (e) => {
   if (ev.type === 'workerinfo') setWorkerInfo(ev.info);
   if (ev.type === 'message') message(ev.message);
   if (ev.type === 'thinking') setThinking(ev.name);
-  if (ev.type === 'turn') status(ev.text);
+  if (ev.type === 'turn') { yourTurn = true; status(ev.text); updateReplicaView(); }
   if (ev.type === 'note') status(ev.text, ev.error);
   if (ev.type === 'doc' && !viewing) showDoc(ev.file);
   if (ev.type === 'files') openFiles();

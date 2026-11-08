@@ -38,8 +38,14 @@ mode; `/docs` opens a document separately in the browser.
 
 ## Use the screen
 
-The header shows the full **root folder**, the selected discussion or **No discussion started**,
-the server's version, subscription usage, and **Open room in folder…**. The version is the commit
+The header has three zones. **Room** (blue): **agent-room ▾**, whose menu holds **Switch room…**,
+**Open room in folder…** and **Quit room**, above the full **root folder**; hover or focus the room
+name for its replication line, when replication is on. **Current discussion** (green): the selected
+discussion or **No discussion started**, with its state under it (paused, who is thinking, or your
+turn); **Actions ▾** holds **Pause discussion**, **Summarize** and **New discussion**, with
+**Auto-summarize** beside it. **Server and monitoring** (amber): **● Server ▾**, whose menu holds
+**Reload**, **Restart** and **Shutdown server**, then the subscription usage gauges and **Usage**;
+hover or focus **Server** for its uptime, port and the server's version. The version is the commit
 of agent-room's checkout when the server started and its start time, such as `4cb41bd · started
 12:28`, with `+` when the checkout had uncommitted changes (outside `discussions/`). After a
 Reload it adds `· reloaded 12:41 (commit)`, again with `+` if needed. Both are snapshots taken
@@ -87,9 +93,9 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   origin); typing `/shutdown` in a room does the same. If any room has a discussion round or worker instruction running, Shutdown and Restart first list those rooms and require confirmation. Running workers may be stopped at once, leaving partial changes. The page asks before retrying; unconfirmed requests to the endpoint return HTTP 409 with the warning (confirmation uses `?confirmed=yes`). The Dock launcher shows the same warning in a native Cancel / Shutdown dialog; Cancel leaves both the launcher and server running. Otherwise Shutdown and Restart start at once; each
   room then ends as with Quit room, within the same 30 seconds. Reload waits behind an ongoing
   round and its automatic summary.
-- **Server status:** under the root folder, the header shows whether the server is up, for how
-  long and on which port (hover for its process). Its dot pulses green on each answer and turns
-  red when the server stops. The page asks every three seconds; it says when
+- **Server status:** **● Server** in the header shows whether the server is up; hover or focus it
+  for how long and on which port (and its process, in the tooltip). Its dot pulses green on each
+  answer and turns red when the server stops. The page asks every three seconds; it says when
   the server stops answering, and reloads when a server answers again on that address.
 
 In this project (the agent-room room itself), its design history is five discussions, each with
@@ -132,13 +138,13 @@ first needed, and always listed at the bottom of **Discussions**, after the acti
 The discussion in use in this room can't be moved. New discussion names also skip names already
 taken in `archive/` and `deferred/`.
 
-**New discussion** (at the top of **Discussions**, or `/new`) works between rounds. It ends this
+**New discussion** (in the header's **Actions ▾** menu, or `/new`) works between rounds. It ends this
 room's session the way Re-open does (below), except for the worker: its running task, log and CLI
 session carry on, and its log gets a marker line. Nothing is created yet: your next message gets
 a title and creates the new discussion's folder, as in a fresh room. The worker's next instruction
 then gets the new folder; until it exists, the worker is told no discussion is active.
 
-**Pause discussion** (under the active discussion in the header, or `/pause`) waits for the
+**Pause discussion** (in the header's **Actions ▾** menu, or `/pause`) waits for the
 current round, including its automatic summary, and queued worker tasks to finish. It saves the
 chat, worker log, provider session IDs, unread-message positions, provider/model choices and usage
 totals on this machine. Messages, summaries, worker instructions and agent-setting changes are
@@ -146,7 +152,7 @@ blocked while paused. You can then quit, restart the server or start another dis
 
 Choose **Resume** under **Paused on this machine** in **Discussions**, or `/resume <folder-name>`,
 to continue those same discussion and worker sessions with the saved chat. In the room you just
-paused, the header also offers **Resume discussion** (`/resume` with no name). Pause any current
+paused, the header's **Actions ▾** menu offers **Resume discussion** (`/resume` with no name). Pause any current
 conversation before resuming another one. Starting a New discussion from a paused one starts a
 fresh worker too, keeping the saved worker session untouched. **Re-open** still starts fresh;
 re-opening a paused discussion asks for confirmation and discards its saved Pause.
@@ -158,9 +164,6 @@ This is native session continuation, subject to provider context compaction and 
 models or rulebooks. It is not recovery of a turn interrupted by a crash. Once resumed, Pause again
 before quitting to save the latest state. Paused discussions must be resumed before moving them
 to archive or deferred.
-
-After New discussion or Re-open, the header shows **← back to "<title>"**, which re-opens the
-previous discussion, until the next message starts a discussion.
 
 To go back to an existing discussion, choose **Re-open** on its row in **Discussions** (or on its
 page), or use `/reopen <folder-name>`. It works at any time between rounds. An archived or deferred
@@ -362,7 +365,7 @@ background; unreachable peers retry with a delay capped at five minutes, includi
 
 Received lines appear in **Discussions**. **View** opens their conversation and files read-only,
 without starting or stopping agents. **Back to <node>'s line** returns to the local conversation when that discussion has a local line.
-The bottom read-only bar retains Usage, Restart and Quit; node lines are grouped under each
+The header keeps Usage, and Restart and Quit room in its menus; node lines are grouped under each
 discussion, with Peers at the bottom of the Discussions pane.
 New received rounds do not change an open View. Each browser pins its selected snapshot;
 Back releases it, and closing/reloading the page releases it after two minutes without renewal.
