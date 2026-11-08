@@ -51,10 +51,42 @@ export function quotaSummary(quota, providers) {
     .join(' · ');
 }
 
+// The meter uses local wall-clock text in two formats. Reorder it without converting zones.
+// A time without a date means its next occurrence relative to the meter's measurement.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function resetTime(text, measured) {
+  if (!text) return null;
+  const zone = text.match(/ \([^)]+\)$/)?.[0] ?? '';
+  const value = text.slice(0, text.length - zone.length).trim();
+  const match = /^(?:([A-Za-z]{3}) (\d{1,2}) at )?(\d{1,2})(?::(\d{2}))?(am|pm)?(?: on (\d{1,2}) ([A-Za-z]{3}))?$/i.exec(value);
+  if (!match) return text; // Leave an unfamiliar meter format intact.
+  let [, month, day, hour, minute = '00', period, endDay, endMonth] = match;
+  hour = Number(hour);
+  if (period) {
+    if (hour < 1 || hour > 12) return text;
+    hour = hour % 12 + (period.toLowerCase() === 'pm' ? 12 : 0);
+  }
+  if (hour > 23 || Number(minute) > 59) return text;
+  month ||= endMonth; day ||= endDay;
+  if (month) {
+    month = MONTHS.find((m) => m.toLowerCase() === month.toLowerCase());
+    if (!month || Number(day) < 1 || Number(day) > 31) return text;
+  } else {
+    const stamp = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(measured ?? '');
+    const now = new Date();
+    const [year, mon, date, h, min] = stamp ? stamp.slice(1).map(Number)
+      : [now.getFullYear(), now.getMonth() + 1, now.getDate(), now.getHours(), now.getMinutes()];
+    // UTC is calendar arithmetic only: the reset's local clock and zone stay untouched.
+    const calendar = new Date(Date.UTC(year, mon - 1, date + (hour * 60 + Number(minute) < h * 60 + min ? 1 : 0)));
+    day = calendar.getUTCDate(); month = MONTHS[calendar.getUTCMonth()];
+  }
+  return `${Number(day)} ${month} ${String(hour).padStart(2, '0')}:${minute}${zone}`;
+}
+
 // The quota windows as gauges for the screen's header: [{ provider, label, used, resets }], in the
 // order of providers; [] if the meter had nothing for them.
 export function quotaGauges(quota, providers) {
-  return providers.flatMap((p) => windows(quota, p).map(([label, x]) => ({ provider: p, label, used: x.used_percent, resets: x.resets ?? null })));
+  return providers.flatMap((p) => windows(quota, p).map(([label, x]) => ({ provider: p, label, used: x.used_percent, resets: resetTime(x.resets, quota.last_update) })));
 }
 
 // The full /usage report: session totals per agent, then the quotas.
@@ -73,7 +105,7 @@ export function usageReport({ totals, agents, quota, url = METER_URL }) {
   lines.push(`Subscription quota (meter, updated ${quota.last_update ?? '?'}):`);
   for (const p of [...new Set(agents.map((a) => a.provider))]) {
     const w = windows(quota, p);
-    lines.push(`  ${p.padEnd(10)} ${w.length ? w.map(([label, x]) => `${label} ${x.used_percent}% used${x.resets ? ` (resets ${x.resets})` : ''}`).join(' · ') : 'unavailable'}`);
+    lines.push(`  ${p.padEnd(10)} ${w.length ? w.map(([label, x]) => `${label} ${x.used_percent}% used${x.resets ? ` (at ${resetTime(x.resets, quota.last_update)})` : ''}`).join(' · ') : 'unavailable'}`);
   }
   return lines.join('\n');
 }

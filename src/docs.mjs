@@ -1199,13 +1199,13 @@ function showQuota(gauges, at) {
     // Highlighted by what is left: yellow under 30%, red under 10%.
     const left = 100 - g.used;
     el.className = 'gauge' + (left < 10 ? ' high' : left < 30 ? ' warn' : '');
-    el.title = provider + ' ' + g.label + ': ' + g.used + '% used' + (g.resets ? ', resets ' + g.resets : '');
+    el.title = provider + ' ' + g.label + ': ' + g.used + '% used' + (g.resets ? ', at ' + g.resets : '');
     el.innerHTML = '<span></span><span class="bar"><i></i></span><span></span><span class="resets"></span>';
     el.children[0].textContent = g.label === 'week' ? 'wk' : g.label;
     el.children[1].firstChild.style.width = Math.min(100, Math.max(0, g.used)) + '%';
     el.children[2].textContent = g.used + '%';
-    // Keep the meter’s date and time, omitting the time zone and redundant "at".
-    if (g.resets) el.children[3].textContent = 'at ' + g.resets.split(' (')[0].replace(' at ', ' ');
+    // The shared usage formatter supplies the local date and 24-hour time.
+    if (g.resets) el.children[3].textContent = 'at ' + g.resets.split(' (')[0];
     group.append(el);
   }
   box.append(quotaUpdated(at));

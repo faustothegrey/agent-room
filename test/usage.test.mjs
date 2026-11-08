@@ -33,7 +33,7 @@ test('the /usage report lists each agent and the quotas, or says the meter is un
   const report = usageReport({ totals, agents, quota: QUOTA });
   assert.match(report, /Claude +2 turns · 4\.2k in \(400 cached\) · 120 out · \$0\.03 at API prices/);
   assert.match(report, /Codex +no turns yet/);
-  assert.match(report, /claude +5h 70% used \(resets 2:20pm\) · week 31% used/);
+  assert.match(report, /claude +5h 70% used \(at 20 Oct 14:20\) · week 31% used/);
   assert.match(report, /updated 2026-10-20 13:44:46/);
   assert.match(usageReport({ totals, agents, quota: null, url: 'http://x' }), /meter at http:\/\/x is not reachable/);
 });
@@ -51,12 +51,32 @@ test('quota gauges: one per window, for the room\'s providers only, in their ord
   const quota = {
     claude: { ok: true, parsed: { current_session: { used_percent: 20, resets: '2:59pm' }, current_week_all_models: { used_percent: 6 } } },
     codex: { ok: true, parsed: { five_hour_limit: { used_percent: 8, resets: '13:31' }, weekly_limit: { used_percent: 26 } } },
+    last_update: '2026-10-20 12:00:00',
   };
   assert.deepEqual(quotaGauges(quota, ['codex', 'claude']), [
-    { provider: 'codex', label: '5h', used: 8, resets: '13:31' },
+    { provider: 'codex', label: '5h', used: 8, resets: '20 Oct 13:31' },
     { provider: 'codex', label: 'week', used: 26, resets: null },
-    { provider: 'claude', label: '5h', used: 20, resets: '2:59pm' },
+    { provider: 'claude', label: '5h', used: 20, resets: '20 Oct 14:59' },
     { provider: 'claude', label: 'week', used: 6, resets: null },
   ]);
   assert.deepEqual(quotaGauges({ codex: { ok: false } }, ['codex']), []);
+});
+
+test('reset dates share a local 24-hour format without changing the clock or zone', () => {
+  const cases = [
+    ['10:59pm (Europe/Rome)', '2026-11-08 18:00:00', '8 Nov 22:59 (Europe/Rome)'],
+    ['3:59am (Europe/Rome)', '2026-11-08 23:05:21', '9 Nov 03:59 (Europe/Rome)'],
+    ['Nov 11 at 7:59am (Europe/Rome)', '2026-11-08 23:05:21', '11 Nov 07:59 (Europe/Rome)'],
+    ['01:59 on 9 Nov', '2026-11-08 23:05:21', '9 Nov 01:59'],
+    ['07:45 on 11 Nov', '2026-11-08 23:05:21', '11 Nov 07:45'],
+    ['12am', '2026-12-31 23:00:00', '1 Jan 00:00'],
+    ['12pm', '2026-11-08 10:00:00', '8 Nov 12:00'],
+    ['13:44', '2026-10-20 13:44:46', '20 Oct 13:44'],
+    ['unknown reset', '2026-11-08 23:05:21', 'unknown reset'],
+  ];
+  for (const [resets, last_update, expected] of cases) {
+    const quota = { claude: { ok: true, parsed: { current_session: { used_percent: 20, resets } } }, last_update };
+    assert.equal(quotaGauges(quota, ['claude'])[0].resets, expected);
+    assert.ok(usageReport({ totals: {}, agents: [{ name: 'A', provider: 'claude' }], quota }).includes('(at ' + expected + ')'));
+  }
 });
