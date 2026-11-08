@@ -552,7 +552,8 @@ function showDoc(file) {
     const root = room.folder.endsWith('/') ? room.folder : room.folder + '/';
     send('Please read this transcript of an earlier session in full, as background for our discussion: ' + root + file);
   };
-  $('current').textContent = doc ? doc : 'No document shown.';
+  $('current').textContent = doc ? doc.split('/').pop() : 'No document shown.';
+  $('current').title = doc || ''; // the full path, on hover
   $('tab-document').disabled = !doc;
   if (!doc) { docpane.replaceChildren(); return showSub('explorer'); }
   if (!same) { docpane.innerHTML = '<iframe id="doc"></iframe>'; docpane.firstChild.src = urlFor(doc); }
