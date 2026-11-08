@@ -171,7 +171,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .menu-items button:hover { background: #8882; }
 .menu-items .danger { color: #ef4444; }
 .menu-items hr { width: 100%; border: 0; border-top: 1px solid var(--line); margin: .25rem 0; }
-#disc-zone { flex-direction: row; align-items: center; gap: .3rem .5rem; justify-content: flex-start; justify-self: start; max-width: 100%; }
+#disc-zone { flex-direction: row; align-items: center; gap: .3rem .5rem; justify-content: flex-start; }
 #disc-text { flex: 0 1 auto; min-width: 5rem; display: flex; flex-direction: column; overflow-wrap: anywhere; }
 #disc-heading { display: flex; align-items: baseline; gap: .15rem; min-width: 0; }
 #disc { min-width: 0; }
