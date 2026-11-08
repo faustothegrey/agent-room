@@ -90,7 +90,8 @@ nav { font-size: .85rem; opacity: .7; margin-bottom: 1rem; }
 <script>
 let last = null;
 setInterval(async () => {
-  const t = await (await fetch(${JSON.stringify(mtime)} + encodeURIComponent(${JSON.stringify(watch)}))).text();
+  const t = await (await fetch(${JSON.stringify(mtime)} + encodeURIComponent(${JSON.stringify(watch)}), { cache: 'no-store' })).text();
+  if (t === 'false') return; // missing for now (being saved?): keep showing it, ask again
   if (last !== null && t !== last) location.reload();
   last = t;
 }, 2000);
@@ -523,6 +524,19 @@ function showDoc(file) {
   document.title = doc + ' · agent-room';
   showSub('document');
 }
+// Every two seconds, the shown file's modification time; a change reloads it in place (the browser
+// keeps its scroll position where it can). Markdown pages poll themselves, and received snapshots
+// never change. A missing file (being saved?) keeps showing and is asked about again.
+let docStamp = null; // { file, t }: the shown file's last known modification time
+setInterval(async () => {
+  const shown = doc;
+  if (!shown || viewing || shown.startsWith('__received/') || /\\.md$/i.test(shown)) return;
+  let t;
+  try { t = await (await fetch('__mtime?f=' + encodeURIComponent(shown), { cache: 'no-store' })).text(); } catch { return; }
+  if (shown !== doc || t === 'false') return;
+  if (docStamp?.file === shown && docStamp.t !== t) $('doc')?.contentWindow.location.reload();
+  docStamp = { file: shown, t };
+}, 2000);
 const post = (path, body) => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': viewClient }, body: JSON.stringify(body) });
 // Each browser owns a leased View pin, independent of other browsers and local agents.
 async function viewRemote(line) {
@@ -1358,8 +1372,10 @@ export function handle(req, res, dir, screen, base = '/') {
   const file = got ? screen?.receivedFile?.(got[1], got[2], got[3], got[4]) : servable(dir, rel, screen);
   if (!file) return send(404, 'text/plain; charset=utf-8', `Not found: ${rel}`);
   // A session transcript quotes whatever was said: its HTML is shown as text, never run.
-  if (/\.md$/i.test(file)) return send(200, 'text/html; charset=utf-8', page(rel, ((/(^|\/)transcripts\//.test(rel)) ? mdText : md).parse(readFileSync(file, 'utf8')), rel, base));
-  send(200, TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream', readFileSync(file));
+  // no-cache: a reload after the file changes shows the new content, not a cached copy.
+  const sendDoc = (type, body) => { res.writeHead(200, { 'content-type': type, 'cache-control': 'no-cache' }); res.end(body); };
+  if (/\.md$/i.test(file)) return sendDoc('text/html; charset=utf-8', page(rel, ((/(^|\/)transcripts\//.test(rel)) ? mdText : md).parse(readFileSync(file, 'utf8')), rel, base));
+  sendDoc(TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream', readFileSync(file));
 }
 
 // Terminal list: ↑/↓ (or j/k) to move, Enter calls onOpen(file) and stays, Esc/q resolves.
