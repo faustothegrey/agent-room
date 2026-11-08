@@ -287,6 +287,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #right { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 #bar { display: flex; gap: .6rem; align-items: center; padding: .4rem .6rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
 #current { color: var(--dim); } #feed { margin-left: auto; }
+#siblings { max-height: 60vh; overflow-y: auto; } #siblings .shown { font-weight: 600; }
 #pane, #docpane { flex: 1; min-height: 0; }
 #pane { overflow-y: auto; }
 #doc { border: 0; width: 100%; height: 100%; }
@@ -391,7 +392,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
   <div id="subtabs" role="tablist"><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button></div>
   <div class="view" id="explorer"><div id="pane"></div></div>
   <div class="view" id="document" hidden>
-    <div id="bar"><span id="current">No document shown.</span><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
+    <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
     <div id="docpane"></div>
   </div>
 </div>
@@ -553,6 +554,7 @@ function showDoc(file) {
     send('Please read this transcript of an earlier session in full, as background for our discussion: ' + root + file);
   };
   $('current').textContent = doc ? doc.split('/').pop() : 'No document shown.';
+  $('doc-menu').open = false;
   $('current').title = doc || ''; // the full path, on hover
   $('tab-document').disabled = !doc;
   if (!doc) { docpane.replaceChildren(); return showSub('explorer'); }
@@ -560,6 +562,30 @@ function showDoc(file) {
   document.title = doc + ' · agent-room';
   showSub('document');
 }
+// The file name's ▾ menu: the shown file's siblings (files in its folder), to switch without Explorer.
+// Local files open as from Explorer; a received snapshot's siblings come from that snapshot.
+$('doc-menu').addEventListener('toggle', async () => {
+  const box = $('siblings');
+  if (!$('doc-menu').open) return;
+  box.replaceChildren();
+  if (!doc) return;
+  const received = doc.startsWith('__received/');
+  const prefix = received ? doc.split('/').slice(0, 4).join('/') + '/' : '';
+  const rel = doc.slice(prefix.length), folder = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/') + 1) : '';
+  let files = [];
+  try {
+    files = received ? (viewing ? await (await fetch('__rfiles?d=' + viewing.discussion + '&n=' + viewing.node + '&c=' + viewing.commit)).json() : [])
+      : await (await fetch('__files')).json();
+  } catch {}
+  const siblings = files.filter((f) => f.startsWith(folder) && !f.slice(folder.length).includes('/')).sort();
+  for (const f of siblings) {
+    const b = document.createElement('button'); b.textContent = f.slice(folder.length);
+    if (prefix + f === doc) b.className = 'shown';
+    b.onclick = () => { closeMenus(); if (prefix + f === doc) return; if (received) showDoc(prefix + f); else post('__show', { file: f }); };
+    box.append(b);
+  }
+  if (!siblings.length) box.textContent = 'No other files here.';
+});
 // Every two seconds, the shown file's modification time; a change reloads it in place (the browser
 // keeps its scroll position where it can). Markdown pages poll themselves, and received snapshots
 // never change. A missing file (being saved?) keeps showing and is asked about again.
