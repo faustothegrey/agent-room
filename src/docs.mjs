@@ -163,7 +163,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .menu { position: relative; }
 .menu > summary { list-style: none; cursor: pointer; border-radius: 6px; padding: .05rem .3rem; margin-left: -.3rem; white-space: nowrap; }
 .menu > summary::-webkit-details-marker { display: none; }
-.menu > summary::after { content: ' ▾'; color: var(--dim); font-size: .75rem; }
+.menu > summary::after { content: ' ▾'; color: light-dark(#555, #ccc); font-size: .85rem; }
 .menu > summary:hover, .menu[open] > summary { background: #8882; }
 .menu > summary b { font-size: .85rem; letter-spacing: -.02em; }
 .menu-items { position: absolute; top: calc(100% + .25rem); left: -.3rem; z-index: 10; min-width: 13rem; display: flex; flex-direction: column; padding: .3rem; border: 1px solid var(--line); border-radius: 8px; background: Canvas; box-shadow: 0 6px 20px #0004; }
@@ -171,11 +171,14 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .menu-items button:hover { background: #8882; }
 .menu-items .danger { color: #ef4444; }
 .menu-items hr { width: 100%; border: 0; border-top: 1px solid var(--line); margin: .25rem 0; }
-#disc-zone { flex-direction: row; align-items: center; gap: .3rem .8rem; justify-content: flex-start; }
-#disc-text { flex: 1 1 auto; min-width: 5rem; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+#disc-zone { flex-direction: row; align-items: center; gap: .3rem .5rem; justify-content: flex-start; justify-self: start; max-width: 100%; }
+#disc-text { flex: 0 1 auto; min-width: 5rem; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+#disc-heading { display: flex; align-items: baseline; gap: .15rem; min-width: 0; }
+#disc { min-width: 0; }
 #actions-menu, #auto-controls { flex: none; }
 #disc-status { font-size: .7rem; color: var(--dim); line-height: 1.35; }
-#actions-menu > summary { border: 1px solid var(--line); background: #8882; padding: .15rem .55rem; margin-left: 0; font-size: .75rem; }
+#actions-menu > summary { padding: .15rem .3rem; margin-left: 0; }
+#actions-menu > summary::after { content: '▾'; }
 #actions-menu[hidden] { display: none; }
 #auto-controls { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); font-size: .75rem; white-space: nowrap; }
 #new-discussion { display: contents; }
@@ -272,6 +275,8 @@ body.resizing iframe { pointer-events: none; } /* the document would swallow the
 .msg p { margin: .3rem 0; } .msg pre { overflow-x: auto; } .msg img { max-width: 100%; }
 .status { color: var(--dim); font-size: .85rem; margin: .4rem 0 .9rem; white-space: pre-wrap; }
 .status.error { color: #ef4444; }
+#system-messages { flex: none; border-top: 1px solid var(--line); padding: .35rem .6rem; font-size: .75rem; line-height: 1.4; min-height: calc(2.8em + .7rem + 1px); }
+#system-messages .status { margin: 0; font-size: inherit; line-height: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer { border-top: 1px solid var(--line); padding: .6rem; }
 .box { width: 100%; min-height: 3.2rem; resize: vertical; font: inherit; padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--line); }
 .tools { display: flex; gap: .4rem; align-items: center; margin-top: .4rem; font-size: .85rem; }
@@ -299,9 +304,13 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #files .actions .primary { background: #3b82f6; border-color: #3b82f6; color: white; }
 #files .row { display: flex; align-items: center; gap: .3rem; }
 #files .row .entry { flex: 1; min-width: 0; }
+#files button.archiving::before { content: ""; display: inline-block; width: .65em; height: .65em; margin-right: .35em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: archive-spin .7s linear infinite; }
+@keyframes archive-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #files button.archiving::before { animation: none; } }
 #files .row .reopen { font-size: .75rem; padding: .1rem .5rem; }
 #files .discussion-row { align-items: baseline; flex-wrap: wrap; }
 #files .discussion-row > .discussion-lines { flex-basis: 14rem; }
+#files .discussion-row.in-use { background: #3b82f614; box-shadow: inset 3px 0 #60a5fa; border-radius: 4px; padding-left: .5rem; }
 .inline-folder { margin-left: 1rem; }
 .inline-folder > summary { cursor: pointer; padding: .3rem; }
 .local-label { color: var(--dim); font-size: .8rem; margin: .3rem 0; }
@@ -335,7 +344,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b>agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><span id="folder" title="The room's root folder"></span><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span></div><details class="menu" id="actions-menu"><summary>Actions</summary><div class="menu-items"><button id="pause-discussion" hidden>Pause discussion</button><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button></span></div></details><label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label></div>
+<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="pause-discussion" hidden>Pause discussion</button><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label></div>
 <div id="server-zone" class="zone" aria-label="Server and monitoring"><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span><button id="usage">Usage</button></div></div>
 </header>
 <div id="left">
@@ -373,6 +382,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <div class="tools"><span class="hint" id="whint"></span></div>
     </div>
   </div>
+  <div id="system-messages" role="log" aria-label="System messages" aria-live="polite" aria-relevant="additions"></div>
 </div>
 <div id="split" role="separator" aria-orientation="vertical" aria-label="Resize the chat and the document" tabindex="0" title="Drag to resize"></div>
 <div id="right">
@@ -437,7 +447,7 @@ function showTab(name) {
 $('tab-talk').onclick = () => showTab('talk');
 $('tab-work').onclick = () => showTab('work');
 function workMessage(m, live) {
-  if (m.note) return work.add(statusEl(m.note, m.error)); // a marker (New discussion) or an error
+  if (m.note) return status(m.note, m.error, 'Worker'); // a marker (New discussion) or an error
   work.add(bubble(m));
   if (live && m.speaker !== 'User' && tab !== 'work') $('tab-work').classList.add('news');
 }
@@ -498,7 +508,14 @@ function message(m) {
   if (m.pass || m.hidden) return; // passes and summary turns are hidden, as in the terminal
   talk.add(bubble(m));
 }
-function status(text, error) { if (viewing) { viewNotice = text; updateReplicaView(); return; } talk.add(statusEl(text, error)); }
+function status(text, error, source) {
+  if (!text) return;
+  const hub = $('system-messages');
+  const line = statusEl((source ? source + ' · ' : '') + text, error);
+  line.title = line.textContent; // Long messages keep their full text on hover.
+  hub.append(line);
+  while (hub.children.length > 2) hub.firstChild.remove();
+}
 function setThinking(name) {
   localThinking = name; if (name) yourTurn = false; updateReplicaView();
   if (viewing) return;
@@ -703,6 +720,25 @@ function confirmed(b, run, warning) {
     run();
   };
 }
+const pendingArchives = new Set();
+function archiveButton(b, ref) {
+  const pending = pendingArchives.has('discussions/' + ref);
+  b.classList.toggle('archiving', pending);
+  b.setAttribute('aria-busy', String(pending));
+  if (pending) b.disabled = true;
+  b.onclick = async () => {
+    if (ended) return;
+    pendingArchives.add('discussions/' + ref);
+    archiveButton(b, ref);
+    try {
+      const res = await post('__say', { text: '/move ' + ref + ' archive' });
+      if (res.ok) return; // Accepted into the queue: keep spinning until the moved event.
+      status(await res.text(), true);
+    } catch (err) { status(err.message, true); }
+    pendingArchives.delete('discussions/' + ref);
+    if (listed !== null) openFiles(listed);
+  };
+}
 const expandedLines = new Set();
 let listed = null; // the list path shown in the pane ('' for the top), or null when a document is shown
 async function openFiles(group) {
@@ -783,7 +819,7 @@ async function openFiles(group) {
     details.open = expandedLines.has(path);
     details.ontoggle = () => { if (details.open) expandedLines.add(path); else expandedLines.delete(path); };
     details.append(el('summary', '', name + (path === room?.active ? ' · in use' : '')));
-    const row = el('div', 'row discussion-row'); row.append(details);
+    const row = el('div', 'row discussion-row' + (path === room?.active ? ' in-use' : '')); row.append(details);
     const label = (replica?.node || 'Local') + ' (this node) · ' + (own ? 'round ' + own.round : 'no saved round') +
       (own ? Object.entries(own.sent).map(([n, sent]) => ' · ' + (sent ? 'sent to ' + n + ' ✓' : n + ' pending')).join('') : '');
     row.append(info(label));
@@ -797,7 +833,9 @@ async function openFiles(group) {
         const b = el('button', 'reopen', label);
         b.disabled = path === room.active || paused;
         b.title = path === room.active ? 'The discussion in use cannot be moved' : paused ? 'Resume the paused discussion before moving it' : 'Move the whole discussion into ' + target + '/';
-        b.onclick = () => send('/move ' + name + ' ' + target); row.append(b);
+        b.onclick = () => send('/move ' + name + ' ' + target);
+        if (target === 'archive') archiveButton(b, name);
+        row.append(b);
       }
     }
     if (remote.length) details.append(el('div', 'local-label', 'Local · ' + (replica?.node || 'this node')));
@@ -846,7 +884,7 @@ async function openFiles(group) {
       if (!inUse(group)) {
         if (actions.children.length) actions.append(el('span', 'sep'));
         if (disc.section) action('Make active', () => send('/move ' + disc.ref + ' active'), 'Move it back to the active discussions');
-        if (disc.section !== 'archive') action('Archive', () => send('/move ' + disc.ref + ' archive'), 'Move the whole discussion into archive/');
+        if (disc.section !== 'archive') archiveButton(action('Archive', null, 'Move the whole discussion into archive/'), disc.ref);
         if (disc.section !== 'deferred') action('Defer', () => send('/move ' + disc.ref + ' deferred'), 'Move the whole discussion into deferred/');
       }
       if (actions.children.length) list.append(actions);
@@ -1119,7 +1157,7 @@ async function sendWork(text) {
   text = text.trim();
   if (!text || ended) return;
   const res = await post('__work', { text });
-  if (!res.ok) work.add(statusEl(await res.text(), true));
+  if (!res.ok) status(await res.text(), true, 'Worker');
 }
 wbox.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendWork(wbox.value); wbox.value = ''; }
@@ -1248,12 +1286,12 @@ events.onmessage = (e) => {
     localMessages = []; localInput = ev.input;
     talk.clear();
     ev.messages.forEach(message);
-    if (ev.status) status(ev.status);
     yourTurn = !ev.thinking; setThinking(ev.thinking); if (!viewing) { showDoc(ev.doc); openFiles(listed ?? ''); }
     if (!ev.input) { $('composer').hidden = true; } // terminal mode: the page only watches
     work.clear();
     if (!ev.worker.length) work.add(statusEl('Give the worker instructions here. It works alongside the discussion and sees only what you send it.'));
     ev.worker.forEach((m) => workMessage(m, false));
+    if (ev.status) status(ev.status);
     setWorking(ev.working);
     if (!ev.workInput) { $('wcomposer').hidden = true; }
     setWorkerInfo(ev.workerInfo);
@@ -1274,11 +1312,18 @@ events.onmessage = (e) => {
   if (ev.type === 'message') message(ev.message);
   if (ev.type === 'thinking') setThinking(ev.name);
   if (ev.type === 'turn') { yourTurn = true; status(ev.text); updateReplicaView(); }
-  if (ev.type === 'note') status(ev.text, ev.error);
+  if (ev.type === 'note') {
+    status(ev.text, ev.error);
+    if (ev.error && pendingArchives.size) {
+      pendingArchives.clear();
+      if (listed !== null) openFiles(listed);
+    }
+  }
   if (ev.type === 'doc' && !viewing) showDoc(ev.file);
   if (ev.type === 'files') { showSub('explorer'); openFiles(); }
-  if (ev.type === 'moved' && listed !== null) {
-    openFiles(listed === ev.from || listed.startsWith(ev.from + '/') ? ev.to + listed.slice(ev.from.length) : listed);
+  if (ev.type === 'moved') {
+    pendingArchives.delete(ev.from);
+    if (listed !== null) openFiles(listed === ev.from || listed.startsWith(ev.from + '/') ? ev.to + listed.slice(ev.from.length) : listed);
   }
   if (ev.type === 'ended') { ended = true; status('This room has ended. You can close this window.'); events.close(); box.disabled = true; wbox.disabled = true; }
   if (ev.type === 'restarting') { restarting = true; status('Restarting the server: this page reloads when the new one answers.'); events.close(); box.disabled = true; wbox.disabled = true; }
