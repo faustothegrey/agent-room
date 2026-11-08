@@ -536,7 +536,21 @@ function showSub(name) {
   $('explorer').hidden = name !== 'explorer'; $('document').hidden = name !== 'document';
   $('tab-explorer').classList.toggle('on', name === 'explorer'); $('tab-document').classList.toggle('on', name === 'document');
 }
-$('tab-explorer').onclick = () => showSub('explorer');
+$('tab-explorer').onclick = () => { showSub('explorer'); revealDoc(); };
+// Back to Explorer with a local file shown: open the list where that file is and scroll it into
+// view. Active discussions unfold in place; archive/ and deferred/ open the file's folder page.
+// A received snapshot's files keep Explorer where it was.
+async function revealDoc() {
+  if (!doc || doc.startsWith('__received/') || viewing) return;
+  const parts = doc.split('/');
+  if (parts[0] === 'discussions' && SECTIONS[parts[1]] && parts.length > 3) await openFiles(parts.slice(0, -1).join('/'));
+  else {
+    if (parts[0] === 'discussions' && parts.length > 2)
+      for (let i = 2; i < parts.length; i++) expandedLines.add(parts.slice(0, i).join('/'));
+    await openFiles('');
+  }
+  requestAnimationFrame(() => [...pane.querySelectorAll('.entry.file')].find((b) => b.querySelector('.tag')?.textContent === 'shown')?.scrollIntoView({ block: 'center' }));
+}
 $('tab-document').onclick = () => showSub('document');
 // A file chosen (here, on another page, or by the room) opens in Document, which comes to the front.
 function showDoc(file) {
