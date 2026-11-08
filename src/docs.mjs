@@ -267,7 +267,9 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #split:hover, #split:focus-visible, body.resizing #split { background-color: #3b82f6; outline: none; }
 body.resizing { cursor: col-resize; user-select: none; }
 body.resizing iframe { pointer-events: none; } /* the document would swallow the drag */
-.chat { flex: 1; overflow-y: auto; padding: 1rem; }
+.chat-wrap { position: relative; display: flex; flex: 1; min-height: 0; }
+.chat { flex: 1; min-width: 0; overflow-y: auto; padding: 1rem; }
+.scroll-end { position: absolute; right: 1rem; bottom: .6rem; width: 2rem; height: 2rem; padding: 0; border-radius: 50%; background: Canvas; color: CanvasText; box-shadow: 0 2px 8px #0004; }
 .msg { margin: 0 0 .9rem; padding: .5rem .75rem; border-radius: 8px; background: #8881; }
 .msg.user { background: #3b82f622; } .msg.error { background: #ef444422; }
 .msg.summary { background: #10b98122; border-left: 3px solid #10b981; } .msg.summary.not-agreed { background: #f59e0b22; border-left-color: #f59e0b; }
@@ -359,7 +361,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
         <p class="settings-status" id="talk-settings-status" role="status"></p>
       </form>
     </details>
-    <div class="chat" id="chat"></div>
+    <div class="chat-wrap"><div class="chat" id="chat"></div><button class="scroll-end" id="talk-end" aria-label="Scroll to latest discussion messages" title="Scroll to latest messages" hidden>↓</button></div>
     <div class="composer" id="composer">
       <div id="remote-view" hidden></div>
       <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"></textarea>
@@ -376,7 +378,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       </form>
     </details>
     <div id="winfo" aria-live="polite"></div>
-    <div class="chat" id="wchat"></div>
+    <div class="chat-wrap"><div class="chat" id="wchat"></div><button class="scroll-end" id="work-end" aria-label="Scroll to latest worker messages" title="Scroll to latest messages" hidden>↓</button></div>
     <div class="composer" id="wcomposer">
       <textarea class="box" id="wbox" placeholder="Instructions for the worker (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands."></textarea>
       <div class="tools"><span class="hint" id="whint"></span></div>
@@ -409,22 +411,26 @@ try { [box.value, wbox.value] = JSON.parse(sessionStorage.getItem('drafts')) ?? 
 sessionStorage.removeItem('drafts');
 
 // A chat list that keeps its "is thinking" line last and follows new messages when already at the bottom.
-function makeChat(list) {
+function makeChat(list, endButton) {
   let thinking = null;
   const atBottom = () => list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-  const add = (el) => { const stick = atBottom(); list.insertBefore(el, thinking); if (stick) list.scrollTop = list.scrollHeight; };
+  const updateEnd = () => { endButton.hidden = atBottom(); };
+  list.addEventListener('scroll', updateEnd);
+  new ResizeObserver(updateEnd).observe(list);
+  endButton.onclick = () => list.scrollTo({ top: list.scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+  const add = (el) => { const stick = atBottom(); list.insertBefore(el, thinking); if (stick) list.scrollTop = list.scrollHeight; updateEnd(); };
   return {
     add,
-    clear() { list.textContent = ''; thinking = null; },
+    clear() { list.textContent = ''; thinking = null; updateEnd(); },
     think(text) {
       thinking?.remove(); thinking = null;
-      if (!text) return;
+      if (!text) { updateEnd(); return; }
       thinking = document.createElement('div'); thinking.className = 'status'; thinking.textContent = text;
-      const stick = atBottom(); list.append(thinking); if (stick) list.scrollTop = list.scrollHeight;
+      const stick = atBottom(); list.append(thinking); if (stick) list.scrollTop = list.scrollHeight; updateEnd();
     },
   };
 }
-const talk = makeChat($('chat')), work = makeChat($('wchat'));
+const talk = makeChat($('chat'), $('talk-end')), work = makeChat($('wchat'), $('work-end'));
 function bubble(m) {
   const el = document.createElement('div');
   el.className = 'msg' + (m.speaker === 'User' ? ' user' : '') + (m.error ? ' error' : '')
