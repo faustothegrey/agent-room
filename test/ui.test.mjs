@@ -295,11 +295,19 @@ test('/reopen of an archived discussion makes it active first; new names skip ar
 });
 
 test('Restart keeps the launch flags that matter: the same port, agents, worker and dev mode, in the discussion in use', () => {
-  const ctx = { cwd: '/r', server: { address: () => ({ port: 5566 }) }, discussion: { name: '2026-11-03-a-topic' } };
-  const args = restartArgs(ctx, { agents: 'claude:Ada', worker: 'codex:W', dev: true, open: true });
+  // The agents and worker are the room's current ones (ctx), not the launch flags.
+  const ctx = { cwd: '/r', agentSpecs: 'claude:Ada', workerSpec: 'codex:W', discussion: { name: '2026-11-03-a-topic' } };
+  const args = restartArgs([ctx], { agents: 'claude:Old', worker: 'codex:Old', dev: true, open: true }, 5566);
   assert.match(args[0], /src\/cli\.mjs$/);
   assert.deepEqual(args.slice(1), ['--cwd', '/r', '--port', '5566', '--agents', 'claude:Ada', '--worker', 'codex:W', '--dev', '--reopen', '2026-11-03-a-topic']);
-  assert.deepEqual(restartArgs({ ...ctx, discussion: null }, {}).slice(1), ['--cwd', '/r', '--port', '5566']);
+  assert.deepEqual(restartArgs([{ cwd: '/r', discussion: null }], {}, 5566).slice(1), ['--cwd', '/r', '--port', '5566']);
+  // Every other room of the server comes back too, with its own settings and discussion.
+  const other = { cwd: '/o', launch: false, agentSpecs: 'codex:Lin', workerSpec: 'claude:Wo', discussion: { name: '2026-11-04-b' } };
+  assert.deepEqual(restartArgs([ctx, other], {}, 5566).slice(-2),
+    ['--room', JSON.stringify({ cwd: '/o', agents: 'codex:Lin', worker: 'claude:Wo', reopen: '2026-11-04-b' })]);
+  // Replication flags only when the first room is the launch room.
+  assert.equal(restartArgs([other], { node: 'Mac', peer: ['p=http://x:1'] }, 5566).some((a) => a === '--node' || a === '--peer'), false);
+  assert.deepEqual(restartArgs([ctx], { node: 'Mac', peer: ['p=http://x:1'] }, 5566).slice(9, 13), ['--node', 'Mac', '--peer', 'p=http://x:1']);
 });
 
 test('/new: nothing to end before the first message; it creates nothing and changes nothing', async () => {
@@ -695,24 +703,16 @@ test('worker switches after a running failure, carries history, and retains its 
   assert.equal(session.threadId, 'new-provider-thread');
 });
 
-test('room discovery finds independent listeners and excludes other HTTP services', async () => {
-  const { createServer } = await import('node:http');
+test('Switch room lists this server\'s rooms, with the pages open on each and which one is asking', async () => {
   const { listRooms } = await import('../src/ui.mjs');
-  const room = createServer((req, res) => {
-    res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify({ app: 'agent-room', root: '/tmp/discovery-room', discussion: 'discussions/test', pages: 2 }));
-  });
-  const other = createServer((req, res) => res.end('{"app":"other"}'));
-  try {
-    await Promise.all([room, other].map((s) => new Promise((done) => s.listen(0, '127.0.0.1', done))));
-    const rooms = await listRooms();
-    assert.deepEqual(rooms.find((r) => r.port === room.address().port), {
-      port: room.address().port, root: '/tmp/discovery-room', discussion: 'discussions/test', pages: 2,
-    });
-    assert.equal(rooms.some((r) => r.port === other.address().port), false);
-  } finally {
-    for (const server of [room, other]) { server.closeAllConnections(); server.close(); }
-  }
+  const room = (cwd, id, pages) => ({ cwd, id, screen: { clients: new Set(Array(pages).fill(0).map((_, i) => i)), room: { active: null } } });
+  const a = room('/tmp/b-room', 'b-room-111111', 2), b = room('/tmp/a-room', 'a-room-222222', 0);
+  const hub = { rooms: new Map([['/tmp/b-room', a], ['/tmp/a-room', b]]) };
+  a.hub = b.hub = hub;
+  assert.deepEqual(listRooms(b), [
+    { id: 'a-room-222222', path: '/r/a-room-222222/__room', root: '/tmp/a-room', discussion: null, pages: 0, current: true },
+    { id: 'b-room-111111', path: '/r/b-room-111111/__room', root: '/tmp/b-room', discussion: null, pages: 2, current: false },
+  ]);
 });
 
 test('Pause preserves native sessions across New discussion; corrupt Resume leaves the checkpoint and room intact', async () => {
@@ -786,7 +786,39 @@ test('Pause preserves native sessions across New discussion; corrupt Resume leav
 
 
 test('Restart leaves a paused checkpoint for Resume instead of re-opening it fresh', () => {
-  const ctx = { cwd: '/r', paused: true, server: { address: () => ({ port: 5566 }) },
-    discussion: { name: '2026-11-03-paused' } };
-  assert.deepEqual(restartArgs(ctx, {}).slice(1), ['--cwd', '/r', '--port', '5566']);
+  const ctx = { cwd: '/r', paused: true, discussion: { name: '2026-11-03-paused' } };
+  assert.deepEqual(restartArgs([ctx], {}, 5566).slice(1), ['--cwd', '/r', '--port', '5566']);
+});
+
+test('Quit room during a round: after the grace period the agent mid-turn is stopped, and no new one starts', { timeout: 20000 }, async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { quitRequested, QUIT_GRACE_MS } = await import('../src/ui.mjs');
+  const home = mkdtempSync(join(tmpdir(), 'quit-round-')), bin = join(home, 'bin'), pidFile = join(home, 'pid');
+  mkdirSync(bin);
+  // A claude whose turn never ends by itself (a minute, far past this test).
+  writeFileSync(join(bin, 'claude'), `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetTimeout(() => console.log('{"result":"late"}'), 60000);\n`, { mode: 0o755 });
+  const path = process.env.PATH;
+  process.env.PATH = bin + ':' + path;
+  try {
+    const ctx = { cwd: home, agentSpecs: 'claude:A', workerSpec: 'claude:W', noScreen: true, state: { transcript: [], seen: new Map() }, sessions: new Map() };
+    Object.assign(ctx, await load(ctx, ''));
+    ctx.suggestTitle = async () => ({ title: 'Quit test' });
+    ctx.usage = { ...ctx.usage, fetchQuota: async () => null };
+    const round = handleLine('a turn that never ends', ctx);
+    for (let i = 0; i < 100 && !existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 50));
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    const t0 = Date.now();
+    quitRequested(ctx, 300);
+    await round; // the round ends because its agent was stopped
+    assert.ok(Date.now() - t0 < 6000, `${Date.now() - t0}ms`);
+    assert.deepEqual([ctx.state.transcript.at(-1).speaker, ctx.state.transcript.at(-1).error], ['A', true]);
+    assert.throws(() => process.kill(pid, 0)); // its program is gone
+    assert.equal(ctx.programs.running.size, 0);
+    // A line queued behind it doesn't start another agent program.
+    await handleLine('queued before Quit', ctx);
+    assert.match(ctx.state.transcript.at(-1).text, /not started: the room is quitting/);
+    assert.equal(QUIT_GRACE_MS, 30000); // the real wait, stated in the README
+  } finally { process.env.PATH = path; }
 });

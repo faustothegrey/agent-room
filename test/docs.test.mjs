@@ -97,7 +97,7 @@ test('the discussion screen: a new page gets the room so far, then live events',
   const screen = { clients: new Set(), transcript, doc: 'plan.md', thinking: 'B' };
   const s = await serve(fixture(), screen);
   const page = await (await s.get('/__room')).text();
-  assert.match(page, /EventSource\('\/__events'\)/);
+  assert.match(page, /EventSource\('__events'\)/); // relative: the page's own room
 
   const next = eventReader(await s.get('/__events'));
   const reset = await next();
@@ -336,7 +336,7 @@ test('a page learns its code version, so it can refresh after a reload that chan
 });
 
 test('running rooms can be listed without changing the current conversation', async () => {
-  const rooms = [{ port: 6010, root: '/tmp/other', discussion: 'discussions/example', pages: 1 }];
+  const rooms = [{ id: 'other-0a1b2c', path: '/r/other-0a1b2c/__room', root: '/tmp/other', discussion: 'discussions/example', pages: 1, current: false }];
   const screen = { clients: new Set(), transcript: [], listRooms: async () => rooms };
   const s = await serve(fixture(), screen);
   try {

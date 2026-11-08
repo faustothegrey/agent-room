@@ -9,7 +9,7 @@
 // mode (npm run terminal) the page only watches.
 // cli.mjs loads this module in load(), so /reload swaps it too.
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { Marked } from 'marked';
@@ -52,12 +52,17 @@ export function listFiles(dir) {
 // The URL path for a file returned by listFiles.
 export const urlPath = (file) => file.split(sep).map(encodeURIComponent).join('/');
 
-// The file at rel if it is a non-hidden file inside dir (no ../ escapes), else null.
+// The file at rel if it is a non-hidden file inside dir, else null: no ../ escapes, and no symbolic
+// link leading out of dir (both are compared by real path), so a room serves only its own folder.
 function inside(dir, rel) {
-  const root = resolve(dir);
+  let root;
+  try { root = realpathSync(dir); } catch { return null; }
   const file = resolve(root, rel);
   if (!file.startsWith(root + sep) || rel.split('/').some((p) => p.startsWith('.'))) return null;
-  try { return statSync(file).isFile() ? file : null; } catch { return null; }
+  try {
+    const target = realpathSync(file);
+    return target.startsWith(root + sep) && statSync(target).isFile() ? target : null;
+  } catch { return null; }
 }
 
 // A room serves only some folders of its root (screen.sections: discussions/);
@@ -70,7 +75,9 @@ function docFiles(dir, screen) {
 }
 
 // The page polls the file's mtime and reloads when an agent changes it.
-function page(title, body, watch, home = '<a href="/">all files</a>', mtime = '/__mtime?f=') {
+// base: the room's address (/r/<id>/), so the page's links stay in its room.
+function page(title, body, watch, base = '/') {
+  const home = `<a href="${esc(base)}">all files</a>`, mtime = `${base}__mtime?f=`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>${esc(title)}</title><style>
 :root { color-scheme: light dark; }
@@ -281,10 +288,10 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <div class="chat" id="chat"></div>
     <div class="composer" id="composer">
       <div id="remote-view" hidden></div>
-      <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit"></textarea>
+      <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"></textarea>
       <div class="tools" style="justify-content: flex-end">
         <label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label>
-        <button id="summary">Summarize</button><button id="usage">Usage</button><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, in the discussion in use, from its handoff. The chat clears.">Restart</button><button id="quit">Quit</button></div>
+        <button id="summary">Summarize</button><button id="usage">Usage</button><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><button id="quit" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button><button id="shutdown" title="End every room on this server, then the server.">Shutdown server</button></div>
     </div>
   </div>
   <div class="view" id="work" hidden>
@@ -313,7 +320,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <script>
 const $ = (id) => document.getElementById(id);
 const pane = $('pane'), box = $('box'), wbox = $('wbox');
-let replica = null, viewing = null, localMessages = [], localInput = true, localThinking = null, localWorking = null, viewExpired = false, viewNotice = null;
+let replica = null, replicaOff = null, viewing = null, localMessages = [], localInput = true, localThinking = null, localWorking = null, viewExpired = false, viewNotice = null;
 // crypto.randomUUID exists only in secure contexts (HTTPS or localhost); over plain HTTP from another machine, use random bytes.
 const viewClient = crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 let ended = false, doc = null, tab = 'talk', page = null;
@@ -431,7 +438,7 @@ function setThinking(name) {
   if (viewing) return;
   talk.think(name ? '… ' + name + ' is thinking' : null);
 }
-const urlFor = (file) => '/' + file.split('/').map(encodeURIComponent).join('/');
+const urlFor = (file) => file.split('/').map(encodeURIComponent).join('/');
 function showDoc(file) {
   doc = file || null;
   // Send to agents, on a transcript of an earlier session (not this one): a normal message asking
@@ -455,7 +462,7 @@ function showDoc(file) {
 const post = (path, body) => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': viewClient }, body: JSON.stringify(body) });
 // Each browser owns a leased View pin, independent of other browsers and local agents.
 async function viewRemote(line) {
-  const res = await post('/__view', line ? { discussion: line.discussion, node: line.node } : { back: true });
+  const res = await post('__view', line ? { discussion: line.discussion, node: line.node } : { back: true });
   if (!res.ok) return status(await res.text(), true);
   viewing = (await res.json()).viewing;
   viewExpired = false; viewNotice = null;
@@ -514,7 +521,7 @@ function updateReplicaView() {
 async function remoteFiles() {
   if (!viewing) return;
   const v = viewing;
-  const files = await (await fetch('/__rfiles?d=' + v.discussion + '&n=' + v.node + '&c=' + v.commit)).json();
+  const files = await (await fetch('__rfiles?d=' + v.discussion + '&n=' + v.node + '&c=' + v.commit)).json();
   pane.replaceChildren(); listed = null;
   const title = document.createElement('p'); title.textContent = v.node + ' · round ' + v.round + ' · received files'; pane.append(title);
   for (const f of files) {
@@ -528,6 +535,10 @@ function showReplica(r) {
   if (listed !== null) openFiles(listed);
 }
 function appendPeers(list) {
+  if (!replica && replicaOff) {
+    const title = document.createElement('h3'); title.textContent = 'Peers'; list.append(title);
+    list.append(statusEl(replicaOff));
+  }
   if (!replica) return;
   const title = document.createElement('h3'); title.textContent = 'Peers'; list.append(title);
   for (const peer of replica.peers) {
@@ -537,11 +548,11 @@ function appendPeers(list) {
     if (!peer.paired) {
       const b = document.createElement('button'); b.textContent = 'Pair with ' + peer.name + '…';
       b.onclick = async () => {
-        const check = await post('/__pair', { peer: peer.name });
+        const check = await post('__pair', { peer: peer.name });
         if (!check.ok) return status(await check.text(), true);
         const x = await check.json();
         if (!confirm('Pair these room folders?\\n' + x.local.node + ': ' + x.local.root + '\\n' + x.peer.node + ': ' + x.peer.root)) return;
-        const result = await post('/__pair', { peer: peer.name, confirm: true });
+        const result = await post('__pair', { peer: peer.name, confirm: true });
         if (!result.ok) status(await result.text(), true);
       }; row.append(b);
     }
@@ -550,7 +561,7 @@ function appendPeers(list) {
     list.append(row);
   }
 }
-setInterval(async () => { if (viewing) { try { const r = await post('/__view', { renew: true }); if (!r.ok) { viewExpired = true; updateReplicaView(); } } catch {} } }, 30000);
+setInterval(async () => { if (viewing) { try { const r = await post('__view', { renew: true }); if (!r.ok) { viewExpired = true; updateReplicaView(); } } catch {} } }, 30000);
 // Discussions: the room's active discussions (newest first), then its own documents, then archive/
 // and deferred/ (always shown, at the bottom), which hold whole discussions moved there. Open a
 // discussion to see its documents, and its subfolders (drawings/, transcripts/, …) one level at a
@@ -586,7 +597,7 @@ async function openFiles(group) {
   if (typeof group !== 'string') group = ''; // as a click handler, group is the event
   listed = group;
   $('feed').hidden = true;
-  const files = await (await fetch('/__files')).json();
+  const files = await (await fetch('__files')).json();
   pane.innerHTML = '<div id="files"></div>';
   const list = pane.firstChild;
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
@@ -672,7 +683,7 @@ async function openFiles(group) {
     for (const d of folders) entry('folder', d + '/', () => openFiles(group + '/' + d), '', 'Open this folder');
     for (const r of own) {
       const f = group + '/' + r;
-      entry('file', r, () => post('/__show', { file: f }), f === room?.transcript ? 'this session' : f === doc ? 'shown' : '');
+      entry('file', r, () => post('__show', { file: f }), f === room?.transcript ? 'this session' : f === doc ? 'shown' : '');
     }
     return;
   }
@@ -723,7 +734,7 @@ async function openFiles(group) {
   if (own.length || loose.length) {
     heading("This room's own documents");
     for (const d of own) entry('folder', d + '/', () => openFiles('discussions/' + d), '', 'Open this folder');
-    for (const r of loose) entry('file', r, () => post('/__show', { file: 'discussions/' + r }), 'discussions/' + r === doc ? 'shown' : '');
+    for (const r of loose) entry('file', r, () => post('__show', { file: 'discussions/' + r }), 'discussions/' + r === doc ? 'shown' : '');
   }
   heading('Archive and deferred');
   for (const s of Object.keys(SECTIONS)) {
@@ -809,7 +820,7 @@ for (const scope of ['talk', 'work']) {
     delete settingsRows[scope];
     try {
       await settingsSave;
-      const res = await fetch('/__settings');
+      const res = await fetch('__settings');
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(), selected = selectedSettings(data);
       if (scope === 'work') selected.worker = data.settings.worker;
@@ -831,11 +842,11 @@ for (const scope of ['talk', 'work']) {
     result.textContent = 'Saving…';
     // Serialize saves from both tabs so a quick second change cannot overwrite a newer choice.
     settingsSave = settingsSave.then(async () => {
-      const latest = await fetch('/__settings');
+      const latest = await fetch('__settings');
       if (!latest.ok) throw new Error(await latest.text());
       const settings = selectedSettings(await latest.json());
       if (scope === 'talk') settings.agents = choices; else settings.worker = choices[0];
-      const res = await post('/__settings', settings);
+      const res = await post('__settings', settings);
       if (!res.ok) throw new Error(await res.text());
       const saved = await res.json();
       result.textContent = scope === 'work' && saved.workerApplied ? 'Saved. Applies to the next worker instruction.' : saved.applied ? 'Saved.' : 'Saved for future rooms. This room keeps its settings.';
@@ -844,12 +855,13 @@ for (const scope of ['talk', 'work']) {
   form.onchange = saveChanges;
   form.onsubmit = (e) => { e.preventDefault(); saveChanges(); };
 }
-// Room URLs use this page's host, so switching also works from another LAN device.
+// This server's rooms. Their addresses are paths on this page's host, so switching also works from
+// another LAN device.
 $('switchroom').onclick = async () => {
   const button = $('switchroom'), menu = $('rooms');
   button.disabled = true;
   try {
-    const res = await fetch('/__rooms');
+    const res = await fetch('__rooms');
     if (!res.ok) throw new Error(await res.text());
     const rooms = await res.json();
     menu.replaceChildren(new Option('Choose a running room…', ''));
@@ -859,11 +871,11 @@ $('switchroom').onclick = async () => {
       const group = document.createElement('optgroup');
       group.label = heading;
       for (const room of rooms) {
-        const current = room.port === Number(location.port);
+        const current = !!room.current;
         const open = !current && room.pages > 0;
         const pages = room.pages == null ? '' : ' · ' + room.pages + (room.pages === 1 ? ' page' : ' pages') + ' open';
-        const label = room.root + ' · ' + (room.discussion || 'No discussion started') + ' · port ' + room.port + pages + (current ? ' (current)' : open ? ' (open in another window)' : '');
-        const option = new Option(label, mode + ':' + room.port);
+        const label = room.root + ' · ' + (room.discussion || 'No discussion started') + pages + (current ? ' (current)' : open ? ' (open in another window)' : '');
+        const option = new Option(label, mode + ':' + room.path);
         option.disabled = current || open;
         group.append(option);
       }
@@ -871,39 +883,48 @@ $('switchroom').onclick = async () => {
     }
     menu.hidden = false;
     menu.focus();
-    if (!rooms.some((r) => r.port !== Number(location.port))) status('No other rooms are running on this machine.');
+    if (!rooms.some((r) => !r.current)) status('No other rooms are open on this server: New room in folder… adds one.');
   } catch (err) { status('✗ Switch room: ' + err.message, true); }
   finally { button.disabled = false; }
 };
 $('rooms').onchange = () => {
-  const menu = $('rooms'), [mode, port] = menu.value.split(':');
-  if (!port) return;
-  const url = new URL('/__room', location.href);
-  url.port = port;
+  const menu = $('rooms'), at = menu.value.indexOf(':'), mode = menu.value.slice(0, at), path = menu.value.slice(at + 1);
+  if (!path) return;
+  const url = new URL(path, location.href);
   if (mode === 'tab') return location.assign(url.href);
   // Opened during the choice, so the browser doesn't block it; this window stays on its room.
   const win = window.open(url.href, '_blank', 'width=' + window.outerWidth + ',height=' + window.outerHeight);
   menu.value = '';
   menu.hidden = true;
-  status(win ? 'Opened port ' + port + ' in a new window. This window stays on its room.' : 'The browser blocked the new window; open ' + url.href + ' yourself.', !win);
+  status(win ? 'Opened the room in a new window. This window stays on its room.' : 'The browser blocked the new window; open ' + url.href + ' yourself.', !win);
 };
-// New room in folder…: the room's server shows the Mac's folder chooser and starts the new room.
+// New room in folder…: the server shows the Mac's folder chooser and adds a room there (or finds the
+// folder's room, if it has one).
 $('newroom').onclick = async () => {
   // Opened during the click, so the browser doesn't block it; pointed at the new room below.
   const win = window.open('', '_blank', 'width=' + window.outerWidth + ',height=' + window.outerHeight);
   if (win) win.document.body.textContent = 'Choose a folder in the window that has just opened…';
-  const res = await post('/__newroom', {});
+  const res = await post('__newroom', {});
   if (!res.ok) { win?.close(); return status('✗ New room: ' + await res.text(), true); }
   const r = await res.json();
   if (r.cancelled) { win?.close(); return; }
-  if (win) win.location = r.url;
-  status('Opened a new room in ' + r.folder + (win ? '' : ' at ' + r.url + ' (the browser blocked the new window)') + '. This room keeps running.');
+  if (r.open) { win?.close(); return status('The room in ' + r.folder + ' is already open in another window.'); }
+  if (win) win.location = new URL(r.url, location.href).href;
+  status((r.existing ? 'Opened the room already in ' : 'Opened a new room in ') + r.folder + (win ? '' : ' at ' + r.url + ' (the browser blocked the new window)') + '. This room keeps running.');
 };
 async function send(text) {
   text = text.trim();
   if (!text || ended) return;
   if (text === '/docs') return openFiles();
-  const res = await post('/__say', { text });
+  const res = await post('__say', { text });
+  if (res.status === 409 && ['/restart', '/shutdown'].includes(text)) {
+    const warning = await res.text();
+    if (confirm(warning)) {
+      const retry = await post('__say', { text, confirmed: true });
+      if (!retry.ok) status(await retry.text(), true);
+    }
+    return;
+  }
   if (!res.ok) status(await res.text(), true);
 }
 box.addEventListener('keydown', (e) => {
@@ -912,7 +933,7 @@ box.addEventListener('keydown', (e) => {
 async function sendWork(text) {
   text = text.trim();
   if (!text || ended) return;
-  const res = await post('/__work', { text });
+  const res = await post('__work', { text });
   if (!res.ok) work.add(statusEl(await res.text(), true));
 }
 wbox.addEventListener('keydown', (e) => {
@@ -961,19 +982,33 @@ function showQuota(gauges, at) {
   box.append(quotaUpdated(at));
 }
 $('auto').onchange = async (e) => {
-  const res = await post('/__auto', { on: e.target.checked });
+  const res = await post('__auto', { on: e.target.checked });
   if (!res.ok) { status(await res.text(), true); e.target.checked = !e.target.checked; }
 };
 $('docs').onclick = openFiles;
 $('summary').onclick = () => send('/summary');
 $('usage').onclick = () => send('/usage');
 $('reload').onclick = () => send('/reload');
-// Two clicks to quit, so a stray click doesn't end the room.
+// Two clicks to quit or shut down, so a stray click doesn't end anything.
 $('quit').onclick = (e) => {
   const b = e.currentTarget;
   if (b.dataset.armed) return send('/quit');
-  b.dataset.armed = '1'; b.textContent = 'Click again to quit';
-  setTimeout(() => { delete b.dataset.armed; b.textContent = 'Quit'; }, 3000);
+  b.dataset.armed = '1'; b.textContent = 'Click again to quit this room';
+  setTimeout(() => { delete b.dataset.armed; b.textContent = 'Quit room'; }, 3000);
+};
+$('shutdown').onclick = (e) => {
+  const b = e.currentTarget;
+  // The server's own address (as the Dock app's Quit uses), not this room's.
+  if (b.dataset.armed) return post('/__shutdown', {}).then(async (res) => {
+    if (res.status === 409) {
+      if (confirm(await res.text())) {
+        const retry = await post('/__shutdown?confirmed=yes', {});
+        if (!retry.ok) status(await retry.text(), true);
+      }
+    } else if (!res.ok) status(await res.text(), true);
+  });
+  b.dataset.armed = '1'; b.textContent = 'Click again: every room ends';
+  setTimeout(() => { delete b.dataset.armed; b.textContent = 'Shutdown server'; }, 3000);
 };
 $('restart').onclick = (e) => {
   const b = e.currentTarget;
@@ -987,13 +1022,17 @@ $('restart').onclick = (e) => {
 let serverPid = null, restarting = false;
 const upFor = (t) => { const m = Math.max(0, Math.floor((Date.now() - Date.parse(t)) / 60000)); return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h ' + (m % 60) + 'm'; };
 async function heartbeat() {
-  let h = null;
-  try { h = await (await fetch('/__health', { cache: 'no-store', signal: AbortSignal.timeout(2500) })).json(); } catch {}
+  let h = null, gone = false;
+  try {
+    const res = await fetch('__health', { cache: 'no-store', signal: AbortSignal.timeout(2500) });
+    if (res.status === 404) gone = true; else h = await res.json();
+  } catch {}
   const el = $('server'), text = $('server-text'), dot = $('beat');
   if (!h) {
     el.dataset.state = 'down';
-    text.textContent = restarting ? 'Restarting the server…' : ended ? 'Server stopped' : 'Server not responding';
-    el.title = 'Start it again from the Dock app (or npm start): this page reloads when it answers.';
+    // 404: the server answers, but this room isn't on it (quit, or not brought back).
+    text.textContent = gone ? 'This room is not open on the server' : restarting ? 'Restarting the server…' : ended ? 'Server stopped' : 'Server not responding';
+    el.title = gone ? 'Open it again with New room in folder… from another room.' : 'Start it again from the Dock app (or npm start): this page reloads when it answers.';
     return;
   }
   if (serverPid && h.pid !== serverPid) return refreshPage();
@@ -1004,7 +1043,7 @@ async function heartbeat() {
   el.title = 'Process ' + h.pid + (h.startedAt ? ', started ' + new Date(h.startedAt).toLocaleString() : '');
 }
 heartbeat(); setInterval(heartbeat, 3000);
-const events = new EventSource('/__events');
+const events = new EventSource('__events');
 events.onmessage = (e) => {
   const ev = JSON.parse(e.data);
   // A reload that changed the page's code: refresh, so the page runs the new code too.
@@ -1029,6 +1068,7 @@ events.onmessage = (e) => {
     $('auto').checked = !!ev.auto;
     if (ev.room) setRoom(ev.room);
     $('newroom').hidden = !ev.newRoom;
+    replicaOff = ev.replicaOff ?? null;
     showReplica(ev.replica);
   }
   if (ev.type === 'replica') showReplica(ev.replica);
@@ -1047,7 +1087,7 @@ events.onmessage = (e) => {
   if (ev.type === 'moved' && listed !== null) {
     openFiles(listed === ev.from || listed.startsWith(ev.from + '/') ? ev.to + listed.slice(ev.from.length) : listed);
   }
-  if (ev.type === 'ended') { ended = true; status('The room has ended. You can close this tab.'); events.close(); box.disabled = true; wbox.disabled = true; }
+  if (ev.type === 'ended') { ended = true; status('This room has ended. You can close this window.'); events.close(); box.disabled = true; wbox.disabled = true; }
   if (ev.type === 'restarting') { restarting = true; status('Restarting the server: this page reloads when the new one answers.'); events.close(); box.disabled = true; wbox.disabled = true; }
 };
 </script></body></html>`;
@@ -1062,7 +1102,7 @@ function ownHost(host) {
     ...Object.values(networkInterfaces()).flat().filter((i) => i.family === 'IPv4').map((i) => i.address)];
   return mine.includes(name);
 }
-function fromOwnPage(req) {
+export function fromOwnPage(req) {
   const host = req.headers.host ?? '';
   if (!ownHost(host)) return false;
   if (req.headers.origin && req.headers.origin !== `http://${host}`) return false;
@@ -1157,7 +1197,8 @@ function handleScreen(req, res, url, dir, screen) {
       if (typeof body?.text !== 'string' || !body.text.trim()) return send(400, 'text/plain; charset=utf-8', 'Nothing to send.');
       // While another node's line is open in View, it is read-only: only these commands pass.
       if (screen.isViewing?.(req.headers['x-view-client']) && !VIEW_COMMANDS.includes(body.text.trim())) return send(409, 'text/plain; charset=utf-8', `Read-only: you are viewing a received line. Go back to this node's line first.`);
-      screen.say(body.text.trim());
+      const warning = screen.say(body.text.trim(), body.confirmed === true);
+      if (typeof warning === 'string') return send(409, 'text/plain; charset=utf-8', warning);
       send(204, 'text/plain', '');
     });
     return true;
@@ -1178,16 +1219,17 @@ export function resetEvent(screen) {
     thinking: screen.thinking, status: screen.status, input: !!screen.say,
     room: screen.room ?? null, worker: screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
     auto: screen.auto ?? false, quota: screen.quota, quotaAt: screen.quotaAt ?? null, newRoom: !!screen.newRoom, page: PAGE,
-    replica: screen.replica ?? null, viewing: screen.viewing ?? null };
+    replica: screen.replica ?? null, replicaOff: screen.replicaOff ?? null, viewing: screen.viewing ?? null };
 }
 
 // What the page can still send while viewing another node's line.
-const VIEW_COMMANDS = ['/usage', '/reload', '/restart', '/quit'];
+const VIEW_COMMANDS = ['/usage', '/reload', '/restart', '/quit', '/shutdown'];
 
 // The page's own code, as a short hash: after a reload, open pages refresh only if it changed.
 export const PAGE = createHash('sha1').update(SCREEN).digest('hex').slice(0, 12);
 
-export function handle(req, res, dir, screen) {
+// dir: the room's folder; base: its address on the server (/r/<id>/), for the links in its pages.
+export function handle(req, res, dir, screen, base = '/') {
   const url = new URL(req.url, 'http://localhost');
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
   // Other nodes' rooms (replicate.mjs), with --node only.
@@ -1197,20 +1239,21 @@ export function handle(req, res, dir, screen) {
   if (url.pathname === '/__mtime') {
     const rel = url.searchParams.get('f') ?? '';
     if (rel.startsWith('__received/')) return send(200, 'text/plain', 'fixed'); // a received snapshot never changes
-    const stamp = rel ? servable(dir, rel, screen) && statSync(inside(dir, rel)).mtimeMs : docFiles(dir, screen).join('\n');
+    const file = rel ? servable(dir, rel, screen) : null;
+    const stamp = rel ? !!file && statSync(file).mtimeMs : docFiles(dir, screen).join('\n');
     return send(200, 'text/plain', String(stamp));
   }
   const rel = decodeURIComponent(url.pathname.slice(1));
   if (rel === '') {
-    const items = docFiles(dir, screen).map((f) => `<li><a href="/${urlPath(f)}">${esc(f)}</a></li>`).join('');
-    return send(200, 'text/html; charset=utf-8', page('all files', `<ul>${items}</ul>`, ''));
+    const items = docFiles(dir, screen).map((f) => `<li><a href="${esc(base + urlPath(f))}">${esc(f)}</a></li>`).join('');
+    return send(200, 'text/html; charset=utf-8', page('all files', `<ul>${items}</ul>`, '', base));
   }
   // __received/<discussion>/<node>/<commit>/<path>: a file of a received snapshot, read-only.
   const got = /^__received\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(rel);
   const file = got ? screen?.receivedFile?.(got[1], got[2], got[3], got[4]) : servable(dir, rel, screen);
   if (!file) return send(404, 'text/plain; charset=utf-8', `Not found: ${rel}`);
   // A session transcript quotes whatever was said: its HTML is shown as text, never run.
-  if (/\.md$/i.test(file)) return send(200, 'text/html; charset=utf-8', page(rel, ((/(^|\/)transcripts\//.test(rel)) ? mdText : md).parse(readFileSync(file, 'utf8')), rel));
+  if (/\.md$/i.test(file)) return send(200, 'text/html; charset=utf-8', page(rel, ((/(^|\/)transcripts\//.test(rel)) ? mdText : md).parse(readFileSync(file, 'utf8')), rel, base));
   send(200, TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream', readFileSync(file));
 }
 

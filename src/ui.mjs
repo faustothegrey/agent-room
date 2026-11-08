@@ -7,8 +7,8 @@
 import { createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { createConnection, createServer as createNetServer } from 'node:net';
-import { appendFileSync, closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createConnection } from 'node:net';
+import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,11 +34,14 @@ and /docs opens each file alone in the browser.
 --dev (part of npm start, which the Dock app runs too): saving a source module or a rulebook
 reloads it by itself, as /reload does; open pages refresh when their own code changed. cli.mjs
 changes still need /restart. Without --dev (node src/cli.mjs), only /reload does.
---port: the screen's port (default 5566), on every address of this machine, so other devices on
-the LAN can open it too; if it is taken, any free port is used (with --peer, the room stops instead).
---node NAME: replicate this room's discussions under this node name: each round is saved as a Git
+--port: the server's port (default 5566), on every address of this machine, so other devices on
+the LAN can open it too; if it is taken, any free port is used (with --peer, the server stops instead).
+One server runs several rooms, one per folder, each at /r/<room>/__room; /__room opens the first.
+New room in folder… (on the screen) adds a room to this server, or opens the folder's room if it has one.
+--node NAME: replicate the launch room's (--cwd's) discussions under this node name: each round is saved as a Git
 commit in <root>/.agent-room/ (not the project's repository). --peer NAME=http://ADDRESS:PORT
-(repeatable): another node's room, to pair with once (Discussions → Peers) and send rounds to.
+(repeatable): another node's server, whose launch room is paired with once (Discussions → Peers) and
+sent rounds. Rooms added with New room in folder… don't replicate.
 The --cwd folder is the room's root. Opening it writes nothing: the first message starts a new
 discussion in DIR/discussions/<date>-<title>/ (its documents, drawings and transcripts/), unless
 /reopen <name> (or --reopen <name> at launch) picked an existing one first.
@@ -51,8 +54,11 @@ carries on), /move <name> active|archive|deferred (move a whole discussion; not 
 /summary (the agents agree a short
 summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
 in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
-/reload (load edited code and both agent rulebooks; conversation continues), /restart (screen
-only: a new process on the same port, in the discussion in use, from its handoff), /quit
+/reload (load edited code and both agent rulebooks, in every room; conversations continue), /restart
+(screen only: a new process on the same port, with every room, each in its discussion in use, from
+its handoff), /quit (Quit room: ends this room only, after its round in progress or at most 30s,
+then stopping its agent and worker programs), /shutdown (screen only: Shutdown server, ending every
+room; the same as POST /__shutdown, which the Dock app uses)
 Refresh the browser after /reload to see page changes.`;
 
 // How long one worker instruction may run before it is stopped (a room turn gets 5 minutes).
@@ -148,16 +154,25 @@ export async function load(ctx, v) {
   }
   const instructions = readFileSync(new URL('../README-for-brainstorming-agents.md', import.meta.url), 'utf8');
   const workerInstructions = readFileSync(new URL('../README-for-worker-agents.md', import.meta.url), 'utf8');
-  const { createAgent, claudeTitle } = await import(`./agents.mjs${v}`);
+  const { createAgent, claudeTitle, run } = await import(`./agents.mjs${v}`);
   const { createRoom } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
   const usage = await import(`./usage.mjs${v}`);
   // Replication is loaded only with --node.
   const replicate = ctx.node ? await import(`./replicate.mjs${v}`) : null;
+  // The room's identity on its server: its folder's real path, and the id in its addresses.
+  ctx.key ??= real(ctx.cwd);
+  ctx.id ??= roomId(ctx.key);
+  // Every agent program this room starts is tracked, so Quit room can stop it; once the room is
+  // stopping, none starts (shared by reference, so copies of ctx and reloads see the same).
+  const programs = ctx.programs ??= { running: new Set(), stopping: false };
+  const runner = (command, args, options) => (programs.stopping
+    ? Promise.reject(new Error('not started: the room is quitting'))
+    : run(command, args, { ...options, procs: programs.running }));
   const agents = ctx.agentSpecs.split(',').map((spec) => {
     const { provider, name, model } = parseSpec(spec);
     if (!ctx.sessions.has(name)) ctx.sessions.set(name, {});
-    return createAgent(provider, { name, model, cwd: ctx.cwd, instructions, session: ctx.sessions.get(name) });
+    return createAgent(provider, { name, model, cwd: ctx.cwd, instructions, runner, session: ctx.sessions.get(name) });
   });
   // The worker's session is kept under its own key, so it never mixes with a room agent's.
   const { provider: wProvider, name: wName, model: wModel } = parseSpec(ctx.workerSpec, true);
@@ -166,18 +181,27 @@ export async function load(ctx, v) {
   // Its worktree (see refreshWorker), shared by reference so it survives reloads and settings copies.
   const workerDir = ctx.workerDir ??= { path: null };
   const worker = createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions, shell: true,
-    timeoutMs: WORKER_TIMEOUT_MS, session: ctx.sessions.get(`worker:${wName}`) });
+    timeoutMs: WORKER_TIMEOUT_MS, runner, session: ctx.sessions.get(`worker:${wName}`) });
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
   // ctx so they survive a reload.
   const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: [], working: null };
-  return { room: createRoom(agents, ctx.state), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, suggestTitle: claudeTitle };
+  return { room: createRoom(agents, ctx.state), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen,
+    suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }) };
 }
+
+// A room's id in its addresses (/r/<id>/…): its folder's name and a short hash of its real path, so
+// it stays the same across a Restart and open pages reconnect to their own room.
+export const roomId = (key) => `${slug(basename(key)) || 'room'}-${createHash('sha256').update(key).digest('hex').slice(0, 6)}`;
 
 const tty = process.stdout.isTTY;
 const style = (code) => (s) => (tty ? `\x1b[${code}m${s}\x1b[0m` : s);
 const bold = style('1');
 const dim = style('2');
 const red = style('31');
+// A line for the terminal (or the Dock app's log). In UI mode one server runs several rooms, so
+// each line says which room it is from: ctx.label, set by cli.mjs.
+const labelled = (ctx, text) => (ctx?.label ? String(text).replace(/^(?=.)/gm, `[${ctx.label}] `) : String(text));
+const out = (ctx, text) => console.log(labelled(ctx, text));
 // Until the discussion's folder exists (at the first message), the transcript is kept in memory.
 const log = (ctx, text) => {
   if (ctx.logPath) appendFileSync(ctx.logPath, text);
@@ -192,13 +216,15 @@ function wire(ctx) {
   ctx.screen.room = header(ctx);
   ctx.screen.sections = ['discussions'];
   ctx.screen.auto = autoOn(ctx);
+  // With --node only the launch room replicates: its Peers panel works, the others' says why.
+  ctx.screen.replicaOff = ctx.hub?.node && !ctx.node ? replicaOff(ctx) : null;
   if (ctx.replica) wireReplica(ctx); // its peer endpoint works in terminal mode too
   if (ctx.noScreen) return;
   ctx.screen.work = (text) => queueWork(ctx, text);
   // The screen's checkbox: applied at once, not queued behind a round, so it can stop the next summary.
   ctx.screen.setAuto = (on) => setAuto(ctx, on);
   ctx.screen.newRoom = () => newRoom(ctx);
-  ctx.screen.listRooms = () => listRooms();
+  ctx.screen.listRooms = async () => listRooms(ctx);
   ctx.screen.getSettings = () => ({ settings: currentSettings(ctx), defaults: readDefaults(), models: modelChoices(), started: !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length || !!ctx.screen.worker.length });
   ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
 }
@@ -302,7 +328,7 @@ async function openDiscussion(ctx, line) {
   try {
     if (!ctx.discussion) {
       const label = 'Claude (choosing the discussion\'s title)';
-      startThinking(label);
+      startThinking(ctx, label);
       setScreenThinking(ctx, label);
       const t0 = Date.now();
       let title = null;
@@ -314,7 +340,7 @@ async function openDiscussion(ctx, line) {
       } catch (err) {
         how = `_(no title, so the folder is named after the date and time: ${err.message})_\n\n`;
       } finally {
-        stopThinking();
+        stopThinking(ctx);
         setScreenThinking(ctx, null);
       }
       const parent = join(ctx.cwd, 'discussions');
@@ -332,7 +358,7 @@ async function openDiscussion(ctx, line) {
     return false;
   }
   ctx.state.briefing = briefing(ctx);
-  console.log(`Discussion: ${ctx.discussion.dir}\nTranscript: ${ctx.logPath}`);
+  out(ctx, `Discussion: ${ctx.discussion.dir}\nTranscript: ${ctx.logPath}`);
   showHeader(ctx);
   return true;
 }
@@ -528,62 +554,53 @@ function chooseFolder() {
   }));
 }
 
-// Discover local listeners, then identify rooms using their existing heartbeat. No registry
-// survives a stopped process, and rooms launched independently are found too.
-export async function listRooms() {
-  const output = await new Promise((done, fail) => execFile('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fn'],
-    { timeout: 3000 }, (err, stdout) => err && err.code !== 1 ? fail(err) : done(stdout)));
-  const ports = [...new Set([...output.matchAll(/^n.*:(\d+)$/gm)].map((m) => Number(m[1])))];
-  const rooms = await Promise.all(ports.map(async (port) => {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/__health`, { signal: AbortSignal.timeout(800) });
-      if (!res.ok) return null;
-      const h = await res.json();
-      if (h.app === 'agent-room' && typeof h.root === 'string')
-        return { port, root: h.root, discussion: h.discussion ?? null, pages: h.pages ?? null };
-    } catch {} // Another service, or a room that has just stopped.
-    return null;
-  }));
-  return rooms.filter(Boolean).sort((a, b) => a.root.localeCompare(b.root) || a.port - b.port);
+// Switch room…: this server's rooms, straight from its list. `pages`: the pages open on each (on
+// any device), so the chooser doesn't offer a room already open in another window.
+export function listRooms(ctx) {
+  const rooms = ctx.hub ? [...ctx.hub.rooms.values()] : [ctx];
+  return rooms.filter((r) => r.id && r.screen).map((r) => ({ id: r.id, path: roomPath(r) + '__room', root: r.cwd,
+    discussion: r.screen.room?.active ?? null, pages: r.screen.clients.size, current: r === ctx }))
+    .sort((a, b) => a.root.localeCompare(b.root));
+}
+const roomPath = (ctx) => `/r/${ctx.id}/`;
+
+// New room in folder…: a room in the chosen folder, added to this server, using saved defaults (or
+// this room's agents if none are saved). If that folder (by its real path) already has a room, that
+// room is the answer; when a page shows it already, no second window is opened for it.
+// Resolves to { url, folder }, { open: true, url, folder } or { cancelled: true }.
+export function assertRoomCreation(hub) {
+  if (hub?.ending) throw new Error('The server is ending: no room can be created.');
 }
 
-const freePort = () => new Promise((done, fail) => {
-  const s = createNetServer().once('error', fail);
-  s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => done(port)); });
-});
+// Confirmation is checked on the server for every entry point.
+export function serverEndWarning(hub) {
+  const busy = [...hub.rooms.values()].filter((r) => r.busy || r.screen?.working);
+  if (!busy.length) return null;
+  return 'Busy rooms:\n' + busy.map((r) => r.cwd + ': ' +
+    [r.busy && 'discussion round in progress', r.screen?.working && 'worker instruction running'].filter(Boolean).join(', ')).join('\n') +
+    '\nRunning workers may be stopped at once, leaving partial changes. Continue?';
+}
 
-// A separate agent-room process in the chosen folder, using saved defaults (or this room's agents
-// if none are saved), on a port of its own,
-// so each window keeps its own address. It runs on its own: quitting this room doesn't end it.
-// Its output goes to a log file in the temp folder, shown here if it stops at once.
-// Resolves to { url, folder } once it answers, or { cancelled: true }.
 async function newRoom(ctx) {
+  assertRoomCreation(ctx.hub);
   const folder = await chooseFolder();
   if (!folder) return { cancelled: true };
-  const port = await freePort();
-  const out = join(tmpdir(), `agent-room-${port}-${Date.now()}.log`);
-  const fd = openSync(out, 'a');
+  if (!ctx.hub?.addRoom) throw new Error('this room can\'t open another one.');
   const defaults = readDefaults();
-  const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', folder, '--agents', defaults ? defaults.agents.map(specFor).join(',') : ctx.agentSpecs,
-    '--worker', defaults ? specFor(defaults.worker) : ctx.workerSpec ?? 'claude:Worker', '--port', String(port)];
-  const child = spawn(process.execPath, args, { cwd: folder, detached: true, stdio: ['ignore', fd, fd] });
-  closeSync(fd);
-  child.unref();
-  let exited = false;
-  child.once('exit', () => { exited = true; });
-  const url = `http://127.0.0.1:${port}/__room`;
-  for (const t0 = Date.now(); Date.now() - t0 < 20_000;) {
-    if (exited) throw new Error(`the new room stopped at once. Its log (${out}):\n${readFileSync(out, 'utf8').trim().slice(-800)}`);
-    try {
-      if ((await fetch(url)).ok) {
-        log(ctx, `_(opened a new room in ${folder})_\n\n`);
-        console.log(`New room in ${folder}: ${url} (log: ${out})`);
-        return { url, folder };
-      }
-    } catch {} // not listening yet
-    await new Promise((r) => setTimeout(r, 300));
-  }
-  throw new Error(`the new room didn't answer at ${url} within 20s. Its log: ${out}`);
+  const { ctx: room, existing } = await ctx.hub.addRoom(folder, {
+    agents: defaults ? defaults.agents.map(specFor).join(',') : ctx.agentSpecs,
+    worker: defaults ? specFor(defaults.worker) : ctx.workerSpec ?? 'claude:Worker' });
+  const url = roomPath(room) + '__room';
+  if (existing) return { url, folder: room.cwd, existing: true, open: room.screen.clients.size > 0 };
+  log(ctx, `_(opened a new room in ${room.cwd})_\n\n`);
+  out(ctx, `New room in ${room.cwd}: ${url}`);
+  return { url, folder: room.cwd };
+}
+
+function replicaOff(ctx) {
+  const launch = [...ctx.hub.rooms.values()].find((r) => r.launch);
+  return `Replication runs only for this server's launch room${launch ? ` (${launch.cwd})` : ''}. A --peer address names a whole server, `
+    + 'not one of its rooms, so this room has no peer: its rounds are neither saved for replication nor sent.';
 }
 
 // Auto-summarize: on unless turned off (ctx.autoSummary, so it survives a reload).
@@ -618,8 +635,8 @@ export const promptText = () => (tty ? '\x1b[1;36mYou ›\x1b[0m ' : 'You › ')
 export async function start(ctx) {
   ctx.openedAt = new Date();
   ctx.screen.startedAt = ctx.openedAt.toISOString(); // the page's and the Dock app's heartbeat show it
-  console.log(`Room: ${describe(ctx.room)} · worker ${ctx.worker.name} (${ctx.worker.provider}) · root ${ctx.cwd}`);
-  console.log(`Transcript: in ${join(ctx.cwd, 'discussions')}/, once the first message starts a discussion`);
+  out(ctx, `Room: ${describe(ctx.room)} · worker ${ctx.worker.name} (${ctx.worker.provider}) · root ${ctx.cwd}`);
+  out(ctx, `Transcript: in ${join(ctx.cwd, 'discussions')}/, once the first message starts a discussion`);
   // With --node: the server first (with --peer its port must be the configured one), then the storage.
   if (ctx.node) { await viewerUrl(ctx); await setupReplica(ctx); }
   wire(ctx);
@@ -632,13 +649,18 @@ export async function start(ctx) {
   showHeader(ctx);
   refreshWorker(ctx).catch(() => {}); // the Worker tab's line; creates nothing
   if (ctx.noScreen) {
-    return console.log('Type a message, /docs to browse the discussions, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
+    return out(ctx, 'Type a message, /docs to browse the discussions, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
   }
-  ctx.screen.say = (line) => ctx.say(line);
-  const screenUrl = `${await viewerUrl(ctx)}__room`;
-  console.log(`Discussion screen: ${screenUrl}${tty || ctx.open ? ' (opening it in your browser)' : ''}`);
-  if (!ctx.node) for (const address of lanAddresses()) console.log(`  LAN: http://${address}:${ctx.server.address().port}/__room`);
-  console.log('Use the room from the browser. This terminal only shows a log; Quit there, or Ctrl-C here, ends the room.\n');
+  ctx.screen.say = (line, confirmed) => ctx.say(line, confirmed);
+  const base = await viewerUrl(ctx);
+  const screenUrl = `${base.slice(0, -1)}${roomPath(ctx)}__room`;
+  out(ctx, `Room screen: ${screenUrl}`);
+  // A room added later (New room in folder…, or brought back by Restart) opens in its own window.
+  if (ctx.added) return;
+  // The server's address, which opens its first room: what the Dock app reads from the log.
+  console.log(`Discussion screen: ${base}__room${tty || ctx.open ? ' (opening it in your browser)' : ''}`);
+  if (!ctx.node) for (const address of lanAddresses()) console.log(`  LAN: http://${address}:${hubOf(ctx).server.address().port}/__room`);
+  console.log('Use the rooms from the browser. This terminal only shows a log; Shutdown server there, or Ctrl-C here, ends them all.\n');
   if (ctx.open) {
     await new Promise((done, fail) => execFile('open', [screenUrl], (err) => err ? fail(err) : done()));
   } else if (tty) browse(screenUrl);
@@ -648,13 +670,14 @@ const browse = (url) => execFile('open', [url], (err) => err && console.log(red(
 
 // Output that isn't a chat message: printed in the terminal and shown on the screen.
 export function note(ctx, text, error = false) {
-  console.log(error ? red(text) : text);
+  out(ctx, error ? red(text) : text);
   toScreen(ctx, { type: 'note', text, error });
 }
 
 export async function reloaded(ctx) {
   if (ctx.node) await setupReplica(ctx).catch((err) => note(ctx, `✗ Replication: ${err.message}`, true));
   wire(ctx);
+  if (ctx.hub) ctx.hub.route = route; // the server's routing runs the new code too
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   log(ctx, '_(code reloaded)_\n\n');
   note(ctx, 'Reloaded the code and the agents\' rulebook; the conversation continues.\n');
@@ -668,33 +691,101 @@ export async function reloaded(ctx) {
   if (ctx.replica) codeInfo(ctx.cwd).then((p) => { ctx.project = p; pushReplica(ctx); }).catch(() => {});
 }
 
-// The room is over (after /quit): screens say so and stop reconnecting. After /restart they wait
-// for the new process instead, and reload when it answers.
+// The room is over (Quit room, or the whole server ending): its screens say so and stop
+// reconnecting. After /restart they wait for the new process instead, and reload when it answers.
 export function ended(ctx, restarting = false) {
   if (ctx.replica) ctx.replicate.stopPeers(ctx.replica);
+  clearInterval(ctx.quotaTimer);
   return ctx.docs.endAll(ctx.screen, { type: restarting ? 'restarting' : 'ended' });
 }
 
-// /restart: this process frees its port and a new agent-room process takes it over, with the same
-// launch flags and the discussion in use re-opened (a fresh session from its handoff, as /reopen).
-// A paused discussion instead stays saved for explicit Resume; no --reopen is passed.
-// An unpaused chat in memory doesn't carry over. The new process writes where this one did (the terminal or
-// the Dock app's log) and runs on its own once this one exits.
-export function restartArgs(ctx, values) {
-  const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', ctx.cwd, '--port', String(ctx.server.address().port)];
-  if (values.agents) args.push('--agents', values.agents);
-  if (values.worker) args.push('--worker', values.worker);
+// How long Quit room (and Shutdown, Restart) waits for the room's round in progress, or other
+// queued lines, before stopping its agents mid-turn. Without it a round could hold Quit for up to
+// 8 turns of 5 minutes, plus its summary's turns, plus every line queued before Quit.
+export const QUIT_GRACE_MS = 30_000;
+
+// Stops every agent and worker program the room runs (SIGTERM, then SIGKILL after 5s); from then on
+// none starts, nor any queued worker instruction. Resolves to what it found, for the report.
+async function stopPrograms(ctx) {
+  const programs = ctx.programs ??= { running: new Set(), stopping: false };
+  programs.stopping = true;
+  ctx.stopped = true;
+  const procs = [...programs.running];
+  const worker = ctx.screen?.working ?? null;
+  const gone = (p) => p.groupAlive ? !p.groupAlive() : p.exitCode !== null || p.signalCode !== null;
+  for (const p of procs) (p.stopGroup ? p.stopGroup('SIGTERM') : p.kill('SIGTERM'));
+  for (let i = 0; i < 50 && procs.some((p) => !gone(p)); i++) await new Promise((r) => setTimeout(r, 100));
+  const stuck = procs.filter((p) => !gone(p));
+  for (const p of stuck) (p.stopGroup ? p.stopGroup('SIGKILL') : p.kill('SIGKILL'));
+  for (let i = 0; i < 10 && stuck.some((p) => !gone(p)); i++) await new Promise((r) => setTimeout(r, 100));
+  const survivors = stuck.filter((p) => !gone(p));
+  const lines = [];
+  if (survivors.length) lines.push(`Could not verify that ${survivors.length} process group(s) stopped after SIGKILL: ${survivors.map((p) => p.pid).join(', ')}.`);
+  if (worker && procs.length) lines.push(`The worker ${worker} was stopped in the middle of an instruction: its worktree may hold partial, uncommitted changes.`);
+  const others = procs.length - (worker && procs.length ? 1 : 0);
+  if (others > 0) lines.push(`${plural(others, 'agent program')} ${others === 1 ? 'was' : 'were'} stopped mid-turn.`);
+  if (stuck.length) lines.push(`${plural(stuck.length, 'program')} didn't stop within 5s and ${stuck.length === 1 ? 'was' : 'were'} killed: ${stuck.map((p) => p.spawnargs[0]).join(', ')}.`);
+  return lines;
+}
+
+// Quit room was asked for (cli.mjs calls this as the line arrives, before it waits in the queue):
+// if the room hasn't ended within graceMs, its programs are stopped, so the round in progress fails
+// at once and Quit goes ahead.
+export function quitRequested(ctx, graceMs = QUIT_GRACE_MS) {
+  if (ctx.quitTimer || ctx.programs?.stopping) return;
+  ctx.quitTimer = setTimeout(() => {
+    // Kept, so the room's end (stopRoom) waits for this report before closing its pages.
+    ctx.quitStop = stopPrograms(ctx).then((lines) => {
+      note(ctx, `✗ Quitting: the round in progress didn't end within ${Math.round(graceMs / 1000)}s, so the room's agents were stopped.`, true);
+      for (const line of lines) note(ctx, `✗ ${line}`, true);
+    });
+  }, graceMs);
+  ctx.quitTimer.unref?.();
+}
+
+// Before a room's state goes (Quit room, Shutdown, Restart): the agent and worker programs it still
+// runs are stopped, and queued worker instructions are not started. What couldn't end cleanly is
+// reported on the room's screen and in the log. Resolves to those report lines.
+export async function stopRoom(ctx) {
+  clearTimeout(ctx.quitTimer);
+  await ctx.quitStop;
+  const report = await stopPrograms(ctx);
+  const queued = (ctx.workPending ?? 0) + (ctx.workSkipped ?? 0);
+  if (queued) report.push(`${plural(queued, 'queued worker instruction')} ${queued === 1 ? 'was' : 'were'} not started.`);
+  ctx.workSkipped = 0;
+  // The stopped instruction's own reply (an error) is recorded before the room closes.
+  await Promise.race([ctx.workQueue, new Promise((r) => setTimeout(r, 3000))]);
+  for (const line of report) note(ctx, `✗ ${line}`, true);
+  return report;
+}
+
+// /restart (the whole server): this process frees its port and a new agent-room process takes it
+// over with the same launch flags and every room, each with its current agents and worker, and the
+// discussion in use re-opened (a fresh session from its handoff, as /reopen). A paused discussion
+// instead stays saved for explicit Resume; no --reopen is passed. An unpaused chat in memory doesn't
+// carry over. The first room is passed as --cwd (replicating, with --node, only if it is the launch
+// room); the others as --room. The new process writes where this one did (the terminal or the Dock
+// app's log) and runs on its own once this one exits.
+export function restartArgs(rooms, values, port) {
+  const [first, ...rest] = rooms;
+  const reopen = (r) => (r.discussion && !r.paused ? r.discussion.name : null);
+  const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', first.cwd, '--port', String(port)];
+  if (first.agentSpecs) args.push('--agents', first.agentSpecs);
+  if (first.workerSpec) args.push('--worker', first.workerSpec);
   if (values.dev) args.push('--dev');
-  if (values.node) args.push('--node', values.node);
-  for (const p of values.peer ?? []) args.push('--peer', p);
-  if (ctx.discussion && !ctx.paused) args.push('--reopen', ctx.discussion.name);
+  if (values.node && first.launch !== false) {
+    args.push('--node', values.node);
+    for (const p of values.peer ?? []) args.push('--peer', p);
+  }
+  if (reopen(first)) args.push('--reopen', reopen(first));
+  for (const r of rest) args.push('--room', JSON.stringify({ cwd: r.cwd, agents: r.agentSpecs, worker: r.workerSpec, ...(reopen(r) && { reopen: reopen(r) }) }));
   return args;
 }
-export async function restart(ctx, values) {
-  const args = restartArgs(ctx, values);
-  ctx.server.closeAllConnections();
-  await new Promise((done) => ctx.server.close(done));
-  spawn(process.execPath, args, { cwd: ctx.cwd, detached: true, stdio: 'inherit' }).unref();
+export async function restart(hub, rooms, values) {
+  const args = restartArgs(rooms, values, hub.server.address().port);
+  hub.server.closeAllConnections();
+  await new Promise((done) => hub.server.close(done));
+  spawn(process.execPath, args, { cwd: rooms[0].cwd, detached: true, stdio: 'inherit' }).unref();
 }
 
 export async function handleLine(line, ctx) {
@@ -733,17 +824,18 @@ export async function handleLine(line, ctx) {
 }
 
 // One status line per turn, rewritten every second so a long (or silently passing) turn is visible.
-let ticker = null;
-function startThinking(name) {
+// The timer is the room's own (ctx.ticker): rooms on one server think independently.
+function startThinking(ctx, name) {
   const t0 = Date.now();
-  const show = () => process.stdout.write(`\r\x1b[2K${dim(`  … ${name} is thinking (${Math.round((Date.now() - t0) / 1000)}s)`)}`);
-  if (!tty) return console.log(`  … ${name} is thinking`);
+  const show = () => process.stdout.write(`\r\x1b[2K${labelled(ctx, dim(`  … ${name} is thinking (${Math.round((Date.now() - t0) / 1000)}s)`))}`);
+  if (!tty) return out(ctx, `  … ${name} is thinking`);
+  clearInterval(ctx.ticker);
   show();
-  ticker = setInterval(show, 1000);
+  ctx.ticker = setInterval(show, 1000);
 }
-function stopThinking() {
-  clearInterval(ticker);
-  ticker = null;
+function stopThinking(ctx) {
+  clearInterval(ctx.ticker);
+  ctx.ticker = null;
   if (tty) process.stdout.write('\r\x1b[2K');
 }
 
@@ -767,13 +859,13 @@ async function runSummary(ctx, auto = false) {
     onTurnStart(agent, { turn, of }) {
       started = Date.now();
       const label = `${agent.name} (summary, turn ${turn} of at most ${of})`;
-      startThinking(label);
+      startThinking(ctx, label);
       setScreenThinking(ctx, label);
     },
     onMessage(m) {
       const tokens = m.usage ? ` · ${ctx.usage.formatUsage(m.usage)}` : '';
       log(ctx, `**${m.speaker}** — summary turn${m.error ? ', failed' : ''} (${((Date.now() - started) / 1000).toFixed(0)}s${tokens})\n\n${m.text}\n\n`);
-      stopThinking();
+      stopThinking(ctx);
       setScreenThinking(ctx, null);
       turns++;
       if (m.usage) {
@@ -786,7 +878,7 @@ async function runSummary(ctx, auto = false) {
   if (result) {
     const label = result.outcome === 'agreed' ? `agreed, by ${result.by}` : `not agreed: the last version, by ${result.by}`;
     log(ctx, `**Summary** — ${label}\n\n${result.text}\n\n`);
-    console.log(`\n${bold('Summary')} ${dim(`(${label})`)} ›\n${result.text}\n`);
+    out(ctx, `\n${bold('Summary')} ${dim(`(${label})`)} ›\n${result.text}\n`);
     toScreen(ctx, { type: 'message', message: ctx.docs.messageView(result) });
   }
   if (status === 'empty' && !auto) note(ctx, 'Nothing to summarize yet.');
@@ -794,7 +886,7 @@ async function runSummary(ctx, auto = false) {
   const secs = Math.round((Date.now() - t0) / 1000);
   const parts = [`${auto ? 'auto-summary' : 'summary'} ${status === 'failed' ? 'stopped' : status}`, `${turns} agent turn${turns === 1 ? '' : 's'}`, `${secs}s`, ctx.usage.formatUsage(used)];
   refreshQuota(ctx).catch(() => {});
-  console.log(dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
+  out(ctx, dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
   toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
   return status;
 }
@@ -811,7 +903,7 @@ async function runRound(line, ctx) {
     await ctx.room.round(line, {
       onTurnStart(agent) {
         started = Date.now();
-        startThinking(agent.name);
+        startThinking(ctx, agent.name);
         setScreenThinking(ctx, agent.name);
       },
       onMessage(m) {
@@ -821,7 +913,7 @@ async function runRound(line, ctx) {
         if (m.speaker !== 'User') setScreenThinking(ctx, null);
         toScreen(ctx, { type: 'message', message: ctx.docs.messageView(m) }); // the page hides passes
         if (m.speaker === 'User') return;
-        stopThinking();
+        stopThinking(ctx);
         turns++;
         if (m.usage) {
           roundUsage = ctx.usage.addUsage(roundUsage, m.usage);
@@ -830,11 +922,11 @@ async function runRound(line, ctx) {
         if (m.error) ending = `${m.speaker} failed`;
         if (m.pass) return; // passes are logged, not shown
         if (!m.error) spoke++;
-        console.log(m.error ? red(`\n✗ ${m.speaker} failed${secs}: ${m.text}\n`) : `\n${bold(m.speaker)}${dim(secs)} › ${m.text}\n`);
+        out(ctx, m.error ? red(`\n✗ ${m.speaker} failed${secs}: ${m.text}\n`) : `\n${bold(m.speaker)}${dim(secs)} › ${m.text}\n`);
       },
       onNotice(text) {
         log(ctx, `_${text}_\n\n`);
-        console.log(`${text}\n`);
+        out(ctx, `${text}\n`);
         toScreen(ctx, { type: 'turn', text });
         ending = 'turn cap reached';
       },
@@ -846,12 +938,12 @@ async function runRound(line, ctx) {
     // Auto-summarize: after a round in which an agent spoke and none failed. Its own end line is
     // then the "your turn" one; this round's line is just a note.
     if (autoOn(ctx) && spoke && !ending.endsWith('failed')) {
-      console.log(dim(`── round over · ${parts.filter(Boolean).join(' · ')} · summarizing ──`));
+      out(ctx, dim(`── round over · ${parts.filter(Boolean).join(' · ')} · summarizing ──`));
       toScreen(ctx, { type: 'note', text: `round over · ${parts.filter(Boolean).join(' · ')} · summarizing` });
       const summary = await runSummary(ctx, true);
       return await saveRound(ctx, { kind: 'round', outcome: summary === 'failed' ? 'failed' : 'completed', ending, summary });
     }
-    console.log(dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
+    out(ctx, dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
     toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
     await saveRound(ctx, { kind: 'round', outcome: ending.endsWith('failed') ? 'failed' : 'completed', ending, summary: null });
   } catch (err) {
@@ -886,6 +978,19 @@ export async function workerPlace(roomRoot) {
   if (real(own) !== real(common)) return { disabled: `${top} is itself a linked Git worktree (such as a worker's): open the room in the main checkout instead.` };
   const path = join(dirname(top), `${basename(top)}.worker`);
   return { root, top, path, cwd: join(path, relative(top, root)) };
+}
+
+// Rooms on one server in the same Git repository would share one worktree: the first room opened
+// there has the worker; a later one gets none, with the reason.
+async function sharedWorktree(ctx, place) {
+  if (place.disabled || !ctx.hub) return place;
+  for (const other of ctx.hub.rooms.values()) {
+    if (other === ctx) break; // only rooms opened before this one
+    if ((await workerPlace(other.cwd)).top === place.top) {
+      return { disabled: `No worker in this room: ${other.cwd} is already open on this server in the same Git repository (${place.top}), and its worker uses ${place.path}.` };
+    }
+  }
+  return place;
 }
 
 // The worktrees Git knows about: [{ path, branch }].
@@ -969,7 +1074,7 @@ export async function codeInfo(dir = dirname(dirname(fileURLToPath(import.meta.u
 // Reads the worktree's state for the Worker tab; with `prepare` (before each instruction), creates
 // or reattaches the worktree and catches up first. Returns the place (disabled or not).
 export async function refreshWorker(ctx, { prepare = false } = {}) {
-  const place = await workerPlace(ctx.cwd);
+  const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
   let info;
   try {
     if (place.disabled) info = { lines: [place.disabled], disabled: true };
@@ -996,10 +1101,16 @@ export async function refreshWorker(ctx, { prepare = false } = {}) {
 export function queueWork(ctx, text) {
   if (ctx.paused || ctx.pausing) return note(ctx, 'The discussion is pausing or paused. Resume before sending worker instructions.', true);
   if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
+  if (ctx.stopped) return note(ctx, 'This room is ending: the instruction was not sent.', true);
   ctx.agentsStarted = true;
-  // A bug here must not jam the queue: report it, and the next instruction still runs.
-  ctx.workQueue = (ctx.workQueue ?? Promise.resolve()).then(() => runWork(ctx, text))
-    .catch((err) => note(ctx, `✗ ${err.stack}\n`, true));
+  // A bug here must not jam the queue: report it, and the next instruction still runs. Once the
+  // room is ending (Quit room), queued instructions are not started.
+  ctx.workPending = (ctx.workPending ?? 0) + 1;
+  ctx.workQueue = (ctx.workQueue ?? Promise.resolve()).then(() => {
+    ctx.workPending--;
+    if (ctx.stopped) { ctx.workSkipped = (ctx.workSkipped ?? 0) + 1; return; }
+    return runWork(ctx, text);
+  }).catch((err) => note(ctx, `✗ ${err.stack}\n`, true));
 }
 
 async function runWork(ctx, text) {
@@ -1027,7 +1138,7 @@ async function runWork(ctx, text) {
   screen.working = worker.name;
   try {
     workLog(`**User → ${worker.name}** (worker)\n\n${text}\n\n`);
-    console.log(`\n${bold(`You → ${worker.name}`)} › ${text}\n`);
+    out(ctx, `\n${bold(`You → ${worker.name}`)} › ${text}\n`);
     show({ speaker: 'User', text });
     toScreen(ctx, { type: 'working', name: worker.name });
     const t0 = Date.now();
@@ -1060,13 +1171,13 @@ async function runWork(ctx, text) {
     }
     const meta = [`${Math.round((Date.now() - t0) / 1000)}s`, entry.error ? '' : ctx.usage.formatUsage(worker.lastUsage)].filter(Boolean).join(' · ');
     workLog(`**${worker.name}** (worker${entry.error ? ', failed' : ''}, ${meta})\n\n${entry.text}\n\n`);
-    console.log(entry.error ? red(`\n✗ ${worker.name} (worker) failed: ${entry.text}\n`) : `\n${bold(worker.name)}${dim(` (worker, ${meta})`)} › ${entry.text}\n`);
+    out(ctx, entry.error ? red(`\n✗ ${worker.name} (worker) failed: ${entry.text}\n`) : `\n${bold(worker.name)}${dim(` (worker, ${meta})`)} › ${entry.text}\n`);
     show(entry, meta);
     if (saveError) {
       const view = { note: `✗ ${worker.name}: couldn't save to the transcript: ${saveError.message}`, error: true };
       screen.worker.push(view);
       toScreen(ctx, { type: 'work', message: view });
-      console.log(red(view.note));
+      out(ctx, red(view.note));
     }
   } finally {
     ctx.workingIn = null;
@@ -1077,23 +1188,29 @@ async function runWork(ctx, text) {
   refreshQuota(ctx).catch(() => {});
 }
 
-// The document viewer and discussion screen: a local-only HTTP server kept in ctx, started at
-// start-up in UI mode and on the first /docs in terminal mode. It calls ctx.docs on every request,
-// so a reload applies to it too. Its connections (open screens hold one) never keep the process
-// alive; in terminal mode the server doesn't either, while in UI mode it is the room's input.
+// The server's state for a room started without cli.mjs's hub (some tests): just that room, served
+// at its own address like any other.
+const hubOf = (ctx) => (ctx.hub ??= { rooms: new Map([[ctx.key ?? ctx.cwd, ctx]]) });
+
+// The document viewer and discussion screens: one HTTP server for all the server's rooms, kept in
+// hub.server, started with the first room in UI mode and on the first /docs in terminal mode. It
+// calls hub.route (replaced on Reload) on every request. Its connections (open screens hold one)
+// never keep the process alive; in terminal mode the server doesn't either, while in UI mode it is
+// the rooms' input.
 async function viewerUrl(ctx) {
-  if (!ctx.server) {
-    ctx.server = createServer((req, res) => {
-      // The root, limited to ctx.screen.sections (discussions/).
-      try { ctx.docs.handle(req, res, ctx.cwd, ctx.screen); } catch (err) { res.writeHead(500); res.end(String(err)); }
+  const hub = hubOf(ctx);
+  if (!hub.server) {
+    hub.route ??= route;
+    const server = createServer((req, res) => {
+      try { hub.route(hub, req, res); } catch (err) { res.writeHead(500); res.end(String(err)); }
     });
-    ctx.server.on('connection', (socket) => socket.unref());
-    // The fixed port gives the screen the same address every time; if another room (or anything
-    // else) has it, any free port will do, and the banner shows which. With --peer the room stops
+    server.on('connection', (socket) => socket.unref());
+    // The fixed port gives the screen the same address every time; if another server (or anything
+    // else) has it, any free port will do, and the banner shows which. With --peer the server stops
     // instead: its peers know it by that port. It listens on every address (the LAN too).
     const listen = (port) => new Promise((ok, fail) => {
-      ctx.server.once('error', fail);
-      ctx.server.listen(port, '0.0.0.0', () => { ctx.server.off('error', fail); ok(); });
+      server.once('error', fail);
+      server.listen(port, '0.0.0.0', () => { server.off('error', fail); ok(); });
     });
     const port = ctx.port ?? 5566;
     try {
@@ -1103,13 +1220,55 @@ async function viewerUrl(ctx) {
       await listen(port);
     } catch (err) {
       if (err.code !== 'EADDRINUSE') throw err;
-      if (ctx.peers?.length) throw new Error(`Port ${port} is in use. With --peer this room must listen on its configured port, where its peers reach it: stop whatever uses ${port}, or choose another --port (and tell the peers).`);
+      if (ctx.peers?.length) throw new Error(`Port ${port} is in use. With --peer this server must listen on its configured port, where its peers reach it: stop whatever uses ${port}, or choose another --port (and tell the peers).`);
       console.log(dim(`Port ${port} is in use; using a free port instead.`));
       await listen(0);
     }
-    if (ctx.noScreen) ctx.server.unref();
+    if (ctx.noScreen) server.unref();
+    hub.server = server;
   }
-  return `http://127.0.0.1:${ctx.server.address().port}/`;
+  ctx.server = hub.server; // shared by every room of the server
+  return `http://127.0.0.1:${hub.server.address().port}/`;
+}
+
+// Every request goes to one room, named by its address: /r/<id>/… is served by that room alone,
+// from its own folder and state (docs.mjs keeps file access inside that folder). The few addresses
+// without a room are the server's: its heartbeat, Shutdown, /__room (the first room's page) and
+// /replica/… (the launch room's peer endpoint, unchanged for peers).
+export function route(hub, req, res) {
+  const url = new URL(req.url, 'http://localhost');
+  const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
+  const rooms = [...hub.rooms.values()].filter((r) => r.id && r.docs && r.screen);
+  const m = /^\/r\/([^/]+)(\/.*)?$/.exec(url.pathname);
+  if (m) {
+    const ctx = rooms.find((r) => r.id === m[1]);
+    if (!ctx) return send(404, 'text/plain; charset=utf-8', 'No such room on this server: it may have been quit.');
+    if (!m[2]) { res.writeHead(302, { location: `${roomPath(ctx)}__room` }); return res.end(); }
+    req.url = m[2] + url.search; // what the room's handler sees: its own paths, as with one room
+    return ctx.docs.handle(req, res, ctx.cwd, ctx.screen, roomPath(ctx));
+  }
+  if (url.pathname === '/__health') {
+    return send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, startedAt: hub.startedAt ?? null,
+      rooms: rooms.map((r) => ({ id: r.id, root: r.cwd, pages: r.screen.clients.size })) }));
+  }
+  if (url.pathname === '/__room' || url.pathname === '/') {
+    if (!rooms.length) return send(404, 'text/plain; charset=utf-8', 'This server has no room open.');
+    res.writeHead(302, { location: `${roomPath(rooms[0])}__room` });
+    return res.end();
+  }
+  if (url.pathname === '/__shutdown') {
+    if (req.method !== 'POST' || !rooms[0]?.docs.fromOwnPage(req)) return send(403, 'text/plain; charset=utf-8', 'Refused: only a room page can shut the server down.');
+    if (!hub.shutdown) return send(409, 'text/plain; charset=utf-8', 'This room is typed in the terminal: use /quit there.');
+    const warning = hub.shutdown(url.searchParams.get('confirmed') === 'yes');
+    if (warning) return send(409, 'text/plain; charset=utf-8', warning);
+    return send(202, 'text/plain; charset=utf-8', 'Shutting down: every room ends after its round in progress.');
+  }
+  if (url.pathname.startsWith('/replica/')) {
+    const launch = rooms.find((r) => r.replica);
+    if (!launch) return send(404, 'text/plain', 'This server doesn\'t replicate.');
+    return launch.docs.handle(req, res, launch.cwd, launch.screen);
+  }
+  send(404, 'text/plain; charset=utf-8', 'Not found: room pages are at /r/<room>/__room.');
 }
 
 const answers = (port) => new Promise((ok) => {
@@ -1124,7 +1283,7 @@ async function showDocs(ctx) {
   if (!ctx.noScreen) return toScreen(ctx, { type: 'files' });
   const files = ctx.screen.sections.flatMap((s) => (existsSync(join(ctx.cwd, s)) ? ctx.docs.listFiles(join(ctx.cwd, s)).map((f) => join(s, f)) : []));
   if (!files.length) return console.log(`No documents in ${join(ctx.cwd, 'discussions')} yet: they appear when an agent writes one.\n`);
-  const base = await viewerUrl(ctx);
+  const base = `${(await viewerUrl(ctx)).slice(0, -1)}${roomPath(ctx)}`;
   const open = (f) => browse(base + ctx.docs.urlPath(f));
   if (!tty) return console.log(`${files.map((f) => base + ctx.docs.urlPath(f)).join('\n')}\n`);
   // Take the keys away from readline while the list is up, then give them back.
@@ -1147,16 +1306,16 @@ async function setupReplica(ctx) {
   const R = ctx.replicate, first = !ctx.replicaState?.s;
   ctx.replicaState ??= {};
   const r = ctx.replica = await R.createReplica({ root: ctx.cwd, node: ctx.node, peers: ctx.peers, state: ctx.replicaState,
-    activity: () => (ctx.busy ? 'running a round' : 'idle'), project: () => ctx.project ?? null, log: (t) => console.log(red(t)) });
+    activity: () => (ctx.busy ? 'running a round' : 'idle'), project: () => ctx.project ?? null, log: (t) => out(ctx, red(t)) });
   r.changed = () => pushReplica(ctx);
   r.onReceived = (p) => { note(ctx, `Received ${p.node}'s ${p.kind} ${p.round} of "${p.title}".`); pushReplica(ctx); };
   r.onSent = (x) => { if (x.late) R.lineRound(r.s, x.acked).then((n) => note(ctx, `Round ${n} sent to ${x.peer} ✓`), () => {}); };
   if (!first) return;
-  const port = ctx.server.address().port, rec = r.s.recovered;
-  console.log(`agent-room on ${ctx.node}, listening on 0.0.0.0:${port} · ${r.git ?? 'git not found'}`);
-  for (const a of lanAddresses()) console.log(`  open:  http://${a}:${port}/__room`);
-  console.log(`  peers: ${ctx.peers.length ? ctx.peers.map((p) => `${p.name} ${p.url.replace(/^http:\/\//, '')}`).join(', ') : 'none'}`);
-  if (rec.tmp + rec.snapshots + rec.incomingRefs + rec.refRepaired) console.log(`  recovered an interrupted receive: ${JSON.stringify(rec)}`);
+  const port = hubOf(ctx).server.address().port, rec = r.s.recovered;
+  out(ctx, `agent-room on ${ctx.node}, listening on 0.0.0.0:${port} · ${r.git ?? 'git not found'}`);
+  for (const a of lanAddresses()) out(ctx, `  open:  http://${a}:${port}/__room`);
+  out(ctx, `  peers: ${ctx.peers.length ? ctx.peers.map((p) => `${p.name} ${p.url.replace(/^http:\/\//, '')}`).join(', ') : 'none'}`);
+  if (rec.tmp + rec.snapshots + rec.incomingRefs + rec.refRepaired) out(ctx, `  recovered an interrupted receive: ${JSON.stringify(rec)}`);
   R.startPeers(r);
 }
 
@@ -1194,7 +1353,7 @@ async function replicaStatus(ctx) {
     return { name: p.name, address: p.url.replace(/^http:\/\//, ''), reachable: st.reachable ?? null, since: st.since ?? null, activity: st.activity ?? null, project: st.project ?? null,
       paired: !!room.paired[p.name], mismatch: !!(room.paired[p.name] && st.roomId && st.roomId !== room.roomId), error: st.error ?? null };
   });
-  const port = ctx.server?.address()?.port;
+  const port = ctx.hub?.server?.address()?.port;
   return { node: ctx.node, addresses: lanAddresses().map((a) => `${a}:${port}`), roomId: room.roomId, project: ctx.project ?? null, own, received, peers };
 }
 async function pushReplica(ctx) {
@@ -1203,11 +1362,11 @@ async function pushReplica(ctx) {
     const status = await replicaStatus(ctx), before = ctx.screen.replica?.peers ?? [];
     for (const p of status.peers) {
       const was = before.find((b) => b.name === p.name);
-      if (p.reachable !== null && was?.reachable !== p.reachable) console.log(dim(`Peer ${p.name}: ${p.reachable ? `reachable${p.paired ? ', paired' : ', not paired yet'}` : `unreachable (${p.error})`}`));
+      if (p.reachable !== null && was?.reachable !== p.reachable) out(ctx, dim(`Peer ${p.name}: ${p.reachable ? `reachable${p.paired ? ', paired' : ', not paired yet'}` : `unreachable (${p.error})`}`));
     }
     ctx.screen.replica = status;
     toScreen(ctx, { type: 'replica', replica: status });
-  } catch (err) { console.log(red(`✗ replication status: ${err.message}`)); }
+  } catch (err) { out(ctx, red(`✗ replication status: ${err.message}`)); }
 }
 
 // End of a round (after its summary) or of a manual summary: one commit on this node's line, then

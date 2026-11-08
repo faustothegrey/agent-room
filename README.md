@@ -23,7 +23,13 @@ npm start
 app runs it too. Without dev mode, use `node src/cli.mjs`.
 
 The browser opens the discussion screen, normally at `http://127.0.0.1:5566/__room`.
-If that port is occupied, the room uses a free one and prints its address. The starting
+If that port is occupied, the server uses a free one and prints its address.
+One server process runs several rooms, one per folder (identified by its real path, so a symbolic
+link can't open a second room there). Each room has its own address, `/r/<room>/__room`, and its
+own agents, worker, discussion, transcript, pause, pages and input queue: a round in one room never
+waits for another. `/__room` opens the server's first room. Every request names its room, and the
+server serves each room's files only from inside its folder (no `../`, and no symbolic link leading
+out of it). In the log, each room's lines start with `[<folder name>]`. The starting
 terminal shows a log; interact with the room in the browser. When output is piped, the
 address is printed without opening a browser unless `--open` is supplied.
 
@@ -62,10 +68,25 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   current conversation. Open pages refresh by themselves when the page's own code changed,
   keeping what you were typing.
 - **Restart:** click twice to replace the server process on the same address, for changes Reload
-  can't load (such as `cli.mjs`). The new process re-opens the discussion in use, a fresh session
-  from its handoff; the chat clears, its transcript is kept, and open pages reload by themselves.
-- **Quit:** click twice to end the room. Discussion commands, including Quit, Restart and Reload,
-  wait behind an ongoing round and its automatic summary; they are not immediate cancellation.
+  can't load (such as `cli.mjs`). It acts on the whole server: the new process brings back every
+  room, each with its current agents and worker, and re-opens each one's discussion in use, a fresh
+  session from its handoff; the chats clear, transcripts are kept, and open pages reload by
+  themselves. Reload also applies to every room, each between its own rounds.
+- **Quit room:** click twice to end this room only. It waits for the round in progress (and lines
+  queued before it) for at most 30 seconds; then the room's agents are stopped mid-turn, so the
+  round ends as failed. Its running agent and worker programs are stopped before its state goes; a
+  worker stopped in the middle of an instruction, agents stopped mid-turn, or queued instructions
+  not started are reported on the screen and in the log. The server's other rooms keep running;
+  when the last room quits, the server ends.
+  Provider programs run in separate process groups; cleanup stops their child commands too
+  (SIGTERM, then SIGKILL after 5 seconds). Commands that deliberately detach into a new session
+  escape this group; stopping those would require OS supervision.
+
+- **Shutdown server:** click twice to end every room, then the server. The button, the Dock app's
+  Quit and `curl` all use the server's address `POST /__shutdown` (from a room page's own host and
+  origin); typing `/shutdown` in a room does the same. If any room has a discussion round or worker instruction running, Shutdown and Restart first list those rooms and require confirmation. Running workers may be stopped at once, leaving partial changes. The page asks before retrying; unconfirmed requests to the endpoint return HTTP 409 with the warning (confirmation uses `?confirmed=yes`). The Dock launcher shows the same warning in a native Cancel / Shutdown dialog; Cancel leaves both the launcher and server running. Otherwise Shutdown and Restart start at once; each
+  room then ends as with Quit room, within the same 30 seconds. Reload waits behind an ongoing
+  round and its automatic summary.
 - **Server status:** under the root folder, the header shows whether the server is up, for how
   long and on which port (hover for its process). Its dot pulses green on each answer and turns
   red when the server stops. The page asks every three seconds; it says when
@@ -158,8 +179,8 @@ Worker turns and other log entries before the first discussion message remain in
 that message creates the transcript. A worker-only session therefore has no saved transcript
 if the room ends before a discussion starts.
 
-**Switch room…** lists rooms already running on this machine, showing their root folders,
-active discussions, ports and how many room pages are open on each. Each room appears twice:
+**Switch room…** lists this server's rooms, showing their root folders, active discussions and
+how many room pages are open on each. Each room appears twice:
 under **Switch this tab to**, which opens it in the current tab (the room you leave keeps running
 with its conversation intact), and under **Open in new window**, which opens it in a new browser
 window and leaves this one on its own room, so several rooms can be worked on side by side.
@@ -167,13 +188,15 @@ The current room is disabled and marked "(current)"; any other room with a page 
 disabled and marked "(open in another window)", so the chooser doesn't open a room twice. Pages
 on any device count (provisional). Opening a room's URL by hand, or two windows choosing the same
 room at once, is still possible, and nothing checks when a page connects. The list refreshes each
-time you click the button. Discovery uses the system's `lsof` command and does not include rooms
-on other machines.
+time you click the button. Rooms of other agent-room processes (another port, another machine) are
+not listed.
 
-**New room in folder…** opens the Mac folder chooser and starts an independent room in a new
-browser window on its own port. It uses saved agent defaults if present, otherwise the current
-room's choices. The existing room stays running; quitting either room does not quit the other.
-Cancelling the chooser leaves the existing room in place.
+**New room in folder…** opens the Mac folder chooser and adds a room in that folder to this
+server, in a new browser window. It uses saved agent defaults if present, otherwise the current
+room's choices. If the folder already has a room on this server, that room opens instead, unless a
+page already shows it (then the status line says so). Two rooms in the same Git repository would
+share one worker worktree: the room opened later there gets no worker, and its Worker tab says why.
+Cancelling the chooser leaves everything as it was.
 
 ## Choose providers and models
 
@@ -262,8 +285,9 @@ node src/cli.mjs --help
 | `/autosummary [on\|off]` | Toggle automatic summaries, or set them explicitly. |
 | `/usage` | Show session tokens and subscription quotas. |
 | `/reload` | Reload source modules and both agent rulebooks; retain conversation and provider sessions. |
-| `/restart` | Screen only: a new server process on the same port, re-opening the discussion in use. |
-| `/quit` | End this room. |
+| `/restart` | Screen only: a new server process on the same port, with every room, each re-opening its discussion in use. |
+| `/quit` | Quit room: end this room only, stopping its running agent and worker programs. |
+| `/shutdown` | Screen only: Shutdown server, ending every room (the same as `POST /__shutdown`). |
 
 ## macOS Dock launcher
 
@@ -289,10 +313,10 @@ plutil -remove CFBundleIconName "$app/Contents/Info.plist"
 codesign --force --sign - "$app"
 ```
 
-Drag the app into the Dock. The app serves nothing itself: a room is one agent-room process
-(`node src/cli.mjs`), which is the web server, the conversation and the agents' sessions together.
+Drag the app into the Dock. The app serves nothing itself: the server is one agent-room process
+(`node src/cli.mjs`), which is the web server and every room's conversation and agents' sessions.
 If such a process already answers on port 5566 (wherever it was started, and in whatever folder),
-the app opens its page. Otherwise it runs
+the app opens its first room's page. Otherwise it runs
 `npm start -- --open --node Mac --peer charon=http://192.168.178.70:5566` in the fixed project
 path `/Users/fausto/Software/agent-room`, enabling replication with charon and reusing the saved
 pairing. Edit the script and rebuild the app if the checkout or peer address changes.
@@ -301,8 +325,8 @@ Only the app reuses a running process: `npm start` in a terminal still moves to 
 
 The app then follows the process's heartbeat every three seconds. The process keeps running when
 you close the browser window: clicking the Dock icon again opens its page in a new tab. Restart
-keeps the app running. When the process stops (Quit in the screen), the app quits too; quitting
-the app from the Dock stops the process the same way.
+keeps the app running. When the process stops (Shutdown server, or quitting its last room), the
+app quits too; quitting the app from the Dock shuts the server down the same way (`POST /__shutdown`).
 
 The script checks for `node`, `claude` and `codex` through a login shell with Homebrew and
 `~/.local/bin` paths. Its log is `~/Library/Logs/agent-room.log`, replaced on each launch.
@@ -311,7 +335,11 @@ own folders.
 
 ## Replicate discussions between nodes
 
-Start each room with a stable node name and the other room's address, for example:
+Replication covers only the server's launch room (its `--cwd`, agent-room itself from the Dock
+app): a `--peer` address names a whole server, not one of its rooms, so rooms added with New room
+in folder… have no peer, and their Peers panel says so. Their folders get no `.agent-room/`.
+
+Start each server with a stable node name and the other server's address, for example:
 
 ```sh
 node src/cli.mjs --node Mac --peer Pi=http://192.168.1.21:5566
@@ -388,7 +416,7 @@ agent-room's source.
 
 | Source | Responsibility |
 |---|---|
-| `src/cli.mjs` | Arguments, shared session context, input queue, Reload, Restart and Quit. |
+| `src/cli.mjs` | Arguments, the server's rooms, each room's context and input queue, Reload, Restart, Quit room and Shutdown. |
 | `src/agents.mjs` | CLI processes, session resumption, model arguments, title generation and usage parsing. |
 | `src/room.mjs` | Discussion turns, unseen messages, passes and summary agreement. |
 | `src/ui.mjs` | Room setup, persistent defaults, commands, discussions, worker queue, logging and launch integration. |

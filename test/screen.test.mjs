@@ -16,7 +16,7 @@ test('UI mode: the screen is the room\'s input, its replies come back as events,
     const base = await new Promise((done) => cli.stdout.on('data', (d) => {
       out += d;
       // The banner may arrive in several chunks: wait for its last line.
-      const m = out.match(/Discussion screen: (http:\/\/127\.0\.0\.1:\d+\/)__room/);
+      const m = out.match(/Room screen: (http:\/\/127\.0\.0\.1:\d+\/r\/[^/]+\/)__room/);
       if (m && out.includes('This terminal only shows a log')) done(m[1]);
     }));
 
@@ -73,11 +73,11 @@ test('saved provider/model choices survive CLI restarts and explicit CLI flags o
         cli.once('exit', (code) => reject(new Error(`CLI exited ${code}: ${errors}`)));
         cli.stdout.on('data', (d) => {
           out += d;
-          const match = out.match(/Discussion screen: (http:\/\/127\.0\.0\.1:\d+\/)__room/);
+          const match = out.match(/Room screen: (http:\/\/127\.0\.0\.1:\d+\/r\/[^/]+\/)__room/);
           if (match) resolve(match[1]);
         });
       });
-      const post = (path, value) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: base.slice(0, -1) }, body: JSON.stringify(value) });
+      const post = (path, value) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: new URL(base).origin }, body: JSON.stringify(value) });
       await check(base, post);
       await post('__say', { text: '/quit' });
       assert.equal(await exited, 0);
@@ -112,7 +112,7 @@ test('Restart: a new server process on the same port, re-opening the discussion 
     let out = '';
     const base = await new Promise((done) => cli.stdout.on('data', (d) => {
       out += d;
-      const m = out.match(/Discussion screen: (http:\/\/127\.0\.0\.1:\d+\/)__room/);
+      const m = out.match(/Room screen: (http:\/\/127\.0\.0\.1:\d+\/r\/[^/]+\/)__room/);
       if (m) done(m[1]);
     }));
     const health = async () => { try { return await (await fetch(base + '__health')).json(); } catch { return null; } };
@@ -130,7 +130,7 @@ test('Restart: a new server process on the same port, re-opening the discussion 
     const after = await until((h) => h && h.pid !== before.pid);
     newPid = after.pid;
     assert.equal(after.discussion, 'discussions/2026-11-03-a-topic'); // re-opened there
-    assert.match(out, /Restarting: a new process takes over this room\./);
+    assert.match(out, /Restarting: a new process takes over the server\./);
 
     await say('/quit');
     await until((h) => h === null);
@@ -179,7 +179,7 @@ process.stdin.on('end', () => {
       cli.once('exit', () => fail(new Error(output)));
       cli.stdout.on('data', (d) => {
         output += d;
-        const m = output.match(/Discussion screen: (http:\/\/127\.0\.0\.1:\d+\/)__room/);
+        const m = output.match(/Room screen: (http:\/\/127\.0\.0\.1:\d+\/r\/[^/]+\/)__room/);
         if (m) done(m[1]);
       });
     });

@@ -12,19 +12,24 @@ test('two rooms: pairing, round hooks, independent browser pins, deletion and re
   const root = await fs.mkdtemp(join(tmpdir(),'replication-ui-')), rooms=[];
   const make = async (node) => {
     const cwd = join(root,node); await fs.mkdir(cwd);
-    const ctx = {cwd,node,peers:[],port:0,agentSpecs:'claude:A',workerSpec:'claude:W',sessions:new Map(),state:{transcript:[],seen:new Map()},say:()=>{throw new Error('View started agents');}};
+    // Each node is a server with this room as its launch room, as cli.mjs sets it up.
+    const hub = {rooms:new Map(),node};
+    const ctx = {cwd,node,peers:[],port:0,hub,launch:true,agentSpecs:'claude:A',workerSpec:'claude:W',sessions:new Map(),state:{transcript:[],seen:new Map()},say:()=>{throw new Error('View started agents');}};
     Object.assign(ctx, await ui.load(ctx, ''));
+    hub.rooms.set(ctx.key, ctx);
     ctx.usage={...ctx.usage,fetchQuota:async()=>null};
     ctx.room=createRoom([{name:'A',provider:'claude',turn:async()=> 'PASS'}],ctx.state);
     ctx.suggestTitle=async()=>({title:'Replication test'});
     await ui.start(ctx); rooms.push(ctx);
     assert.deepEqual(ctx.screen.replica.project, ctx.project);
-    ctx.base=`http://127.0.0.1:${ctx.server.address().port}`;
+    // Peers reach the server (its launch room's /replica/…); the page reaches the room at its address.
+    ctx.origin=`http://127.0.0.1:${ctx.server.address().port}`;
+    ctx.base=`${ctx.origin}/r/${ctx.id}`;
     return ctx;
   };
   try {
     const a=await make('Mac'), b=await make('Pi');
-    a.peers.push({name:'Pi',url:b.base}); b.peers.push({name:'Mac',url:a.base});
+    a.peers.push({name:'Pi',url:b.origin}); b.peers.push({name:'Mac',url:a.origin});
     const post=async(c,path,body,client='browser-one')=>fetch(c.base+path,{method:'POST',headers:{'content-type':'application/json','x-view-client':client},body:JSON.stringify(body)});
     const preview=await (await post(a,'/__pair',{peer:'Pi'})).json();
     assert.equal(preview.peer.root,b.cwd); assert.equal(preview.local.root,a.cwd); assert.equal(preview.peer.project.commit,null);

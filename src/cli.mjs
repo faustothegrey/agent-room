@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// The only part of agent-room that never reloads: arguments, the input loop (terminal or screen),
-// /reload, /quit and /restart. Everything else is in ui.mjs (and what it loads), which /reload swaps between
-// rounds.
-// The conversation lives in `ctx`, so it carries over. Keep this file small: changes here need a
-// restart.
-import { watch } from 'node:fs';
+// The only part of agent-room that never reloads: arguments, the server's rooms and each room's
+// input loop (terminal or screen), /reload, /quit, /shutdown and /restart. Everything else is in
+// ui.mjs (and what it loads), which /reload swaps between rounds.
+// One process serves several rooms, one per folder (identified by its real path). Each room's
+// conversation lives in its own `ctx`, with its own input queue, so it carries over a reload and a
+// round in one room never waits for another. Keep this file small: changes here need a restart.
+import { realpathSync, watch } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 const { values } = parseArgs({
@@ -21,6 +22,8 @@ const { values } = parseArgs({
     dev: { type: 'boolean' },
     node: { type: 'string' },
     peer: { type: 'string', multiple: true },
+    // Used by Restart only: another room to bring back, as JSON { cwd, agents, worker, reopen? }.
+    room: { type: 'string', multiple: true },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -35,100 +38,182 @@ if ((peers.length && !values.node) || peers.some((p) => !p.name)) {
   console.error('--peer needs --node, and is written --peer <name>=http://<address>:<port>');
   process.exit(1);
 }
+let restored;
+try { restored = (values.room ?? []).map((r) => JSON.parse(r)); }
+catch { console.error('--room expects the JSON that Restart writes'); process.exit(1); }
 
-const ctx = {
-  cwd: resolve(values.cwd),
-  agentSpecs: values.agents,
-  workerSpec: values.worker,
-  port: Number(values.port),
-  noScreen: !!values['no-screen'],
-  open: !!values.open,
-  node: values.node ?? null,
-  peers,
-  state: { transcript: [], seen: new Map() },
-  sessions: new Map(),
-};
-
-// Imports a fresh ui.mjs (the query defeats the module cache); ui.load imports the rest with the
-// same tag. Nothing changes unless everything loads.
-let ui;
-async function load() {
-  const v = `?v=${Date.now()}`;
-  const next = await import(`./ui.mjs${v}`);
-  Object.assign(ctx, await next.load(ctx, v));
-  ui = next;
-}
-
-await load();
+// The latest loaded code (each room also keeps the version it last applied, in ctx.ui). The query
+// defeats the module cache; ui.load imports the rest with the same tag.
+let ui = await import(`./ui.mjs?v=${Date.now()}`);
 if (values.help) {
   console.log(ui.USAGE);
   process.exit(0);
 }
-// The room's input. Terminal mode: lines typed here. UI mode: lines sent from the discussion
-// screen (ui.mjs passes them to ctx.say). Either way they are handled one at a time, so a line
-// sent during a round waits for it to end.
-let input;
-let prompt = () => {};
-let rl = null;
-if (ctx.noScreen) {
-  // Iterating the lines (rather than rl.question) buffers anything typed during a round,
-  // so it becomes the next round instead of being lost.
-  rl = createInterface({ input: process.stdin, output: process.stdout });
-  let inputOpen = true;
-  rl.on('close', () => { inputOpen = false; });
-  prompt = () => {
-    if (!inputOpen) return;
-    try { rl.setPrompt(ui.promptText()); } catch { rl.setPrompt('You › '); }
-    rl.prompt();
+
+const END = Symbol('end'); // pushed into a room's input when the whole server ends
+// The server: its rooms by real path, in the order they opened (the first is the launch room, the
+// only one that replicates with --node). The HTTP server itself is created by ui.mjs, in hub.server.
+const noScreen = !!values['no-screen'];
+const hub = { rooms: new Map(), noScreen, node: values.node ?? null, startedAt: new Date().toISOString(), addRoom };
+if (!noScreen) hub.shutdown = (confirmed) => endServer('shutdown', confirmed);
+
+// Opens a room in `folder`, or returns the one already open there: { ctx, existing }.
+async function addRoom(folder, { launch = false, agents, worker, reopen } = {}) {
+  ui.assertRoomCreation(hub);
+  const cwd = resolve(folder);
+  const key = realpathSync(cwd); // a symbolic link can't make a second room for the same folder
+  const had = hub.rooms.get(key);
+  if (had) return { ctx: had, existing: true };
+  const ctx = {
+    cwd, key, hub, launch, added: !launch,
+    agentSpecs: agents, workerSpec: worker,
+    port: Number(values.port), noScreen, open: launch && !!values.open,
+    node: launch ? values.node ?? null : null, peers: launch ? peers : [],
+    state: { transcript: [], seen: new Map() },
+    sessions: new Map(),
   };
-  input = rl;
-} else {
-  input = lineQueue();
-  ctx.say = (line) => input.push(line);
+  let ready;
+  ctx.ready = new Promise((resolve) => { ready = resolve; });
+  hub.rooms.set(key, ctx); // first, so a second request for this folder finds it
+  try {
+    Object.assign(ctx, await ui.load(ctx, `?v=${Date.now()}`));
+    ctx.ui = ui;
+    // Each log line says which room it is from (UI mode; the terminal mode has a single room).
+    const name = basename(key);
+    if (!noScreen) ctx.label = [...hub.rooms.values()].some((o) => o !== ctx && o.label === name) ? ctx.id : name;
+    if (noScreen) {
+      // Iterating the lines (rather than rl.question) buffers anything typed during a round,
+      // so it becomes the next round instead of being lost.
+      const rl = ctx.rl = createInterface({ input: process.stdin, output: process.stdout });
+      let inputOpen = true;
+      rl.on('close', () => { inputOpen = false; });
+      // /quit typed during a round: it waits its turn, but not indefinitely (see ui.quitRequested).
+      rl.on('line', (l) => { if (['/quit', '/shutdown'].includes(l.trim())) ctx.ui.quitRequested(ctx); });
+      ctx.prompt = () => {
+        if (!inputOpen) return;
+        try { rl.setPrompt(ctx.ui.promptText()); } catch { rl.setPrompt('You › '); }
+        rl.prompt();
+      };
+      ctx.input = rl;
+    } else {
+      ctx.prompt = () => {};
+      ctx.input = lineQueue();
+      // Seen as they arrive, not when their turn comes: Restart and Shutdown start at once (every
+      // room then ends after its round in progress), and Quit room can't wait indefinitely.
+      ctx.say = (line, confirmed = false) => {
+        const command = line.trim();
+        if (command === '/restart' || command === '/shutdown') return endServer(command.slice(1), confirmed);
+        if (command === '/quit') ctx.ui.quitRequested(ctx);
+        ctx.input.push(line);
+      };
+    }
+    await ui.start(ctx);
+  } catch (err) {
+    hub.rooms.delete(key);
+    ctx.rl?.close();
+    ready();
+    throw err;
+  }
+  // --reopen <discussion> (or a restored room's): start in that discussion, as /reopen would.
+  if (reopen) { try { await ctx.ui.handleLine(`/reopen ${reopen}`, ctx); } catch (err) { report(ctx, `✗ ${err.message}\n`); } }
+  ctx.done = runRoom(ctx);
+  ready();
+  return { ctx, existing: false };
 }
 
-// Messages from this shell: on the screen too, when the loaded code can still show them.
-const report = (text) => { try { ui.note(ctx, text, true); } catch { console.log(text); } };
+// Messages from this shell: on the room's screen too, when its loaded code can still show them.
+const report = (ctx, text) => { try { ctx.ui.note(ctx, text, true); } catch { console.log(text); } };
+
+// The room's input, one line at a time: a line sent during a round waits for it to end.
+async function runRoom(ctx) {
+  ctx.prompt();
+  for await (const raw of ctx.input) {
+    if (raw === END) break;
+    if (raw?.reload) { await applyReload(ctx, raw); ctx.prompt(); continue; }
+    const line = raw.trim();
+    if (line === '/quit' || (noScreen && line === '/shutdown')) break;
+    // UI mode: Restart and Shutdown act on the whole server, after every room's round in progress.
+    if (!noScreen && (line === '/restart' || line === '/shutdown')) { endServer(line.slice(1)); continue; }
+    if (line === '/reload') await reloadAll(ctx);
+    else {
+      // A bug in the loaded code must not end the room: report it, so it can be fixed and reloaded.
+      try { await ctx.ui.handleLine(line, ctx); } catch (err) { report(ctx, `✗ ${err.stack}\n`); }
+    }
+    ctx.prompt();
+  }
+  // Its running programs are stopped before its state goes (anything not stopped cleanly is reported).
+  try { await ctx.ui.stopRoom(ctx); } catch (err) { console.log(`✗ ${err.message}`); }
+  try { await ctx.ui.ended(ctx, hub.ending === 'restart'); } catch {}
+  ctx.rl?.close();
+  hub.rooms.delete(ctx.key);
+  if (!noScreen) console.log(`[${ctx.label}] Room ended.`);
+  if (!hub.ending && !hub.rooms.size) finish('shutdown', [ctx]); // the last room: the server ends too
+}
+
+// Shutdown server and Restart: every room ends after its round in progress (for at most
+// ui.QUIT_GRACE_MS, then its agents are stopped), then the process.
+function endServer(kind, confirmed = false) {
+  if (hub.ending) return;
+  const warning = ui.serverEndWarning(hub);
+  if (warning && !confirmed) return warning;
+  hub.ending = kind;
+  const closing = [...hub.rooms.values()];
+  Promise.all(closing.map(async (ctx) => {
+    await ctx.ready;
+    if (!ctx.done) return;
+    ctx.input.push(END);
+    ctx.ui.quitRequested(ctx);
+    await ctx.done;
+  })).then(() => finish(kind, closing));
+}
+
+async function finish(kind, rooms) {
+  hub.ending ??= kind;
+  // "Server ended." is the log's last line after a normal end: the Dock app shows the log otherwise.
+  let last = noScreen ? 'Room ended.' : 'Server ended.';
+  if (kind === 'restart') {
+    try { await ui.restart(hub, rooms, values); last = 'Restarting: a new process takes over the server.'; }
+    catch (err) { last = `✗ Restart failed, the server has ended: ${err.message}`; }
+  }
+  console.log(last);
+  // In UI mode the viewer server is what kept the process running, so end it explicitly.
+  process.exit(0);
+}
+
+// /reload: the code is imported once, then each room applies it between its own rounds.
+async function reloadAll(from) {
+  const v = `?v=${Date.now()}`;
+  let next;
+  try { next = await import(`./ui.mjs${v}`); }
+  catch (err) { for (const ctx of from ? [from] : hub.rooms.values()) report(ctx, `✗ Reload failed, still running the previous code: ${err.message}\n`); return; }
+  ui = next;
+  for (const ctx of hub.rooms.values()) {
+    if (ctx === from) await applyReload(ctx, { reload: v, ui: next });
+    else ctx.input.push({ reload: v, ui: next });
+  }
+}
+async function applyReload(ctx, { reload: v, ui: next }) {
+  try {
+    Object.assign(ctx, await next.load(ctx, v));
+    ctx.ui = next;
+    await next.reloaded(ctx);
+  } catch (err) {
+    report(ctx, `✗ Reload failed, still running the previous code: ${err.message}\n`);
+  }
+}
 
 // A start that can't go on (a taken port with --peer, a bad --node or --peer) ends with its reason.
-try { await ui.start(ctx); } catch (err) { console.error(`✗ ${err.message}`); process.exit(1); }
-// --reopen <discussion>: start in that discussion, as /reopen would (a restart passes the one in use).
-if (values.reopen) { try { await ui.handleLine(`/reopen ${values.reopen}`, ctx); } catch (err) { report(`✗ ${err.message}\n`); } }
-if (values.dev && !ctx.noScreen) watchSource();
-prompt();
-let restart = false;
-for await (const raw of input) {
-  const line = raw.trim();
-  if (line === '/quit') break;
-  // UI mode: a new process takes over this room's port, so the page and the Dock app keep their address.
-  if (line === '/restart' && !ctx.noScreen) { restart = true; break; }
-  if (line === '/reload') {
-    try {
-      await load();
-      await ui.reloaded(ctx);
-    } catch (err) {
-      report(`✗ Reload failed, still running the previous code: ${err.message}\n`);
-    }
-  } else {
-    // A bug in the loaded code must not end the room: report it, so it can be fixed and reloaded.
-    try { await ui.handleLine(line, ctx); } catch (err) { report(`✗ ${err.stack}\n`); }
-  }
-  prompt();
+try {
+  await addRoom(values.cwd, { launch: true, agents: values.agents, worker: values.worker, reopen: values.reopen });
+} catch (err) { console.error(`✗ ${err.message}`); process.exit(1); }
+for (const r of restored) {
+  try { await addRoom(r.cwd, { agents: r.agents, worker: r.worker, reopen: r.reopen }); }
+  catch (err) { console.error(`✗ The room in ${r.cwd} could not be restored: ${err.message}`); }
 }
-try { await ui.ended(ctx, restart); } catch {}
-rl?.close();
-// "Room ended." is the log's last line after a normal Quit: the Dock app shows the log otherwise.
-let last = 'Room ended.';
-if (restart) {
-  try { await ui.restart(ctx, values); last = 'Restarting: a new process takes over this room.'; }
-  catch (err) { last = `✗ Restart failed, the room has ended: ${err.message}`; }
-}
-console.log(last);
-// In UI mode the viewer server is what kept the process running, so end it explicitly.
-process.exit(0);
+if (values.dev && !noScreen) watchSource();
 
-// --dev: saving a module in src/ or a rulebook queues /reload (after a round in progress, like the
-// button); an editor's burst of events makes one reload. This file can't reload: it asks for Restart.
+// --dev: saving a module in src/ or a rulebook reloads every room (after a round in progress, like
+// the button); an editor's burst of events makes one reload. This file can't reload: it asks for Restart.
 function watchSource() {
   let timer = null;
   const files = new Set();
@@ -136,8 +221,8 @@ function watchSource() {
     files.add(file);
     clearTimeout(timer);
     timer = setTimeout(() => {
-      if (files.has('cli.mjs')) report('cli.mjs changed: Restart to apply it (Reload can\'t).\n');
-      if ([...files].some((f) => f !== 'cli.mjs')) input.push('/reload');
+      if (files.has('cli.mjs')) for (const ctx of hub.rooms.values()) report(ctx, 'cli.mjs changed: Restart to apply it (Reload can\'t).\n');
+      if ([...files].some((f) => f !== 'cli.mjs')) reloadAll(null);
       files.clear();
     }, 300);
   };

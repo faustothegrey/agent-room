@@ -26,21 +26,28 @@ const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const at = (cwd) => (typeof cwd === 'function' ? cwd() : cwd);
 
 // Run a command with `input` on stdin; resolve with stdout, reject on non-zero exit or timeout.
-export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+// `procs` (a Set, optional) holds the process while it runs, so its room can stop it (Quit room).
+export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOUT_MS, procs } = {}) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn(command, args, { cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    procs?.add(proc);
+    // Keep the group tracked even if the provider exits before its commands.
+    proc.stopGroup = (signal) => { try { process.kill(-proc.pid, signal); } catch (e) { if (e.code !== 'ESRCH') throw e; } };
+    proc.groupAlive = () => { try { process.kill(-proc.pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
+    proc.on('close', () => { if (!proc.groupAlive()) procs?.delete(proc); });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
-      proc.kill('SIGKILL');
+      proc.stopGroup('SIGKILL');
       reject(new Error(`${command} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
     proc.stdout.on('data', (d) => { stdout += d; });
     proc.stderr.on('data', (d) => { stderr += d; });
-    proc.on('error', (err) => { clearTimeout(timer); reject(err); });
-    proc.on('close', (code) => {
+    proc.on('error', (err) => { clearTimeout(timer); procs?.delete(proc); reject(err); });
+    proc.on('close', (code, signal) => {
       clearTimeout(timer);
       if (code === 0) resolve(stdout);
+      else if (code === null) reject(new Error(`${command} was stopped (${signal})`));
       else reject(new Error(`${command} exited with code ${code}: ${stderr.trim().slice(-500)}`));
     });
     proc.stdin.end(input);

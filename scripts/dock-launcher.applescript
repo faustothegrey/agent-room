@@ -1,9 +1,9 @@
 -- Compile with the README commands (osacompile -s: a stay-open app). This launcher intentionally
--- uses this project only. It serves nothing itself: if agent-room's process (its web server,
--- conversation and agents) answers on port 5566 it opens that page; otherwise it starts the
--- process with npm start and the Mac/charon replication flags. Then it follows the heartbeat (/__health):
--- clicking the Dock icon again reopens the page, Quit stops the process, and the app quits once
--- the process has stopped.
+-- uses this project only. It serves nothing itself: if agent-room's server (one process for all its
+-- rooms) answers on port 5566 it opens its first room's page; otherwise it starts the server with
+-- npm start and the Mac/charon replication flags. Then it follows the heartbeat (/__health):
+-- clicking the Dock icon again reopens the page, Quit shuts the server down (every room), and the
+-- app quits once the server has stopped.
 -- Globals, not properties: an applet saves properties into itself, which would break its signature.
 global roomUrl, misses, startedHere
 
@@ -11,7 +11,7 @@ on logFile()
     return (POSIX path of (path to library folder from user domain)) & "Logs/agent-room.log"
 end logFile
 
--- Whether an agent-room room answers at base (http://127.0.0.1:<port>).
+-- Whether an agent-room server answers at base (http://127.0.0.1:<port>).
 on answers(base)
     try
         return (do shell script "/usr/bin/curl -fsm 2 " & quoted form of (base & "/__health")) contains "\"app\":\"agent-room\""
@@ -50,8 +50,8 @@ on run
 end run
 
 -- The heartbeat, every 3 seconds. Five missed beats in a row (about 10 seconds, longer than a
--- Restart takes) mean the room has stopped; if this app started it and its log doesn't end with
--- a normal Quit, the log's tail is shown.
+-- Restart takes) mean the server has stopped; if this app started it and its log doesn't end with
+-- a normal end, the log's tail is shown.
 on idle
     if roomUrl is missing value then return 5
     if answers(roomUrl) then
@@ -62,23 +62,44 @@ on idle
     if misses < 5 then return 2
     set roomUrl to missing value
     if startedHere then
-        if (do shell script "/usr/bin/tail -n 1 " & quoted form of logFile()) is not "Room ended." then showLog("Agent Room ended with an error")
+        if (do shell script "/usr/bin/tail -n 1 " & quoted form of logFile()) is not "Server ended." then showLog("Agent Room ended with an error")
     end if
     quit
 end idle
 
--- Clicking the Dock icon while the room runs reopens its page.
+-- Clicking the Dock icon while the server runs reopens its first room's page.
 on reopen
     try
         if roomUrl is not missing value then do shell script "/usr/bin/open " & quoted form of (roomUrl & "/__room")
     end try
 end reopen
 
--- Quitting the app quits the room the way its page does (after a round in progress), wherever
--- the room was started.
+-- Keep the HTTP status as well as the body: a busy server returns its warning with 409.
+on shutdownRequest(endpoint)
+    return do shell script "/usr/bin/curl -sS -m 5 -w '\n%{http_code}' -H 'Content-Type: application/json' -H " & quoted form of ("Origin: " & roomUrl) & " -d '{}' " & quoted form of (roomUrl & endpoint)
+end shutdownRequest
+
+-- A busy server must be confirmed before anything stops. Cancel (including Escape) returns
+-- without continuing quit, so both this stay-open launcher and the server keep running.
 on quit
-    try
-        if roomUrl is not missing value then do shell script "/usr/bin/curl -fsm 5 -H 'Content-Type: application/json' -H " & quoted form of ("Origin: " & roomUrl) & " -d '{\"text\":\"/quit\"}' " & quoted form of (roomUrl & "/__say")
-    end try
+    if roomUrl is not missing value then
+        try
+            set response to shutdownRequest("/__shutdown")
+            set responseCode to last paragraph of response
+            if responseCode is "409" then
+                set warningText to text 1 thru -5 of response
+                display alert "Shutdown server?" message warningText buttons {"Cancel", "Shutdown"} default button "Cancel" cancel button "Cancel" as warning
+                set response to shutdownRequest("/__shutdown?confirmed=yes")
+                set responseCode to last paragraph of response
+            end if
+            if responseCode is not "202" then
+                display alert "Server did not shut down" message response as warning
+                return
+            end if
+        on error errorText number errorNumber
+            if errorNumber is not -128 then display alert "Could not shut down the server" message errorText as warning
+            return
+        end try
+    end if
     continue quit
 end quit
