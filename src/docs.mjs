@@ -442,6 +442,7 @@ function showTab(name) {
   $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work';
   $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work');
   if (name === 'work') $('tab-work').classList.remove('news');
+  updateReplicaView();
   (name === 'work' ? wbox : box).focus();
 }
 $('tab-talk').onclick = () => showTab('talk');
@@ -462,7 +463,6 @@ function setWorkerInfo(info) {
 }
 function setWorking(name) {
   localWorking = name; updateReplicaView();
-  work.think(name ? '… ' + name + ' is working' : null);
   $('whint').textContent = name ? 'The worker is busy: what you send now waits for it to finish.' : '';
   $('tab-work').textContent = name ? 'Worker …' : 'Worker';
 }
@@ -602,8 +602,8 @@ function updateReplicaHeader() {
 function updateReplicaView() {
   updateReplicaHeader();
   if (room) { $('disc').textContent = viewing ? viewing.title : room.discussion; $('disc').dataset.active = !viewing && room.active ? 'true' : 'false'; }
-  // Under the title, states the page already shows elsewhere: paused, who is thinking, your turn.
-  const state = !room ? '' : viewing ? 'read-only' : room.paused ? 'paused' : localThinking ? localThinking + ' is thinking' : room.started && yourTurn ? 'your turn' : '';
+  // Under the title, show the activity of the selected tab.
+  const state = tab === 'work' ? (localWorking ? localWorking + ' is working' : 'idle') : !room ? '' : viewing ? 'read-only' : room.paused ? 'paused' : localThinking ? localThinking + ' is thinking' : room.started && yourTurn ? 'your turn' : '';
   $('disc-status').textContent = state;
   const panel = $('remote-view'); panel.hidden = !viewing; panel.replaceChildren();
   $('composer').hidden = !viewing && !localInput;
