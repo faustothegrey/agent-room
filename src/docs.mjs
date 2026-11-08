@@ -244,8 +244,8 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 }
 .discussion-lines { margin: .4rem 0; min-width: 0; flex: 1; }
 .discussion-lines > summary { cursor: pointer; padding: .4rem 0; overflow-wrap: anywhere; }
-.discussion-lines .line-row { padding: .35rem .5rem .35rem 1rem; display: flex; gap: .6rem; align-items: center; justify-content: space-between; font-size: .85rem; }
-.discussion-lines .line-row span { overflow-wrap: anywhere; }
+.line-row { padding: .35rem .5rem .35rem 1rem; display: flex; gap: .6rem; align-items: center; justify-content: space-between; font-size: .85rem; }
+.line-row span { overflow-wrap: anywhere; }
 .peer-row { padding: .35rem 0; font-size: .85rem; overflow-wrap: anywhere; }
 .peer-dot { color: #888; } .peer-dot.up { color: #22c55e; } .peer-dot.down { color: #ef4444; }
 #remote-view { border-bottom: 1px solid var(--line); padding-bottom: .5rem; margin-bottom: .5rem; font-size: .85rem; }
@@ -300,6 +300,15 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #files .row { display: flex; align-items: center; gap: .3rem; }
 #files .row .entry { flex: 1; min-width: 0; }
 #files .row .reopen { font-size: .75rem; padding: .1rem .5rem; }
+#files .discussion-row { align-items: baseline; flex-wrap: wrap; }
+#files .discussion-row > .discussion-lines { flex-basis: 14rem; }
+.inline-folder { margin-left: 1rem; }
+.inline-folder > summary { cursor: pointer; padding: .3rem; }
+.local-label { color: var(--dim); font-size: .8rem; margin: .3rem 0; }
+.discussion-info { position: relative; display: inline-block; }
+.discussion-info > button { border: 0; background: none; color: #8fa8ee; padding: .15rem; }
+.info-detail { display: none; position: absolute; right: 0; top: 100%; z-index: 5; width: 15rem; padding: .5rem; background: Canvas; color: CanvasText; border: 1px solid var(--line); border-radius: 4px; font-size: .8rem; }
+.discussion-info:hover .info-detail, .discussion-info:focus-within .info-detail { display: block; }
 #files .actions .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 .3rem; }
 #files h3 { color: var(--dim); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; margin: .9rem 0 .3rem; }
 #talk, #tab-talk { --accent: #3b82f6; --tint: #3b82f612; }
@@ -713,7 +722,7 @@ async function openFiles(group) {
     list.append(b);
   };
   const heading = (text) => list.append(el('h3', '', text));
-  const discussionRow = (name, path, id = replica?.own[name]?.discussion) => {
+  const storedDiscussionRow = (name, path, id = replica?.own[name]?.discussion) => {
     if (!replica) return entry('discussion', name, () => openFiles(path), path === room?.active ? 'in use' : '');
     const remote = replica.received.filter((l) => id ? l.discussion === id : l.local === name);
     const key = path || id;
@@ -732,6 +741,69 @@ async function openFiles(group) {
       const b = el('button', '', 'View'); b.onclick = () => viewRemote(line); row.append(b); details.append(row);
     }
     list.append(details);
+  };
+  const info = (text) => {
+    const wrap = el('span', 'discussion-info');
+    const b = el('button', '', 'ⓘ'); b.setAttribute('aria-label', text);
+    wrap.append(b, el('span', 'info-detail', text)); return wrap;
+  };
+  const localFile = async (file) => {
+    if (viewing) await viewRemote(null);
+    if (!viewing) post('__show', { file });
+  };
+  const inlineFiles = (parent, path) => {
+    const rel = files.filter((f) => f.startsWith(path + '/')).map((f) => f.slice(path.length + 1));
+    const folders = [...new Set(rel.filter((f) => f.includes('/')).map((f) => f.split('/')[0]))].sort();
+    for (const folder of folders) {
+      const nested = el('details', 'inline-folder'), key = path + '/' + folder;
+      nested.open = expandedLines.has(key);
+      nested.ontoggle = () => { if (nested.open) expandedLines.add(key); else expandedLines.delete(key); };
+      nested.append(el('summary', '', folder + '/')); inlineFiles(nested, key); parent.append(nested);
+    }
+    for (const name of rel.filter((f) => !f.includes('/'))) {
+      const file = path + '/' + name, b = el('button', 'entry file', name);
+      b.onclick = () => localFile(file);
+      if (file === doc) b.append(el('span', 'tag', 'shown'));
+      parent.append(b);
+    }
+    if (!rel.length) parent.append(el('span', 'hint', 'No files yet.'));
+  };
+  const receivedRow = (line, label) => {
+    const row = el('div', 'line-row'); row.append(el('span', '', label));
+    row.append(info(line.node + ' · round ' + line.round + ' · received ' + receivedTime(line.receivedAt) + ' · ' + line.node + ' ' + peerActivity(line.node)));
+    const b = el('button', '', 'View'); b.onclick = () => viewRemote(line); row.append(b); return row;
+  };
+  const discussionRow = (name, path) => {
+    // Archive/deferred retain their existing discussion pages and Make active action.
+    if (!path.startsWith('discussions/') || path.split('/').length !== 2)
+      return storedDiscussionRow(name, path);
+    const own = replica?.own[name];
+    const remote = replica?.received.filter((l) => own ? l.discussion === own.discussion : l.local === name) || [];
+    const details = el('details', 'discussion-lines');
+    details.open = expandedLines.has(path);
+    details.ontoggle = () => { if (details.open) expandedLines.add(path); else expandedLines.delete(path); };
+    details.append(el('summary', '', name + (path === room?.active ? ' · in use' : '')));
+    const row = el('div', 'row discussion-row'); row.append(details);
+    const label = (replica?.node || 'Local') + ' (this node) · ' + (own ? 'round ' + own.round : 'no saved round') +
+      (own ? Object.entries(own.sent).map(([n, sent]) => ' · ' + (sent ? 'sent to ' + n + ' ✓' : n + ' pending')).join('') : '');
+    row.append(info(label));
+    if (canAct) {
+      const paused = room.pausedSessions?.some((p) => p.name === name);
+      if (!(path === room.active && !room.started)) {
+        const b = el('button', 'reopen', 'Re-open'); b.title = REOPEN_TIP;
+        confirmed(b, () => send('/reopen ' + name), paused ? 'Click again: discard the saved Pause and start fresh' : null); row.append(b);
+      }
+      for (const [label, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
+        const b = el('button', 'reopen', label);
+        b.disabled = path === room.active || paused;
+        b.title = path === room.active ? 'The discussion in use cannot be moved' : paused ? 'Resume the paused discussion before moving it' : 'Move the whole discussion into ' + target + '/';
+        b.onclick = () => send('/move ' + name + ' ' + target); row.append(b);
+      }
+    }
+    if (remote.length) details.append(el('div', 'local-label', 'Local · ' + (replica?.node || 'this node')));
+    inlineFiles(details, path);
+    for (const line of remote) details.append(receivedRow(line, 'Received · ' + line.node));
+    list.append(row);
   };
   const inUse = (path) => path === room?.active;
   const discussionsIn = (prefix) => [...new Set(files.filter((f) => f.startsWith(prefix + '/'))
@@ -812,17 +884,11 @@ async function openFiles(group) {
   for (const d of discussions) {
     const path = 'discussions/' + d;
     discussionRow(d, path);
-    // Re-open on the row itself, as on its page; not for the one in use before anything was said.
-    if (!canAct || (inUse(path) && !room.started)) continue;
-    const row = el('div', 'row'), b = el('button', 'reopen', 'Re-open');
-    b.title = REOPEN_TIP;
-    confirmed(b, () => send('/reopen ' + d), room.pausedSessions?.some((p) => p.name === d) ? 'Click again: discard the saved Pause and start fresh' : null);
-    row.append(list.lastChild, b);
-    list.append(row);
   }
   if (replica) {
-    const remoteOnly = new Map(replica.received.filter((l) => !l.local).map((l) => [l.discussion, l]));
-    for (const [id, line] of remoteOnly) discussionRow(line.name, null, id);
+    const remoteOnly = replica.received.filter((l) => !l.local && !discussions.some((d) => replica.own[d]?.discussion === l.discussion));
+    if (remoteOnly.length) heading('Received from peers · read-only');
+    for (const line of remoteOnly) list.append(receivedRow(line, line.name + ' · ' + line.node));
   }
   const top = files.filter((f) => f.startsWith('discussions/')).map((f) => f.slice('discussions/'.length));
   const own = [...new Set(top.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))].filter((n) => !isDiscussion(n) && !SECTIONS[n]).sort();

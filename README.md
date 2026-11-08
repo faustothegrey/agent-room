@@ -67,7 +67,7 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
 - **Explorer** and **Document** (right pane, two tabs): in **Explorer**, browse discussions (the one
   in use first), then choose a Markdown document, SVG drawing, transcript or other supported file:
   it opens in **Document**, which shows its path and the file. Each tab keeps its place when you
-  switch; Document is disabled until a file is chosen. Inside a discussion, each subfolder (`drawings/`,
+  switch; Document is disabled until a file is chosen. Expand a discussion to reach its files directly; each subfolder (`drawings/`,
   `transcripts/`, …) opens to its files. The chosen document stays selected when agents edit
   other files. Open documents check for changes every two seconds. Drag the divider to resize
   the panes. Browsing is available during agent turns and does not notify the agents.
@@ -134,12 +134,12 @@ and is not delivered to the agents.
     deferred/                  # postponed discussions, moved here whole
 ```
 
-**Archive and deferred.** A discussion's page in **Explorer** has **Archive** and **Defer**
+**Archive and deferred.** Each local discussion row in **Explorer** has **Archive** and **Defer**
 buttons (or `/move <folder-name> archive|deferred`), which move the whole discussion, documents and
 transcripts, into `discussions/archive/` or `discussions/deferred/`; **Make active**
 (`/move archive/<folder-name> active`) moves it back. `archive/` and `deferred/` are created when
 first needed, and always listed at the bottom of **Explorer**, after the active discussions.
-The discussion in use in this room can't be moved. New discussion names also skip names already
+Archive and Defer are disabled for the discussion in use and paused discussions, with the reason in a tooltip. New discussion names also skip names already
 taken in `archive/` and `deferred/`.
 
 **New discussion** (in the header's **Actions ▾** menu, or `/new`) works between rounds. It ends this
@@ -367,10 +367,9 @@ Transcripts are included even if the project's ignore rules exclude them. Failed
 labelled as failed. A saving error leaves discussion files in place. Sending runs in the
 background; unreachable peers retry with a delay capped at five minutes, including after restart.
 
-Received lines appear in **Explorer**, under their discussions. **View** opens their conversation and files read-only,
+Received-only discussions appear under **Received from peers · read-only** in **Explorer**, with the peer name and **View**. Mixed discussions keep one local row: expand it for **Local ·** files and **Received ·** versions with **View**. **View** opens that peer's conversation and files read-only,
 without starting or stopping agents. **Back to <node>'s line** returns to the local conversation when that discussion has a local line.
-The header keeps Usage, and Restart and Quit room in its menus; node lines are grouped under each
-discussion, and Peers… is in the room's **agent-room ▾** menu.
+The header keeps Usage, and Restart and Quit room in its menus; ⓘ on each row shows node details on hover or keyboard focus, and Peers… is in the room's **agent-room ▾** menu.
 New received rounds do not change an open View. Each browser pins its selected snapshot;
 Back releases it, and closing/reloading the page releases it after two minutes without renewal.
 Keep the page connected while reading: a suspended or disconnected page must select View again
