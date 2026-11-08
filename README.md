@@ -39,7 +39,7 @@ mode; `/docs` opens a document separately in the browser.
 ## Use the screen
 
 The header shows the full **root folder**, the selected discussion or **No discussion started**,
-the server's version, subscription usage, and **New room in folder…**. The version is the commit
+the server's version, subscription usage, and **Open room in folder…**. The version is the commit
 of agent-room's checkout when the server started and its start time, such as `4cb41bd · started
 12:28`, with `+` when the checkout had uncommitted changes (outside `discussions/`). After a
 Reload it adds `· reloaded 12:41 (commit)`, again with `+` if needed. Both are snapshots taken
@@ -191,10 +191,13 @@ room at once, is still possible, and nothing checks when a page connects. The li
 time you click the button. Rooms of other agent-room processes (another port, another machine) are
 not listed.
 
-**New room in folder…** opens the Mac folder chooser and adds a room in that folder to this
-server, in a new browser window. It uses saved agent defaults if present, otherwise the current
-room's choices. If the folder already has a room on this server, that room opens instead, unless a
-page already shows it (then the status line says so). Two rooms in the same Git repository would
+**Open room in folder…** opens the Mac folder chooser. If the folder already has a room on this
+server, that room opens in a new browser window, unless a page already shows it: then a dialog
+says it is already open in another window, and no window opens. If it has none, a dialog asks
+**Create a room in …?**: **Create room** adds the room to this server and opens it in a new window,
+**Cancel** creates nothing. The new room uses saved agent defaults if present, otherwise the current
+room's choices. Create room can only create the room for the folder the server's own chooser just
+returned (a one-time token), so a page can't name a folder. Two rooms in the same Git repository would
 share one worker worktree: the room opened later there gets no worker, and its Worker tab says why.
 Cancelling the chooser leaves everything as it was.
 

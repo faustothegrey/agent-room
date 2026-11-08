@@ -350,3 +350,23 @@ test('running rooms can be listed without changing the current conversation', as
     assert.equal(await failed.text(), 'Discovery failed');
   } finally { s.close(); }
 });
+
+test('Open room in folder…: the page\'s request reaches the room, and a refused token answers 400', async () => {
+  const bodies = [];
+  const screen = { clients: new Set(), transcript: [], newRoom: async (body) => {
+    bodies.push(body);
+    if (body.token) throw Object.assign(new Error('this folder choice has expired or was already used: choose the folder again.'), { status: 400 });
+    return { confirm: true, token: 't', folder: '/tmp/x' };
+  } };
+  const s = await serve(fixture(), screen);
+  try {
+    assert.deepEqual(await (await postFrom(s, '/__newroom', {})).json(), { confirm: true, token: 't', folder: '/tmp/x' });
+    const refused = await postFrom(s, '/__newroom', { token: 'made-up' });
+    assert.equal(refused.status, 400);
+    assert.match(await refused.text(), /choose the folder again/);
+    assert.equal((await postFrom(s, '/__newroom', { token: 't' }, { origin: 'https://evil.example' })).status, 403);
+    assert.deepEqual(bodies, [{}, { token: 'made-up' }]);
+  } finally {
+    s.close();
+  }
+});

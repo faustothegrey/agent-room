@@ -822,3 +822,46 @@ test('Quit room during a round: after the grace period the agent mid-turn is sto
     assert.equal(QUIT_GRACE_MS, 30000); // the real wait, stated in the README
   } finally { process.env.PATH = path; }
 });
+
+test('Open room in folder… opens an existing room, says when it is open elsewhere, and creates one only with its one-time token', async () => {
+  const { newRoom } = await import('../src/ui.mjs');
+  const { realpathSync } = await import('node:fs');
+  const [shown, hidden, fresh, other] = await Promise.all(['open-shown-', 'open-hidden-', 'open-fresh-', 'open-other-'].map(tmp));
+  const room = (cwd, id, pages) => ({ cwd, id, screen: { clients: new Set(Array(pages).fill(0).map((_, i) => i)) } });
+  const added = [];
+  const hub = { rooms: new Map([[realpathSync(shown), room(shown, 'shown-1', 1)], [realpathSync(hidden), room(hidden, 'hidden-1', 0)]]),
+    addRoom: async (folder) => {
+      const key = realpathSync(folder), had = hub.rooms.get(key);
+      if (had) return { ctx: had, existing: true };
+      const made = room(folder, `made-${added.push(folder)}`, 0);
+      hub.rooms.set(key, made);
+      return { ctx: made, existing: false };
+    } };
+  const ctx = { cwd: '/tmp', agentSpecs: 'claude:A', hub };
+  const choosing = (folder) => async () => folder;
+  // Cancelling the chooser.
+  assert.deepEqual(await newRoom(ctx, {}, choosing(null)), { cancelled: true });
+  // A room a page shows already: no window, and nothing created.
+  assert.deepEqual(await newRoom(ctx, {}, choosing(shown)), { url: '/r/shown-1/__room', folder: shown, existing: true, open: true });
+  // A room no page shows: opened as it is.
+  assert.deepEqual(await newRoom(ctx, {}, choosing(hidden)), { url: '/r/hidden-1/__room', folder: hidden, existing: true, open: false });
+  // No room yet: the first request only asks, with a token.
+  const asked = await newRoom(ctx, {}, choosing(fresh));
+  assert.deepEqual([asked.confirm, asked.folder, typeof asked.token], [true, fresh, 'string']);
+  assert.deepEqual(added, []);
+  // A made-up token, or a token that isn't a string, creates nothing.
+  for (const token of ['not-a-token', { folder: other }, '']) {
+    await assert.rejects(newRoom(ctx, { token }), (err) => err.status === 400 && /choose the folder again/.test(err.message));
+  }
+  assert.deepEqual(added, []);
+  // Create room: the chooser's folder, once; the same token again is refused.
+  const chooserNotRun = async () => { throw new Error('Create room must not run the chooser'); };
+  assert.deepEqual(await newRoom(ctx, { token: asked.token }, chooserNotRun), { url: '/r/made-1/__room', folder: fresh });
+  assert.deepEqual(added, [fresh]);
+  await assert.rejects(newRoom(ctx, { token: asked.token }), /choose the folder again/);
+  // Cancel in the dialog: the token is dropped and nothing is created.
+  const second = await newRoom(ctx, {}, choosing(other));
+  assert.deepEqual(await newRoom(ctx, { token: second.token, cancel: true }), { cancelled: true });
+  await assert.rejects(newRoom(ctx, { token: second.token }), /choose the folder again/);
+  assert.deepEqual(added, [fresh]);
+});

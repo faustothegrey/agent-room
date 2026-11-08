@@ -4,7 +4,7 @@
 // of a local module here would stay cached and never reload.)
 // What must survive a reload lives in `ctx`, owned by cli.mjs: the conversation state, the CLI
 // sessions, the transcript path and the viewer server.
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
@@ -37,11 +37,11 @@ changes still need /restart. Without --dev (node src/cli.mjs), only /reload does
 --port: the server's port (default 5566), on every address of this machine, so other devices on
 the LAN can open it too; if it is taken, any free port is used (with --peer, the server stops instead).
 One server runs several rooms, one per folder, each at /r/<room>/__room; /__room opens the first.
-New room in folder… (on the screen) adds a room to this server, or opens the folder's room if it has one.
+Open room in folder… (on the screen) opens the folder's room, or asks, then adds one to this server.
 --node NAME: replicate the launch room's (--cwd's) discussions under this node name: each round is saved as a Git
 commit in <root>/.agent-room/ (not the project's repository). --peer NAME=http://ADDRESS:PORT
 (repeatable): another node's server, whose launch room is paired with once (Discussions → Peers) and
-sent rounds. Rooms added with New room in folder… don't replicate.
+sent rounds. Rooms added with Open room in folder… don't replicate.
 The --cwd folder is the room's root. Opening it writes nothing: the first message starts a new
 discussion in DIR/discussions/<date>-<title>/ (its documents, drawings and transcripts/), unless
 /reopen <name> (or --reopen <name> at launch) picked an existing one first.
@@ -223,7 +223,7 @@ function wire(ctx) {
   ctx.screen.work = (text) => queueWork(ctx, text);
   // The screen's checkbox: applied at once, not queued behind a round, so it can stop the next summary.
   ctx.screen.setAuto = (on) => setAuto(ctx, on);
-  ctx.screen.newRoom = () => newRoom(ctx);
+  ctx.screen.newRoom = (body) => newRoom(ctx, body);
   ctx.screen.listRooms = async () => listRooms(ctx);
   ctx.screen.getSettings = () => ({ settings: currentSettings(ctx), defaults: readDefaults(), models: modelChoices(), started: !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length || !!ctx.screen.worker.length });
   ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
@@ -542,11 +542,11 @@ function newDiscussion(ctx) {
   note(ctx, `New discussion: your next message names it and starts it.${was ? ` To go back, /reopen ${was.name}.` : ''}`);
 }
 
-// ── New room in folder… ─────────────────────────────────────────
+// ── Open room in folder… ────────────────────────────────────────
 // The Mac's own folder chooser, run by the server because it needs the full path (a browser's
 // picker gives only the name). Resolves to the path, or null if the User cancelled.
 function chooseFolder() {
-  const script = 'POSIX path of (choose folder with prompt "Choose the folder for the new room")';
+  const script = 'POSIX path of (choose folder with prompt "Choose the folder of the room to open")';
   return new Promise((done, fail) => execFile('osascript', ['-e', 'activate', '-e', script], (err, stdout, stderr) => {
     if (err) return /-128/.test(stderr) ? done(null) : fail(new Error(`the folder chooser failed: ${stderr.trim() || err.message}`));
     const path = stdout.trim();
@@ -564,10 +564,6 @@ export function listRooms(ctx) {
 }
 const roomPath = (ctx) => `/r/${ctx.id}/`;
 
-// New room in folder…: a room in the chosen folder, added to this server, using saved defaults (or
-// this room's agents if none are saved). If that folder (by its real path) already has a room, that
-// room is the answer; when a page shows it already, no second window is opened for it.
-// Resolves to { url, folder }, { open: true, url, folder } or { cancelled: true }.
 export function assertRoomCreation(hub) {
   if (hub?.ending) throw new Error('The server is ending: no room can be created.');
 }
@@ -581,17 +577,41 @@ export function serverEndWarning(hub) {
     '\nRunning workers may be stopped at once, leaving partial changes. Continue?';
 }
 
-async function newRoom(ctx) {
+// Open room in folder…: the folder's room on this server, or (once the page has asked the User) a
+// new room there, using saved defaults (or this room's agents if none are saved).
+// The first request ({}) runs the chooser and creates nothing. It resolves to { cancelled: true };
+// { url, folder, existing: true, open } when the folder (by its real path) has a room, `open` when a
+// page shows it already; or { confirm: true, token, folder } when it has none. The second request
+// ({ token }, or { token, cancel: true }) creates the room for that folder, or drops it: a token
+// works once and names only a folder this room's chooser returned, so a page can't name a folder.
+export async function newRoom(ctx, body = {}, choose = chooseFolder) {
   assertRoomCreation(ctx.hub);
-  const folder = await chooseFolder();
+  const tokens = ctx.roomTokens ??= new Map();
+  if (body?.token !== undefined) {
+    const folder = typeof body.token === 'string' ? tokens.get(body.token) : undefined;
+    if (!folder) throw Object.assign(new Error('this folder choice has expired or was already used: choose the folder again.'), { status: 400 });
+    tokens.delete(body.token);
+    if (body.cancel) return { cancelled: true };
+    return openRoom(ctx, folder);
+  }
+  const folder = await choose();
   if (!folder) return { cancelled: true };
   if (!ctx.hub?.addRoom) throw new Error('this room can\'t open another one.');
+  const had = ctx.hub.rooms.get(realpathSync(folder));
+  if (had) return { url: roomPath(had) + '__room', folder: had.cwd, existing: true, open: had.screen?.clients.size > 0 };
+  const token = randomBytes(16).toString('hex');
+  tokens.set(token, folder);
+  return { confirm: true, token, folder };
+}
+
+async function openRoom(ctx, folder) {
   const defaults = readDefaults();
   const { ctx: room, existing } = await ctx.hub.addRoom(folder, {
     agents: defaults ? defaults.agents.map(specFor).join(',') : ctx.agentSpecs,
     worker: defaults ? specFor(defaults.worker) : ctx.workerSpec ?? 'claude:Worker' });
   const url = roomPath(room) + '__room';
-  if (existing) return { url, folder: room.cwd, existing: true, open: room.screen.clients.size > 0 };
+  // Added meanwhile (another page's Create room): that room, as the first request would have said.
+  if (existing) return { url, folder: room.cwd, existing: true, open: room.screen?.clients.size > 0 };
   log(ctx, `_(opened a new room in ${room.cwd})_\n\n`);
   out(ctx, `New room in ${room.cwd}: ${url}`);
   return { url, folder: room.cwd };
@@ -655,7 +675,7 @@ export async function start(ctx) {
   const base = await viewerUrl(ctx);
   const screenUrl = `${base.slice(0, -1)}${roomPath(ctx)}__room`;
   out(ctx, `Room screen: ${screenUrl}`);
-  // A room added later (New room in folder…, or brought back by Restart) opens in its own window.
+  // A room added later (Open room in folder…, or brought back by Restart) opens in its own window.
   if (ctx.added) return;
   // The server's address, which opens its first room: what the Dock app reads from the log.
   console.log(`Discussion screen: ${base}__room${tty || ctx.open ? ' (opening it in your browser)' : ''}`);

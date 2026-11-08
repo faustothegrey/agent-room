@@ -152,6 +152,10 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #room-controls > b { font-size: .85rem; letter-spacing: -.02em; }
 #room-location { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .15rem; }
 #newroom, #switchroom { font-size: .75rem; white-space: nowrap; }
+#ask { max-width: min(32rem, 90vw); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.2rem; }
+#ask::backdrop { background: #0006; }
+#ask-text { margin: 0 0 1rem; overflow-wrap: anywhere; }
+#ask-buttons { display: flex; justify-content: flex-end; gap: .5rem; }
 #rooms { max-width: min(28rem, 80vw); font: inherit; font-size: .75rem; }
 #folder { font-family: ui-monospace, monospace; font-size: .75rem; overflow-wrap: anywhere; line-height: 1.35; }
 #disc { font-size: .75rem; color: var(--dim); line-height: 1.35; }
@@ -272,7 +276,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .msg.error { border-left-color: #ef4444; }
 .tools { flex-wrap: wrap; }
 </style></head><body>
-<header id="header"><div id="room-controls"><b>agent-room</b><button id="switchroom">Switch room…</button><select id="rooms" aria-label="Running rooms" hidden></select><button id="newroom" title="Choose a folder and open a new room there, in a new window. This room keeps running.">New room in folder…</button></div><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="server"><i id="beat"></i><span><span id="server-text">Connecting to the server…</span><span id="replica-header"></span></span></span><span id="disc" title="The active discussion"></span><button id="pause-discussion" hidden>Pause discussion</button><button id="back-to" hidden title="Re-open the discussion you were in: a fresh session there, from its handoff"></button><span id="code"></span></div><span id="gauges" aria-label="Subscription usage"></span></header>
+<header id="header"><div id="room-controls"><b>agent-room</b><button id="switchroom">Switch room…</button><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button></div><div id="room-location"><span id="folder" title="The room's root folder"></span><span id="server"><i id="beat"></i><span><span id="server-text">Connecting to the server…</span><span id="replica-header"></span></span></span><span id="disc" title="The active discussion"></span><button id="pause-discussion" hidden>Pause discussion</button><button id="back-to" hidden title="Re-open the discussion you were in: a fresh session there, from its handoff"></button><span id="code"></span></div><span id="gauges" aria-label="Subscription usage"></span></header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
   <div class="view" id="talk">
@@ -883,7 +887,7 @@ $('switchroom').onclick = async () => {
     }
     menu.hidden = false;
     menu.focus();
-    if (!rooms.some((r) => !r.current)) status('No other rooms are open on this server: New room in folder… adds one.');
+    if (!rooms.some((r) => !r.current)) status('No other rooms are open on this server: Open room in folder… adds one.');
   } catch (err) { status('✗ Switch room: ' + err.message, true); }
   finally { button.disabled = false; }
 };
@@ -898,17 +902,46 @@ $('rooms').onchange = () => {
   menu.hidden = true;
   status(win ? 'Opened the room in a new window. This window stays on its room.' : 'The browser blocked the new window; open ' + url.href + ' yourself.', !win);
 };
-// New room in folder…: the server shows the Mac's folder chooser and adds a room there (or finds the
-// folder's room, if it has one).
+// A modal question drawn in the page. buttons: [label, act]; act runs inside the click (so it may
+// open a window) and the promise resolves to what it returns (undefined for Escape or no act).
+function ask(text, buttons) {
+  const dialog = $('ask');
+  $('ask-text').textContent = text;
+  return new Promise((done) => {
+    $('ask-buttons').replaceChildren(...buttons.map(([label, act]) => {
+      const button = document.createElement('button');
+      button.textContent = label;
+      button.onclick = () => { dialog.onclose = null; dialog.close(); done(act ? act() : undefined); };
+      return button;
+    }));
+    dialog.onclose = () => done(undefined);
+    dialog.showModal();
+    $('ask-buttons').lastChild.focus();
+  });
+}
+const newWindow = () => window.open('', '_blank', 'width=' + window.outerWidth + ',height=' + window.outerHeight);
+// Open room in folder…: the server shows the Mac's folder chooser. A folder whose room exists opens
+// it in a new window; one without a room is created only after the page has asked.
 $('newroom').onclick = async () => {
-  // Opened during the click, so the browser doesn't block it; pointed at the new room below.
-  const win = window.open('', '_blank', 'width=' + window.outerWidth + ',height=' + window.outerHeight);
+  // Opened during the click, so the browser doesn't block it; pointed at the room below.
+  let win = newWindow();
   if (win) win.document.body.textContent = 'Choose a folder in the window that has just opened…';
-  const res = await post('__newroom', {});
-  if (!res.ok) { win?.close(); return status('✗ New room: ' + await res.text(), true); }
-  const r = await res.json();
+  let res = await post('__newroom', {});
+  if (!res.ok) { win?.close(); return status('✗ Open room: ' + await res.text(), true); }
+  let r = await res.json();
   if (r.cancelled) { win?.close(); return; }
-  if (r.open) { win?.close(); return status('The room in ' + r.folder + ' is already open in another window.'); }
+  if (r.open) { win?.close(); return ask('The room in ' + r.folder + ' is already open in another window.', [['OK']]); }
+  if (r.confirm) {
+    win?.close();
+    const chosen = await ask('Create a room in ' + r.folder + '?', [['Cancel'], ['Create room', () => ({ win: newWindow() })]]);
+    if (!chosen) { post('__newroom', { token: r.token, cancel: true }).catch(() => {}); return; }
+    win = chosen.win;
+    if (win) win.document.body.textContent = 'Creating the room in ' + r.folder + '…';
+    res = await post('__newroom', { token: r.token });
+    if (!res.ok) { win?.close(); return status('✗ Open room: ' + await res.text(), true); }
+    r = await res.json();
+    if (r.open) { win?.close(); return ask('The room in ' + r.folder + ' is already open in another window.', [['OK']]); }
+  }
   if (win) win.location = new URL(r.url, location.href).href;
   status((r.existing ? 'Opened the room already in ' : 'Opened a new room in ') + r.folder + (win ? '' : ' at ' + r.url + ' (the browser blocked the new window)') + '. This room keeps running.');
 };
@@ -1032,7 +1065,7 @@ async function heartbeat() {
     el.dataset.state = 'down';
     // 404: the server answers, but this room isn't on it (quit, or not brought back).
     text.textContent = gone ? 'This room is not open on the server' : restarting ? 'Restarting the server…' : ended ? 'Server stopped' : 'Server not responding';
-    el.title = gone ? 'Open it again with New room in folder… from another room.' : 'Start it again from the Dock app (or npm start): this page reloads when it answers.';
+    el.title = gone ? 'Open it again with Open room in folder… from another room.' : 'Start it again from the Dock app (or npm start): this page reloads when it answers.';
     return;
   }
   if (serverPid && h.pid !== serverPid) return refreshPage();
@@ -1170,9 +1203,9 @@ function handleScreen(req, res, url, dir, screen) {
     readJson(req).then((body) => {
       if (url.pathname === '/__newroom') {
         if (!screen.newRoom) return send(409, 'text/plain; charset=utf-8', 'This room can\'t open another one.');
-        // Resolves when the User has chosen (or cancelled) and the new room answers: { url } or { cancelled }.
-        return screen.newRoom().then((r) => send(200, 'application/json', JSON.stringify(r)),
-          (err) => send(500, 'text/plain; charset=utf-8', err.message));
+        // {}: the chooser's answer; { token }: Create room for that answer (see newRoom in ui.mjs).
+        return screen.newRoom(body ?? {}).then((r) => send(200, 'application/json', JSON.stringify(r)),
+          (err) => send(err.status ?? 500, 'text/plain; charset=utf-8', err.message));
       }
       if (url.pathname === '/__show') {
         const file = typeof body?.file === 'string' && servable(dir, body.file, screen) ? body.file : null;
