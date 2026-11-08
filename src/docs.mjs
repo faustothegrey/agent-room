@@ -853,12 +853,21 @@ $('switchroom').onclick = async () => {
     if (!res.ok) throw new Error(await res.text());
     const rooms = await res.json();
     menu.replaceChildren(new Option('Choose a running room…', ''));
-    for (const room of rooms) {
-      const current = room.port === Number(location.port);
-      const label = room.root + ' · ' + (room.discussion || 'No discussion started') + ' · port ' + room.port + (current ? ' (current)' : '');
-      const option = new Option(label, String(room.port));
-      option.disabled = current;
-      menu.add(option);
+    // The same rooms twice: switch this tab, or open a new window. A room with a page open
+    // (on any device) is disabled in both, so the chooser doesn't open it twice.
+    for (const [mode, heading] of [['tab', 'Switch this tab to'], ['window', 'Open in new window']]) {
+      const group = document.createElement('optgroup');
+      group.label = heading;
+      for (const room of rooms) {
+        const current = room.port === Number(location.port);
+        const open = !current && room.pages > 0;
+        const pages = room.pages == null ? '' : ' · ' + room.pages + (room.pages === 1 ? ' page' : ' pages') + ' open';
+        const label = room.root + ' · ' + (room.discussion || 'No discussion started') + ' · port ' + room.port + pages + (current ? ' (current)' : open ? ' (open in another window)' : '');
+        const option = new Option(label, mode + ':' + room.port);
+        option.disabled = current || open;
+        group.append(option);
+      }
+      menu.append(group);
     }
     menu.hidden = false;
     menu.focus();
@@ -867,10 +876,16 @@ $('switchroom').onclick = async () => {
   finally { button.disabled = false; }
 };
 $('rooms').onchange = () => {
-  if (!$('rooms').value) return;
+  const menu = $('rooms'), [mode, port] = menu.value.split(':');
+  if (!port) return;
   const url = new URL('/__room', location.href);
-  url.port = $('rooms').value;
-  location.assign(url.href);
+  url.port = port;
+  if (mode === 'tab') return location.assign(url.href);
+  // Opened during the choice, so the browser doesn't block it; this window stays on its room.
+  const win = window.open(url.href, '_blank', 'width=' + window.outerWidth + ',height=' + window.outerHeight);
+  menu.value = '';
+  menu.hidden = true;
+  status(win ? 'Opened port ' + port + ' in a new window. This window stays on its room.' : 'The browser blocked the new window; open ' + url.href + ' yourself.', !win);
 };
 // New room in folder…: the room's server shows the Mac's folder chooser and starts the new room.
 $('newroom').onclick = async () => {
@@ -1070,7 +1085,7 @@ function handleScreen(req, res, url, dir, screen) {
   // The heartbeat: the page and the Dock app ask every few seconds; a new pid means a new process.
   if (url.pathname === '/__health') {
     send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, root: dir,
-      startedAt: screen.startedAt ?? null, discussion: screen.room?.active ?? null }));
+      startedAt: screen.startedAt ?? null, discussion: screen.room?.active ?? null, pages: screen.clients.size }));
     return true;
   }
   if (url.pathname === '/__rooms') {

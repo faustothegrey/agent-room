@@ -307,8 +307,23 @@ test('the heartbeat: /__health says it is agent-room, with its process, root and
   const s = await serve(dir, screen);
   const res = await s.get('/__health');
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { app: 'agent-room', pid: process.pid, root: dir, startedAt: '2026-11-03T10:00:00.000Z', discussion: 'discussions/2026-11-03-x' });
+  assert.deepEqual(await res.json(), { app: 'agent-room', pid: process.pid, root: dir, startedAt: '2026-11-03T10:00:00.000Z', discussion: 'discussions/2026-11-03-x', pages: 0 });
   s.close();
+});
+
+test('the heartbeat counts the room pages open on it, and stops counting a closed one', async () => {
+  const screen = { clients: new Set(), transcript: [] };
+  const s = await serve(fixture(), screen);
+  try {
+    const pages = async () => (await (await s.get('/__health')).json()).pages;
+    const controller = new AbortController();
+    const events = await fetch(s.base + '/__events', { signal: controller.signal });
+    await eventReader(events)();
+    assert.equal(await pages(), 1);
+    controller.abort();
+    for (let i = 0; i < 50 && screen.clients.size; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(await pages(), 0);
+  } finally { s.close(); }
 });
 
 test('a page learns its code version, so it can refresh after a reload that changed it', async () => {
@@ -321,7 +336,7 @@ test('a page learns its code version, so it can refresh after a reload that chan
 });
 
 test('running rooms can be listed without changing the current conversation', async () => {
-  const rooms = [{ port: 6010, root: '/tmp/other', discussion: 'discussions/example' }];
+  const rooms = [{ port: 6010, root: '/tmp/other', discussion: 'discussions/example', pages: 1 }];
   const screen = { clients: new Set(), transcript: [], listRooms: async () => rooms };
   const s = await serve(fixture(), screen);
   try {

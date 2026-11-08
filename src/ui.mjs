@@ -540,7 +540,7 @@ export async function listRooms() {
       if (!res.ok) return null;
       const h = await res.json();
       if (h.app === 'agent-room' && typeof h.root === 'string')
-        return { port, root: h.root, discussion: h.discussion ?? null };
+        return { port, root: h.root, discussion: h.discussion ?? null, pages: h.pages ?? null };
     } catch {} // Another service, or a room that has just stopped.
     return null;
   }));

@@ -159,9 +159,16 @@ that message creates the transcript. A worker-only session therefore has no save
 if the room ends before a discussion starts.
 
 **Switch room…** lists rooms already running on this machine, showing their root folders,
-active discussions and ports. Choose one to open it in the current tab; the room you leave keeps
-running with its conversation intact. The list refreshes each time you click the button.
-Discovery uses the system's `lsof` command and does not include rooms on other machines.
+active discussions, ports and how many room pages are open on each. Each room appears twice:
+under **Switch this tab to**, which opens it in the current tab (the room you leave keeps running
+with its conversation intact), and under **Open in new window**, which opens it in a new browser
+window and leaves this one on its own room, so several rooms can be worked on side by side.
+The current room is disabled and marked "(current)"; any other room with a page already open is
+disabled and marked "(open in another window)", so the chooser doesn't open a room twice. Pages
+on any device count (provisional). Opening a room's URL by hand, or two windows choosing the same
+room at once, is still possible, and nothing checks when a page connects. The list refreshes each
+time you click the button. Discovery uses the system's `lsof` command and does not include rooms
+on other machines.
 
 **New room in folder…** opens the Mac folder chooser and starts an independent room in a new
 browser window on its own port. It uses saved agent defaults if present, otherwise the current

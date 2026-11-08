@@ -700,14 +700,14 @@ test('room discovery finds independent listeners and excludes other HTTP service
   const { listRooms } = await import('../src/ui.mjs');
   const room = createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify({ app: 'agent-room', root: '/tmp/discovery-room', discussion: 'discussions/test' }));
+    res.end(JSON.stringify({ app: 'agent-room', root: '/tmp/discovery-room', discussion: 'discussions/test', pages: 2 }));
   });
   const other = createServer((req, res) => res.end('{"app":"other"}'));
   try {
     await Promise.all([room, other].map((s) => new Promise((done) => s.listen(0, '127.0.0.1', done))));
     const rooms = await listRooms();
     assert.deepEqual(rooms.find((r) => r.port === room.address().port), {
-      port: room.address().port, root: '/tmp/discovery-room', discussion: 'discussions/test',
+      port: room.address().port, root: '/tmp/discovery-room', discussion: 'discussions/test', pages: 2,
     });
     assert.equal(rooms.some((r) => r.port === other.address().port), false);
   } finally {
