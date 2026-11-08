@@ -193,7 +193,10 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #monitor:not(:has(.quota)) { display: flex; align-items: center; gap: .3rem .8rem; white-space: nowrap; }
 #monitor:not(:has(.quota)) .updated { align-self: center; }
 #ask { max-width: min(32rem, 90vw); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.2rem; }
-#ask::backdrop { background: #0006; }
+#ask::backdrop, #peers::backdrop { background: #0006; }
+#peers { width: min(40rem, 90vw); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.2rem; }
+#peers h3 { color: var(--dim); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 .5rem; }
+#peers-buttons { display: flex; justify-content: flex-end; margin-top: 1rem; }
 #ask-text { margin: 0 0 1rem; overflow-wrap: anywhere; }
 #ask-buttons { display: flex; justify-content: flex-end; gap: .5rem; }
 #rooms { max-width: min(28rem, 80vw); font: inherit; font-size: .75rem; }
@@ -246,7 +249,9 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #remote-view p { margin: .2rem 0; } #remote-view .local-activity { color: var(--dim); font-size: .75rem; }
 .tools label { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); }
 #left { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-#tabs { display: flex; border-bottom: 1px solid var(--line); }
+#tabs, #subtabs { display: flex; border-bottom: 1px solid var(--line); }
+#subtabs { --accent: #3b82f6; --tint: #3b82f612; }
+.tab:disabled { opacity: .45; cursor: default; }
 .tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: .45rem .9rem; font-size: .9rem; }
 .tab.on { border-bottom-color: #3b82f6; font-weight: 600; }
 .tab.news::after { content: ' •'; color: #3b82f6; }
@@ -271,10 +276,11 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #right { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 #bar { display: flex; gap: .6rem; align-items: center; padding: .4rem .6rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
 #current { color: var(--dim); } #feed { margin-left: auto; }
-#pane { flex: 1; min-height: 0; }
+#pane, #docpane { flex: 1; min-height: 0; }
+#pane { overflow-y: auto; }
 #doc { border: 0; width: 100%; height: 100%; }
 .empty { display: grid; place-items: center; color: var(--dim); height: 100%; padding: 1rem; text-align: center; }
-#files { padding: 1rem; overflow-y: auto; height: 100%; }
+#files { padding: 1rem; }
 #files .entry { display: block; width: 100%; text-align: left; margin: 0; padding: .3rem .5rem; border: 0; border-radius: 4px; background: none; font-size: .9rem; }
 #files .entry:hover { background: #8882; }
 #files .entry::before { display: inline-block; width: 1.5em; }
@@ -315,7 +321,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .tools { flex-wrap: wrap; }
 </style></head><body>
 <header id="header">
-<div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b>agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><span id="folder" title="The room's root folder"></span><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog></div>
+<div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b>agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><span id="folder" title="The room's root folder"></span><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
 <div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span></div><details class="menu" id="actions-menu"><summary>Actions</summary><div class="menu-items"><button id="pause-discussion" hidden>Pause discussion</button><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button></span></div></details><label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label></div>
 <div id="server-zone" class="zone" aria-label="Server and monitoring"><div id="server-box"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></div><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span><button id="usage">Usage</button></div></div>
 </header>
@@ -357,12 +363,16 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </div>
 <div id="split" role="separator" aria-orientation="vertical" aria-label="Resize the chat and the document" tabindex="0" title="Drag to resize"></div>
 <div id="right">
-  <div id="bar"><button id="docs">Discussions</button><span id="current">No document shown.</span><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
-  <div id="pane"><div class="empty">The agents can talk without a document. Pick one with Discussions (or /docs) to watch it live.</div></div>
+  <div id="subtabs" role="tablist"><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button></div>
+  <div class="view" id="explorer"><div id="pane"></div></div>
+  <div class="view" id="document" hidden>
+    <div id="bar"><span id="current">No document shown.</span><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
+    <div id="docpane"></div>
+  </div>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
-const pane = $('pane'), box = $('box'), wbox = $('wbox');
+const pane = $('pane'), docpane = $('docpane'), box = $('box'), wbox = $('wbox');
 let replica = null, replicaOff = null, viewing = null, localMessages = [], localInput = true, localThinking = null, yourTurn = false, localWorking = null, viewExpired = false, viewNotice = null;
 // crypto.randomUUID exists only in secure contexts (HTTPS or localhost); over plain HTTP from another machine, use random bytes.
 const viewClient = crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
@@ -482,7 +492,18 @@ function setThinking(name) {
   talk.think(name ? '… ' + name + ' is thinking' : null);
 }
 const urlFor = (file) => file.split('/').map(encodeURIComponent).join('/');
+// The right pane's two subtabs. Each keeps its place while the other is shown: Explorer its folder
+// and scroll position, Document its file and scroll position. Document needs a file.
+function showSub(name) {
+  if (name === 'document' && !doc) return;
+  $('explorer').hidden = name !== 'explorer'; $('document').hidden = name !== 'document';
+  $('tab-explorer').classList.toggle('on', name === 'explorer'); $('tab-document').classList.toggle('on', name === 'document');
+}
+$('tab-explorer').onclick = () => showSub('explorer');
+$('tab-document').onclick = () => showSub('document');
+// A file chosen (here, on another page, or by the room) opens in Document, which comes to the front.
 function showDoc(file) {
+  const same = !!file && file === doc && !!docpane.firstChild;
   doc = file || null;
   // Send to agents, on a transcript of an earlier session (not this one): a normal message asking
   // the agents to read it as background; its old sessions are not resumed.
@@ -496,11 +517,11 @@ function showDoc(file) {
     send('Please read this transcript of an earlier session in full, as background for our discussion: ' + root + file);
   };
   $('current').textContent = doc ? doc : 'No document shown.';
-  if (!doc) return;
-  listed = null;
-  pane.innerHTML = '<iframe id="doc"></iframe>';
-  pane.firstChild.src = urlFor(doc);
+  $('tab-document').disabled = !doc;
+  if (!doc) { docpane.replaceChildren(); return showSub('explorer'); }
+  if (!same) { docpane.innerHTML = '<iframe id="doc"></iframe>'; docpane.firstChild.src = urlFor(doc); }
   document.title = doc + ' · agent-room';
+  showSub('document');
 }
 const post = (path, body) => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': viewClient }, body: JSON.stringify(body) });
 // Each browser owns a leased View pin, independent of other browsers and local agents.
@@ -510,6 +531,7 @@ async function viewRemote(line) {
   viewing = (await res.json()).viewing;
   viewExpired = false; viewNotice = null;
   updateReplicaView();
+  showDoc(null);
   talk.clear();
   if (viewing) {
     viewing.messages.forEach((m) => { if (!m.pass && !m.hidden) talk.add(bubble(m)); });
@@ -582,7 +604,17 @@ function showReplica(r) {
   replica = r;
   updateReplicaView();
   if (listed !== null) openFiles(listed);
+  $('peers-open').hidden = !replica && !replicaOff;
+  if ($('peers').open) showPeers();
 }
+// Peers… (room menu): the replication peers, with their reachability and Pair buttons.
+function showPeers() {
+  const list = $('peers-list');
+  list.replaceChildren();
+  appendPeers(list);
+}
+$('peers-open').onclick = () => { closeMenus(); showPeers(); $('peers').showModal(); };
+$('peers-close').onclick = () => $('peers').close();
 function appendPeers(list) {
   if (!replica && replicaOff) {
     const title = document.createElement('h3'); title.textContent = 'Peers'; list.append(title);
@@ -644,11 +676,12 @@ const expandedLines = new Set();
 let listed = null; // the list path shown in the pane ('' for the top), or null when a document is shown
 async function openFiles(group) {
   if (typeof group !== 'string') group = ''; // as a click handler, group is the event
+  const scroll = group === listed ? pane.scrollTop : 0; // drawn again in place: keep where you were
   listed = group;
-  $('feed').hidden = true;
   const files = await (await fetch('__files')).json();
   pane.innerHTML = '<div id="files"></div>';
   const list = pane.firstChild;
+  requestAnimationFrame(() => { pane.scrollTop = scroll; });
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
   // A row in the list: a discussion, a folder or a file, with an optional grey tag after its name.
   const entry = (kind, label, onclick, tag, title) => {
@@ -737,8 +770,9 @@ async function openFiles(group) {
     return;
   }
   // The top: active discussions, the room's own documents, then archive/ and deferred/.
-  const discussions = discussionsIn('discussions');
-  title('Discussions');
+  // The discussion in use first; the others newest first.
+  const active = room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
+  const discussions = discussionsIn('discussions').sort((a, b) => (b === active) - (a === active));
   if (canAct && room.pausedSessions?.length) {
     heading('Paused on this machine');
     for (const saved of room.pausedSessions) {
@@ -752,7 +786,7 @@ async function openFiles(group) {
   }
   if (!discussions.length && !replica?.received.some((l) => !l.local)) list.append(el('span', 'hint', room?.started ? '' : 'No active discussions: your first message starts one.'));
   else if (room && !room.started && canAct) list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Re-open on its row.'));
-  heading('Active');
+  heading('Discussions');
   for (const d of discussions) {
     const path = 'discussions/' + d;
     discussionRow(d, path);
@@ -781,7 +815,6 @@ async function openFiles(group) {
     const n = discussionsIn('discussions/' + s).length;
     entry('folder', s + '/', () => openFiles('discussions/' + s), n + (n === 1 ? ' discussion' : ' discussions'), s === 'archive' ? 'Finished discussions' : 'Postponed discussions');
   }
-  appendPeers(list);
 }
 // The header: the room's full root path and its active discussion, if one has been selected.
 let room = null;
@@ -979,7 +1012,7 @@ $('newroom').onclick = async () => {
 async function send(text) {
   text = text.trim();
   if (!text || ended) return;
-  if (text === '/docs') return openFiles();
+  if (text === '/docs') { showSub('explorer'); return openFiles(); }
   const res = await post('__say', { text });
   if (res.status === 409 && ['/restart', '/shutdown'].includes(text)) {
     const warning = await res.text();
@@ -1049,7 +1082,6 @@ $('auto').onchange = async (e) => {
   const res = await post('__auto', { on: e.target.checked });
   if (!res.ok) { status(await res.text(), true); e.target.checked = !e.target.checked; }
 };
-$('docs').onclick = openFiles;
 // The header's ▾ menus: one open at a time; a click outside or Escape closes them. Actions that
 // open something else close their menu; the two-click ones keep it open for the second click.
 const menus = [...document.querySelectorAll('details.menu')];
@@ -1129,7 +1161,7 @@ events.onmessage = (e) => {
     talk.clear();
     ev.messages.forEach(message);
     if (ev.status) status(ev.status);
-    yourTurn = !ev.thinking; setThinking(ev.thinking); if (!viewing) showDoc(ev.doc);
+    yourTurn = !ev.thinking; setThinking(ev.thinking); if (!viewing) { showDoc(ev.doc); openFiles(listed ?? ''); }
     if (!ev.input) { $('composer').hidden = true; } // terminal mode: the page only watches
     work.clear();
     if (!ev.worker.length) work.add(statusEl('Give the worker instructions here. It works alongside the discussion and sees only what you send it.'));
@@ -1156,7 +1188,7 @@ events.onmessage = (e) => {
   if (ev.type === 'turn') { yourTurn = true; status(ev.text); updateReplicaView(); }
   if (ev.type === 'note') status(ev.text, ev.error);
   if (ev.type === 'doc' && !viewing) showDoc(ev.file);
-  if (ev.type === 'files') openFiles();
+  if (ev.type === 'files') { showSub('explorer'); openFiles(); }
   if (ev.type === 'moved' && listed !== null) {
     openFiles(listed === ev.from || listed.startsWith(ev.from + '/') ? ev.to + listed.slice(ev.from.length) : listed);
   }

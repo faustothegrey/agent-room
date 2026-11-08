@@ -62,12 +62,14 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   implementation notes and plans; the work itself goes in its own worktree (see
   [The worker's worktree](#the-workers-worktree)). Instructions run
   one at a time alongside the discussion, with a 30-minute timeout per instruction.
-- **Discussions** (right pane): browse discussions, then choose a Markdown document, SVG drawing, transcript
-  or other supported file for the right pane. Inside a discussion, each subfolder (`drawings/`,
+- **Explorer** and **Document** (right pane, two tabs): in **Explorer**, browse discussions (the one
+  in use first), then choose a Markdown document, SVG drawing, transcript or other supported file:
+  it opens in **Document**, which shows its path and the file. Each tab keeps its place when you
+  switch; Document is disabled until a file is chosen. Inside a discussion, each subfolder (`drawings/`,
   `transcripts/`, …) opens to its files. The chosen document stays selected when agents edit
   other files. Open documents check for changes every two seconds. Drag the divider to resize
   the panes. Browsing is available during agent turns and does not notify the agents.
-- **Transcripts** are in each discussion's `transcripts/` folder, under **Discussions**. On an
+- **Transcripts** are in each discussion's `transcripts/` folder, under **Explorer**. On an
   earlier session's transcript, **Send to agents** asks the discussion agents to read it as
   background; it does not resume its sessions.
 - **Reload:** load code and rulebook edits between discussion commands without losing the
@@ -130,11 +132,11 @@ and is not delivered to the agents.
     deferred/                  # postponed discussions, moved here whole
 ```
 
-**Archive and deferred.** A discussion's page in **Discussions** has **Archive** and **Defer**
+**Archive and deferred.** A discussion's page in **Explorer** has **Archive** and **Defer**
 buttons (or `/move <folder-name> archive|deferred`), which move the whole discussion, documents and
 transcripts, into `discussions/archive/` or `discussions/deferred/`; **Make active**
 (`/move archive/<folder-name> active`) moves it back. `archive/` and `deferred/` are created when
-first needed, and always listed at the bottom of **Discussions**, after the active discussions.
+first needed, and always listed at the bottom of **Explorer**, after the active discussions.
 The discussion in use in this room can't be moved. New discussion names also skip names already
 taken in `archive/` and `deferred/`.
 
@@ -150,7 +152,7 @@ chat, worker log, provider session IDs, unread-message positions, provider/model
 totals on this machine. Messages, summaries, worker instructions and agent-setting changes are
 blocked while paused. You can then quit, restart the server or start another discussion.
 
-Choose **Resume** under **Paused on this machine** in **Discussions**, or `/resume <folder-name>`,
+Choose **Resume** under **Paused on this machine** in **Explorer**, or `/resume <folder-name>`,
 to continue those same discussion and worker sessions with the saved chat. In the room you just
 paused, the header's **Actions ▾** menu offers **Resume discussion** (`/resume` with no name). Pause any current
 conversation before resuming another one. Starting a New discussion from a paused one starts a
@@ -165,7 +167,7 @@ models or rulebooks. It is not recovery of a turn interrupted by a crash. Once r
 before quitting to save the latest state. Paused discussions must be resumed before moving them
 to archive or deferred.
 
-To go back to an existing discussion, choose **Re-open** on its row in **Discussions** (or on its
+To go back to an existing discussion, choose **Re-open** on its row in **Explorer** (or on its
 page), or use `/reopen <folder-name>`. It works at any time between rounds. An archived or deferred
 discussion (`/reopen archive/<folder-name>`) is moved back to the active discussions first. No title is requested; the
 next message creates a new session transcript in that discussion. If this room's session had
@@ -352,7 +354,7 @@ node src/cli.mjs --node Mac --peer Pi=http://192.168.1.21:5566
 node src/cli.mjs --node Pi --peer Mac=http://192.168.1.20:5566
 ```
 
-In **Peers**, choose **Pair with …**, check both root folders, and confirm. A different
+In **Peers…** (in the room's **agent-room ▾** menu), choose **Pair with …**, check both root folders, and confirm. A different
 established room ID is refused. Node names are kept in storage and cannot be changed there.
 With `--peer`, an occupied port stops startup; without peers the usual free-port fallback applies.
 Without `--node` or `--peer`, no replication module or storage is loaded.
@@ -363,10 +365,10 @@ Transcripts are included even if the project's ignore rules exclude them. Failed
 labelled as failed. A saving error leaves discussion files in place. Sending runs in the
 background; unreachable peers retry with a delay capped at five minutes, including after restart.
 
-Received lines appear in **Discussions**. **View** opens their conversation and files read-only,
+Received lines appear in **Explorer**, under their discussions. **View** opens their conversation and files read-only,
 without starting or stopping agents. **Back to <node>'s line** returns to the local conversation when that discussion has a local line.
 The header keeps Usage, and Restart and Quit room in its menus; node lines are grouped under each
-discussion, with Peers at the bottom of the Discussions pane.
+discussion, and Peers… is in the room's **agent-room ▾** menu.
 New received rounds do not change an open View. Each browser pins its selected snapshot;
 Back releases it, and closing/reloading the page releases it after two minutes without renewal.
 Keep the page connected while reading: a suspended or disconnected page must select View again
