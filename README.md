@@ -39,13 +39,15 @@ mode; `/docs` opens a document separately in the browser.
 ## Use the screen
 
 The header has three zones. **Room** (blue): **agent-room ▾**, whose menu holds **Switch room…**,
-**Open room in folder…** and **Quit room**, above the full **root folder**; hover or focus the room
+**Open room in folder…**, **Peers…** and **Quit room**, above the full **root folder**; hover or focus the room
 name for its replication line, when replication is on. **Current discussion** (green): the selected
 discussion or **No discussion started**, with its state under it (paused, who is thinking, or your
 turn); **Actions ▾** holds **Pause discussion**, **Summarize** and **New discussion**, with
 **Auto-summarize** beside it. **Server and monitoring** (amber): **● Server ▾**, whose menu holds
 **Reload**, **Restart** and **Shutdown server**, then the subscription usage gauges and **Usage**;
-hover or focus **Server** for its uptime, port and the server's version. The version is the commit
+hover or focus **Server** for its uptime, port and the server's version.
+An amber ⚠ under **Server** means a replication peer is unreachable (hover for how many); click it to open **Peers…**.
+The version is the commit
 of agent-room's checkout when the server started and its start time, such as `4cb41bd · started
 12:28`, with `+` when the checkout had uncommitted changes (outside `discussions/`). After a
 Reload it adds `· reloaded 12:41 (commit)`, again with `+` if needed. Both are snapshots taken

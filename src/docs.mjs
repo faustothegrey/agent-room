@@ -157,7 +157,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .hover-detail { display: none; position: absolute; top: 100%; left: 0; z-index: 11; flex-direction: column; gap: .1rem; width: max-content; max-width: min(26rem, 80vw); padding: .4rem .6rem; border: 1px solid var(--zone); border-radius: 6px; background: Canvas; box-shadow: 0 6px 20px #0004; font-size: .7rem; color: var(--dim); overflow-wrap: anywhere; }
 /* No gap under the trigger, and it stays while hovered, so the version's own tooltip can be reached. */
 .menu:not([open]):is(:hover, :has(> summary:focus-visible)) + .hover-detail:not(:empty), .hover-detail:not(:empty):hover { display: flex; }
-#room-zone .zone-line, #server-box { position: relative; }
+#room-zone .zone-line, #server-head { position: relative; display: block; } /* the details hang right under their trigger */
 .zone-line { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .5rem; min-width: 0; max-width: 100%; }
 .zone button { font-size: .75rem; white-space: nowrap; }
 .menu { position: relative; }
@@ -181,7 +181,10 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #new-discussion { display: contents; }
 #new-discussion[hidden] { display: none; }
 #server-zone { flex-direction: row; align-items: center; gap: .8rem; }
-#server-box { flex: none; }
+#server-box { flex: none; display: flex; flex-direction: column; align-items: flex-start; }
+/* Under "● Server": some replication peer is unreachable (as in Peers…). Amber; red stays the server's. */
+#peer-warning { border: 0; background: none; padding: 0 .2rem; margin-left: -.2rem; font-size: .8rem; line-height: 1.1; color: light-dark(#92600a, #d6a84c); }
+#peer-warning[hidden] { display: none; }
 #server-details { flex-direction: column; }
 /* The gauges' own children join this grid, so "updated" sits above Usage, as in the drawing. */
 #monitor { display: grid; grid-template-rows: auto auto; align-items: center; gap: .1rem .8rem; flex: none; font-size: .65rem; color: var(--dim); }
@@ -324,7 +327,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b>agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><span id="folder" title="The room's root folder"></span><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
 <div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span></div><details class="menu" id="actions-menu"><summary>Actions</summary><div class="menu-items"><button id="pause-discussion" hidden>Pause discussion</button><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button></span></div></details><label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label></div>
-<div id="server-zone" class="zone" aria-label="Server and monitoring"><div id="server-box"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></div><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span><button id="usage">Usage</button></div></div>
+<div id="server-zone" class="zone" aria-label="Server and monitoring"><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span><button id="usage">Usage</button></div></div>
 </header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
@@ -619,6 +622,10 @@ function showReplica(r) {
   updateReplicaView();
   if (listed !== null) openFiles(listed);
   $('peers-open').hidden = !replica && !replicaOff;
+  const down = replica?.peers.filter((p) => p.reachable === false).length ?? 0, warning = $('peer-warning');
+  warning.hidden = !down;
+  warning.title = down + (down === 1 ? ' peer unreachable' : ' peers unreachable');
+  warning.setAttribute('aria-label', warning.title);
   if ($('peers').open) showPeers();
 }
 // Peers… (room menu): the replication peers, with their reachability and Pair buttons.
@@ -629,6 +636,7 @@ function showPeers() {
 }
 $('peers-open').onclick = () => { closeMenus(); showPeers(); $('peers').showModal(); };
 $('peers-close').onclick = () => $('peers').close();
+$('peer-warning').onclick = () => { showPeers(); $('peers').showModal(); };
 function appendPeers(list) {
   if (!replica && replicaOff) {
     const title = document.createElement('h3'); title.textContent = 'Peers'; list.append(title);
