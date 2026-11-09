@@ -84,7 +84,7 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   room, each with its current agents and worker, and re-opens each one's discussion in use, a fresh
   session from its handoff; the chats clear, transcripts are kept, and open pages reload by
   themselves. Reload also applies to every room, each between its own rounds.
-- **Quit room:** click twice to end this room only. It waits for the round in progress (and lines
+- **Quit room:** click twice to end this room only, closing every discussion open in its folder. It waits for the round in progress (and lines
   queued before it) for at most 30 seconds; then the room's agents are stopped mid-turn, so the
   round ends as failed. Its running agent and worker programs are stopped before its state goes; a
   worker stopped in the middle of an instruction, agents stopped mid-turn, or queued instructions
@@ -144,7 +144,21 @@ first needed, and always listed at the bottom of **Explorer**, after the active 
 Archive and Defer are disabled for the discussion in use and paused discussions, with the reason in a tooltip. New discussion names also skip names already
 taken in `archive/` and `deferred/`.
 
-**New discussion** (in the header's **Actions ▾** menu, or `/new`) works between rounds. It ends this
+**Several open discussions** (on the screen; an intermediate first version). A folder can have
+several discussions open at once, each with its own agents' sessions, chat and auto dev, sharing
+one worker. One window shows one of them; Explorer marks the others "open", with **Go to**, which
+shows it as it was. **New discussion** opens the new one beside the discussion in use, which stays
+open, and ends an open brainstorm. **Re-open** shows a discussion that is already open, and opens
+any other beside, fresh from its handoff. At most one brainstorm is open per folder. **Close
+discussion** (in **Actions ▾**, or `/close`) closes the one shown and its agents; it can't close one
+whose worker edits are unresolved (below). **Quit room** closes them all, and Restart brings back
+every open discussion fresh from its handoff (not brainstorms, paused or unstarted ones). In a
+`--node` launch room every open discussion replicates, through the room's one replica; the first one
+holds it, so it closes last (or with Quit room). The worker's provider and model are one setting for
+all open discussions; each keeps its own worker session. In the terminal one discussion is open at
+a time, as described next: its one input can't switch between discussions.
+
+**New discussion** in the terminal (`/new`) works between rounds. It ends this
 room's session the way Re-open does (below), except for the worker: its running task, log and CLI
 session carry on, and its log gets a marker line. Nothing is created yet: your next message gets
 a title and creates the new discussion's folder, as in a fresh room. The worker's next instruction
@@ -294,8 +308,9 @@ auto dev**, which grants another 5 cycles. While paused, any summary asks for `O
 or `WAIT FOR USER` instead, and sends nothing. An agreed `FINISH`, running or paused, ends the run:
 review and merge `worker/main` yourself, as ever. An instruction that can't be read reliably from Next step (two of them, no
 closing quotation mark…) is never sent, and the page says why. Reload keeps a run, its cycle count
-and what was sent; a relay whose result is lost pauses the run. Pause, Resume, New discussion, New
-brainstorm, Re-open, Restart and Quit room end it. Auto dev is for discussions only, not brainstorms.
+and what was sent; a relay whose result is lost pauses the run. Pause, Resume, Close discussion, Restart
+and Quit room end it; in the terminal, New discussion, New brainstorm and Re-open do too (on the
+screen they leave the discussion and its run open). Auto dev is for discussions only, not brainstorms.
 
 **Usage**, or `/usage`, reports session token totals for discussion agents and the worker.
 Claude's reported dollar value is an API-price equivalent, not your subscription bill.
@@ -326,7 +341,8 @@ node src/cli.mjs --help
 |---|---|
 | `/docs` | Browse documents; in terminal mode, ↑/↓ selects, Enter opens, Esc leaves the picker. |
 | `/reopen <folder-name>` | Re-open an existing discussion: a fresh session there, from its handoff. `archive/…` or `deferred/…` is made active first. |
-| `/new` | End this session; your next message starts a new discussion. The worker carries on. |
+| `/new` | On the screen, open a new discussion beside this one (which stays open); an open brainstorm ends. In the terminal, end this session; your next message starts a new discussion. The worker carries on. |
+| `/close` | Close discussion: close the one shown, keeping the others open (not while it holds unresolved worker edits). |
 | `/brainstorm` | End this session (or brainstorm) and start a brainstorm: nothing saved, lost on Restart or Quit. |
 | `/move <folder-name> active\|archive\|deferred` | Move a whole discussion (not the one in use) into `archive/` or `deferred/`, or back. |
 | `/pause` | Save the discussion and worker sessions locally after their work finishes. |
@@ -337,7 +353,7 @@ node src/cli.mjs --help
 | `/usage` | Show session tokens and subscription quotas. |
 | `/reload` | Reload source modules and both agent rulebooks; retain conversation and provider sessions. |
 | `/restart` | Screen only: a new server process on the same port, with every room, each re-opening its discussion in use. |
-| `/quit` | Quit room: end this room only, stopping its running agent and worker programs. |
+| `/quit` | Quit room: end this room only, closing every discussion open in its folder and stopping its running agent and worker programs. |
 | `/shutdown` | Screen only: Shutdown server, ending every room (the same as `POST /__shutdown`). |
 
 ## macOS Dock launcher
@@ -434,8 +450,20 @@ based on, and says when the room has uncommitted changes the worker can't see, o
   that folder, the worker refuses to run and changes nothing.
 - Before each instruction, `worker/main` catches up with the room's `HEAD`, by fast-forward only,
   when it is strictly behind it and its worktree is clean. Otherwise it is left as it is, and the
-  tab says why. agent-room never resets, merges, rebases or deletes the worktree or its branch, and
-  never touches the room's own index, branch or files.
+  tab says why. agent-room's own code never resets, merges, rebases or deletes the worktree or its
+  branch, and never touches the room's own index, branch or files. The worker itself may do such Git
+  actions in its worktree when you explicitly ask (a rollback's reverts, merging main into
+  `worker/main` for it, or abandoning an attempt after listing the edits and getting your approval).
+- The worker commits every completed task on `worker/main`, with a message starting with its origin
+  in brackets (`[<discussion folder name>]`, or `[brainstorm]`) and the commit ID in its reply.
+  agent-room reports commits without that label. Each instruction in the Worker tab shows its
+  origin, and its reply goes back to that discussion's transcript.
+- **Leftover edits:** agent-room checks the worktree after each task and again before the next. If
+  a task leaves uncommitted edits, the queue holds and its origin is told; only that origin's own
+  instructions go through (to finish and commit them, or to abandon them), with the first task's
+  details. That discussion can't be closed, archived or deferred meanwhile. Uncommitted edits of
+  unknown origin, for example found at start after a Restart, hold every task until the folder is
+  clean (commit or remove them yourself); they are never given to a new task.
 - Without a Git repository, or in one with no commit yet, the worker is disabled:
   "Worker requires a source Git repository for its isolated worktree." Discussions work as usual.
 - The worker keeps scratch notes in `.worker-notes/<task>/` inside its worktree. Git ignores them

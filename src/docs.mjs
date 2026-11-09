@@ -358,7 +358,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b>agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><span id="folder" title="The room's root folder"></span><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="pause-discussion" hidden>Pause discussion</button><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, kept only in memory: no folder, transcript or notes. It ends this session; Restart or Quit room loses it, and a new one replaces it.">New brainstorm</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label></div>
+<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="pause-discussion" hidden>Pause discussion</button><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, kept only in memory: no folder, transcript or notes. It ends this session; Restart or Quit room loses it, and a new one replaces it.">New brainstorm</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Re-open it from Explorer.">Close discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label></div>
 <div id="server-zone" class="zone" aria-label="Server and monitoring"><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span><button id="usage">Usage</button></div></div>
 </header>
 <div id="left">
@@ -449,7 +449,7 @@ function bubble(m) {
   el.className = 'msg' + (m.speaker === 'User' || m.speaker === 'Relayed from discussion' ? ' user' : '') + (m.speaker === 'Worker report' ? ' report' : '') + (m.error ? ' error' : '')
     + (m.outcome ? ' summary' + (m.outcome === 'agreed' ? '' : ' not-agreed') : '');
   el.innerHTML = '<div class="who"></div>' + m.html;
-  el.firstChild.textContent = m.speaker + (m.error ? ' — failed' : '');
+  el.firstChild.textContent = m.speaker + (m.origin ? ' · [' + m.origin + ']' : '') + (m.error ? ' — failed' : '');
   if (m.meta) { const meta = document.createElement('span'); meta.className = 'meta'; meta.textContent = ' · ' + m.meta; el.firstChild.append(meta); }
   return el;
 }
@@ -734,6 +734,13 @@ function updateReplicaView() {
   // New brainstorm, beside it, is always offered (it ends a session or a brainstorm the same way).
   $('new-discussion').hidden = !(room && localInput && !viewing);
   $('newdisc').hidden = !(room?.active || room?.brainstorm);
+  // With several discussions open (the screen), New discussion and Re-open keep this one open;
+  // Close discussion closes it. Their tooltips say so.
+  $('closedisc').hidden = !room?.multi || !(room.active || room.brainstorm || room.open?.length > 1);
+  if (room?.multi) {
+    $('newdisc').title = 'Open a new discussion beside this one, which stays open (Explorer: Go to). An open brainstorm ends.';
+    $('newbrainstorm').title = 'A conversation with the same agents, kept only in memory, beside the open discussions (one per folder; a new one replaces it).';
+  }
   $('actions-menu').hidden = ['pause-discussion', 'summary', 'new-discussion'].every((id) => $(id).hidden);
   if (!viewing) return;
   const label = document.createElement('p');
@@ -941,16 +948,21 @@ async function openFiles(group) {
     const details = el('details', 'discussion-lines');
     details.open = expandedLines.has(path);
     details.ontoggle = () => { if (details.open) expandedLines.add(path); else expandedLines.delete(path); };
-    details.append(el('summary', '', name + (path === room?.active ? ' · in use' : '')));
+    // Open in another context of this folder (the screen keeps several open): Go to it.
+    const openHere = room?.open?.find((o) => !o.current && o.active === path);
+    details.append(el('summary', '', name + (path === room?.active ? ' · in use' : openHere ? ' · open' : '')));
     const row = el('div', 'row discussion-row' + (path === room?.active ? ' in-use' : '')); row.append(details);
     const label = (replica?.node || 'Local') + ' (this node) · ' + (own ? 'round ' + own.round : 'no saved round') +
       (own ? Object.entries(own.sent).map(([n, sent]) => ' · ' + (sent ? 'sent to ' + n + ' ✓' : n + ' pending')).join('') : '');
     row.append(info(label));
     if (canAct) {
       const paused = room.pausedSessions?.some((p) => p.name === name);
-      if (!(path === room.active && !room.started)) {
-        const b = el('button', 'reopen', 'Re-open'); b.title = REOPEN_TIP;
-        confirmed(b, () => send('/reopen ' + name), paused ? 'Click again: discard the saved Pause and start fresh' : null); row.append(b);
+      if (openHere) {
+        const b = el('button', 'reopen', 'Go to'); b.title = 'Show this open discussion, as it is: same sessions and chat'; b.onclick = () => { location.href = openHere.url; }; row.append(b);
+      } else if (!(path === room.active && !room.started)) {
+        const b = el('button', 'reopen', 'Re-open'); b.title = room.multi && path !== room.active ? 'Open it beside the open discussions, fresh from its handoff. Any saved Pause for it is discarded.' : REOPEN_TIP;
+        confirmed(b, () => send('/reopen ' + name), paused ? 'Click again: discard the saved Pause and start fresh' : null,
+          () => !!paused || (room.started && (!room.multi || path === room.active))); row.append(b);
       }
       for (const [label, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
         const b = el('button', 'reopen', label);
@@ -1039,7 +1051,12 @@ async function openFiles(group) {
       row.append(resume); list.append(row);
     }
   }
-  if (room?.brainstorm && canAct) list.append(el('span', 'hint', 'A brainstorm is in progress: agent-room keeps no record of it. New discussion, Re-open or Resume ends it.'));
+  // The folder's other open contexts that have no discussion row: the brainstorm, a new one.
+  for (const o of (room?.open ?? []).filter((x) => !x.current && !x.active)) {
+    const r = el('div', 'row'); r.append(el('span', '', o.title + ' · open'));
+    const b = el('button', 'reopen', 'Go to'); b.onclick = () => { location.href = o.url; }; r.append(b); list.append(r);
+  }
+  if (room?.brainstorm && canAct) list.append(el('span', 'hint', room.multi ? 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Close discussion ends it.' : 'A brainstorm is in progress: agent-room keeps no record of it. New discussion, Re-open or Resume ends it.'));
   else if (!discussions.length && !replica?.received.some((l) => !l.local)) list.append(el('span', 'hint', room?.started ? '' : 'No active discussions: your first message starts one.'));
   else if (room && !room.started && canAct) list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Re-open on its row.'));
   heading('Discussions');
@@ -1341,8 +1358,12 @@ const closeMenus = () => menus.forEach((m) => { m.open = false; });
 document.addEventListener('click', (e) => { if (!e.target.closest('details.menu')) closeMenus(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 for (const id of ['switchroom', 'newroom', 'reload', 'pause-discussion', 'summary']) $(id).addEventListener('click', closeMenus);
-confirmed($('newdisc'), () => send('/new'));
-confirmed($('newbrainstorm'), () => send('/brainstorm'));
+// On the screen with several discussions, New discussion asks twice only when it ends a brainstorm,
+// and New brainstorm only when it discards one.
+const brainstormOpen = () => !!room?.open?.some((o) => o.brainstorm);
+confirmed($('newdisc'), () => send('/new'), null, () => (room?.multi ? brainstormOpen() : room?.started));
+confirmed($('newbrainstorm'), () => send('/brainstorm'), null, () => (room?.multi ? brainstormOpen() : room?.started));
+confirmed($('closedisc'), () => send('/close'), 'Click again: this discussion closes (its agents stop)', () => !!room?.started);
 $('summary').onclick = () => send('/summary');
 $('usage').onclick = () => send('/usage');
 $('reload').onclick = () => send('/reload');
@@ -1451,6 +1472,7 @@ events.onmessage = (e) => {
     pendingArchives.delete(ev.from);
     if (listed !== null) openFiles(listed === ev.from || listed.startsWith(ev.from + '/') ? ev.to + listed.slice(ev.from.length) : listed);
   }
+  if (ev.type === 'goto') { location.href = ev.url; return; } // this window switches discussion
   if (ev.type === 'ended') { ended = true; status('This room has ended. You can close this window.'); events.close(); box.disabled = true; wbox.disabled = true; }
   if (ev.type === 'restarting') { restarting = true; status('Restarting the server: this page reloads when the new one answers.'); events.close(); box.disabled = true; wbox.disabled = true; }
 };

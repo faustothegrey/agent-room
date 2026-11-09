@@ -22,7 +22,7 @@ const { values } = parseArgs({
     dev: { type: 'boolean' },
     node: { type: 'string' },
     peer: { type: 'string', multiple: true },
-    // Used by Restart only: another room to bring back, as JSON { cwd, agents, worker, reopen? }.
+    // Used by Restart only: another room to bring back, as JSON { cwd, agents, worker, reopen?, context? }.
     room: { type: 'string', multiple: true },
     help: { type: 'boolean', short: 'h' },
   },
@@ -57,15 +57,18 @@ const noScreen = !!values['no-screen'];
 const hub = { rooms: new Map(), noScreen, node: values.node ?? null, startedAt: new Date().toISOString(), addRoom };
 if (!noScreen) hub.shutdown = (confirmed) => endServer('shutdown', confirmed);
 
-// Opens a room in `folder`, or returns the one already open there: { ctx, existing }.
-async function addRoom(folder, { launch = false, agents, worker, reopen } = {}) {
+// Opens a room in `folder`, or returns the one already open there: { ctx, existing }. `context`: one
+// more open discussion in a folder that already has a room (see ui.mjs, "Several open discussions"),
+// with its own key, input queue and page; it shares the folder's worker.
+async function addRoom(folder, { launch = false, agents, worker, reopen, context } = {}) {
   ui.assertRoomCreation(hub);
   const cwd = resolve(folder);
-  const key = realpathSync(cwd); // a symbolic link can't make a second room for the same folder
+  // A symbolic link can't make a second room for the same folder.
+  const key = realpathSync(cwd) + (context ? `#${context}` : '');
   const had = hub.rooms.get(key);
   if (had) return { ctx: had, existing: true };
   const ctx = {
-    cwd, key, hub, launch, added: !launch,
+    cwd, key, hub, launch, added: !launch, context: context ?? null,
     agentSpecs: agents, workerSpec: worker,
     port: Number(values.port), noScreen, open: launch && !!values.open,
     node: launch ? values.node ?? null : null, peers: launch ? peers : [],
@@ -207,7 +210,7 @@ try {
   await addRoom(values.cwd, { launch: true, agents: values.agents, worker: values.worker, reopen: values.reopen });
 } catch (err) { console.error(`✗ ${err.message}`); process.exit(1); }
 for (const r of restored) {
-  try { await addRoom(r.cwd, { agents: r.agents, worker: r.worker, reopen: r.reopen }); }
+  try { await addRoom(r.cwd, { agents: r.agents, worker: r.worker, reopen: r.reopen, context: r.context }); }
   catch (err) { console.error(`✗ The room in ${r.cwd} could not be restored: ${err.message}`); }
 }
 if (values.dev && !noScreen) watchSource();

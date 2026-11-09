@@ -127,21 +127,36 @@ export async function saveSettings(ctx, value, file = defaultsFile()) {
   const temp = `${file}.${process.pid}.tmp`;
   writeFileSync(temp, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 });
   renameSync(temp, file);
+  const useWorker = (c, built, sessions) => {
+    c.worker = built.worker;
+    c.workerSpec = next.workerSpec;
+    c.sessions.set(`worker:${settings.worker.name}`, sessions.get(`worker:${settings.worker.name}`));
+    if (freshWorker) {
+      c.workerBriefed = null;
+      c.workerTree = null;
+      c.workerLabel = null;
+      c.workerHandoff = true;
+    }
+  };
   if (applied) {
     Object.assign(ctx, loaded, { agentSpecs: next.agentSpecs, workerSpec: next.workerSpec, sessions: next.sessions, state: next.state });
     wire(ctx);
-    showHeader(ctx);
-  } else if (workerChanged) {
-    ctx.worker = loaded.worker;
-    ctx.workerSpec = next.workerSpec;
-    ctx.sessions.set(`worker:${settings.worker.name}`, next.sessions.get(`worker:${settings.worker.name}`));
-    if (freshWorker) {
-      ctx.workerBriefed = null;
-      ctx.workerTree = null;
-      ctx.workerHandoff = true;
+  } else if (workerChanged) useWorker(ctx, loaded, next.sessions);
+  // The worker is one, shared by the folder's open discussions: its provider and model are one
+  // setting for all of them (each keeps its own worker session, a fresh one if the provider changed).
+  if (workerChanged) {
+    for (const c of siblings(ctx)) {
+      if (c === ctx || !c.room || c.workerSpec === next.workerSpec) continue;
+      if (c.room.agents.some((a) => a.name.toLowerCase() === settings.worker.name.toLowerCase())) {
+        note(c, `✗ The worker's new name, ${settings.worker.name}, is taken by an agent here: this discussion keeps its worker.`, true);
+        continue;
+      }
+      const sessions = new Map(c.sessions);
+      if (freshWorker) sessions.set(`worker:${settings.worker.name}`, {});
+      useWorker(c, await load({ ...c, workerSpec: next.workerSpec, sessions }, ''), sessions);
     }
-    showHeader(ctx);
   }
+  showHeader(ctx);
   return { applied, workerApplied: true, settings };
 }
 
@@ -180,14 +195,18 @@ export async function load(ctx, v) {
   const { provider: wProvider, name: wName, model: wModel } = parseSpec(ctx.workerSpec, true);
   if (agents.some((a) => a.name === wName)) throw new Error(`The worker's name "${wName}" is taken by a room agent`);
   if (!ctx.sessions.has(`worker:${wName}`)) ctx.sessions.set(`worker:${wName}`, {});
+  // The folder's workshop (see "Several open discussions"): the worker's queue, worktree and tab,
+  // shared by every discussion open in this folder, and by reference so it survives reloads.
+  const shop = ctx.shop ?? siblings(ctx).find((r) => r !== ctx && r.shop)?.shop ?? null;
   // Its worktree (see refreshWorker), shared by reference so it survives reloads and settings copies.
-  const workerDir = ctx.workerDir ??= { path: null };
+  const workerDir = ctx.workerDir = shop?.workerDir ?? ctx.workerDir ?? { path: null };
   const worker = createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions, shell: true,
     timeoutMs: WORKER_TIMEOUT_MS, runner, session: ctx.sessions.get(`worker:${wName}`) });
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
   // ctx so they survive a reload.
-  const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: [], working: null };
+  const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: shop?.log ?? [], working: shop?.running ? shop.running.origin.worker.name : null };
   return { room: createRoom(agents, ctx.state), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen,
+    shop: shop ?? newShop(workerDir, screen.worker),
     suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }) };
 }
 
@@ -225,7 +244,12 @@ function wire(ctx) {
   if (ctx.noScreen) return;
   // What the User types pauses a running auto dev (as it arrives, not when its turn comes).
   ctx.screen.work = (text) => { autoDevInput(ctx, 'you sent the Worker an instruction'); return queueWork(ctx, text); };
-  ctx.screen.say = (line, confirmed) => { if (!line.trim().startsWith('/')) autoDevInput(ctx, 'you sent a message'); return ctx.say(line, confirmed); };
+  ctx.screen.say = (line, confirmed) => {
+    if (!line.trim().startsWith('/')) autoDevInput(ctx, 'you sent a message');
+    // Quit room closes every discussion open in this folder.
+    if (line.trim() === '/quit') for (const c of siblings(ctx)) if (c !== ctx) c.say?.('/quit');
+    return ctx.say(line, confirmed);
+  };
   // The screen's checkbox: applied at once, not queued behind a round, so it can stop the next summary.
   ctx.screen.setAuto = (on) => setAuto(ctx, on);
   ctx.screen.newRoom = (body) => newRoom(ctx, body);
@@ -246,11 +270,16 @@ function header(ctx) {
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
     paused: !!ctx.paused, pausedSessions: pausedSessions(ctx),
     back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
-    code: ctx.code ?? null }; // the version this process runs (see codeInfo)
+    code: ctx.code ?? null, // the version this process runs (see codeInfo)
+    multi: multi(ctx), open: openList(ctx) }; // the folder's open discussions (see openList)
 }
+// Every page of the folder's open discussions: they list each other.
 function showHeader(ctx) {
-  ctx.screen.room = header(ctx);
-  toScreen(ctx, { type: 'room', room: ctx.screen.room });
+  for (const c of siblings(ctx)) {
+    if (!c.room || !c.worker) continue; // still loading
+    c.screen.room = header(c);
+    toScreen(c, { type: 'room', room: c.screen.room });
+  }
 }
 
 // ── Discussions ───────────────────────────────────────────────────────
@@ -288,11 +317,26 @@ function moveDiscussion(ctx, ref, to) {
   const from = join(parent, d.section ?? '', d.name);
   if (ctx.discussion?.dir === from) return note(ctx, `✗ ${d.name} is the discussion in use in this room: it can't move now.`, true), null;
   if (pausedSessions(ctx).some((p) => p.name === d.name)) return note(ctx, '✗ Resume the paused discussion before moving it.', true), null;
-  if (ctx.workingIn === from) return note(ctx, `✗ A worker task is still writing to ${d.name}; try again when it finishes.`, true), null;
+  const shop = shopOf(ctx);
+  if (shop.workingIn === from) return note(ctx, `✗ A worker task is still writing to ${d.name}; try again when it finishes.`, true), null;
+  // Open in another context of this folder: it can move between its rounds, unless it holds worker edits.
+  const open = siblings(ctx).find((c) => c !== ctx && c.discussion?.dir === from);
+  if (open && workerHold(open)) return note(ctx, `✗ ${d.name} can't move: ${workerHold(open)}.`, true), null;
+  if (open?.busy) return note(ctx, `✗ ${d.name} is in the middle of a round; try again when it ends.`, true), null;
   const dest = join(parent, target ?? '', d.name);
   if (existsSync(dest)) return note(ctx, `✗ There is already a discussion ${d.name} in ${target ?? 'discussions'}/.`, true), null;
   mkdirSync(dirname(dest), { recursive: true });
   renameSync(from, dest);
+  if (open) {
+    // Its session follows: its folder and transcript paths, and its agents are told.
+    open.discussion.dir = dest;
+    if (open.logPath?.startsWith(from + sep)) open.logPath = dest + open.logPath.slice(from.length);
+    const moved = { speaker: 'agent-room', text: `This discussion's folder moved to ${dest}: use that path from now on.` };
+    open.state.transcript.push(moved);
+    log(open, `**${moved.speaker}**\n\n${moved.text}\n\n`);
+    toScreen(open, { type: 'message', message: open.docs.messageView(moved) });
+    showHeader(open);
+  }
   const rel = (section) => ['discussions', ...(section ? [section] : []), d.name].join('/');
   // A page showing a file in it follows the move.
   if (ctx.screen.doc?.startsWith(rel(d.section) + '/')) {
@@ -400,6 +444,9 @@ function pausedSessions(ctx) {
 async function pauseDiscussion(ctx) {
   if (ctx.paused) return note(ctx, 'This discussion is already paused.');
   if (!ctx.discussion || !ctx.logPath) return note(ctx, 'Start a discussion before pausing it.', true);
+  const shop = shopOf(ctx);
+  if (shop.blockedBy && shop.blockedBy.origin !== ctx && shop.tasks.some((t) => t.origin === ctx))
+    return note(ctx, '✗ This discussion\'s worker tasks are waiting for another discussion\'s edits to be resolved: Pause once they have run.', true);
   ctx.pausing = true;
   try {
     await ctx.workQueue; // commands already wait for the round; also drain the independent worker
@@ -431,7 +478,8 @@ async function resumeDiscussion(ctx, name) {
     throw new Error('Choose a paused active discussion to Resume.');
   // A brainstorm can't be paused: Resume replaces it, as Re-open does, once the checkpoint loads.
   const brainstorm = !ctx.paused && !!ctx.state.brainstorm;
-  if (!ctx.paused && !brainstorm && (ctx.logPath || ctx.state.transcript.length || ctx.screen.worker.length || ctx.screen.working))
+  const shop = shopOf(ctx), ownWork = !!ctx.workerTree || shop.running?.origin === ctx || shop.tasks.some((t) => t.origin === ctx);
+  if (!ctx.paused && !brainstorm && (ctx.logPath || ctx.state.transcript.length || ownWork))
     throw new Error('Pause the current discussion before resuming another one.');
   ctx.pausing = true;
   try {
@@ -455,7 +503,7 @@ async function resumeDiscussion(ctx, name) {
     if (!existsSync(saved.logPath)) throw new Error('The paused discussion transcript is missing.');
     const next = { ...ctx, ...saved, sessions: new Map(saved.sessions),
       state: { ...saved.state, seen: new Map(saved.state.seen) }, paused: false,
-      screen: { ...ctx.screen, transcript: saved.state.transcript, worker: saved.worker, doc: saved.doc,
+      screen: { ...ctx.screen, transcript: saved.state.transcript, worker: shopOf(ctx).log, doc: saved.doc,
         thinking: null, working: null, status: null }, agentsStarted: true,
       workerDir: { path: null } };
     // Build before consuming the checkpoint; a failed load leaves it available for retry.
@@ -464,6 +512,7 @@ async function resumeDiscussion(ctx, name) {
     const { root, version, at, worker: workerLog, ...restored } = saved;
     Object.assign(ctx, restored, loaded, { state: next.state, sessions: next.sessions,
       paused: false, agentsStarted: true, workerDir: next.workerDir, previous: null, autoDev: null, autoDevSent: [] });
+    if (!ctx.shop.log.length) ctx.shop.log.push(...workerLog); // shared by the folder's open discussions
     wire(ctx);
     toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
     note(ctx, `Resumed the saved discussion and worker sessions.${brainstorm ? ' The brainstorm was discarded.' : ''}`);
@@ -490,10 +539,9 @@ async function reopenDiscussion(ctx, name) {
     await ctx.workQueue; // let a running worker instruction finish in this session
     endSession(ctx, `re-opening the discussion ${name}`);
     ctx.worker.reset?.();
-    ctx.screen.worker.length = 0;
-    ctx.screen.working = null;
+    if (siblings(ctx).length === 1) ctx.screen.worker.length = 0; // the Worker tab is shared otherwise
     ctx.workerBriefed = null;
-    ctx.workerTree = null; // its fresh session is told about its worktree again
+    ctx.workerTree = ctx.workerLabel = null; // its fresh session is told about its worktree again
   }
   if (ctx.state.brainstorm) endSession(ctx, 'ending the brainstorm');
   switchTo(ctx, { name, dir: join(parent, name), title: name, continued: true });
@@ -543,7 +591,7 @@ function newDiscussion(ctx) {
     // The saved worker session must not receive turns from the new discussion.
     ctx.worker.reset?.();
     ctx.screen.worker.length = 0;
-    ctx.workerBriefed = ctx.workerTree = null;
+    ctx.workerBriefed = ctx.workerTree = ctx.workerLabel = null;
     ctx.workerHandoff = false;
   }
   if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a new discussion');
@@ -566,7 +614,7 @@ function newBrainstorm(ctx) {
   if (ctx.paused) { // as New discussion: the saved worker session must not receive these turns
     ctx.worker.reset?.();
     ctx.screen.worker.length = 0;
-    ctx.workerBriefed = ctx.workerTree = null;
+    ctx.workerBriefed = ctx.workerTree = ctx.workerLabel = null;
     ctx.workerHandoff = false;
   }
   if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a brainstorm');
@@ -575,6 +623,206 @@ function newBrainstorm(ctx) {
   ctx.pendingLog = '';
   switchTo(ctx, null);
   note(ctx, `New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.${was ? ` To go back, /reopen ${was.name}.` : ''}`);
+}
+
+// ── Several open discussions ──────────────────────────────────────────
+// On the browser screen a folder can have several discussions open at once. Each is its own context:
+// a ctx with its own agents' sessions, chat, input queue, auto dev and page, made by cli.mjs's addRoom
+// with a `context` tag (ctx.key is then "<folder>#<tag>"). They share the folder's workshop
+// (ctx.shop): one worker queue, worktree and Worker tab; each task is labelled with its origin and
+// its report goes back there, and each context has its own worker session. One window shows one
+// context; Explorer and the header switch between them ('goto'). New discussion and Re-open open
+// another context and keep this one; Close discussion closes one; Quit room closes them all.
+// Terminal mode keeps one discussion at a time: its one input can't switch between contexts.
+const baseKey = (ctx) => String(ctx.key ?? ctx.cwd).split('#')[0];
+export function siblings(ctx) {
+  const list = ctx.hub?.rooms ? [...ctx.hub.rooms.values()].filter((r) => r.screen && baseKey(r) === baseKey(ctx)) : [];
+  return list.includes(ctx) ? list : [ctx, ...list];
+}
+const multi = (ctx) => !ctx.noScreen;
+// A context with nothing in it yet: New discussion, Re-open and New brainstorm use it in place.
+const fresh = (ctx) => !ctx.discussion && !ctx.logPath && !ctx.state.brainstorm && !ctx.state.transcript.length && !ctx.paused;
+// The task label: the discussion's folder name, or the brainstorm.
+const originLabel = (ctx) => ctx.discussion?.name ?? (ctx.state.brainstorm ? 'brainstorm' : 'no discussion');
+const pageOf = (ctx) => `${roomPath(ctx)}__room`;
+function openList(ctx) {
+  return siblings(ctx).filter((c) => c.state && c.id).map((c) => ({ url: pageOf(c), current: c === ctx,
+    title: c.discussion?.title ?? (c.state.brainstorm ? 'Brainstorm' : 'New discussion (not started)'),
+    active: c.discussion ? `discussions/${c.discussion.name}` : null, brainstorm: !!c.state.brainstorm, paused: !!c.paused }));
+}
+function newShop(workerDir, log) {
+  return { tasks: [], running: null, blockedBy: null, workingIn: null, contexts: 0, workerDir, log };
+}
+function shopOf(ctx) {
+  if (ctx.shop) return ctx.shop;
+  const other = siblings(ctx).find((c) => c !== ctx && c.shop);
+  ctx.shop = other?.shop ?? newShop(ctx.workerDir ??= { path: null }, ctx.screen.worker);
+  ctx.workerDir = ctx.shop.workerDir;
+  ctx.screen.worker = ctx.shop.log;
+  return ctx.shop;
+}
+// Worker events go to every open discussion's pages.
+const toShop = (ctx, event) => { for (const c of siblings(ctx)) if (c.screen) toScreen(c, event); };
+function workNote(ctx, text, error = false) {
+  const view = { note: text, error };
+  shopOf(ctx).log.push(view);
+  toShop(ctx, { type: 'work', message: view });
+  out(ctx, error ? red(text) : text);
+}
+// Sends this context's pages to another one (the window switches discussion).
+const goto = (ctx, target) => toScreen(ctx, { type: 'goto', url: pageOf(target) });
+async function openBeside(ctx, opts = {}) {
+  const shop = shopOf(ctx);
+  let tag;
+  do tag = `d${++shop.contexts}`; while (ctx.hub.rooms.has(`${baseKey(ctx)}#${tag}`));
+  const { ctx: next } = await ctx.hub.addRoom(ctx.cwd, { agents: ctx.agentSpecs, worker: ctx.workerSpec, context: tag, reopen: opts.reopen });
+  showHeader(ctx);
+  return next;
+}
+// Why `c` can't be closed (or its folder moved): it holds unresolved worker edits, or its task runs.
+function workerHold(c) {
+  const shop = shopOf(c);
+  if (shop.blockedBy?.origin === c) return `its worker edits from "${shop.blockedBy.task}" are unresolved: ask the worker to finish and commit them, or to abandon them`;
+  if (shop.running?.origin === c) return 'a worker task from it is running';
+  return null;
+}
+// Ends context `c` (its agents stop; its queued worker tasks are dropped and reported by stopRoom).
+// Its pages go to `to`.
+function closeContext(c, to) {
+  if (to) goto(c, to);
+  c.say?.('/quit');
+}
+
+// /new on the screen: the discussion in use stays open; an open brainstorm ends.
+async function newDiscussionBeside(ctx) {
+  const brain = siblings(ctx).find((c) => c.state?.brainstorm);
+  if (brain) {
+    const hold = workerHold(brain);
+    if (hold) return note(ctx, `✗ The brainstorm can't end yet: ${hold}.`, true);
+    if (brain !== ctx) closeContext(brain, ctx);
+    else {
+      endSession(ctx, 'starting a new discussion');
+      switchTo(ctx, null);
+      return note(ctx, 'New discussion: the brainstorm ended; your next message names the new discussion and starts it.');
+    }
+  }
+  if (fresh(ctx)) return note(ctx, 'No discussion started yet: your next message starts a new one.');
+  const next = await openBeside(ctx);
+  goto(ctx, next);
+  note(ctx, `New discussion: ${originLabel(ctx)} stays open (Explorer: Go to).`);
+}
+// /brainstorm on the screen: at most one per folder, beside the discussions.
+async function newBrainstormBeside(ctx) {
+  const brain = siblings(ctx).find((c) => c !== ctx && c.state?.brainstorm);
+  if (brain) { brain.say?.('/brainstorm'); return goto(ctx, brain); }
+  if (ctx.state.brainstorm || fresh(ctx)) return newBrainstorm(ctx);
+  const next = await openBeside(ctx);
+  next.say?.('/brainstorm');
+  goto(ctx, next);
+}
+// /reopen on the screen: a discussion open in another context is shown there, as it is; otherwise
+// it opens in a context of its own (this one, if it is still empty), fresh from its handoff.
+async function reopenBeside(ctx, name) {
+  const d = discussionRef(join(ctx.cwd, 'discussions'), name ?? '');
+  const open = d && siblings(ctx).find((c) => c !== ctx && c.discussion?.name === d.name);
+  if (open) return goto(ctx, open);
+  if (!d || ctx.discussion?.name === d.name || fresh(ctx)) return reopenDiscussion(ctx, name);
+  goto(ctx, await openBeside(ctx, { reopen: name }));
+}
+// /resume on the screen: as Re-open, for a paused discussion.
+async function resumeBeside(ctx, name) {
+  const open = name && siblings(ctx).find((c) => c !== ctx && c.discussion?.name === name);
+  if (open) { if (open.paused) open.say?.(`/resume ${name}`); return goto(ctx, open); }
+  if (!name || ctx.paused || fresh(ctx) || ctx.state.brainstorm) return resumeDiscussion(ctx, name);
+  const next = await openBeside(ctx);
+  next.say?.(`/resume ${name}`);
+  goto(ctx, next);
+}
+// /close (Close discussion): this discussion (or brainstorm) closes; the others stay open. The last
+// one open ends its session instead, leaving an empty room, as New discussion does in the terminal.
+function closeDiscussion(ctx) {
+  const hold = workerHold(ctx);
+  if (hold) return note(ctx, `✗ This can't be closed yet: ${hold}.`, true);
+  const others = siblings(ctx).filter((c) => c !== ctx);
+  if (!others.length || !multi(ctx)) {
+    if (fresh(ctx)) return note(ctx, 'Nothing to close: no discussion is open here.');
+    const was = ctx.discussion;
+    if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'closing the discussion');
+    ctx.paused = false;
+    switchTo(ctx, null);
+    return note(ctx, `Closed${was ? ` ${was.name}` : ' the brainstorm'}. To go back, Re-open it in Explorer.`);
+  }
+  if (ctx.replicaOwner) return note(ctx, '✗ This discussion holds the room\'s replication (its peers and storage): it stays open while others are. Close them first, or Quit room.', true);
+  closeContext(ctx, others[0]);
+}
+
+// ── The shared worker queue ───────────────────────────────────────────
+// Tasks run one at a time in the order sent, from any open discussion. agent-room checks the
+// worktree after each task and again before the next: uncommitted edits hold the queue
+// (shop.blockedBy) until their origin resolves them; that origin's own tasks still go through (to
+// finish or abandon them), and keep the original task's details. Edits whose origin is unknown
+// (found before a task, or at start after a Restart) hold every task until the folder is clean.
+async function leftovers(ctx) {
+  const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
+  if (place.disabled) return false;
+  const s = await worktreeStatus(place).catch(() => null);
+  return !!(s?.exists && s.treeDirty);
+}
+function hold(ctx, blockedBy) {
+  const shop = shopOf(ctx);
+  shop.blockedBy = blockedBy;
+  const where = blockedBy.origin ? `[${blockedBy.label}]` : 'an unknown origin';
+  workNote(ctx, `✗ The worker's folder has uncommitted edits from ${where}${blockedBy.task ? ` ("${blockedBy.task}")` : ''}: the queue holds${blockedBy.origin ? ` until [${blockedBy.label}] resolves them (its own instructions still go through)` : ' until the folder is clean (commit or remove those edits yourself)'}.`, true);
+  if (blockedBy.origin) note(blockedBy.origin, `✗ The worker left uncommitted edits from "${blockedBy.task}": other discussions' worker tasks wait. Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).`, true);
+  showHeader(ctx);
+}
+function release(ctx) {
+  const shop = shopOf(ctx), was = shop.blockedBy;
+  shop.blockedBy = null;
+  workNote(ctx, 'The worker\'s folder is clean again: the queue resumes.');
+  if (was?.origin) note(was.origin, 'The worker\'s folder is clean again: other worker tasks resume.');
+  showHeader(ctx);
+}
+async function pump(shop) {
+  if (shop.pumping) return;
+  shop.pumping = true;
+  try {
+    while (!shop.running && shop.tasks.length) {
+      for (const t of shop.tasks.filter((x) => x.origin.stopped)) dropTask(shop, t);
+      const any = shop.tasks[0]?.origin;
+      if (!any) break;
+      // Before the next task: is the folder clean?
+      const dirty = await leftovers(any);
+      if (dirty && !shop.blockedBy) hold(any, { origin: null });
+      else if (!dirty && shop.blockedBy) release(any);
+      const t = !shop.blockedBy ? shop.tasks[0] : shop.blockedBy.origin && shop.tasks.find((x) => x.origin === shop.blockedBy.origin);
+      if (!t) break; // held
+      shop.tasks.splice(shop.tasks.indexOf(t), 1);
+      t.origin.workPending--;
+      shop.running = t;
+      const recovery = shop.blockedBy?.origin === t.origin ? shop.blockedBy : null;
+      try { t.before = await runWork(t.origin, t.text, t.run, t.cycle, recovery); }
+      catch (err) { note(t.origin, `✗ ${err.stack}\n`, true); }
+      finally { shop.running = null; }
+      // After it: edits left uncommitted hold the queue; a recovery keeps the first task's details.
+      try {
+        if (await leftovers(t.origin)) { if (!shop.blockedBy) hold(t.origin, { origin: t.origin, label: originLabel(t.origin), task: t.text.split('\n')[0].trim().slice(0, 120), before: t.before }); }
+        else if (shop.blockedBy) release(t.origin);
+      } catch (err) { note(t.origin, `✗ ${err.message}`, true); }
+      t.done();
+    }
+  } finally { shop.pumping = false; }
+  // Tasks held by leftover edits: look again every 2 seconds, so they start once the folder is clean.
+  if (shop.tasks.length && !shop.running && !shop.recheck) {
+    shop.recheck = setTimeout(() => { shop.recheck = null; pump(shop).catch(() => {}); }, 2000);
+    shop.recheck.unref?.();
+  }
+}
+function dropTask(shop, t) {
+  shop.tasks.splice(shop.tasks.indexOf(t), 1);
+  t.origin.workPending--;
+  t.origin.workSkipped = (t.origin.workSkipped ?? 0) + 1;
+  t.done();
 }
 
 // ── Auto dev ────────────────────────────────────────────────────────
@@ -844,6 +1092,9 @@ export async function start(ctx) {
   ctx.screen.startedAt = ctx.openedAt.toISOString(); // the page's and the Dock app's heartbeat show it
   out(ctx, `Room: ${describe(ctx.room)} · worker ${ctx.worker.name} (${ctx.worker.provider}) · root ${ctx.cwd}`);
   out(ctx, `Transcript: in ${join(ctx.cwd, 'discussions')}/, once the first message starts a discussion`);
+  // Another open discussion of the launch room replicates as the launch room does.
+  const owner = !ctx.node && ctx.context && siblings(ctx).find((c) => c.replicaOwner);
+  if (owner) Object.assign(ctx, { node: owner.node, peers: owner.peers, replicate: owner.replicate });
   // With --node: the server first (with --peer its port must be the configured one), then the storage.
   if (ctx.node) { await viewerUrl(ctx); await setupReplica(ctx); }
   wire(ctx);
@@ -855,6 +1106,10 @@ export async function start(ctx) {
   if (ctx.replica) { ctx.project = await codeInfo(ctx.cwd); await pushReplica(ctx); }
   showHeader(ctx);
   refreshWorker(ctx).catch(() => {}); // the Worker tab's line; creates nothing
+  // Uncommitted edits found at start (after a Restart, say) belong to no known task: worker tasks
+  // wait until the folder is clean; they are never given to a new task.
+  const shop = shopOf(ctx);
+  if (!shop.blockedBy && !shop.running && !shop.tasks.length && await leftovers(ctx).catch(() => false)) hold(ctx, { origin: null });
   if (ctx.noScreen) {
     return out(ctx, 'Type a message, /docs to browse the discussions, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
   }
@@ -888,7 +1143,7 @@ export async function reloaded(ctx) {
   log(ctx, '_(code reloaded)_\n\n');
   // A relay whose worker result can't come back any more: pause visibly rather than send again.
   const run = ctx.autoDev;
-  if (run?.status === 'running' && run.waiting && !ctx.screen.working && !ctx.workPending) pauseAutoDev(ctx, 'the worker\'s result was lost in the Reload');
+  if (run?.status === 'running' && run.waiting && shopOf(ctx).running?.origin !== ctx && !ctx.workPending) pauseAutoDev(ctx, 'the worker\'s result was lost in the Reload');
   note(ctx, 'Reloaded the code and the agents\' rulebook; the conversation continues.\n');
   toScreen(ctx, { type: 'reloaded', page: ctx.docs.PAGE }); // pages refresh if their code changed
   // The header's version: the checkout as it is at this Reload (the start's snapshot is kept).
@@ -903,7 +1158,7 @@ export async function reloaded(ctx) {
 // The room is over (Quit room, or the whole server ending): its screens say so and stop
 // reconnecting. After /restart they wait for the new process instead, and reload when it answers.
 export function ended(ctx, restarting = false) {
-  if (ctx.replica) ctx.replicate.stopPeers(ctx.replica);
+  if (ctx.replicaOwner && ctx.replica) ctx.replicate.stopPeers(ctx.replica); // its other discussions close with it (Quit room)
   clearInterval(ctx.quotaTimer);
   return ctx.docs.endAll(ctx.screen, { type: restarting ? 'restarting' : 'ended' });
 }
@@ -959,6 +1214,8 @@ export async function stopRoom(ctx) {
   clearTimeout(ctx.quitTimer);
   await ctx.quitStop;
   const report = await stopPrograms(ctx);
+  const shop = ctx.shop;
+  if (shop) for (const t of shop.tasks.filter((x) => x.origin === ctx)) dropTask(shop, t); // its own, in the shared queue
   const queued = (ctx.workPending ?? 0) + (ctx.workSkipped ?? 0);
   if (queued) report.push(`${plural(queued, 'queued worker instruction')} ${queued === 1 ? 'was' : 'were'} not started.`);
   ctx.workSkipped = 0;
@@ -976,8 +1233,10 @@ export async function stopRoom(ctx) {
 // room); the others as --room. The new process writes where this one did (the terminal or the Dock
 // app's log) and runs on its own once this one exits.
 export function restartArgs(rooms, values, port) {
-  const [first, ...rest] = rooms;
   const reopen = (r) => (r.discussion && !r.paused ? r.discussion.name : null);
+  // A folder's other open discussions come back too, each in its own context; empty ones,
+  // brainstorms and paused ones don't (a paused one stays saved for Resume).
+  const [first, ...rest] = rooms.filter((r) => !r.context || reopen(r));
   const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', first.cwd, '--port', String(port)];
   if (first.agentSpecs) args.push('--agents', first.agentSpecs);
   if (first.workerSpec) args.push('--worker', first.workerSpec);
@@ -987,7 +1246,7 @@ export function restartArgs(rooms, values, port) {
     for (const p of values.peer ?? []) args.push('--peer', p);
   }
   if (reopen(first)) args.push('--reopen', reopen(first));
-  for (const r of rest) args.push('--room', JSON.stringify({ cwd: r.cwd, agents: r.agentSpecs, worker: r.workerSpec, ...(reopen(r) && { reopen: reopen(r) }) }));
+  for (const r of rest) args.push('--room', JSON.stringify({ cwd: r.cwd, agents: r.agentSpecs, worker: r.workerSpec, ...(reopen(r) && { reopen: reopen(r) }), ...(r.context && { context: r.context }) }));
   return args;
 }
 export async function restart(hub, rooms, values) {
@@ -1001,12 +1260,14 @@ export async function handleLine(line, ctx) {
   if (!line) return;
   if (line === '/docs') return showDocs(ctx);
   const reopen = /^\/(?:reopen|continue)(?:\s+(.*))?$/.exec(line); // /continue: its former name
-  if (reopen) return reopenDiscussion(ctx, (reopen[1] ?? '').trim());
+  // On the screen, several discussions stay open (see "Several open discussions").
+  if (reopen) return (multi(ctx) ? reopenBeside : reopenDiscussion)(ctx, (reopen[1] ?? '').trim());
   if (line === '/pause') return pauseDiscussion(ctx);
   const resume = /^\/resume(?:\s+(.*))?$/.exec(line);
-  if (resume) return resumeDiscussion(ctx, (resume[1] ?? '').trim());
-  if (line === '/new') return newDiscussion(ctx);
-  if (line === '/brainstorm') return newBrainstorm(ctx);
+  if (resume) return (multi(ctx) ? resumeBeside : resumeDiscussion)(ctx, (resume[1] ?? '').trim());
+  if (line === '/new') return multi(ctx) ? newDiscussionBeside(ctx) : newDiscussion(ctx);
+  if (line === '/brainstorm') return multi(ctx) ? newBrainstormBeside(ctx) : newBrainstorm(ctx);
+  if (line === '/close') return closeDiscussion(ctx);
   if (line === '/autodev') return startAutoDev(ctx);
   if (line === AUTO_DEV_REPORT) return autoDevReport(ctx);
   const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
@@ -1185,6 +1446,8 @@ async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
 // Reload (read back from Git; agent-room stores nothing). The only Git writes are `worktree add` and
 // a fast-forward of worker/main when it has nothing of its own: never a reset, merge, rebase or
 // deletion, and never anything in the room's own working copy. Decided by the User, 2026-11-07.
+// That is agent-room's own code: the worker itself may do such Git actions in its worktree when the
+// User explicitly asks (a rollback, or abandoning listed edits after approval). Decided 2026-11-09.
 export const WORKER_BRANCH = 'worker/main';
 const NO_GIT = 'Worker requires a source Git repository for its isolated worktree.';
 const git = (dir, ...args) => new Promise((done, fail) => execFile('git', ['-C', dir, ...args], { maxBuffer: 1 << 22 },
@@ -1211,6 +1474,7 @@ async function sharedWorktree(ctx, place) {
   if (place.disabled || !ctx.hub) return place;
   for (const other of ctx.hub.rooms.values()) {
     if (other === ctx) break; // only rooms opened before this one
+    if (baseKey(other) === baseKey(ctx)) continue; // the same folder's open discussions share its worker
     if ((await workerPlace(other.cwd)).top === place.top) {
       return { disabled: `No worker in this room: ${other.cwd} is already open on this server in the same Git repository (${place.top}), and its worker uses ${place.path}.` };
     }
@@ -1314,34 +1578,38 @@ export async function refreshWorker(ctx, { prepare = false } = {}) {
     info = { lines: [`✗ ${err.message}`], error: true };
     if (prepare) throw err;
   } finally {
-    if (info) { ctx.screen.workerInfo = info; toScreen(ctx, { type: 'workerinfo', info }); }
+    if (info) { for (const c of siblings(ctx)) if (c.screen) c.screen.workerInfo = info; toShop(ctx, { type: 'workerinfo', info }); }
   }
   return place;
 }
 
 // The worker: instructions from the Worker tab run one at a time, in the order sent, alongside the
-// discussion (they don't wait for a round, and a round doesn't wait for them). The queue is in ctx,
-// so it carries over a reload. The worker is sent only the instruction itself; its CLI session holds
-// the earlier ones.
+// discussion (they don't wait for a round, and a round doesn't wait for them), in the folder's shared
+// queue (see "The shared worker queue"), which carries over a reload. The worker is sent only the
+// instruction itself; the origin's own worker session holds the earlier ones. ctx.workQueue settles
+// when this context's queued tasks have run (or were dropped).
 // `run`: an auto dev run relaying this instruction (shown as "Relayed from discussion").
 export function queueWork(ctx, text, run = null) {
   if (ctx.paused || ctx.pausing) return note(ctx, 'The discussion is pausing or paused. Resume before sending worker instructions.', true);
   if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
   if (ctx.stopped) return note(ctx, 'This room is ending: the instruction was not sent.', true);
   ctx.agentsStarted = true;
-  const cycle = run?.cycle;
-  // A bug here must not jam the queue: report it, and the next instruction still runs. Once the
-  // room is ending (Quit room), queued instructions are not started.
+  const shop = shopOf(ctx);
+  let done;
+  const finished = new Promise((r) => { done = r; });
+  shop.tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done });
   ctx.workPending = (ctx.workPending ?? 0) + 1;
-  ctx.workQueue = (ctx.workQueue ?? Promise.resolve()).then(() => {
-    ctx.workPending--;
-    if (ctx.stopped) { ctx.workSkipped = (ctx.workSkipped ?? 0) + 1; return; }
-    return runWork(ctx, text, run, cycle);
-  }).catch((err) => note(ctx, `✗ ${err.stack}\n`, true));
+  ctx.workQueue = Promise.all([ctx.workQueue, finished]).then(() => {});
+  // A bug here must not jam the queue: report it, and the next instruction still runs.
+  pump(shop).catch((err) => note(ctx, `✗ ${err.stack}\n`, true));
 }
 
-async function runWork(ctx, text, run = null, cycle = 0) {
-  const { worker, screen } = ctx;
+// One task, for its origin `ctx`. `recovery`: the edits this origin left uncommitted, which this
+// task is to resolve. Resolves to worker/main's commit before the task (or null).
+async function runWork(ctx, text, run = null, cycle = 0, recovery = null) {
+  const { worker } = ctx;
+  const shop = shopOf(ctx), screen = ctx.screen, label = originLabel(ctx);
+  let before = null;
   const history = ctx.workerHandoff ? screen.worker.filter((m) => m.speaker).map((m) =>
     `${m.speaker}${m.error ? ' (failed)' : ''}:\n${m.html}`).join('\n\n') : '';
   // The task's context, read once, here, before anything awaits: its discussion (for the briefing
@@ -1356,41 +1624,53 @@ async function runWork(ctx, text, run = null, cycle = 0) {
     catch (err) { saveError ??= err; }
   };
   const show = (entry, meta) => {
-    const view = { ...ctx.docs.messageView(entry), ...(meta && { meta }) };
-    screen.worker.push(view);
-    toScreen(ctx, { type: 'work', message: view });
+    const view = { ...ctx.docs.messageView(entry), ...(meta && { meta }), origin: label };
+    shop.log.push(view);
+    toShop(ctx, { type: 'work', message: view });
   };
+  const working = (name) => { for (const c of siblings(ctx)) if (c.screen) c.screen.working = name; toShop(ctx, { type: 'working', name }); };
   // The discussion this task writes to (transcript, notes): /move refuses it until the task ends.
-  ctx.workingIn = task.discussion?.dir ?? null;
-  screen.working = worker.name;
+  shop.workingIn = ctx.workingIn = task.discussion?.dir ?? null;
+  for (const c of siblings(ctx)) if (c.screen) c.screen.working = worker.name;
   try {
     const from = run ? 'Relayed from discussion' : 'User';
     workLog(`**${from} → ${worker.name}** (worker${run ? `, auto dev cycle ${cycle} of ${AUTO_DEV_CYCLES}` : ''})\n\n${text}\n\n`);
     out(ctx, `\n${bold(`${run ? 'Relayed' : 'You'} → ${worker.name}`)} › ${text}\n`);
     show({ speaker: from, text });
-    toScreen(ctx, { type: 'working', name: worker.name });
+    working(worker.name);
     const t0 = Date.now();
     let entry;
     try {
       // Its own worktree first (created, reattached or caught up); without one it doesn't run.
       const place = await refreshWorker(ctx, { prepare: true });
       if (place.disabled) throw new Error(place.disabled);
+      before = await git(place.path, 'rev-parse', 'HEAD').catch(() => null);
       // The worker learns the active discussion's folder (for its notes) with its first instruction there.
       // After New discussion, until the next one exists, it learns only that the old one is closed.
       const d = task.discussion;
+      // A brainstorm has no folder: it is told so once.
       const brief = d && ctx.workerBriefed !== d.dir
         ? `The active discussion's folder is ${d.dir}: create, read and write this discussion's documents there, including your implementation notes and plans. The work itself goes in your worktree, ${place.cwd}.\n\n`
-        : !d && ctx.workerBriefed
+        : !d && ctx.state.brainstorm && ctx.workerBriefed !== 'brainstorm'
+          ? 'These instructions come from a brainstorm, which has no folder: keep your notes in your scratch folder only.\n\n'
+        : !d && ctx.workerBriefed && ctx.workerBriefed !== 'brainstorm'
           ? `No discussion is active now: ${ctx.workerBriefed} is no longer the active discussion's folder. You will be told the next one's folder once it exists.\n\n`
           : '';
       // And where it works, with its first instruction (again if that changes).
       const tree = ctx.workerTree !== place.cwd
-        ? `Your working directory is ${place.cwd}, your own Git worktree of the project, on the branch ${WORKER_BRANCH}. Make your changes there, never in the room's root, ${ctx.cwd}: that is the User's working copy (only the discussion folder there is yours, for notes). Commit on ${WORKER_BRANCH} only when asked; the User reviews and merges it. Your scratch notes go in ${join(place.path, NOTES)}/<task>/, one folder per task: Git ignores them, never commit them, and delete them only when the User says "stage accepted". Plans and notes for the User's review still go in the discussion's folder.\n\n`
+        ? `Your working directory is ${place.cwd}, your own Git worktree of the project, on the branch ${WORKER_BRANCH}. Make your changes there, never in the room's root, ${ctx.cwd}: that is the User's working copy (only the discussion folder there is yours, for notes). Commit every completed task on ${WORKER_BRANCH}, labelled as each instruction says, and give the commit ID in your reply; the User reviews and merges it into main. Your scratch notes go in ${join(place.path, NOTES)}/<task>/, one folder per task: Git ignores them, never commit them, and delete them only when the User says "stage accepted". Plans and notes for the User's review still go in the discussion's folder.\n\n`
         : '';
-      entry = { speaker: worker.name, text: (await worker.turn(brief + tree + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
+      // Its origin's label for the commit, once per worker session (again if it changes); a recovery
+      // task also gets the first task's details.
+      const commit = ctx.workerLabel === label ? '' : `These instructions come from [${label}]. When a task is complete, commit it on ${WORKER_BRANCH} with a message starting "[${label}]" and give the commit ID in your reply.\n\n`;
+      const leftover = recovery
+        ? `Uncommitted edits are left in your worktree from the earlier task from [${label}] "${recovery.task}"${recovery.before ? ` (${WORKER_BRANCH} was at ${recovery.before.slice(0, 7)} when it started)` : ''}: other discussions' tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those.\n\n`
+        : '';
+      entry = { speaker: worker.name, text: (await worker.turn(brief + tree + commit + leftover + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
       if (ctx.worker === worker) {
-        if (brief) ctx.workerBriefed = d?.dir ?? null;
+        if (brief) ctx.workerBriefed = d?.dir ?? (ctx.state.brainstorm ? 'brainstorm' : null);
         ctx.workerTree = place.cwd;
+        ctx.workerLabel = label;
         ctx.workerHandoff = false;
       }
       if (worker.lastUsage) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
@@ -1401,21 +1681,23 @@ async function runWork(ctx, text, run = null, cycle = 0) {
     workLog(`**${worker.name}** (worker${entry.error ? ', failed' : ''}, ${meta})\n\n${entry.text}\n\n`);
     out(ctx, entry.error ? red(`\n✗ ${worker.name} (worker) failed: ${entry.text}\n`) : `\n${bold(worker.name)}${dim(` (worker, ${meta})`)} › ${entry.text}\n`);
     show(entry, meta);
-    if (saveError) {
-      const view = { note: `✗ ${worker.name}: couldn't save to the transcript: ${saveError.message}`, error: true };
-      screen.worker.push(view);
-      toScreen(ctx, { type: 'work', message: view });
-      out(ctx, red(view.note));
+    if (saveError) workNote(ctx, `✗ ${worker.name}: couldn't save to the transcript: ${saveError.message}`, true);
+    // Its commits must carry its label: one without it is reported, not trusted.
+    if (before) {
+      const subjects = (await git(workerDir(ctx), 'log', '--format=%h %s', `${before}..HEAD`).catch(() => '')).split('\n').filter(Boolean);
+      const unlabelled = subjects.filter((l) => !l.slice(l.indexOf(' ') + 1).startsWith(`[${label}]`));
+      if (unlabelled.length) workNote(ctx, `✗ Commits without the [${label}] label: ${unlabelled.join(' · ')}.`, true);
     }
     if (run) reportBack(ctx, run, entry);
   } finally {
-    ctx.workingIn = null;
-    screen.working = null;
-    toScreen(ctx, { type: 'working', name: null });
+    shop.workingIn = ctx.workingIn = null;
+    working(null);
   }
   refreshWorker(ctx).catch(() => {});
   refreshQuota(ctx).catch(() => {});
+  return before;
 }
+const workerDir = (ctx) => shopOf(ctx).workerDir.path ?? ctx.cwd;
 
 // The server's state for a room started without cli.mjs's hub (some tests): just that room, served
 // at its own address like any other.
@@ -1531,13 +1813,19 @@ export const lanAddresses = () => Object.values(networkInterfaces()).flat().filt
 
 // Opens the storage (recovering an interrupted receive) and starts one background loop per peer,
 // once per process: on Reload only the code changes (its state stays in ctx.replicaState).
+// The launch room's other open discussions use its replica as it is (one storage, one set of peer
+// loops): each saves and sends its own rounds; received rounds show on every page.
 async function setupReplica(ctx) {
+  const owner = siblings(ctx).find((c) => c !== ctx && c.replicaOwner && c.replica);
+  if (owner && !ctx.replicaOwner) { ctx.replica = owner.replica; ctx.replicaState = owner.replicaState; return; }
   const R = ctx.replicate, first = !ctx.replicaState?.s;
   ctx.replicaState ??= {};
+  ctx.replicaOwner = true;
+  const all = () => siblings(ctx).filter((c) => c.replica);
   const r = ctx.replica = await R.createReplica({ root: ctx.cwd, node: ctx.node, peers: ctx.peers, state: ctx.replicaState,
-    activity: () => (ctx.busy ? 'running a round' : 'idle'), project: () => ctx.project ?? null, log: (t) => out(ctx, red(t)) });
-  r.changed = () => pushReplica(ctx);
-  r.onReceived = (p) => { note(ctx, `Received ${p.node}'s ${p.kind} ${p.round} of "${p.title}".`); pushReplica(ctx); };
+    activity: () => (siblings(ctx).some((c) => c.busy) ? 'running a round' : 'idle'), project: () => ctx.project ?? null, log: (t) => out(ctx, red(t)) });
+  r.changed = () => { for (const c of all()) pushReplica(c); };
+  r.onReceived = (p) => { for (const c of all()) note(c, `Received ${p.node}'s ${p.kind} ${p.round} of "${p.title}".`); r.changed(); };
   r.onSent = (x) => { if (x.late) R.lineRound(r.s, x.acked).then((n) => note(ctx, `Round ${n} sent to ${x.peer} ✓`), () => {}); };
   if (!first) return;
   const port = hubOf(ctx).server.address().port, rec = r.s.recovered;
@@ -1607,7 +1895,10 @@ async function saveRound(ctx, { kind, outcome, ending, summary }) {
   try {
     const conversation = ctx.state.transcript.map(({ speaker, text, error, pass, summary: turn, outcome: o, by }) =>
       ({ speaker, text: String(text ?? ''), ...(error && { error }), ...(pass && { pass }), ...(turn && { summary: true }), ...(o && { outcome: o, by }) }));
-    c = await R.capture(r.s, ctx.discussion, { kind, outcome, ending, summary, agents: currentSettings(ctx).agents, conversation });
+    // One capture at a time in the storage: the launch room's open discussions share it.
+    const capture = (r.s.captures ?? Promise.resolve()).then(() => R.capture(r.s, ctx.discussion, { kind, outcome, ending, summary, agents: currentSettings(ctx).agents, conversation }));
+    r.s.captures = capture.catch(() => {});
+    c = await capture;
   } catch (err) {
     return note(ctx, `✗ Could not save ${label.toLowerCase()}: ${err.message}. The discussion's files are as they were; nothing was sent.`, true);
   }

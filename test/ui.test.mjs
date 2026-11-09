@@ -180,6 +180,7 @@ test('/reopen after the session started: a fresh session in that discussion, fro
   const { mkdirSync, readdirSync, readFileSync } = await import('node:fs');
   const prompts = [];
   const ctx = await freshSession([], async () => ({ title: 'First topic' }));
+  ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
   const resets = [];
   for (const a of [...ctx.room.agents, ctx.worker]) a.reset = () => resets.push(a.name);
   ctx.room.agents[0].turn = async (p) => { prompts.push(p); return 'PASS'; };
@@ -332,6 +333,7 @@ test('/brainstorm: no title, folder or transcript is created; the agents are tol
 test('New brainstorm replaces the current one, and ends a discussion session keeping its folder and transcript', async () => {
   const { readdirSync, readFileSync } = await import('node:fs');
   const ctx = await freshSession([], async () => ({ title: 'Topic' }));
+  ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
   const resets = [];
   for (const a of [...ctx.room.agents, ctx.worker]) a.reset = () => resets.push(a.name);
   await handleLine('/autosummary off', ctx);
@@ -360,6 +362,7 @@ test('New brainstorm replaces the current one, and ends a discussion session kee
 test('New discussion or Re-open ends the brainstorm; the next message then starts a discussion', async () => {
   const { mkdirSync, readdirSync } = await import('node:fs');
   const ctx = await freshSession([], async () => ({ title: 'Real topic' }));
+  ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
   await handleLine('/autosummary off', ctx);
   await handleLine('/brainstorm', ctx);
   await handleLine('just talking', ctx);
@@ -411,6 +414,7 @@ test('/new: nothing to end before the first message; it creates nothing and chan
 test('/new after a round: the session ends as with Re-open; the next message starts a new titled discussion', async () => {
   const { mkdirSync, readdirSync, readFileSync, chmodSync } = await import('node:fs');
   const ctx = await freshSession([], async (text) => ({ title: text === 'hello' ? 'First topic' : 'Second topic' }));
+  ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
   const resets = [];
   for (const a of [...ctx.room.agents, ctx.worker]) a.reset = () => resets.push(a.name);
   const prompts = [];
@@ -456,6 +460,7 @@ test('/new leaves the worker alone: a running task keeps its transcript, its log
   const { readFileSync } = await import('node:fs');
   const titles = ['First topic', 'Second topic'];
   const ctx = await freshSession([], async () => ({ title: titles.shift() }));
+  ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
   await gitRoom(ctx.cwd);
   let resetWorker = false;
   ctx.worker.reset = () => { resetWorker = true; };
@@ -495,6 +500,7 @@ test('after New discussion, the previous one can\'t move while its worker task r
   const { queueWork } = await import('../src/ui.mjs');
   const { existsSync, readFileSync } = await import('node:fs');
   const ctx = await freshSession([], async () => ({ title: 'First topic' }));
+  ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
   let finish;
   await gitRoom(ctx.cwd);
   ctx.worker.turn = () => new Promise((done) => { finish = done; });
@@ -623,11 +629,21 @@ test('after a restart the worktree is reused; an existing worker/main without a 
   await work(first, 'do it');
   const path = `${realpathSync(first.cwd)}.worker`;
   writeFileSync(`${path}/wip.txt`, 'unfinished\n'); // the worker's uncommitted work
-  const again = (await workerRoom()).ctx; // a new process on the same room
+  const { ctx: again, got } = await workerRoom(); // a new process on the same room
   again.cwd = first.cwd;
-  await work(again, 'more');
-  assert.equal(again.workerDir.path, path);
+  // Its owner is unknown to the new process: the queue holds, and the edits are left as they are.
+  const { queueWork } = await import('../src/ui.mjs');
+  queueWork(again, 'more');
+  await until(() => again.shop.blockedBy);
+  assert.equal(again.shop.blockedBy.origin, null);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(got, []);
   assert.equal(git('-C', path, 'status', '--porcelain'), '?? wip.txt'); // kept
+  // Committed (here by hand): the held instruction runs, in the reused worktree.
+  git('-C', path, 'add', 'wip.txt'); git('-C', path, 'commit', '-q', '-m', 'unfinished work');
+  await again.workQueue;
+  assert.equal(again.workerDir.path, path);
+  assert.match(got[0], /more$/);
 
   const other = (await workerRoom()).ctx; // a branch made earlier, its worktree removed by hand
   const g2 = await gitRoom(other.cwd);
@@ -654,7 +670,7 @@ test('a folder already at the worktree\'s place is refused and left alone; the w
 
 test('worker/main catches up with the room only when strictly behind with a clean worktree; otherwise it is left as it is', async () => {
   const { writeFileSync, realpathSync } = await import('node:fs');
-  const { ctx } = await workerRoom();
+  const { ctx, got } = await workerRoom();
   const git = await gitRoom(ctx.cwd);
   const path = `${realpathSync(ctx.cwd)}.worker`;
   await work(ctx, 'start');
@@ -665,12 +681,23 @@ test('worker/main catches up with the room only when strictly behind with a clea
   git('commit', '-q', '--allow-empty', '-m', 'room 2');
   writeFileSync(`${path}/wip.txt`, 'x\n');
   const before = git('rev-parse', 'worker/main');
-  await work(ctx, 'dirty');
+  // Uncommitted edits: the queue holds, with the edits intact and worker/main where it was.
+  const { queueWork, refreshWorker } = await import('../src/ui.mjs');
+  queueWork(ctx, 'dirty');
+  await until(() => ctx.shop.blockedBy);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(!got.some((p) => p.endsWith('dirty')));
+  assert.equal(git('-C', path, 'status', '--porcelain'), '?? wip.txt');
   assert.equal(git('rev-parse', 'worker/main'), before);
+  await refreshWorker(ctx);
   assert.ok(ctx.screen.workerInfo.lines.some((l) => /1 commit behind the room: its worktree has uncommitted changes, so it is left as it is/.test(l)));
 
+  // Committed: the held instruction runs; worker/main has its own commit now, so it isn't moved.
   git('-C', path, 'add', 'wip.txt'); git('-C', path, 'commit', '-q', '-m', 'worker work');
   const own = git('rev-parse', 'worker/main');
+  await ctx.workQueue;
+  assert.ok(got.some((p) => p.endsWith('dirty')));
+  assert.equal(git('rev-parse', 'worker/main'), own);
   await work(ctx, 'own commits');
   assert.equal(git('rev-parse', 'worker/main'), own); // never reset, merged or rebased
   assert.ok(ctx.screen.workerInfo.lines.includes('worker/main has 1 commit not in the room: review and merge them when ready.'));
@@ -712,6 +739,7 @@ test('a worker task keeps the discussion it started in, even if New discussion c
   const { readFileSync, existsSync } = await import('node:fs');
   const { queueWork } = await import('../src/ui.mjs');
   const { ctx, got } = await workerRoom();
+  ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
   await gitRoom(ctx.cwd);
   let finish;
   ctx.worker.turn = (p) => { got.push(p); return new Promise((done) => { finish = done; }); };
@@ -811,6 +839,7 @@ test('Pause preserves native sessions across New discussion; corrupt Resume leav
   const { join, dirname } = await import('node:path');
   const { readFileSync, writeFileSync, realpathSync, rmSync, existsSync } = await import('node:fs');
   const ctx = { ...freshCtx(), cwd: await tmp('paused-state-test-'), workerSpec: 'claude:W' };
+  ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
   Object.assign(ctx, await load(ctx, '?pause-unit'));
   ctx.suggestTitle = async () => ({ title: 'Saved context' });
   for (const agent of ctx.room.agents) agent.turn = async () => 'PASS';
@@ -881,6 +910,7 @@ test('Resume replaces a brainstorm only with a valid Pause; its button asks twic
   const { join, dirname } = await import('node:path');
   const { readFileSync, writeFileSync, renameSync, realpathSync, rmSync, existsSync } = await import('node:fs');
   const ctx = { ...freshCtx(), cwd: await tmp('brainstorm-resume-test-'), workerSpec: 'claude:W' };
+  ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
   Object.assign(ctx, await load(ctx, '?brainstorm-resume'));
   ctx.suggestTitle = async () => ({ title: 'Saved topic' });
   const pass = () => { for (const agent of ctx.room.agents) agent.turn = async () => 'PASS'; };
@@ -1148,6 +1178,7 @@ test('auto dev: while a run is active, the status under the title says so instea
 test('auto dev: never in a brainstorm; New discussion ends a run; Reload keeps it, and a lost worker result pauses it', async () => {
   const { reloaded } = await import('../src/ui.mjs');
   const brainstorm = await freshSession([], async () => ({ title: 'x' }));
+  brainstorm.noScreen = true; // terminal mode: one discussion at a time
   brainstorm.say = () => {};
   await handleLine('/brainstorm', brainstorm);
   brainstorm.state.transcript.push({ speaker: 'Summary', text: summaryWith('A'), outcome: 'agreed', by: 'A' });
@@ -1158,6 +1189,7 @@ test('auto dev: never in a brainstorm; New discussion ends a run; Reload keeps i
   let release;
   const gate = new Promise((r) => { release = r; });
   const { ctx, got, settle } = await autoDevRoom({ summaries: [summaryWith('A'), summaryWith('B', 'SEND')], worker: async () => { await gate; return 'did A'; } });
+  ctx.noScreen = true; // terminal mode: New discussion ends the session here
   await handleLine('/autodev', ctx);
   const run = ctx.autoDev;
   Object.assign(ctx, { code: {}, refreshQuota: () => {} });
@@ -1179,6 +1211,198 @@ test('auto dev: never in a brainstorm; New discussion ends a run; Reload keeps i
   await reloaded(lost.ctx);
   assert.deepEqual([lost.ctx.autoDev.status, lost.ctx.autoDev.reason], ['paused', 'the worker\'s result was lost in the Reload']);
   assert.equal(lost.got.length, 1);
+});
+
+// ── Several open discussions (the screen) ──
+// A folder whose open discussions are scripted contexts on one hub, as cli.mjs's addRoom makes them:
+// each records its pages' events, its worker's prompts and the lines it queues for itself.
+async function multiRoom({ worker } = {}) {
+  const { realpathSync } = await import('node:fs');
+  const { roomId } = await import('../src/ui.mjs');
+  const cwd = await tmp('multi-test-');
+  const git = await gitRoom(cwd);
+  const hub = { rooms: new Map() };
+  const make = async (context) => {
+    const ctx = await scriptedCtx([]);
+    delete ctx.logPath;
+    Object.assign(ctx, { cwd, hub, context: context ?? null, key: realpathSync(cwd) + (context ? `#${context}` : '') });
+    ctx.id = roomId(ctx.key);
+    ctx.suggestTitle = async (text) => ({ title: text });
+    ctx.events = []; ctx.notes = []; ctx.queued = []; ctx.prompts = []; ctx.resets = 0;
+    ctx.docs = { ...ctx.docs, broadcast: (screen, ev) => { ctx.events.push(ev); if (ev.type === 'note') ctx.notes.push(ev.text); } };
+    ctx.say = (line) => ctx.queued.push(line);
+    for (const a of ctx.room.agents) a.reset = () => ctx.resets++;
+    ctx.worker.turn = async (p) => { ctx.prompts.push(p); return worker ? worker(ctx, p) : 'done'; };
+    hub.rooms.set(ctx.key, ctx);
+    return ctx;
+  };
+  hub.addRoom = async (folder, { context, reopen }) => {
+    const c = await make(context);
+    if (reopen) await handleLine(`/reopen ${reopen}`, c);
+    return { ctx: c };
+  };
+  const first = await make(null);
+  await handleLine('/autosummary off', first);
+  // The lines contexts queued for themselves (except /quit, recorded only), run as their input would.
+  const settle = async () => {
+    for (let more = true; more;) {
+      more = false;
+      for (const c of [...hub.rooms.values()]) {
+        while (c.queued.some((l) => l !== '/quit')) { more = true; await handleLine(c.queued.splice(c.queued.findIndex((l) => l !== '/quit'), 1)[0], c); }
+      }
+    }
+  };
+  const gotoOf = (c) => c.events.filter((e) => e.type === 'goto').at(-1)?.url;
+  const pageOf = (c) => `/r/${c.id}/__room`;
+  return { hub, first, settle, git, gotoOf, pageOf, contexts: () => [...hub.rooms.values()] };
+}
+
+test('on the screen, New discussion keeps the discussion open with its sessions; Re-open of an open one goes there; New discussion ends an open brainstorm', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { hub, first, settle, gotoOf, pageOf, contexts } = await multiRoom();
+  await handleLine('topic-a', first);
+  const a = first.discussion, transcript = first.logPath;
+  await handleLine('/new', first);
+  const [, second] = contexts();
+  assert.equal(contexts().length, 2);
+  assert.equal(gotoOf(first), pageOf(second)); // this window shows the new one
+  assert.deepEqual([first.discussion, first.logPath, first.resets], [a, transcript, 0]); // kept as it was
+  assert.deepEqual(first.state.transcript.map((m) => m.text), ['topic-a', 'PASS', 'PASS']);
+  assert.doesNotMatch(readFileSync(transcript, 'utf8'), /session ended/);
+  await handleLine('topic-b', second);
+  assert.equal(second.discussion.title, 'topic-b');
+  assert.deepEqual(first.screen.room.open.map((o) => [o.title, o.current]), [['topic-a', true], ['topic-b', false]]);
+
+  await handleLine(`/reopen ${a.name}`, second); // open already: shown as it is
+  assert.equal(gotoOf(second), pageOf(first));
+  assert.equal(first.resets, 0);
+  assert.equal(contexts().length, 2);
+
+  await handleLine('/brainstorm', second); // beside, in a context of its own
+  await settle();
+  const brain = contexts().find((c) => c.state.brainstorm);
+  assert.ok(brain && brain !== second && second.discussion);
+  assert.equal(gotoOf(second), pageOf(brain));
+  await handleLine('/new', first); // ends the open brainstorm
+  assert.deepEqual(brain.queued, ['/quit']);
+  assert.equal(gotoOf(brain), pageOf(first));
+  assert.equal(contexts().length, 4); // until the brainstorm's input ends it; plus the new one
+  assert.equal(gotoOf(first), pageOf(contexts().at(-1)));
+  assert.equal(hub.rooms.size, 4);
+});
+
+test('one shared worker queue: tasks labelled by origin, one worker session each, reports back there; Close discussion; Quit room closes them all', async () => {
+  const { readFileSync, realpathSync } = await import('node:fs');
+  const { queueWork, reloaded } = await import('../src/ui.mjs');
+  const commit = (msg) => (ctx) => { const g = (...a) => require('node:child_process').execFileSync('git', ['-C', ctx.shop.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]); g('commit', '-q', '--allow-empty', '-m', msg); return 'committed'; };
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const { first, gotoOf, pageOf, contexts } = await multiRoom({ worker: (ctx, p) => commit(ctx === contexts()[0] ? `[${ctx.discussion.name}] done` : 'no label')(ctx) });
+  await handleLine('topic-a', first);
+  await handleLine('/new', first);
+  const second = contexts()[1];
+  await handleLine('topic-b', second);
+  queueWork(first, 'task for a');
+  queueWork(second, 'task for b');
+  await Promise.all([first.workQueue, second.workQueue]);
+  assert.equal(first.shop, second.shop); // one queue, one Worker tab
+  assert.match(first.prompts[0], new RegExp(`These instructions come from \\[${first.discussion.name}\\]\\. When a task is complete, commit it on worker/main with a message starting "\\[${first.discussion.name}\\]" and give the commit ID in your reply`));
+  assert.match(second.prompts[0], new RegExp(`come from \\[${second.discussion.name}\\]`));
+  assert.match(first.prompts[0], new RegExp(`The active discussion's folder is ${first.discussion.dir}:`)); // its own folder, its own session
+  assert.match(second.prompts[0], new RegExp(`The active discussion's folder is ${second.discussion.dir}:`));
+  assert.deepEqual(first.shop.log.filter((m) => m.speaker === 'User').map((m) => m.origin), [first.discussion.name, second.discussion.name]);
+  assert.match(readFileSync(first.logPath, 'utf8'), /task for a[\s\S]*committed/); // each report goes back to its origin
+  assert.doesNotMatch(readFileSync(first.logPath, 'utf8'), /task for b/);
+  assert.match(readFileSync(second.logPath, 'utf8'), /task for b/);
+  assert.ok(first.shop.log.some((m) => m.note && new RegExp(`Commits without the \\[${second.discussion.name}\\] label: [0-9a-f]+ no label`).test(m.note)));
+  assert.ok(!first.shop.log.some((m) => m.note?.includes(`[${first.discussion.name}] label`)));
+  assert.equal(realpathSync(first.shop.workerDir.path), `${realpathSync(first.cwd)}.worker`);
+
+  await handleLine('/close', second); // the others stay open
+  assert.deepEqual(second.queued, ['/quit']);
+  assert.equal(gotoOf(second), pageOf(first));
+  Object.assign(first, { code: {}, refreshQuota: () => {} });
+  await reloaded(first); // wires the page's input
+  first.screen.say('/quit', false);
+  assert.deepEqual([first.queued.at(-1), second.queued.at(-1)], ['/quit', '/quit']); // every open discussion
+});
+
+test('leftover edits hold the shared queue for their origin, which can recover them; they block Close, Archive and Defer; unknown leftovers hold everything', async () => {
+  const { writeFileSync, existsSync } = await import('node:fs');
+  const { queueWork, start } = await import('../src/ui.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const inTree = (ctx, ...a) => execFileSync('git', ['-C', ctx.shop.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]);
+  const { first, git, contexts } = await multiRoom({ worker: (ctx, p) => {
+    if (p.endsWith('make wip')) writeFileSync(`${ctx.shop.workerDir.path}/wip.txt`, 'half done\n');
+    if (p.endsWith('finish it')) { inTree(ctx, 'add', 'wip.txt'); inTree(ctx, 'commit', '-q', '-m', `[${ctx.discussion.name}] finished`); }
+    return 'ok';
+  } });
+  await handleLine('topic-a', first);
+  await handleLine('/new', first);
+  const second = contexts()[1];
+  await handleLine('topic-b', second);
+  queueWork(first, 'make wip');
+  await first.workQueue;
+  assert.equal(first.shop.blockedBy.origin, first);
+  assert.match(first.notes.at(-1), /The worker left uncommitted edits from "make wip": other discussions' worker tasks wait/);
+  let otherRan = false;
+  queueWork(second, 'other work');
+  second.workQueue.then(() => { otherRan = true; });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual([otherRan, second.prompts.length], [false, 0]); // held
+
+  await handleLine('/close', first);
+  assert.match(first.notes.at(-1), /can't be closed yet: its worker edits from "make wip" are unresolved/);
+  await handleLine(`/move ${first.discussion.name} archive`, second);
+  assert.match(second.notes.at(-1), /can't move: its worker edits from "make wip" are unresolved/);
+  await handleLine(`/move ${first.discussion.name} deferred`, second);
+  assert.ok(existsSync(first.discussion.dir));
+
+  queueWork(first, 'finish it'); // its origin's recovery goes through, with the first task's details
+  await first.workQueue;
+  assert.match(first.prompts[1], new RegExp(`Uncommitted edits are left in your worktree from the earlier task from \\[${first.discussion.name}\\] "make wip" \\(worker/main was at [0-9a-f]{7} when it started\\)`));
+  assert.match(first.prompts[1], /first list exactly the edits you would remove and wait for the User's explicit approval/);
+  await second.workQueue;
+  assert.equal(otherRan, true);
+  assert.equal(first.shop.blockedBy, null);
+  assert.ok(first.shop.log.some((m) => m.note === 'The worker\'s folder is clean again: the queue resumes.'));
+
+  // Edits of unknown origin (here, made by hand) hold every task, the origin's too, until the folder is clean.
+  writeFileSync(`${first.shop.workerDir.path}/stray.txt`, 'x\n');
+  let ran = false;
+  queueWork(first, 'next');
+  first.workQueue.then(() => { ran = true; });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual([ran, first.shop.blockedBy?.origin], [false, null]);
+  assert.match(first.shop.log.filter((m) => m.note).at(-1).note, /uncommitted edits from an unknown origin: the queue holds until the folder is clean/);
+  inTree(first, 'add', 'stray.txt'); inTree(first, 'commit', '-q', '-m', 'by hand');
+  queueWork(first, 'after');
+  await first.workQueue;
+  assert.deepEqual(first.prompts.slice(-2).map((p) => p.split('\n').at(-1)), ['next', 'after']);
+
+  // At start (after a Restart, say), leftovers in the worktree belong to no known task.
+  writeFileSync(`${first.shop.workerDir.path}/left.txt`, 'x\n');
+  const restarted = await workerRoom();
+  Object.assign(restarted.ctx, { cwd: first.cwd, noScreen: true, refreshQuota: () => {} });
+  await start(restarted.ctx);
+  assert.equal(restarted.ctx.shop.blockedBy.origin, null);
+  let started = false;
+  queueWork(restarted.ctx, 'do it');
+  restarted.ctx.workQueue.then(() => { started = true; });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual([started, restarted.got.length], [false, 0]);
+  void git;
+});
+
+test('Restart brings back every open discussion of a folder, each in its own context', () => {
+  const rooms = [{ cwd: '/r', discussion: { name: '2026-11-09-a' }, agentSpecs: 'claude:A', workerSpec: 'claude:W' },
+    { cwd: '/r', context: 'd1', discussion: { name: '2026-11-09-b' }, agentSpecs: 'claude:A', workerSpec: 'claude:W' },
+    { cwd: '/r', context: 'd2', state: { brainstorm: true } }];
+  const args = restartArgs(rooms, {}, 5566);
+  assert.deepEqual(args.slice(1, 9), ['--cwd', '/r', '--port', '5566', '--agents', 'claude:A', '--worker', 'claude:W']);
+  assert.equal(args[args.indexOf('--reopen') + 1], '2026-11-09-a');
+  assert.deepEqual(args.filter((a, i) => args[i - 1] === '--room').map((a) => JSON.parse(a)),
+    [{ cwd: '/r', agents: 'claude:A', worker: 'claude:W', reopen: '2026-11-09-b', context: 'd1' }]); // not the brainstorm
 });
 
 test('Restart leaves a paused checkpoint for Resume instead of re-opening it fresh', () => {

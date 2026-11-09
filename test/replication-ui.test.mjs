@@ -82,6 +82,47 @@ test('two rooms: pairing, round hooks, independent browser pins, deletion and re
   }
 });
 
+// The launch room's other open discussions (contexts that cli.mjs adds with a `context` tag) use its
+// one replica: each saves and sends its own rounds, and closing one doesn't stop the peers.
+test('every open discussion of a --node launch room replicates, through the launch room\'s replica', async () => {
+  const root = await fs.mkdtemp(join(tmpdir(),'replication-ctx-')), rooms=[];
+  const room = async (fields) => {
+    const ctx = {port:0,agentSpecs:'claude:A',workerSpec:'claude:W',sessions:new Map(),state:{transcript:[],seen:new Map()},say:()=>{},...fields};
+    Object.assign(ctx, await ui.load(ctx, ''));
+    ctx.hub.rooms.set(ctx.key, ctx);
+    ctx.usage={...ctx.usage,fetchQuota:async()=>null};
+    ctx.room=createRoom([{name:'A',provider:'claude',turn:async()=> 'PASS'}],ctx.state);
+    await ui.start(ctx); rooms.push(ctx);
+    return ctx;
+  };
+  const node = async (name) => { const cwd = join(root,name); await fs.mkdir(cwd); const c = await room({cwd,node:name,peers:[],hub:{rooms:new Map(),node:name},launch:true});
+    c.suggestTitle=async()=>({title:'First topic'}); c.origin=`http://127.0.0.1:${c.server.address().port}`; c.base=`${c.origin}/r/${c.id}`; return c; };
+  try {
+    const a=await node('Mac'), b=await node('Pi');
+    a.peers.push({name:'Pi',url:b.origin}); b.peers.push({name:'Mac',url:a.origin});
+    const post=(path,body)=>fetch(a.base+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+    assert.equal((await post('/__pair',{peer:'Pi',confirm:true})).status,200);
+    await ui.handleLine('a round in the first discussion',a);
+    await wait(async()=> (await R.receivedLines(b.replica.s)).length===1);
+    // A second open discussion in Mac's launch folder, as New discussion makes it.
+    const second = await room({cwd:a.cwd,key:`${a.key}#d1`,context:'d1',hub:a.hub,launch:false});
+    second.suggestTitle=async()=>({title:'Second topic'});
+    assert.deepEqual([second.node, second.replica, second.screen.replicaOff], ['Mac', a.replica, null]);
+    await ui.handleLine('a round in the second discussion',second);
+    await wait(async()=> (await R.receivedLines(b.replica.s)).length===2);
+    const titles=(await R.receivedLines(b.replica.s)).map((l)=>l.title).sort();
+    assert.deepEqual(titles,['First topic','Second topic']);
+    // Closing the second one leaves the replication running for the first.
+    ui.ended(second); clearInterval(second.quotaTimer);
+    assert.notEqual(a.replica.state.stopped,true);
+    await ui.handleLine('another round in the first',a);
+    const first=(await R.receivedLines(b.replica.s)).find((l)=>l.title==='First topic');
+    await wait(async()=> (await R.readPointer(b.replica.s,first.discussion,'Mac')).round===2);
+  } finally {
+    for(const c of rooms) { if (c.context) continue; ui.ended(c); clearInterval(c.quotaTimer); await new Promise(r=>c.server.close(r)); }
+  }
+});
+
 test('storage ignores project filters/transcripts rules, preserves Git state and stable identity', async () => {
   const { execFileSync } = await import('node:child_process');
   const root=await fs.mkdtemp(join(tmpdir(),'replication-project-'));

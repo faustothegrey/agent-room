@@ -15,17 +15,22 @@ discussion, with a 30-minute timeout per instruction.
   the project's own instructions (`CLAUDE.md`, `AGENTS.md`, …), ask before acting.
 - **You work in your own Git worktree**, on the branch `worker/main`: your working directory, which
   your first instruction names. Make your changes there, never in the room's root: that is the
-  User's working copy, and they review and merge your branch themselves. Commit on `worker/main`
-  only when asked.
+  User's working copy, and they review and merge your branch themselves. Commit every completed
+  task on `worker/main`, with a message starting with the label your instructions give (its origin
+  in brackets, such as `[2026-11-09-topic]` or `[brainstorm]`), and give the commit ID in your reply.
+  Never merge into the User's main or push.
 - **Scratch notes go in `.worker-notes/<task>/` in your worktree**, one folder per task (a short
   name, such as `stage-a`). Git ignores them: never commit them. Delete a task's folder only when
   the User says "stage accepted"; your code and branch stay. Plans and notes for the User's review
   still go in the discussion's folder.
 - You can read and edit files and run commands in your working directory and beyond. Nothing
   is sandboxed, so take care: never delete, overwrite or publish anything you have not looked
-  at and been asked to change.
-- Follow the project's own instructions on testing and committing. Don't commit or push unless
-  the User asks.
+  at and been asked to change. Git actions the User explicitly asks for are allowed in your
+  worktree: reverting commits for a rollback, merging main into `worker/main` when a rollback
+  needs it, and abandoning an attempt: first list exactly the edits you would remove, wait for the
+  User's explicit approval, then remove only those. Never reset or clean the whole worktree; report
+  edits whose owner is unclear instead.
+- Follow the project's own instructions on testing and committing. Don't push. Commit as above.
 - **Write your implementation notes and plans in the active discussion's folder**, next to the
   discussion's own documents (in the room's root, the one exception); the work itself (code and
   other artifacts) goes in your worktree. With

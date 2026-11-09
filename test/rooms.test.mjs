@@ -191,6 +191,108 @@ process.stdin.on('end', () => {
   }
 });
 
+// The real server with fake provider CLIs: New discussion opens a second discussion beside the
+// first (its own context and page, made by cli.mjs's addRoom and reached through the server's
+// routing), the window switches between them, each keeps its agents' sessions, and a worker task's
+// report goes back to the discussion that sent it. Quit room closes both.
+test('two open discussions in one room: switching keeps their sessions, and a worker report returns to its origin', { timeout: 40000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), 'open-home-'));
+  const repo = realpathSync(mkdtempSync(join(tmpdir(), 'open-repo-')));
+  mkdirSync(join(repo, 'discussions'));
+  const git = (...args) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args]);
+  git('init', '-q', '-b', 'main'); git('commit', '-q', '--allow-empty', '-m', 'initial');
+  const bin = join(home, 'bin'), calls = join(home, 'calls.jsonl');
+  mkdirSync(bin);
+  // claude: titles from the message; the worker reports on its instruction; agents pass. Every
+  // agent call is logged with its arguments, so sessions can be told apart.
+  writeFileSync(join(bin, 'claude'), `#!${process.execPath}
+const fs = require('node:fs');
+let input = '';
+process.stdin.on('data', (d) => input += d);
+process.stdin.on('end', () => {
+  const args = process.argv.slice(2);
+  const reply = (result) => console.log(JSON.stringify({ result }));
+  if (args.includes('--no-session-persistence')) return reply(input.includes('alpha') ? 'Alpha topic' : 'Beta topic');
+  if (args.includes('Bash')) return reply('report on: ' + input.trim().split('\\n').at(-1));
+  fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args, input }) + '\\n');
+  reply('PASS');
+});
+`, { mode: 0o755 });
+  const cli = spawn(process.execPath, [new URL('../src/cli.mjs', import.meta.url).pathname, '--cwd', repo, '--port', '0', '--agents', 'claude:Ada', '--worker', 'claude:W'],
+    { env: { ...process.env, HOME: home, PATH: bin + ':' + process.env.PATH } });
+  const exited = new Promise((done) => cli.once('exit', done));
+  let out = '';
+  cli.stderr.on('data', (d) => { out += d; });
+  try {
+    const baseA = await new Promise((done, fail) => {
+      cli.once('exit', () => fail(new Error(out)));
+      cli.stdout.on('data', (d) => { out += d; const m = /Room screen: (http:\/\/127\.0\.0\.1:\d+\/r\/[^/]+\/)__room/.exec(out); if (m) done(m[1]); });
+    });
+    const origin = new URL(baseA).origin;
+    const stream = async (base) => {
+      const reader = (await fetch(base + '__events')).body.getReader();
+      let buffer = '';
+      const next = async () => {
+        while (!buffer.includes('\n\n')) { const { value, done } = await reader.read(); if (done) throw new Error('stream ended'); buffer += new TextDecoder().decode(value); }
+        const at = buffer.indexOf('\n\n'), chunk = buffer.slice(0, at);
+        buffer = buffer.slice(at + 2);
+        return JSON.parse(chunk.replace(/^data: /, ''));
+      };
+      return { next, until: async (p) => { for (;;) { const ev = await next(); if (p(ev)) return ev; } } };
+    };
+    const say = (base, text) => fetch(base + '__say', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+    const a = await stream(baseA);
+    await a.next();
+    await say(baseA, '/autosummary off');
+    await say(baseA, 'about alpha');
+    await a.until((e) => e.type === 'turn');
+    // New discussion: this window goes to a second discussion's page; the first stays open.
+    await say(baseA, '/new');
+    const toB = await a.until((e) => e.type === 'goto');
+    const baseB = origin + toB.url.replace(/__room$/, '');
+    assert.notEqual(baseB, baseA);
+    assert.equal((await fetch(origin + toB.url)).status, 200); // routed to its own page
+    const b = await stream(baseB);
+    const resetB = await b.next();
+    assert.equal(resetB.room.discussion, 'No discussion started');
+    assert.deepEqual(resetB.room.open.map((o) => [o.title, o.current]), [['Alpha topic', false], ['New discussion (not started)', true]]);
+    await say(baseB, '/autosummary off');
+    await say(baseB, 'about beta');
+    await b.until((e) => e.type === 'turn');
+    // Re-open the first from the second: the window goes back to it, as it was.
+    const alpha = readdirSync(join(repo, 'discussions')).find((n) => n.endsWith('alpha-topic'));
+    await say(baseB, `/reopen ${alpha}`);
+    assert.equal((await b.until((e) => e.type === 'goto')).url, new URL(baseA).pathname + '__room');
+    const pageA = await stream(baseA);
+    const resetA = await pageA.next();
+    assert.ok(resetA.messages.some((m) => m.html.includes('about alpha'))); // its chat is still there
+    await say(baseA, 'more on alpha');
+    await pageA.until((e) => e.type === 'turn');
+    // The agent's sessions: the first discussion's continues (resumed), the second has its own.
+    const logged = readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const session = (text) => { const c = logged.find((x) => x.input.includes(text)); const at = c.args.findIndex((x) => x === '--resume' || x === '--session-id'); return [c.args[at], c.args[at + 1]]; };
+    const [startA, idA] = session('about alpha'), [startB, idB] = session('about beta'), [againA, idA2] = session('more on alpha');
+    assert.deepEqual([startA, startB, againA], ['--session-id', '--session-id', '--resume']);
+    assert.equal(idA2, idA);
+    assert.notEqual(idB, idA);
+    // A worker task from the second discussion: its report goes back there (both pages see the shared tab).
+    await fetch(baseB + '__work', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'task from beta' }) });
+    const report = await pageA.until((e) => e.type === 'work' && e.message.speaker === 'W');
+    assert.match(report.message.html, /report on: task from beta/);
+    assert.match(report.message.origin, /beta-topic$/);
+    const transcript = (d) => readFileSync(join(repo, 'discussions', d, 'transcripts', readdirSync(join(repo, 'discussions', d, 'transcripts'))[0]), 'utf8');
+    const beta = readdirSync(join(repo, 'discussions')).find((n) => n.endsWith('beta-topic'));
+    assert.match(transcript(beta), /task from beta[\s\S]*report on: task from beta/);
+    assert.doesNotMatch(transcript(alpha), /task from beta/);
+    // Quit room closes both open discussions, and the server with them.
+    await say(baseA, '/quit');
+    await exited;
+    assert.equal((out.match(/Room ended\./g) ?? []).length, 2);
+  } finally {
+    if (cli.exitCode === null) cli.kill();
+  }
+});
+
 test('Shutdown server, from the server\'s own address, ends every room; with --node only the launch room replicates', { timeout: 20000 }, async () => {
   const home = mkdtempSync(join(tmpdir(), 'rooms-home-'));
   const one = mkdtempSync(join(tmpdir(), 'room-one-')), two = mkdtempSync(join(tmpdir(), 'room-two-'));
