@@ -1092,6 +1092,44 @@ test('auto dev pauses on WAIT FOR USER, an unagreed summary, a failed turn, or a
   assert.equal(typed.ctx.state.transcript.at(-3).text, 'did A');
 });
 
+test('auto dev: while paused, any agreed summary ending in Outcome: FINISH finishes the run, and none sends anything', async () => {
+  const { readFileSync } = await import('node:fs');
+  const done = '**Agreed**\n- The work is done and reviewed.\n\nOutcome: FINISH';
+  const { ctx, prompts, got, settle } = await autoDevRoom({ summaries: [summaryWith('A'), summaryWith('B', 'WAIT FOR USER'),
+    summaryWith('C', 'WAIT FOR USER'), summaryWith('D', 'SEND'), done, '**Agreed**\n- Nothing more.'] });
+  const turn = ctx.room.agents[0].turn;
+  ctx.room.agents[0].turn = async (p) => (/\[User\]: is it done\?/.test(p) && !/asked for a summary/.test(p) ? 'Yes, it is done.' : turn(p));
+  const drafts = () => prompts.filter((p) => /asked for a summary of the discussion/.test(p));
+  await handleLine('/autodev', ctx);
+  await settle();
+  assert.deepEqual([ctx.autoDev.status, ctx.autoDev.cycle, got.length], ['paused', 1, 1]);
+  // The running run's summary already used the two definitions.
+  assert.match(drafts().at(-1), /FINISH: development is complete and reviewed; only the User's merge, Reload or live trial may remain\. WAIT FOR USER: the User must answer or act before development can continue\./);
+
+  await handleLine('/summary', ctx); // WAIT FOR USER: still paused
+  const asked = drafts().at(-1);
+  assert.match(asked, /Auto dev is paused \(the discussion waits for you \(WAIT FOR USER\)\): this summary sends nothing to the Worker\./);
+  assert.match(asked, /End the summary with one last line: Outcome: FINISH or Outcome: WAIT FOR USER\./);
+  assert.match(asked, /FINISH: development is complete and reviewed/);
+  assert.doesNotMatch(asked, /Outcome: SEND/);
+  await handleLine('/summary', ctx); // says SEND anyway: nothing is sent
+  await settle();
+  assert.deepEqual([ctx.autoDev.status, ctx.autoDev.cycle, got.length], ['paused', 1, 1]);
+  assert.ok(!ctx.state.transcript.some((m) => m.speaker === 'Auto dev' && /"D"/.test(m.text)));
+
+  // An automatic summary after a User round agrees it is done.
+  await handleLine('/autosummary on', ctx);
+  await handleLine('is it done?', ctx);
+  await settle();
+  assert.deepEqual([ctx.autoDev.status, ctx.autoDev.reason, ctx.autoDev.cycle, got.length], ['finished', null, 1, 1]);
+  assert.match(ctx.notes.at(-1), /^Auto dev finished\. Review and merge worker\/main yourself\.$/);
+  assert.match(readFileSync(ctx.logPath, 'utf8'), /_\(auto dev finished\)_/);
+  assert.equal(ctx.screen.room.autoDev.status, 'finished');
+  // With the run finished, summaries are as before.
+  await handleLine('/summary', ctx);
+  assert.doesNotMatch(drafts().at(-1), /Auto dev is|End the summary with one last line/);
+});
+
 test('auto dev: while a run is active, the status under the title says so instead of "your turn"', async () => {
   const { readFileSync } = await import('node:fs');
   const page = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');

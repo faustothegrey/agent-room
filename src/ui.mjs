@@ -586,12 +586,20 @@ function newBrainstorm(ctx) {
 // it survives a Reload; ctx.autoDevSent: the summaries already sent (transcript indexes) this session.
 export const AUTO_DEV_CYCLES = 5;
 const AUTO_DEV_REPORT = '/autodev report';
+const AUTO_DEV_MEANS = 'FINISH: development is complete and reviewed; only the User\'s merge, Reload or live trial may remain. '
+  + 'WAIT FOR USER: the User must answer or act before development can continue.';
 const autoDevTask = (run) => [
   `Auto dev is running (worker cycle ${run.cycle} of at most ${AUTO_DEV_CYCLES}): an agreed summary can send its Next step instruction to the Worker by itself.`,
   'Passing on a version accepts its quoted instruction for the worker exactly as it stands.',
   'End the summary with one last line: Outcome: SEND, Outcome: FINISH or Outcome: WAIT FOR USER.',
   'SEND sends the Next step\'s "Send to the Worker" instruction now: say it only when you mean to send it (repeating earlier text is a deliberate retry).',
-  'FINISH: the work is done and nothing more is sent. WAIT FOR USER: the User must answer or act first.',
+  AUTO_DEV_MEANS,
+].join('\n');
+// While a run is paused, any summary may end it: it can only say FINISH or WAIT FOR USER, and sends nothing.
+const pausedTask = (run) => [
+  `Auto dev is paused (${run.reason}): this summary sends nothing to the Worker.`,
+  'End the summary with one last line: Outcome: FINISH or Outcome: WAIT FOR USER.',
+  AUTO_DEV_MEANS,
 ].join('\n');
 
 // The instruction in a summary's Next step: { text }, { error } when it can't be read reliably, or
@@ -698,6 +706,12 @@ async function autoDevReport(ctx) {
   run.report = null;
   await runRound(text, ctx, { speaker: 'Worker report', run: run.status === 'running' ? run : null });
 }
+function finishAutoDev(ctx, run) {
+  Object.assign(run, { status: 'finished', reason: null });
+  log(ctx, '_(auto dev finished)_\n\n');
+  note(ctx, 'Auto dev finished. Review and merge worker/main yourself.');
+  showHeader(ctx);
+}
 // After a report's round and its summary: send the next instruction, or stop.
 function decide(ctx, run, status) {
   if (ctx.autoDev !== run || run.status !== 'running') return;
@@ -705,12 +719,7 @@ function decide(ctx, run, status) {
   if (status === 'failed') return pauseAutoDev(ctx, 'a summary turn failed');
   if (status !== 'agreed' || result?.outcome !== 'agreed') return pauseAutoDev(ctx, status === 'empty' ? 'the summary was empty' : 'the summary was not agreed');
   const outcome = summaryOutcome(result.text);
-  if (outcome === 'FINISH') {
-    Object.assign(run, { status: 'finished', reason: null });
-    log(ctx, '_(auto dev finished)_\n\n');
-    note(ctx, 'Auto dev finished. Review and merge worker/main yourself.');
-    return showHeader(ctx);
-  }
+  if (outcome === 'FINISH') return finishAutoDev(ctx, run);
   if (outcome === 'WAIT FOR USER') return pauseAutoDev(ctx, 'the discussion waits for you (WAIT FOR USER)');
   if (outcome !== 'SEND') return pauseAutoDev(ctx, 'the summary has no Outcome line');
   const s = { index: ctx.state.transcript.length - 1, instruction: summaryInstruction(result.text) };
@@ -1054,6 +1063,9 @@ function setScreenThinking(ctx, name) {
 // turn, and its tokens count like any other turn. `auto`: started by auto-summarize after a round.
 async function runSummary(ctx, auto = false, extra) {
   const t0 = Date.now();
+  // A paused auto dev run: this summary (asked for, or after a User round) may finish it.
+  const paused = !extra && ctx.autoDev?.status === 'paused' ? ctx.autoDev : null;
+  if (paused) extra = pausedTask(paused);
   let started = 0;
   let turns = 0;
   let used;
@@ -1088,6 +1100,7 @@ async function runSummary(ctx, auto = false, extra) {
   }
   if (status === 'empty' && !auto) note(ctx, 'Nothing to summarize yet.');
   if (status === 'failed') note(ctx, 'The summary stopped because a turn failed.', true);
+  if (paused && ctx.autoDev === paused && paused.status === 'paused' && status === 'agreed' && summaryOutcome(result.text) === 'FINISH') finishAutoDev(ctx, paused);
   const secs = Math.round((Date.now() - t0) / 1000);
   const parts = [`${auto ? 'auto-summary' : 'summary'} ${status === 'failed' ? 'stopped' : status}`, `${turns} agent turn${turns === 1 ? '' : 's'}`, `${secs}s`, ctx.usage.formatUsage(used)];
   refreshQuota(ctx).catch(() => {});

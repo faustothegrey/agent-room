@@ -290,8 +290,9 @@ there is a deliberate retry. The run pauses, with its reason above the message b
 USER`, an unagreed summary, a failed discussion turn, a message you type in either tab (a running
 worker still reports, but nothing more is sent), or after 5 worker cycles (failed attempts count;
 the 5th report is still reviewed). When paused, the next agreed instruction is shown with **Restart
-auto dev**, which grants another 5 cycles. `FINISH` ends the run: review and merge `worker/main`
-yourself, as ever. An instruction that can't be read reliably from Next step (two of them, no
+auto dev**, which grants another 5 cycles. While paused, any summary asks for `Outcome: FINISH`
+or `WAIT FOR USER` instead, and sends nothing. An agreed `FINISH`, running or paused, ends the run:
+review and merge `worker/main` yourself, as ever. An instruction that can't be read reliably from Next step (two of them, no
 closing quotation mark…) is never sent, and the page says why. Reload keeps a run, its cycle count
 and what was sent; a relay whose result is lost pauses the run. Pause, Resume, New discussion, New
 brainstorm, Re-open, Restart and Quit room end it. Auto dev is for discussions only, not brainstorms.
