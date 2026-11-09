@@ -1394,6 +1394,30 @@ test('leftover edits hold the shared queue for their origin, which can recover t
   void git;
 });
 
+test('the worker is one setting for every open discussion: a name clash in any of them rejects the change and leaves the room as it was', async () => {
+  const { existsSync } = await import('node:fs');
+  const { saveSettings } = await import('../src/ui.mjs');
+  const { first, contexts } = await multiRoom();
+  await handleLine('topic-a', first);
+  await handleLine('/new', first);
+  const second = contexts()[1];
+  await handleLine('topic-b', second);
+  for (const c of contexts()) Object.assign(c, { agentSpecs: 'claude:A,claude:B', workerSpec: 'claude:W', sessions: new Map([['worker:W', { id: `session-of-${c.discussion.name}` }]]) });
+  second.room.agents[1].name = 'X'; // an agent of the second discussion already uses the name
+  const file = `${await tmp('settings-')}/defaults.json`;
+  const agents = [{ provider: 'claude', name: 'A', model: '' }, { provider: 'claude', name: 'B', model: '' }];
+  const before = contexts().map((c) => [c.worker, c.workerSpec, [...c.sessions]]);
+  await assert.rejects(saveSettings(first, { agents, worker: { provider: 'claude', name: 'X', model: '' } }, file),
+    new RegExp(`\\[${second.discussion.name}\\] has an agent named X\\. Nothing was changed\\.`));
+  assert.deepEqual(contexts().map((c) => [c.worker, c.workerSpec, [...c.sessions]]), before);
+  assert.equal(existsSync(file), false);
+  // Without a clash, the change applies to every open discussion; each keeps its own worker session.
+  await saveSettings(first, { agents, worker: { provider: 'claude', name: 'W', model: 'sonnet' } }, file);
+  assert.deepEqual(contexts().map((c) => c.workerSpec), ['claude:W:sonnet', 'claude:W:sonnet']);
+  assert.ok(contexts().every((c, i) => c.worker !== before[i][0])); // rebuilt, with the new model
+  assert.deepEqual(contexts().map((c) => c.sessions.get('worker:W').id), [`session-of-${first.discussion.name}`, `session-of-${second.discussion.name}`]);
+});
+
 test('Restart brings back every open discussion of a folder, each in its own context', () => {
   const rooms = [{ cwd: '/r', discussion: { name: '2026-11-09-a' }, agentSpecs: 'claude:A', workerSpec: 'claude:W' },
     { cwd: '/r', context: 'd1', discussion: { name: '2026-11-09-b' }, agentSpecs: 'claude:A', workerSpec: 'claude:W' },

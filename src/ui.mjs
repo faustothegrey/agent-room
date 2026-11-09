@@ -115,14 +115,27 @@ export async function saveSettings(ctx, value, file = defaultsFile()) {
   const workerChanged = next.workerSpec !== ctx.workerSpec;
   const previous = parseSpec(ctx.workerSpec, true);
   const freshWorker = previous.provider !== settings.worker.provider || previous.name !== settings.worker.name;
+  // The worker is one, shared by the folder's open discussions: its provider and model are one
+  // setting for all of them. Its name must differ from the running discussion agents in every one,
+  // checked before anything changes: a clash rejects the change for the whole room.
+  const taken = (c) => c.room.agents.some((a) => a.name.toLowerCase() === settings.worker.name.toLowerCase());
+  if (!applied && taken(ctx)) throw new Error('The worker needs a different name from the running discussion agents.');
+  const others = workerChanged ? siblings(ctx).filter((c) => c !== ctx && c.room && c.workerSpec !== next.workerSpec) : [];
+  const clash = others.find(taken);
+  if (clash) throw new Error(`The worker needs a different name from the discussion agents in every open discussion: [${originLabel(clash)}] has an agent named ${settings.worker.name}. Nothing was changed.`);
   if (!applied) {
-    // Validate against the running discussion names, not just future defaults.
-    if (ctx.room.agents.some((a) => a.name.toLowerCase() === settings.worker.name.toLowerCase()))
-      throw new Error('The worker needs a different name from the running discussion agents.');
     next.sessions = new Map(ctx.sessions);
     if (freshWorker) next.sessions.set(`worker:${settings.worker.name}`, {});
   }
   const loaded = await load(next, '');
+  // Every other open discussion's worker, built before anything is applied (each keeps its own
+  // worker session, a fresh one if the provider changed).
+  const built = [];
+  for (const c of others) {
+    const sessions = new Map(c.sessions);
+    if (freshWorker) sessions.set(`worker:${settings.worker.name}`, {});
+    built.push([c, await load({ ...c, workerSpec: next.workerSpec, sessions }, ''), sessions]);
+  }
   mkdirSync(dirname(file), { recursive: true });
   const temp = `${file}.${process.pid}.tmp`;
   writeFileSync(temp, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 });
@@ -142,20 +155,7 @@ export async function saveSettings(ctx, value, file = defaultsFile()) {
     Object.assign(ctx, loaded, { agentSpecs: next.agentSpecs, workerSpec: next.workerSpec, sessions: next.sessions, state: next.state });
     wire(ctx);
   } else if (workerChanged) useWorker(ctx, loaded, next.sessions);
-  // The worker is one, shared by the folder's open discussions: its provider and model are one
-  // setting for all of them (each keeps its own worker session, a fresh one if the provider changed).
-  if (workerChanged) {
-    for (const c of siblings(ctx)) {
-      if (c === ctx || !c.room || c.workerSpec === next.workerSpec) continue;
-      if (c.room.agents.some((a) => a.name.toLowerCase() === settings.worker.name.toLowerCase())) {
-        note(c, `✗ The worker's new name, ${settings.worker.name}, is taken by an agent here: this discussion keeps its worker.`, true);
-        continue;
-      }
-      const sessions = new Map(c.sessions);
-      if (freshWorker) sessions.set(`worker:${settings.worker.name}`, {});
-      useWorker(c, await load({ ...c, workerSpec: next.workerSpec, sessions }, ''), sessions);
-    }
-  }
+  for (const [c, b, sessions] of built) useWorker(c, b, sessions);
   showHeader(ctx);
   return { applied, workerApplied: true, settings };
 }
