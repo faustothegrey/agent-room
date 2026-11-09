@@ -52,7 +52,8 @@ discussion: a fresh session there, starting from its handoff; one in archive/ or
 active first), /new (end this session; your next message starts a new discussion; the worker
 carries on), /brainstorm (New brainstorm: a conversation kept only in memory, with no folder or
 transcript; it ends this session as /new does, and a new one, /new, /reopen or /resume ends it), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
-/summary (the agents agree a short
+/autodev (screen only: Start auto dev, relaying the latest agreed summary's worker instruction
+and the worker's reports, for up to 5 worker cycles), /summary (the agents agree a short
 summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
 in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
 /reload (load edited code and both agent rulebooks, in every room; conversations continue), /restart
@@ -222,7 +223,9 @@ function wire(ctx) {
   ctx.screen.replicaOff = ctx.hub?.node && !ctx.node ? replicaOff(ctx) : null;
   if (ctx.replica) wireReplica(ctx); // its peer endpoint works in terminal mode too
   if (ctx.noScreen) return;
-  ctx.screen.work = (text) => queueWork(ctx, text);
+  // What the User types pauses a running auto dev (as it arrives, not when its turn comes).
+  ctx.screen.work = (text) => { autoDevInput(ctx, 'you sent the Worker an instruction'); return queueWork(ctx, text); };
+  ctx.screen.say = (line, confirmed) => { if (!line.trim().startsWith('/')) autoDevInput(ctx, 'you sent a message'); return ctx.say(line, confirmed); };
   // The screen's checkbox: applied at once, not queued behind a round, so it can stop the next summary.
   ctx.screen.setAuto = (on) => setAuto(ctx, on);
   ctx.screen.newRoom = (body) => newRoom(ctx, body);
@@ -239,6 +242,7 @@ function header(ctx) {
     discussion: d ? d.title : ctx.state.brainstorm ? 'Brainstorm' : 'No discussion started',
     active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath || !!ctx.state.brainstorm,
     brainstorm: !!ctx.state.brainstorm, // a conversation kept only in memory (see newBrainstorm)
+    autoDev: autoDevView(ctx),
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
     paused: !!ctx.paused, pausedSessions: pausedSessions(ctx),
     back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
@@ -415,6 +419,7 @@ async function pauseDiscussion(ctx) {
       linkSync(temp, file); // Publish without overwriting another room's saved Pause.
     } finally { if (existsSync(temp)) unlinkSync(temp); }
     ctx.paused = true;
+    ctx.autoDev = null; // Pause ends an auto dev run
     showHeader(ctx);
     note(ctx, 'Paused. The discussion and worker sessions are saved on this machine; you can quit or start another discussion, then Resume later.');
   } finally { ctx.pausing = false; }
@@ -458,7 +463,7 @@ async function resumeDiscussion(ctx, name) {
     unlinkSync(file);
     const { root, version, at, worker: workerLog, ...restored } = saved;
     Object.assign(ctx, restored, loaded, { state: next.state, sessions: next.sessions,
-      paused: false, agentsStarted: true, workerDir: next.workerDir, previous: null });
+      paused: false, agentsStarted: true, workerDir: next.workerDir, previous: null, autoDev: null, autoDevSent: [] });
     wire(ctx);
     toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
     note(ctx, `Resumed the saved discussion and worker sessions.${brainstorm ? ' The brainstorm was discarded.' : ''}`);
@@ -508,6 +513,8 @@ function endSession(ctx, why) {
   state.summaries = 0;
   state.briefing = null;
   state.brainstorm = false;
+  ctx.autoDev = null; // Re-open, New discussion and New brainstorm end an auto dev run
+  ctx.autoDevSent = [];
   Object.assign(screen, { doc: null, thinking: null, status: null });
   ctx.logPath = null;
   ctx.pendingLog = '';
@@ -568,6 +575,149 @@ function newBrainstorm(ctx) {
   ctx.pendingLog = '';
   switchTo(ctx, null);
   note(ctx, `New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.${was ? ` To go back, /reopen ${was.name}.` : ''}`);
+}
+
+// ── Auto dev ────────────────────────────────────────────────────────
+// Start auto dev (/autodev) sends the latest agreed summary's instruction to the worker; its reply
+// comes back as a "Worker report" that starts a round, always followed by an auto-summary whose last
+// line decides: SEND (the next instruction, once per report), FINISH or WAIT FOR USER. At most
+// AUTO_DEV_CYCLES worker cycles per start. ctx.autoDev: { status: 'running' | 'paused' | 'finished',
+// cycle, reason, waiting (a relay at the worker), report (its reply, until its round) }, in ctx so
+// it survives a Reload; ctx.autoDevSent: the summaries already sent (transcript indexes) this session.
+export const AUTO_DEV_CYCLES = 5;
+const AUTO_DEV_REPORT = '/autodev report';
+const autoDevTask = (run) => [
+  `Auto dev is running (worker cycle ${run.cycle} of at most ${AUTO_DEV_CYCLES}): an agreed summary can send its Next step instruction to the Worker by itself.`,
+  'Passing on a version accepts its quoted instruction for the worker exactly as it stands.',
+  'End the summary with one last line: Outcome: SEND, Outcome: FINISH or Outcome: WAIT FOR USER.',
+  'SEND sends the Next step\'s "Send to the Worker" instruction now: say it only when you mean to send it (repeating earlier text is a deliberate retry).',
+  'FINISH: the work is done and nothing more is sent. WAIT FOR USER: the User must answer or act first.',
+].join('\n');
+
+// The instruction in a summary's Next step: { text }, { error } when it can't be read reliably, or
+// null when there is none. The text runs from `Send to the Worker: "` to the last quotation mark
+// before the next section (**Later**) or the Outcome line, so it may hold quotes and paragraphs.
+export function summaryInstruction(summary) {
+  const lines = String(summary ?? '').split('\n');
+  const start = lines.findIndex((l) => /^[\s*_#-]*Next step[\s*_:]*$/i.test(l));
+  if (start < 0) return /Send to the Worker:/i.test(summary ?? '') ? { error: 'its "Send to the Worker" line isn\'t under a Next step heading' } : null;
+  let end = lines.findIndex((l, i) => i > start && (/^\s*\*\*[^*]+\*\*[\s:]*$/.test(l) || /^[\s*_]*Outcome:/i.test(l)));
+  if (end < 0) end = lines.length;
+  const section = lines.slice(start + 1, end).join('\n');
+  const opening = /Send to the Worker:\s*["“]/g;
+  const marks = section.match(opening)?.length ?? 0;
+  if (!marks) return /Send to the Worker/i.test(section) ? { error: 'its Next step has no quoted instruction (Send to the Worker: "…")' } : null;
+  if (marks > 1) return { error: 'its Next step holds more than one instruction for the worker' };
+  const after = section.slice(section.search(opening)).replace(/^Send to the Worker:\s*["“]/, '');
+  const close = Math.max(after.lastIndexOf('"'), after.lastIndexOf('”'));
+  if (close < 0) return { error: 'its quoted instruction has no closing quotation mark' };
+  const text = after.slice(0, close).trim();
+  return text ? { text } : { error: 'its quoted instruction is empty' };
+}
+// The summary's last line: 'SEND', 'FINISH', 'WAIT FOR USER', or null.
+export function summaryOutcome(summary) {
+  const last = String(summary ?? '').trim().split('\n').at(-1).replace(/[*_`]/g, '').trim();
+  return /^Outcome:\s*(SEND|FINISH|WAIT FOR USER)\.?$/i.exec(last)?.[1].toUpperCase() ?? null;
+}
+function latestAgreed(ctx) {
+  const t = ctx.state.transcript;
+  for (let i = t.length - 1; i >= 0; i--) if (t[i].outcome === 'agreed') return { index: i, instruction: summaryInstruction(t[i].text) };
+  return null;
+}
+// What the page offers: the latest agreed summary's instruction, unless it was sent (or a run is
+// going, or this is no saved discussion): { text } with a Start or Restart button, or { error }.
+function autoDevOffer(ctx) {
+  if (!ctx.logPath || ctx.state.brainstorm || ctx.paused || ctx.autoDev?.status === 'running') return null;
+  const s = latestAgreed(ctx);
+  return s && !(ctx.autoDevSent ?? []).includes(s.index) ? s.instruction : null;
+}
+function autoDevView(ctx) {
+  const run = ctx.autoDev;
+  return { status: run?.status ?? null, cycle: run?.cycle ?? 0, max: AUTO_DEV_CYCLES, reason: run?.reason ?? null, waiting: !!run?.waiting, offer: autoDevOffer(ctx) };
+}
+
+// /autodev: Start auto dev, or Restart it (another AUTO_DEV_CYCLES cycles), from the latest agreed summary.
+function startAutoDev(ctx) {
+  const s = latestAgreed(ctx);
+  const why = ctx.state.brainstorm ? 'auto dev is for discussions; a brainstorm keeps no saved record'
+    : !ctx.logPath || ctx.paused ? 'it needs a started discussion that isn\'t paused'
+    : !ctx.say ? 'it works from the browser screen'
+    : ctx.autoDev?.status === 'running' ? 'it is already running'
+    : ctx.screen.workerInfo?.disabled ? ctx.screen.workerInfo.lines[0]
+    : !s ? 'there is no agreed summary yet'
+    : (ctx.autoDevSent ?? []).includes(s.index) ? 'the latest agreed summary\'s instruction was already sent'
+    : !s.instruction ? 'the latest agreed summary has no instruction for the worker'
+    : s.instruction.error ?? null;
+  if (why) return note(ctx, `✗ Auto dev can't start: ${why}.`, true);
+  ctx.autoDev = { status: 'running', cycle: 0, reason: null, waiting: false, report: null };
+  log(ctx, `_(auto dev started: up to ${AUTO_DEV_CYCLES} worker cycles)_\n\n`);
+  note(ctx, `Auto dev started: up to ${AUTO_DEV_CYCLES} worker cycles. Auto-summarize is on for this run; your saved setting is unchanged.`);
+  relay(ctx, s);
+}
+function relay(ctx, s) {
+  const run = ctx.autoDev;
+  run.cycle++;
+  run.waiting = true;
+  (ctx.autoDevSent ??= []).push(s.index);
+  // The agents learn it was sent (it is no longer "sending unconfirmed"): a notice in the
+  // conversation, which they receive, the transcript keeps and the page shows. relay() runs between
+  // rounds (from the room's input), so the notice never lands in the middle of one.
+  const notice = { speaker: 'Auto dev', text: `Auto dev sent the instruction "${s.instruction.text.split('\n')[0].trim()}" to the Worker (cycle ${run.cycle} of ${AUTO_DEV_CYCLES}).` };
+  ctx.state.transcript.push(notice);
+  log(ctx, `**${notice.speaker}**\n\n${notice.text}\n\n`);
+  toScreen(ctx, { type: 'message', message: ctx.docs.messageView(notice) });
+  showHeader(ctx);
+  queueWork(ctx, s.instruction.text, run);
+}
+// The User typed something: a running auto dev pauses. A worker already running finishes, and its
+// report is still shown and discussed, but nothing more is sent.
+function autoDevInput(ctx, why) {
+  if (ctx.autoDev?.status === 'running') pauseAutoDev(ctx, why);
+}
+function pauseAutoDev(ctx, reason) {
+  const run = ctx.autoDev;
+  if (!run || run.status !== 'running') return;
+  Object.assign(run, { status: 'paused', reason });
+  log(ctx, `_(auto dev paused: ${reason})_\n\n`);
+  note(ctx, `Auto dev paused: ${reason}.`);
+  showHeader(ctx);
+}
+// The worker finished a relayed instruction: its reply (or failure) goes to the discussion as a
+// round of its own, queued like a typed line. Not if the run has ended meanwhile.
+function reportBack(ctx, run, entry) {
+  if (ctx.autoDev !== run) return;
+  run.waiting = false;
+  run.report = entry.error ? `The worker's attempt failed: ${entry.text}` : entry.text;
+  showHeader(ctx);
+  if (ctx.say) ctx.say(AUTO_DEV_REPORT);
+}
+async function autoDevReport(ctx) {
+  const run = ctx.autoDev;
+  if (!run?.report) return;
+  const text = run.report;
+  run.report = null;
+  await runRound(text, ctx, { speaker: 'Worker report', run: run.status === 'running' ? run : null });
+}
+// After a report's round and its summary: send the next instruction, or stop.
+function decide(ctx, run, status) {
+  if (ctx.autoDev !== run || run.status !== 'running') return;
+  const result = ctx.state.transcript.at(-1);
+  if (status === 'failed') return pauseAutoDev(ctx, 'a summary turn failed');
+  if (status !== 'agreed' || result?.outcome !== 'agreed') return pauseAutoDev(ctx, status === 'empty' ? 'the summary was empty' : 'the summary was not agreed');
+  const outcome = summaryOutcome(result.text);
+  if (outcome === 'FINISH') {
+    Object.assign(run, { status: 'finished', reason: null });
+    log(ctx, '_(auto dev finished)_\n\n');
+    note(ctx, 'Auto dev finished. Review and merge worker/main yourself.');
+    return showHeader(ctx);
+  }
+  if (outcome === 'WAIT FOR USER') return pauseAutoDev(ctx, 'the discussion waits for you (WAIT FOR USER)');
+  if (outcome !== 'SEND') return pauseAutoDev(ctx, 'the summary has no Outcome line');
+  const s = { index: ctx.state.transcript.length - 1, instruction: summaryInstruction(result.text) };
+  if (!s.instruction) return pauseAutoDev(ctx, 'the summary says SEND, but its Next step has no instruction for the worker');
+  if (s.instruction.error) return pauseAutoDev(ctx, `the instruction can't be sent: ${s.instruction.error}`);
+  if (run.cycle >= AUTO_DEV_CYCLES) return pauseAutoDev(ctx, `${AUTO_DEV_CYCLES} cycles used`);
+  relay(ctx, s);
 }
 
 // ── Open room in folder… ────────────────────────────────────────
@@ -699,7 +849,6 @@ export async function start(ctx) {
   if (ctx.noScreen) {
     return out(ctx, 'Type a message, /docs to browse the discussions, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
   }
-  ctx.screen.say = (line, confirmed) => ctx.say(line, confirmed);
   const base = await viewerUrl(ctx);
   const screenUrl = `${base.slice(0, -1)}${roomPath(ctx)}__room`;
   out(ctx, `Room screen: ${screenUrl}`);
@@ -728,6 +877,9 @@ export async function reloaded(ctx) {
   if (ctx.hub) ctx.hub.route = route; // the server's routing runs the new code too
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   log(ctx, '_(code reloaded)_\n\n');
+  // A relay whose worker result can't come back any more: pause visibly rather than send again.
+  const run = ctx.autoDev;
+  if (run?.status === 'running' && run.waiting && !ctx.screen.working && !ctx.workPending) pauseAutoDev(ctx, 'the worker\'s result was lost in the Reload');
   note(ctx, 'Reloaded the code and the agents\' rulebook; the conversation continues.\n');
   toScreen(ctx, { type: 'reloaded', page: ctx.docs.PAGE }); // pages refresh if their code changed
   // The header's version: the checkout as it is at this Reload (the start's snapshot is kept).
@@ -846,6 +998,8 @@ export async function handleLine(line, ctx) {
   if (resume) return resumeDiscussion(ctx, (resume[1] ?? '').trim());
   if (line === '/new') return newDiscussion(ctx);
   if (line === '/brainstorm') return newBrainstorm(ctx);
+  if (line === '/autodev') return startAutoDev(ctx);
+  if (line === AUTO_DEV_REPORT) return autoDevReport(ctx);
   const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
   if (move) return void moveDiscussion(ctx, move[1], move[2]);
   if (line === '/summary' && ctx.paused) return note(ctx, 'Resume the paused discussion before requesting a summary.', true);
@@ -863,6 +1017,7 @@ export async function handleLine(line, ctx) {
     return note(ctx, `${ctx.usage.usageReport({ totals: ctx.totals, agents: [...ctx.room.agents, ctx.worker], quota })}\n`);
   }
   if (ctx.paused) return note(ctx, 'This discussion is paused. Resume it before sending messages.', true);
+  autoDevInput(ctx, 'you sent a message');
   // The session's first message opens its discussion, unless it names an unknown agent (runRound
   // then refuses it, and nothing is created).
   const to = /^@(\w[\w-]*)/.exec(line)?.[1].toLowerCase();
@@ -897,14 +1052,14 @@ function setScreenThinking(ctx, name) {
 
 // /summary: only the result is shown; every turn goes to the transcript file, marked as a summary
 // turn, and its tokens count like any other turn. `auto`: started by auto-summarize after a round.
-async function runSummary(ctx, auto = false) {
+async function runSummary(ctx, auto = false, extra) {
   const t0 = Date.now();
   let started = 0;
   let turns = 0;
   let used;
   log(ctx, auto ? '_(auto-summary)_\n\n' : '_(summary requested)_\n\n');
   ctx.busy = true;
-  const { status, result } = await ctx.room.summary({
+  const { status, result } = await ctx.room.summary({ extra,
     onTurnStart(agent, { turn, of }) {
       started = Date.now();
       const label = `${agent.name} (summary, turn ${turn} of at most ${of})`;
@@ -929,6 +1084,7 @@ async function runSummary(ctx, auto = false) {
     log(ctx, `**Summary** — ${label}\n\n${result.text}\n\n`);
     out(ctx, `\n${bold('Summary')} ${dim(`(${label})`)} ›\n${result.text}\n`);
     toScreen(ctx, { type: 'message', message: ctx.docs.messageView(result) });
+    showHeader(ctx); // auto dev's offer follows the latest agreed summary
   }
   if (status === 'empty' && !auto) note(ctx, 'Nothing to summarize yet.');
   if (status === 'failed') note(ctx, 'The summary stopped because a turn failed.', true);
@@ -940,7 +1096,9 @@ async function runSummary(ctx, auto = false) {
   return status;
 }
 
-async function runRound(line, ctx) {
+// `speaker`: who the opening message is from (the User, or auto dev's "Worker report"). `run`: the
+// auto dev run this round belongs to: it is always summarized, and the summary decides what's next.
+async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
   let started = 0;
   const roundStart = Date.now();
   let turns = 0;
@@ -949,7 +1107,7 @@ async function runRound(line, ctx) {
   let spoke = 0; // agent replies that weren't passes or failures
   try {
     ctx.busy = true;
-    await ctx.room.round(line, {
+    await ctx.room.round(line, { speaker,
       onTurnStart(agent) {
         started = Date.now();
         startThinking(ctx, agent.name);
@@ -957,11 +1115,11 @@ async function runRound(line, ctx) {
       },
       onMessage(m) {
         const tokens = m.usage ? ` · ${ctx.usage.formatUsage(m.usage)}` : '';
-        const secs = m.speaker === 'User' ? '' : ` (${((Date.now() - started) / 1000).toFixed(0)}s${tokens})`;
+        const secs = m.speaker === speaker ? '' : ` (${((Date.now() - started) / 1000).toFixed(0)}s${tokens})`;
         log(ctx, `**${m.speaker}**${m.error ? ' — failed' : ''}${secs}\n\n${m.text}\n\n`);
-        if (m.speaker !== 'User') setScreenThinking(ctx, null);
+        if (m.speaker !== speaker) setScreenThinking(ctx, null);
         toScreen(ctx, { type: 'message', message: ctx.docs.messageView(m) }); // the page hides passes
-        if (m.speaker === 'User') return;
+        if (m.speaker === speaker) return;
         stopThinking(ctx);
         turns++;
         if (m.usage) {
@@ -984,13 +1142,18 @@ async function runRound(line, ctx) {
     const providers = [...new Set(ctx.room.agents.map((a) => a.provider))];
     const quota = ctx.usage.quotaSummary(await refreshQuota(ctx).catch(() => null), providers);
     const parts = [ending, `${turns} agent turn${turns === 1 ? '' : 's'}`, `${secs}s`, ctx.usage.formatUsage(roundUsage), quota];
+    // A failed turn pauses auto dev; otherwise its round is always summarized, to decide what's next.
+    const deciding = run && ctx.autoDev === run && run.status === 'running';
+    if (deciding && ending.endsWith('failed')) pauseAutoDev(ctx, ending);
     // Auto-summarize: after a round in which an agent spoke and none failed. Its own end line is
     // then the "your turn" one; this round's line is just a note.
-    if (autoOn(ctx) && spoke && !ending.endsWith('failed')) {
+    if ((autoOn(ctx) && spoke || deciding) && !ending.endsWith('failed')) {
       out(ctx, dim(`── round over · ${parts.filter(Boolean).join(' · ')} · summarizing ──`));
       toScreen(ctx, { type: 'note', text: `round over · ${parts.filter(Boolean).join(' · ')} · summarizing` });
-      const summary = await runSummary(ctx, true);
-      return await saveRound(ctx, { kind: 'round', outcome: summary === 'failed' ? 'failed' : 'completed', ending, summary });
+      const summary = await runSummary(ctx, true, deciding ? autoDevTask(run) : undefined);
+      await saveRound(ctx, { kind: 'round', outcome: summary === 'failed' ? 'failed' : 'completed', ending, summary });
+      if (deciding) decide(ctx, run, summary);
+      return;
     }
     out(ctx, dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
     toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
@@ -1147,22 +1310,24 @@ export async function refreshWorker(ctx, { prepare = false } = {}) {
 // discussion (they don't wait for a round, and a round doesn't wait for them). The queue is in ctx,
 // so it carries over a reload. The worker is sent only the instruction itself; its CLI session holds
 // the earlier ones.
-export function queueWork(ctx, text) {
+// `run`: an auto dev run relaying this instruction (shown as "Relayed from discussion").
+export function queueWork(ctx, text, run = null) {
   if (ctx.paused || ctx.pausing) return note(ctx, 'The discussion is pausing or paused. Resume before sending worker instructions.', true);
   if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
   if (ctx.stopped) return note(ctx, 'This room is ending: the instruction was not sent.', true);
   ctx.agentsStarted = true;
+  const cycle = run?.cycle;
   // A bug here must not jam the queue: report it, and the next instruction still runs. Once the
   // room is ending (Quit room), queued instructions are not started.
   ctx.workPending = (ctx.workPending ?? 0) + 1;
   ctx.workQueue = (ctx.workQueue ?? Promise.resolve()).then(() => {
     ctx.workPending--;
     if (ctx.stopped) { ctx.workSkipped = (ctx.workSkipped ?? 0) + 1; return; }
-    return runWork(ctx, text);
+    return runWork(ctx, text, run, cycle);
   }).catch((err) => note(ctx, `✗ ${err.stack}\n`, true));
 }
 
-async function runWork(ctx, text) {
+async function runWork(ctx, text, run = null, cycle = 0) {
   const { worker, screen } = ctx;
   const history = ctx.workerHandoff ? screen.worker.filter((m) => m.speaker).map((m) =>
     `${m.speaker}${m.error ? ' (failed)' : ''}:\n${m.html}`).join('\n\n') : '';
@@ -1186,9 +1351,10 @@ async function runWork(ctx, text) {
   ctx.workingIn = task.discussion?.dir ?? null;
   screen.working = worker.name;
   try {
-    workLog(`**User → ${worker.name}** (worker)\n\n${text}\n\n`);
-    out(ctx, `\n${bold(`You → ${worker.name}`)} › ${text}\n`);
-    show({ speaker: 'User', text });
+    const from = run ? 'Relayed from discussion' : 'User';
+    workLog(`**${from} → ${worker.name}** (worker${run ? `, auto dev cycle ${cycle} of ${AUTO_DEV_CYCLES}` : ''})\n\n${text}\n\n`);
+    out(ctx, `\n${bold(`${run ? 'Relayed' : 'You'} → ${worker.name}`)} › ${text}\n`);
+    show({ speaker: from, text });
     toScreen(ctx, { type: 'working', name: worker.name });
     const t0 = Date.now();
     let entry;
@@ -1228,6 +1394,7 @@ async function runWork(ctx, text) {
       toScreen(ctx, { type: 'work', message: view });
       out(ctx, red(view.note));
     }
+    if (run) reportBack(ctx, run, entry);
   } finally {
     ctx.workingIn = null;
     screen.working = null;

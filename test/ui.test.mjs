@@ -954,6 +954,195 @@ test('Resume replaces a brainstorm only with a valid Pause; its button asks twic
   } finally { rmSync(dirname(file), { recursive: true, force: true }); }
 });
 
+// ── Auto dev ──
+// A discussion in a Git room on scripted agents: a summary draft takes the next of `summaries`, a
+// review answers `review(prompt)` (PASS by default), anything else is PASS. The worker answers
+// `worker(prompt)`. Lines auto dev queues (its reports) are run by settle(), as the room's input would.
+const summaryWith = (instruction, outcome) => `**Agreed**\n- ok\n\n**Next step**\n- Send to the Worker: "${instruction}"\n\n**Later**\n- review it${outcome ? `\n\nOutcome: ${outcome}` : ''}`;
+async function autoDevRoom({ summaries, review = () => 'PASS', worker = async () => 'done' }) {
+  const ctx = await freshSession([], async () => ({ title: 'Relay' }));
+  await gitRoom(ctx.cwd);
+  const prompts = [];
+  for (const a of ctx.room.agents) a.turn = async (p) => {
+    prompts.push(p);
+    if (/asked for a summary of the discussion/.test(p)) return summaries.shift() ?? 'PASS';
+    return /asked for a summary\. The latest/.test(p) ? review(p) : 'PASS';
+  };
+  const got = [];
+  ctx.worker.turn = async (p) => { got.push(p); return worker(p); };
+  const queued = [];
+  ctx.say = (line) => queued.push(line);
+  ctx.notes = [];
+  ctx.docs = { ...ctx.docs, broadcast: (screen, ev) => { if (ev.type === 'note') ctx.notes.push(ev.text); } };
+  const settle = async () => { for (;;) { await ctx.workQueue; if (!queued.length) return; await handleLine(queued.shift(), ctx); } };
+  await handleLine('/autosummary off', ctx); // the saved setting stays off throughout
+  await handleLine('plan it', ctx);
+  await handleLine('/summary', ctx); // the agreed summary auto dev starts from
+  return { ctx, prompts, got, settle };
+}
+const sentTo = (got) => got.map((p) => p.split('\n').at(-1));
+
+test('auto dev: reading the instruction only from Next step, and the Outcome line', async () => {
+  const { summaryInstruction, summaryOutcome } = await import('../src/ui.mjs');
+  assert.deepEqual(summaryInstruction(summaryWith('Fix "the" test.\n\n1. **Step:** then more')), { text: 'Fix "the" test.\n\n1. **Step:** then more' });
+  assert.deepEqual(summaryInstruction(summaryWith('Do it', 'SEND')), { text: 'Do it' });
+  assert.equal(summaryInstruction('**Agreed**\n- x\n\n**Next step**\n- Answer: which one?'), null);
+  assert.match(summaryInstruction('**Agreed**\n- Send to the Worker: "x"').error, /isn't under a Next step heading/);
+  assert.match(summaryInstruction('**Next step**\n- Send to the Worker: "a" and Send to the Worker: "b"').error, /more than one/);
+  assert.match(summaryInstruction('**Next step**\n- Send to the Worker: "unclosed\n\n**Later**\n- "quoted later"').error, /no closing quotation mark/);
+  assert.match(summaryInstruction('**Next step**\n- Send to the Worker the fix').error, /no quoted instruction/);
+  assert.equal(summaryOutcome(summaryWith('x', 'SEND')), 'SEND');
+  assert.equal(summaryOutcome('…\n**Outcome: WAIT FOR USER**'), 'WAIT FOR USER');
+  assert.equal(summaryOutcome('Outcome: FINISH\nmore'), null);
+});
+
+test('auto dev: Start relays the instruction; the report starts a round; one SEND per report; FINISH ends it', async () => {
+  const { readFileSync } = await import('node:fs');
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const { ctx, prompts, got, settle } = await autoDevRoom({
+    summaries: [summaryWith('Do "step" 1'), summaryWith('Merely quoted', 'SEND'), summaryWith('Do step 2', 'SEND'), '**Agreed**\n- all done\n\nOutcome: FINISH'],
+    worker: async (p) => { if (p.endsWith('step" 1')) await gate; return p.endsWith('step" 1') ? 'did step 1' : 'did step 2'; },
+  });
+  assert.deepEqual(ctx.screen.room.autoDev.offer, { text: 'Do "step" 1' });
+  await handleLine('/autodev', ctx);
+  assert.deepEqual([ctx.autoDev.status, ctx.autoDev.cycle, ctx.screen.room.autoDev.offer], ['running', 1, null]);
+  // A summary asked for while the worker works decides nothing, whatever it says.
+  await handleLine('/summary', ctx);
+  release();
+  await settle();
+  assert.deepEqual(sentTo(got), ['Do "step" 1', 'Do step 2']);
+  assert.deepEqual([ctx.autoDev.status, ctx.autoDev.cycle], ['finished', 2]);
+  assert.equal(ctx.autoSummary, false); // the saved setting is unchanged
+  // Ordinary messages on both sides, in the transcript too.
+  assert.deepEqual(ctx.state.transcript.filter((m) => m.speaker === 'Worker report').map((m) => m.text), ['did step 1', 'did step 2']);
+  assert.deepEqual(ctx.screen.worker.filter((m) => m.speaker === 'Relayed from discussion').length, 2);
+  const log = readFileSync(ctx.logPath, 'utf8');
+  assert.match(log, /\*\*Relayed from discussion → W\*\* \(worker, auto dev cycle 1 of 5\)\n\nDo "step" 1/);
+  assert.match(log, /\*\*Worker report\*\*\n\ndid step 1/);
+  // Each instruction handed to the worker is announced to the agents: in the conversation they
+  // receive, in the transcript and on the page. None for the summary that merely quoted one.
+  const notices = ctx.state.transcript.filter((m) => m.speaker === 'Auto dev').map((m) => m.text);
+  assert.deepEqual(notices, ['Auto dev sent the instruction "Do "step" 1" to the Worker (cycle 1 of 5).', 'Auto dev sent the instruction "Do step 2" to the Worker (cycle 2 of 5).']);
+  assert.match(log, /\*\*Auto dev\*\*\n\nAuto dev sent the instruction "Do step 2" to the Worker \(cycle 2 of 5\)\./);
+  assert.ok(prompts.some((p) => p.includes('[Auto dev]: Auto dev sent the instruction "Do "step" 1" to the Worker (cycle 1 of 5).')));
+  // The run's summaries were asked for the Outcome line and told what passing means.
+  const draft = prompts.filter((p) => /asked for a summary of the discussion/.test(p)).at(-1);
+  assert.match(draft, /Passing on a version accepts its quoted instruction for the worker exactly as it stands/);
+  assert.match(draft, /End the summary with one last line: Outcome: SEND, Outcome: FINISH or Outcome: WAIT FOR USER/);
+  assert.match(ctx.notes.at(-1), /Auto dev finished\. Review and merge worker\/main yourself/);
+});
+
+test('auto dev: at most 5 worker cycles per start; the 5th report is still reviewed; Restart grants 5 more', async () => {
+  const summaries = [summaryWith('Step 1'), ...[2, 3, 4, 5, 6, 7].map((n) => summaryWith(`Step ${n}`, 'SEND'))];
+  const { ctx, got, settle } = await autoDevRoom({ summaries });
+  await handleLine('/autodev', ctx);
+  await settle();
+  assert.deepEqual(sentTo(got), ['Step 1', 'Step 2', 'Step 3', 'Step 4', 'Step 5']);
+  assert.equal(ctx.state.transcript.filter((m) => m.speaker === 'Worker report').length, 5);
+  // A notice for each instruction sent, none for the 6th, which waits for Restart.
+  assert.deepEqual(ctx.state.transcript.filter((m) => m.speaker === 'Auto dev').map((m) => m.text.match(/"(.*)"/)[1]), ['Step 1', 'Step 2', 'Step 3', 'Step 4', 'Step 5']);
+  assert.deepEqual([ctx.autoDev.status, ctx.autoDev.reason], ['paused', '5 cycles used']);
+  assert.deepEqual(ctx.screen.room.autoDev.offer, { text: 'Step 6' }); // shown with Restart
+  await handleLine('/autodev', ctx);
+  await handleLine('/autodev', ctx); // already running: refused
+  assert.equal(ctx.autoDev.cycle, 1);
+  assert.match(ctx.notes.at(-1), /can't start: it is already running/);
+  await settle();
+  assert.deepEqual(sentTo(got).slice(5), ['Step 6', 'Step 7']);
+});
+
+test('auto dev pauses on WAIT FOR USER, an unagreed summary, a failed turn, or a User message; a failed worker counts as a cycle', async () => {
+  // WAIT FOR USER, then a failed worker attempt reported and counted.
+  let fail = false;
+  const wait = await autoDevRoom({ summaries: [summaryWith('A'), summaryWith('B', 'SEND'), summaryWith('C', 'WAIT FOR USER')],
+    worker: async () => { if (fail) throw new Error('timed out'); fail = true; return 'did A'; } });
+  await handleLine('/autodev', wait.ctx);
+  await wait.settle();
+  assert.deepEqual([wait.ctx.autoDev.status, wait.ctx.autoDev.reason, wait.ctx.autoDev.cycle], ['paused', 'the discussion waits for you (WAIT FOR USER)', 2]);
+  assert.match(wait.ctx.state.transcript.filter((m) => m.speaker === 'Worker report')[1].text, /^The worker's attempt failed: timed out/);
+  assert.deepEqual(wait.ctx.screen.room.autoDev.offer, { text: 'C' });
+
+  // Not agreed: the reviewer keeps revising.
+  let n = 0;
+  const revise = await autoDevRoom({ summaries: [summaryWith('A'), summaryWith('B', 'SEND')],
+    review: (p) => (/Outcome: SEND, Outcome: FINISH/.test(p) ? summaryWith(`B${++n}`, 'SEND') : 'PASS') });
+  await handleLine('/autodev', revise.ctx);
+  await revise.settle();
+  assert.deepEqual([revise.ctx.autoDev.status, revise.ctx.autoDev.reason, revise.got.length], ['paused', 'the summary was not agreed', 1]);
+
+  // A failed discussion turn.
+  const broken = await autoDevRoom({ summaries: [summaryWith('A')] });
+  broken.ctx.room.agents[1].turn = async () => { throw new Error('crashed'); };
+  await handleLine('/autodev', broken.ctx);
+  await broken.settle();
+  assert.deepEqual([broken.ctx.autoDev.status, broken.ctx.autoDev.reason, broken.got.length], ['paused', 'B failed', 1]);
+
+  // The User's message while the worker works: its report is still shown, nothing more is sent.
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const typed = await autoDevRoom({ summaries: [summaryWith('A'), summaryWith('B', 'SEND')], worker: async () => { await gate; return 'did A'; } });
+  await handleLine('/autodev', typed.ctx);
+  await handleLine('wait, one thing', typed.ctx);
+  assert.deepEqual([typed.ctx.autoDev.status, typed.ctx.autoDev.reason], ['paused', 'you sent a message']);
+  release();
+  await typed.settle();
+  assert.deepEqual(sentTo(typed.got), ['A']);
+  assert.equal(typed.ctx.state.transcript.at(-3).speaker, 'Worker report');
+  assert.equal(typed.ctx.state.transcript.at(-3).text, 'did A');
+});
+
+test('auto dev: while a run is active, the status under the title says so instead of "your turn"', async () => {
+  const { readFileSync } = await import('node:fs');
+  const page = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = page.slice(page.indexOf('function talkStatus('), page.indexOf('function updateReplicaView('));
+  const status = (room, more = {}) => new Function('tab', 'localWorking', 'room', 'viewing', 'localThinking', 'yourTurn', `${code}; return talkStatus();`)(
+    more.tab ?? 'talk', more.working ?? null, room, null, more.thinking ?? null, true);
+  const started = { started: true, paused: false };
+  assert.equal(status({ ...started, autoDev: { status: null } }), 'your turn');
+  assert.equal(status({ ...started, autoDev: { status: 'running' } }), 'Auto dev running');
+  assert.equal(status({ ...started, autoDev: { status: 'running' } }, { thinking: 'A' }), 'A is thinking');
+  assert.equal(status({ ...started, autoDev: { status: 'paused' } }), 'your turn');
+  assert.equal(status({ ...started, autoDev: { status: 'finished' } }), 'your turn');
+  assert.equal(status({ ...started, autoDev: { status: 'running' } }, { tab: 'work', working: 'W' }), 'W is working');
+});
+
+test('auto dev: never in a brainstorm; New discussion ends a run; Reload keeps it, and a lost worker result pauses it', async () => {
+  const { reloaded } = await import('../src/ui.mjs');
+  const brainstorm = await freshSession([], async () => ({ title: 'x' }));
+  brainstorm.say = () => {};
+  await handleLine('/brainstorm', brainstorm);
+  brainstorm.state.transcript.push({ speaker: 'Summary', text: summaryWith('A'), outcome: 'agreed', by: 'A' });
+  assert.equal(brainstorm.screen.room.autoDev.offer, null);
+  await handleLine('/autodev', brainstorm);
+  assert.equal(brainstorm.autoDev, undefined);
+
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const { ctx, got, settle } = await autoDevRoom({ summaries: [summaryWith('A'), summaryWith('B', 'SEND')], worker: async () => { await gate; return 'did A'; } });
+  await handleLine('/autodev', ctx);
+  const run = ctx.autoDev;
+  Object.assign(ctx, { code: {}, refreshQuota: () => {} });
+  await reloaded(ctx); // the worker is still at it: nothing changes
+  assert.deepEqual([ctx.autoDev, run.status, run.cycle, ctx.autoDevSent.length], [run, 'running', 1, 1]);
+  await handleLine('/new', ctx);
+  assert.equal(ctx.autoDev, null);
+  release();
+  await settle();
+  assert.deepEqual(sentTo(got), ['A']); // its reply stays in the Worker tab only
+  assert.ok(!ctx.state.transcript.some((m) => m.speaker === 'Worker report'));
+
+  // A relay whose result is gone after a Reload pauses instead of sending again.
+  const lost = await autoDevRoom({ summaries: [summaryWith('A')] });
+  await handleLine('/autodev', lost.ctx);
+  await lost.ctx.workQueue;
+  Object.assign(lost.ctx.autoDev, { waiting: true, report: null }); // as if its result never came back
+  Object.assign(lost.ctx, { code: {}, refreshQuota: () => {} });
+  await reloaded(lost.ctx);
+  assert.deepEqual([lost.ctx.autoDev.status, lost.ctx.autoDev.reason], ['paused', 'the worker\'s result was lost in the Reload']);
+  assert.equal(lost.got.length, 1);
+});
+
 test('Restart leaves a paused checkpoint for Resume instead of re-opening it fresh', () => {
   const ctx = { cwd: '/r', paused: true, discussion: { name: '2026-11-03-paused' } };
   assert.deepEqual(restartArgs([ctx], {}, 5566).slice(1), ['--cwd', '/r', '--port', '5566']);

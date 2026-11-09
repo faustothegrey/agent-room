@@ -22,15 +22,16 @@ const summaryFormat = (brainstorm) => [
     'with its full text kept in the discussion\'s pending-instructions.md.']),
   'At most 8 points in all under Agreed and Not agreed. Reply with the summary only.',
 ].join('\n');
-const draftTask = (brainstorm) => [
+// `extra`: more instructions for this summary only (auto dev's Outcome line, see ui.mjs).
+const draftTask = (brainstorm, extra) => [
   'The User asked for a summary of the discussion since the last summary (or since the start).',
-  summaryFormat(brainstorm),
+  summaryFormat(brainstorm), ...(extra ? [extra] : []),
 ].join('\n');
-const reviewTask = (author, brainstorm) => [
+const reviewTask = (author, brainstorm, extra) => [
   `The User asked for a summary. The latest message from ${author} above is the current version.`,
   'If you accept it as it is, reply exactly PASS. Otherwise reply with a complete revised summary',
   '(not a list of changes); your revision counts as your acceptance of it.',
-  summaryFormat(brainstorm),
+  summaryFormat(brainstorm), ...(extra ? [extra] : []),
 ].join('\n');
 
 export function introduction(agent, agents) {
@@ -112,10 +113,11 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
     transcript,
     agents,
     promptFor,
-    // Rejects on an unknown @name, before anything is recorded or sent.
-    async round(userText, { onTurnStart, onMessage, onNotice } = {}) {
-      const selected = selectFor(userText);
-      const user = { speaker: 'User', text: userText };
+    // Rejects on an unknown @name, before anything is recorded or sent. `speaker`: who the round's
+    // first message is from (auto dev's "Worker report", sent to every agent), the User by default.
+    async round(userText, { onTurnStart, onMessage, onNotice, speaker = 'User' } = {}) {
+      const selected = speaker === 'User' ? selectFor(userText) : agents;
+      const user = { speaker, text: userText };
       transcript.push(user);
       onMessage?.(user);
       let passes = 0;
@@ -137,7 +139,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
     // "not agreed". Resolves to { status: 'agreed' | 'not agreed', result } (result is the recorded
     // Summary entry), { status: 'empty' } if the drafter had nothing to summarize, or
     // { status: 'failed' } if a turn failed.
-    async summary({ onTurnStart, onMessage } = {}) {
+    async summary({ onTurnStart, onMessage, extra } = {}) {
       const n = agents.length;
       const first = (state.summaries ?? 0) % n;
       state.summaries = (state.summaries ?? 0) + 1;
@@ -154,7 +156,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
       for (let turn = 0; turn < maxTurns; turn++) {
         const agent = order[turn % n];
         onTurnStart?.(agent, { turn: turn + 1, of: maxTurns });
-        const entry = await takeTurn(agent, version === null ? draftTask(state.brainstorm) : reviewTask(author.name, state.brainstorm));
+        const entry = await takeTurn(agent, version === null ? draftTask(state.brainstorm, extra) : reviewTask(author.name, state.brainstorm, extra));
         entry.summary = true;
         onMessage?.(entry);
         if (entry.error) return { status: 'failed' };

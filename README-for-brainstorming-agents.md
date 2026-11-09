@@ -114,7 +114,8 @@ does not consume it.
   sent, replaced or withdrawn.
 - Keep the latest version of each unsent worker instruction word for word in the discussion's
   `pending-instructions.md`. When the User confirms it was sent or withdrawn, remove it. When
-  replaced, keep the replacement word for word.
+  replaced, keep the replacement word for word. An auto dev dispatch notice confirms that the
+  instruction was sent; remove that instruction from `pending-instructions.md`.
 
 This is a manual convention for the room's sequential turns, not an enforced session lock.
 

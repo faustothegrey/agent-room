@@ -273,6 +273,27 @@ failed, it runs the same summary process, adding up to three turns per agent. It
 after a round of only passes. Toggle the checkbox or use `/autosummary on|off`; the bare command
 toggles it. This setting survives Reload but is not stored as a default across launches.
 
+**Auto dev** relays instructions between the Discussion and the Worker, so you don't copy and
+paste them. When the latest agreed summary's **Next step** is `Send to the Worker: "…"`, a
+**Start auto dev** button appears beside it (`/autodev`). It sends that instruction to the worker as
+cycle 1 of up to 5, shown in the Worker tab as **Relayed from discussion**; each instruction sent is
+also announced in the Discussion ("Auto dev sent the instruction "…" to the Worker (cycle n of 5)."),
+which the agents receive and the transcript keeps. The worker's full reply,
+or its failure, comes back to the Discussion as a **Worker report** and starts a round; both are in
+the transcript like typed messages. That round is always summarized (auto-summarize is on for the
+run; your saved setting doesn't change), and the summary must end with `Outcome: SEND`, `FINISH` or
+`WAIT FOR USER`; passing on it accepts its quoted instruction exactly as it stands. Only an agreed
+SEND summary written after the latest report sends its instruction, once; repeating earlier text
+there is a deliberate retry. The run pauses, with its reason above the message box, on `WAIT FOR
+USER`, an unagreed summary, a failed discussion turn, a message you type in either tab (a running
+worker still reports, but nothing more is sent), or after 5 worker cycles (failed attempts count;
+the 5th report is still reviewed). When paused, the next agreed instruction is shown with **Restart
+auto dev**, which grants another 5 cycles. `FINISH` ends the run: review and merge `worker/main`
+yourself, as ever. An instruction that can't be read reliably from Next step (two of them, no
+closing quotation mark…) is never sent, and the page says why. Reload keeps a run, its cycle count
+and what was sent; a relay whose result is lost pauses the run. Pause, Resume, New discussion, New
+brainstorm, Re-open, Restart and Quit room end it. Auto dev is for discussions only, not brainstorms.
+
 **Usage**, or `/usage`, reports session token totals for discussion agents and the worker.
 Claude's reported dollar value is an API-price equivalent, not your subscription bill.
 Header gauges show **percent used**, for each provider's five-hour and weekly windows, plus
@@ -308,6 +329,7 @@ node src/cli.mjs --help
 | `/pause` | Save the discussion and worker sessions locally after their work finishes. |
 | `/resume [folder-name]` | Continue a saved Pause, including its provider sessions and chat. |
 | `/summary` | Request an agreed summary. |
+| `/autodev` | Start (or restart) auto dev from the latest agreed summary's worker instruction. |
 | `/autosummary [on\|off]` | Toggle automatic summaries, or set them explicitly. |
 | `/usage` | Show session tokens and subscription quotas. |
 | `/reload` | Reload source modules and both agent rulebooks; retain conversation and provider sessions. |
@@ -431,7 +453,8 @@ agents and workers run without a sandbox and with live web search configured.
 The server listens on `0.0.0.0`: devices on the LAN can open its printed IP address and
 send instructions to local agents. This version has no authentication; use it on a trusted LAN. Browser input endpoints require the room's own origin
 when supplied and JSON requests. There is no remote stop, agent-session crash recovery,
-streaming reply display, live app preview, or automatic discussion-to-worker handoff.
+streaming reply display, or live app preview. Discussion-to-worker relay exists only as auto dev
+(above), started from the screen; merging `worker/main` stays manual.
 
 ## Working on the project
 

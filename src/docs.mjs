@@ -252,6 +252,13 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .line-row span { overflow-wrap: anywhere; }
 .peer-row { padding: .35rem 0; font-size: .85rem; overflow-wrap: anywhere; }
 .peer-dot { color: #888; } .peer-dot.up { color: #22c55e; } .peer-dot.down { color: #ef4444; }
+/* Auto dev: its Start control in the latest agreed summary, and the run's line above the message box. */
+.autodev-offer { display: flex; gap: .6rem; align-items: center; margin: .5rem 0; font-size: .8rem; color: var(--dim); }
+.autodev-offer button, #autodev button { background: #2f6fde; color: #fff; border-color: #2f6fde; font-weight: 600; white-space: nowrap; }
+#autodev { margin-bottom: .5rem; padding: .4rem .6rem; border-radius: 8px; font-size: .85rem; border: 1px solid #3a9a52; background: #3a9a5218; }
+#autodev.paused { border-color: #b08900; background: #b0890018; } #autodev .why, #autodev .hint { color: var(--dim); }
+#autodev p { margin: .25rem 0; } #autodev .next { white-space: pre-wrap; max-height: 6rem; overflow-y: auto; }
+.msg.report .who { color: #3a9a52; }
 #remote-view { border-bottom: 1px solid var(--line); padding-bottom: .5rem; margin-bottom: .5rem; font-size: .85rem; }
 #auto-controls[hidden] { display: none; }
 #remote-view p { margin: .2rem 0; } #remote-view .local-activity { color: var(--dim); font-size: .75rem; }
@@ -366,6 +373,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <div class="chat-wrap"><div class="chat" id="chat"></div><button class="scroll-end" id="talk-end" aria-label="Scroll to latest discussion messages" title="Scroll to latest messages" hidden>↓</button></div>
     <div class="composer" id="composer">
       <div id="remote-view" hidden></div>
+      <div id="autodev" role="status" hidden></div>
       <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"></textarea>
     </div>
   </div>
@@ -435,7 +443,7 @@ function makeChat(list, endButton) {
 const talk = makeChat($('chat'), $('talk-end')), work = makeChat($('wchat'), $('work-end'));
 function bubble(m) {
   const el = document.createElement('div');
-  el.className = 'msg' + (m.speaker === 'User' ? ' user' : '') + (m.error ? ' error' : '')
+  el.className = 'msg' + (m.speaker === 'User' || m.speaker === 'Relayed from discussion' ? ' user' : '') + (m.speaker === 'Worker report' ? ' report' : '') + (m.error ? ' error' : '')
     + (m.outcome ? ' summary' + (m.outcome === 'agreed' ? '' : ' not-agreed') : '');
   el.innerHTML = '<div class="who"></div>' + m.html;
   el.firstChild.textContent = m.speaker + (m.error ? ' — failed' : '');
@@ -515,6 +523,43 @@ function message(m) {
   if (viewing) return;
   if (m.pass || m.hidden) return; // passes and summary turns are hidden, as in the terminal
   talk.add(bubble(m));
+  if (m.outcome) renderAutoDev();
+}
+// Auto dev (see ui.mjs): Start beside the latest agreed summary's instruction, or why it can't be
+// sent; while a run is going or paused, its line above the message box, with Restart when paused.
+function renderAutoDev() {
+  document.querySelectorAll('.autodev-offer').forEach((e) => e.remove());
+  const a = room?.autoDev, el = $('autodev');
+  el.hidden = true; el.replaceChildren(); el.className = '';
+  if (!a || viewing || !localInput) return;
+  const button = (label) => { const b = document.createElement('button'); b.textContent = label; b.onclick = () => send('/autodev'); return b; };
+  const span = (text, cls) => { const e = document.createElement('span'); e.textContent = text; if (cls) e.className = cls; return e; };
+  const para = (...parts) => { const p = document.createElement('p'); p.append(...parts); el.append(p); return p; };
+  if (a.status === 'running') {
+    el.hidden = false;
+    para(span('Auto dev running · cycle ' + a.cycle + ' of ' + a.max + ' · ' + (a.waiting ? 'worker is working' : 'discussion is reviewing') + ' '), span('(typing a message pauses it)', 'hint'));
+    return;
+  }
+  if (a.status === 'paused') {
+    el.hidden = false; el.className = 'paused';
+    para(span('Auto dev paused · '), span('reason: ' + a.reason, 'why'));
+    if (a.offer?.text) {
+      para(span('Next agreed instruction:', 'hint')); para(span(a.offer.text, 'next'));
+      para(button('Restart auto dev (' + a.max + ' more)'), span(' Restarting grants another ' + a.max + ' worker cycles.', 'hint'));
+    } else if (a.offer?.error) para(span("The latest agreed instruction can’t be sent: " + a.offer.error + '.', 'why'));
+    return;
+  }
+  if (a.status === 'finished') { el.hidden = false; para(span('Auto dev finished. Review and merge worker/main yourself.')); }
+  if (!a.offer) return;
+  const summaries = [...$('chat').querySelectorAll('.msg.summary:not(.not-agreed)')];
+  const target = summaries.at(-1);
+  if (!target) return;
+  const offer = document.createElement('div'); offer.className = 'autodev-offer';
+  if (a.offer.text) offer.append(button('Start auto dev'), span('Sends this instruction as cycle 1 of up to ' + a.max + '. Auto-summarize is on for this run; your saved setting is unchanged.'));
+  else offer.append(span("Auto dev can’t send this instruction: " + a.offer.error + '.'));
+  // Right after the instruction: before the summary's next section (Later) or its Outcome line.
+  const after = [...target.children].find((c) => /^(Later|Outcome:)/.test(c.textContent.trim()));
+  target.insertBefore(offer, after ?? null);
 }
 function status(text, error, source) {
   if (!text) return;
@@ -647,12 +692,22 @@ function updateReplicaHeader() {
     : r.node + "'s line" + (own ? ', round ' + own.round : ', no saved round') + ' · agents run on ' + r.node;
   el.textContent = r.node + ' ' + (r.addresses[0] || '127.0.0.1:' + location.port) + ' · ' + line + ' · ' + project;
 }
+// The status under the title, for the selected tab. While auto dev runs, the turn is not the User's.
+function talkStatus() {
+  if (tab === 'work') return localWorking ? localWorking + ' is working' : 'idle';
+  if (!room) return '';
+  if (viewing) return 'read-only';
+  if (room.paused) return 'paused';
+  if (localThinking) return localThinking + ' is thinking';
+  if (room.autoDev?.status === 'running') return 'Auto dev running';
+  return room.started && yourTurn ? 'your turn' : '';
+}
 function updateReplicaView() {
   updateReplicaHeader();
+  renderAutoDev();
   if (room) { $('disc').textContent = viewing ? viewing.title : room.discussion; $('disc').dataset.active = !viewing && room.active ? 'true' : 'false'; }
   // Under the title, show the activity of the selected tab.
-  const state = tab === 'work' ? (localWorking ? localWorking + ' is working' : 'idle') : !room ? '' : viewing ? 'read-only' : room.paused ? 'paused' : localThinking ? localThinking + ' is thinking' : room.started && yourTurn ? 'your turn' : '';
-  $('disc-status').textContent = state;
+  $('disc-status').textContent = talkStatus();
   const panel = $('remote-view'); panel.hidden = !viewing; panel.replaceChildren();
   $('composer').hidden = !viewing && !localInput;
   $('pause-discussion').hidden = !room?.started || room.brainstorm || ended || !!viewing || !localInput;
@@ -1001,6 +1056,7 @@ async function openFiles(group) {
 let room = null;
 function setRoom(r) {
   room = r;
+  renderAutoDev();
   $('folder').textContent = r.folder;
   $('disc').textContent = r.discussion || '';
   const pause = $('pause-discussion');
