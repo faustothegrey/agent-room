@@ -1849,3 +1849,49 @@ test('Stage 3: Explorer queues rollback separately from two-click archive confir
   const current = element(); build(current, element(), name, name, false, true);
   assert.equal(current.children[1].disabled, true); // unchanged Archive guard for the one in use
 });
+
+test('failed worktree inspection blocks even the holding origin recovery, preserves ownership and retries', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const { readFileSync, writeFileSync, existsSync } = await import('node:fs');
+  let recovered = false, otherRan = false;
+  const { first, contexts, git } = await multiRoom({ worker: (c, p) => {
+    const tree = c.shop.workerDir.path;
+    if (p.endsWith('leave edits')) writeFileSync(`${tree}/wip`, 'unfinished');
+    if (p.endsWith('repair')) {
+      recovered = true;
+      git('-C', tree, 'add', 'wip'); git('-C', tree, 'commit', '-qm', `[${c.discussion.name}] repaired`);
+    }
+    if (p.endsWith('other work')) otherRan = true;
+    return 'done';
+  } });
+  await handleLine('topic-a', first); await handleLine('/new', first);
+  const second = contexts()[1]; await handleLine('topic-b', second);
+  queueWork(first, 'leave edits'); await first.workQueue;
+  const shop = first.shop, hold = shop.blockedBy;
+  const privateDir = git('-C', shop.workerDir.path, 'rev-parse', '--absolute-git-dir');
+  const record = `${privateDir}/agent-room-task.json`, index = `${privateDir}/index`;
+  const savedRecord = readFileSync(record), savedIndex = readFileSync(index);
+  try {
+    // A damaged fixture index makes git status throw, without damaging the owner record.
+    writeFileSync(index, 'bad');
+    assert.throws(() => execFileSync('git', ['-C', shop.workerDir.path, 'status', '--porcelain'], { stdio: 'pipe' }));
+    queueWork(first, 'repair'); queueWork(second, 'other work');
+    await until(() => shop.inspectionError);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(recovered, false); assert.equal(otherRan, false);
+    assert.equal(first.prompts.length, 1);
+    assert.deepEqual(shop.tasks.map((t) => t.text), ['repair', 'other work']);
+    assert.equal(shop.blockedBy, hold); // same ownership object, not unknown/reassigned/released
+    assert.deepEqual(readFileSync(record), savedRecord);
+    assert.match(first.notes.at(-1), /inspection failed:[\s\S]*index[\s\S]*including recovery/);
+    assert.ok(shop.log.some((m) => m.error && /inspection failed:[\s\S]*index/.test(m.note)));
+    assert.ok(shop.recheck); // failure keeps the existing two-second retry alive
+  } finally { writeFileSync(index, savedIndex); }
+  // No new instruction: the re-check alone must resume the held recovery.
+  for (let n = 0; n < 120 && !otherRan; n++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(recovered, true); assert.equal(otherRan, true);
+  await first.workQueue; await second.workQueue;
+  assert.equal(shop.inspectionError, null); assert.equal(shop.blockedBy, null);
+  assert.equal(existsSync(record), false);
+});

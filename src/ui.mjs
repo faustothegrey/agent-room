@@ -407,7 +407,7 @@ async function confirmRollbackArchive(ctx, ref) {
   shop.confirming = true;
   try {
     const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
-    if (place.disabled || await leftovers(ctx) || await git(place.path, 'rev-parse', 'HEAD') !== rollback.commit)
+    if (place.disabled || await leftovers(ctx) !== false || await git(place.path, 'rev-parse', 'HEAD') !== rollback.commit)
       return note(ctx, '✗ The worker state changed since the rollback report. Resolve it and request a fresh rollback report before archiving.', true);
     if (await moveDiscussion(ctx, ref, 'archive', { rollbackConfirmed: true })) {
       shop.rollbacks.delete(d.name);
@@ -421,7 +421,7 @@ async function rollbackReport(ctx, rollback, entry) {
   rollback.status = 'needs review';
   rollback.commit = null;
   const match = /^Rollback ready: ([0-9a-f]{40,64})$/.exec(entry.text.trim().split('\n').at(-1));
-  if (!entry.error && match && !await leftovers(ctx)) {
+  if (!entry.error && match && await leftovers(ctx) === false) {
     const dir = workerDir(ctx), id = match[1];
     const body = await git(dir, 'show', '-s', '--format=%B', id).catch(() => '');
     if (await git(dir, 'rev-parse', 'HEAD') === id && body.startsWith(`[${rollback.name}] rollback`) &&
@@ -862,8 +862,23 @@ async function ownerFile(place) {
 async function leftovers(ctx) {
   const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
   if (place.disabled) return false;
-  const s = await worktreeStatus(place).catch(() => null);
-  if (!s?.exists) return false;
+  let s;
+  const shop = shopOf(ctx);
+  try { s = await worktreeStatus(place); }
+  catch (err) {
+    // Unknown is neither clean nor dirty: even the holding origin's recovery must wait.
+    const origin = shop.blockedBy?.origin ?? shop.running?.origin ?? ctx;
+    if (shop.inspectionError?.message !== err.message || shop.inspectionError?.origin !== origin) {
+      const text = `✗ Worker worktree inspection failed: ${err.message}. All worker dispatch, including recovery, waits until inspection succeeds.`;
+      workNote(ctx, text, true);
+      note(origin, text, true);
+    }
+    shop.inspectionError = { message: err.message, origin };
+    if (!shop.pumping) watchShop(shop);
+    return null;
+  }
+  shop.inspectionError = null;
+  if (!s.exists) return false;
   if (!s.treeDirty) {
     const file = await ownerFile(place);
     if (existsSync(file)) {
@@ -892,12 +907,15 @@ async function recordedOwner(ctx) {
 // Restart creates each context before reopening its discussion; try again after that restoration.
 export async function recoverWorkerOwner(ctx) {
   const shop = shopOf(ctx);
-  if (shop.running) return;
-  if (await leftovers(ctx)) {
-    if (shop.blockedBy?.origin) return;
+  if (shop.running) return true;
+  const dirty = await leftovers(ctx);
+  if (dirty === null) return false;
+  if (dirty) {
+    if (shop.blockedBy?.origin) return true;
     const owner = await recordedOwner(ctx);
     if (!shop.blockedBy || owner.origin) hold(ctx, owner);
   } else if (shop.blockedBy) release(ctx);
+  return true;
 }
 async function labelledCommits(dir, range) {
   const lines = (await git(dir, 'log', '--reverse', '--format=%H %s', range)).split('\n');
@@ -951,14 +969,16 @@ async function pump(shop) {
   if (shop.pumping || shop.confirming) return;
   shop.pumping = true;
   try {
-    if (shop.blockedBy && !shop.running) await recoverWorkerOwner(shop.holdContext);
+    if ((shop.blockedBy || shop.inspectionError) && !shop.running &&
+        !await recoverWorkerOwner(shop.holdContext ?? shop.inspectionError.origin)) return;
     while (!shop.running && shop.tasks.length) {
       for (const t of shop.tasks.filter((x) => x.origin.stopped)) dropTask(shop, t);
       const any = shop.tasks[0]?.origin;
       if (!any) break;
       // Before the next task: is the folder clean?
       const dirty = await leftovers(any);
-      if (dirty && !shop.blockedBy?.origin) await recoverWorkerOwner(any);
+      if (dirty === null) break;
+      if (dirty && !shop.blockedBy?.origin && !await recoverWorkerOwner(any)) break;
       else if (!dirty && shop.blockedBy) release(any);
       const t = !shop.blockedBy ? shop.tasks[0] : shop.blockedBy.origin && shop.tasks.find((x) => x.origin === shop.blockedBy.origin);
       if (!t) break; // held
@@ -971,17 +991,17 @@ async function pump(shop) {
       finally { shop.running = null; }
       // After it: edits left uncommitted hold the queue; a recovery keeps the first task's details.
       try {
-        if (await leftovers(t.origin)) { if (!shop.blockedBy) hold(t.origin, { origin: t.origin, label: originLabel(t.origin), task: t.text, before: t.before }); }
-        else if (shop.blockedBy) release(t.origin);
+        const dirty = await leftovers(t.origin);
+        if (dirty === true) { if (!shop.blockedBy) hold(t.origin, { origin: t.origin, label: originLabel(t.origin), task: t.text, before: t.before }); }
+        else if (dirty === false && shop.blockedBy) release(t.origin);
       } catch (err) { note(t.origin, `✗ ${err.message}`, true); }
       t.done();
     }
-  } finally { shop.pumping = false; }
-  watchShop(shop);
+  } finally { shop.pumping = false; watchShop(shop); }
 }
 // Recheck holds even without queued tasks, so cleaning up by hand removes the record and hold.
 function watchShop(shop) {
-  if ((shop.tasks.length || shop.blockedBy) && !shop.running && !shop.recheck) {
+  if ((shop.tasks.length || shop.blockedBy || shop.inspectionError) && !shop.running && !shop.recheck) {
     shop.recheck = setTimeout(() => { shop.recheck = null; pump(shop).catch(() => {}); }, 2000);
     shop.recheck.unref?.();
   }
