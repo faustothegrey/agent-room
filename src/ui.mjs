@@ -307,21 +307,33 @@ function discussionRef(parent, ref) {
 
 // /move <discussion> active|archive|deferred: the whole folder moves (documents and transcripts).
 // Not the discussion this session is using (its transcript is open there).
-function moveDiscussion(ctx, ref, to) {
+async function moveDiscussion(ctx, ref, to) {
   const parent = join(ctx.cwd, 'discussions');
   const d = discussionRef(parent, ref ?? '');
   if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent}.`, true), null;
   const target = to === 'active' ? null : to;
   if (to !== 'active' && !SECTIONS.includes(to)) return note(ctx, '✗ Move it to active, archive or deferred.', true), null;
   if (d.section === target) return { name: d.name }; // already there
+  await recoverWorkerOwner(ctx);
   const from = join(parent, d.section ?? '', d.name);
   if (ctx.discussion?.dir === from) return note(ctx, `✗ ${d.name} is the discussion in use in this room: it can't move now.`, true), null;
   if (pausedSessions(ctx).some((p) => p.name === d.name)) return note(ctx, '✗ Resume the paused discussion before moving it.', true), null;
   const shop = shopOf(ctx);
+  if (target === 'deferred') {
+    const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
+    if (!place.disabled && await gitOk(place.top, 'rev-parse', '--verify', WORKER_BRANCH)) {
+      try {
+        const commits = await labelledCommits(place.top, `main..${WORKER_BRANCH}`);
+        const pending = commits.filter((c) => c.origin === d.name);
+        if (pending.length) return note(ctx, `✗ ${d.name} can't be deferred: commits on worker/main are not merged into main: ${pending.map((c) => c.id).join(', ')}.`, true), null;
+      } catch (err) { return note(ctx, `✗ Can't check unmerged commits: ${err.message}`, true), null; }
+    }
+  }
   if (shop.workingIn === from) return note(ctx, `✗ A worker task is still writing to ${d.name}; try again when it finishes.`, true), null;
   // Open in another context of this folder: it can move between its rounds, unless it holds worker edits.
   const open = siblings(ctx).find((c) => c !== ctx && c.discussion?.dir === from);
   if (open && workerHold(open)) return note(ctx, `✗ ${d.name} can't move: ${workerHold(open)}.`, true), null;
+  if (!open && shop.blockedBy?.label === d.name) return note(ctx, `✗ ${d.name} can't move: its worker edits are unresolved.`, true), null;
   if (open?.busy) return note(ctx, `✗ ${d.name} is in the middle of a round; try again when it ends.`, true), null;
   const dest = join(parent, target ?? '', d.name);
   if (existsSync(dest)) return note(ctx, `✗ There is already a discussion ${d.name} in ${target ?? 'discussions'}/.`, true), null;
@@ -531,7 +543,7 @@ async function reopenDiscussion(ctx, name) {
   // One in archive/ or deferred/ is made active first.
   const d = discussionRef(parent, name ?? '');
   if (!d) return note(ctx, `✗ No discussion "${name}" in ${parent} (discussions are folders named <date>-<title>).`, true);
-  if (d.section && !moveDiscussion(ctx, name, 'active')) return;
+  if (d.section && !await moveDiscussion(ctx, name, 'active')) return;
   name = d.name;
   const checkpoint = pauseFile(ctx, name);
   if (existsSync(checkpoint)) unlinkSync(checkpoint); // Re-open explicitly starts fresh.
@@ -619,6 +631,7 @@ function newBrainstorm(ctx) {
   }
   if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a brainstorm');
   ctx.state.brainstorm = true;
+  ctx.state.brainstormId = randomBytes(12).toString('hex');
   ctx.state.briefing = `This is a brainstorm, not a discussion: it has no folder and agent-room keeps no record of it. Write no files; you may read the project in the room's root, ${ctx.cwd}.`;
   ctx.pendingLog = '';
   switchTo(ctx, null);
@@ -682,7 +695,7 @@ async function openBeside(ctx, opts = {}) {
 // Why `c` can't be closed (or its folder moved): it holds unresolved worker edits, or its task runs.
 function workerHold(c) {
   const shop = shopOf(c);
-  if (shop.blockedBy?.origin === c) return `its worker edits from "${shop.blockedBy.task}" are unresolved: ask the worker to finish and commit them, or to abandon them`;
+  if (shop.blockedBy && (shop.blockedBy.origin === c || shop.blockedBy.label === originLabel(c))) return `its worker edits from "${shop.blockedBy.task}" are unresolved: ask the worker to finish and commit them, or to abandon them`;
   if (shop.running?.origin === c) return 'a worker task from it is running';
   return null;
 }
@@ -761,20 +774,91 @@ function closeDiscussion(ctx) {
 // worktree after each task and again before the next: uncommitted edits hold the queue
 // (shop.blockedBy) until their origin resolves them; that origin's own tasks still go through (to
 // finish or abandon them), and keep the original task's details. Edits whose origin is unknown
-// (found before a task, or at start after a Restart) hold every task until the folder is clean.
+// (without a valid saved owner) hold every task until the folder is clean.
+// The private, per-worktree Git directory is outside both working copies and their indexes.
+async function ownerFile(place) {
+  return join(await git(place.path, 'rev-parse', '--absolute-git-dir'), 'agent-room-task.json');
+}
 async function leftovers(ctx) {
   const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
   if (place.disabled) return false;
   const s = await worktreeStatus(place).catch(() => null);
-  return !!(s?.exists && s.treeDirty);
+  if (!s?.exists) return false;
+  if (!s.treeDirty) {
+    const file = await ownerFile(place);
+    if (existsSync(file)) {
+      const owner = await recordedOwner(ctx);
+      if (owner.before) rememberCommits(shopOf(ctx), await labelledCommits(place.path, `${owner.before}..HEAD`));
+    }
+    try { unlinkSync(file); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+  }
+  return !!s.treeDirty;
 }
+async function recordedOwner(ctx) {
+  try {
+    const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
+    if (place.disabled) return { origin: null };
+    const r = JSON.parse(readFileSync(await ownerFile(place), 'utf8'));
+    if (r.version !== 1 || r.root !== real(ctx.cwd) || typeof r.label !== 'string' ||
+        typeof r.task !== 'string' || !r.task.trim() || typeof r.before !== 'string' ||
+        !/^[0-9a-f]{40,64}$/.test(r.before) || !await gitOk(place.path, 'cat-file', '-e', `${r.before}^{commit}`)) return { origin: null };
+    const origin = siblings(ctx).find((c) => !c.stopped && (r.label === 'brainstorm'
+      ? c.state.brainstorm && typeof r.brainstormId === 'string' && c.state.brainstormId === r.brainstormId : c.discussion?.name === r.label && existsSync(c.discussion.dir)));
+    const exists = r.label !== 'brainstorm' && [r.label, `archive/${r.label}`, `deferred/${r.label}`]
+      .some((ref) => discussionRef(join(ctx.cwd, 'discussions'), ref));
+    return origin || exists ? { origin: origin ?? null, label: r.label, task: r.task, before: r.before } : { origin: null };
+  } catch { return { origin: null }; }
+}
+// Restart creates each context before reopening its discussion; try again after that restoration.
+export async function recoverWorkerOwner(ctx) {
+  const shop = shopOf(ctx);
+  if (shop.running) return;
+  if (await leftovers(ctx)) {
+    if (shop.blockedBy?.origin) return;
+    const owner = await recordedOwner(ctx);
+    if (!shop.blockedBy || owner.origin) hold(ctx, owner);
+  } else if (shop.blockedBy) release(ctx);
+}
+async function labelledCommits(dir, range) {
+  const lines = (await git(dir, 'log', '--reverse', '--format=%H %s', range)).split('\n');
+  const commits = [];
+  for (const line of lines) {
+    const m = /^([0-9a-f]+) \[([^\]]+)\]/.exec(line);
+    if (!m) continue;
+    const files = (await git(dir, 'diff-tree', '--root', '--no-commit-id', '--name-only', '-r', m[1])).split('\n').filter(Boolean);
+    commits.push({ id: m[1], origin: m[2], files });
+  }
+  return commits;
+}
+function rememberCommits(shop, commits) {
+  const completed = shop.completed ??= [];
+  const ids = new Set(completed.map((c) => c.id));
+  for (const c of commits) if (!ids.has(c.id)) { completed.push(c); ids.add(c.id); }
+}
+function workNotice(ctx) {
+  if (!ctx.discussion) return;
+  const shop = shopOf(ctx), reported = shop.reported ??= new Map();
+  if (!reported.has(originLabel(ctx))) reported.set(originLabel(ctx), new Set());
+  const seen = reported.get(originLabel(ctx));
+  const pending = (shop.completed ?? []).filter((c) => c.origin !== originLabel(ctx) && !seen.has(c.id));
+  if (!pending.length) return;
+  const text = `Work finished elsewhere: ${pending.map((c) => `[${c.origin}] ${c.id} (${c.files.join(', ') || 'no files changed'})`).join(' · ')}`;
+  const m = { speaker: 'agent-room', text };
+  ctx.state.transcript.push(m);
+  log(ctx, `**${m.speaker}**\n\n${text}\n\n`);
+  toScreen(ctx, { type: 'message', message: ctx.docs.messageView(m) });
+  for (const c of pending) seen.add(c.id);
+}
+
 function hold(ctx, blockedBy) {
   const shop = shopOf(ctx);
   shop.blockedBy = blockedBy;
-  const where = blockedBy.origin ? `[${blockedBy.label}]` : 'an unknown origin';
-  workNote(ctx, `✗ The worker's folder has uncommitted edits from ${where}${blockedBy.task ? ` ("${blockedBy.task}")` : ''}: the queue holds${blockedBy.origin ? ` until [${blockedBy.label}] resolves them (its own instructions still go through)` : ' until the folder is clean (commit or remove those edits yourself)'}.`, true);
+  shop.holdContext = ctx;
+  const where = blockedBy.label ? `[${blockedBy.label}]` : 'an unknown origin';
+  workNote(ctx, `✗ The worker's folder has uncommitted edits from ${where}${blockedBy.task ? ` ("${blockedBy.task}")` : ''}: the queue holds${blockedBy.label ? ` until [${blockedBy.label}] resolves them (its own instructions still go through)` : ' until the folder is clean (commit or remove those edits yourself)'}.`, true);
   if (blockedBy.origin) note(blockedBy.origin, `✗ The worker left uncommitted edits from "${blockedBy.task}": other discussions' worker tasks wait. Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).`, true);
   showHeader(ctx);
+  if (!shop.pumping) watchShop(shop);
 }
 function release(ctx) {
   const shop = shopOf(ctx), was = shop.blockedBy;
@@ -787,13 +871,14 @@ async function pump(shop) {
   if (shop.pumping) return;
   shop.pumping = true;
   try {
+    if (shop.blockedBy && !shop.running) await recoverWorkerOwner(shop.holdContext);
     while (!shop.running && shop.tasks.length) {
       for (const t of shop.tasks.filter((x) => x.origin.stopped)) dropTask(shop, t);
       const any = shop.tasks[0]?.origin;
       if (!any) break;
       // Before the next task: is the folder clean?
       const dirty = await leftovers(any);
-      if (dirty && !shop.blockedBy) hold(any, { origin: null });
+      if (dirty && !shop.blockedBy?.origin) await recoverWorkerOwner(any);
       else if (!dirty && shop.blockedBy) release(any);
       const t = !shop.blockedBy ? shop.tasks[0] : shop.blockedBy.origin && shop.tasks.find((x) => x.origin === shop.blockedBy.origin);
       if (!t) break; // held
@@ -806,18 +891,22 @@ async function pump(shop) {
       finally { shop.running = null; }
       // After it: edits left uncommitted hold the queue; a recovery keeps the first task's details.
       try {
-        if (await leftovers(t.origin)) { if (!shop.blockedBy) hold(t.origin, { origin: t.origin, label: originLabel(t.origin), task: t.text.split('\n')[0].trim().slice(0, 120), before: t.before }); }
+        if (await leftovers(t.origin)) { if (!shop.blockedBy) hold(t.origin, { origin: t.origin, label: originLabel(t.origin), task: t.text, before: t.before }); }
         else if (shop.blockedBy) release(t.origin);
       } catch (err) { note(t.origin, `✗ ${err.message}`, true); }
       t.done();
     }
   } finally { shop.pumping = false; }
-  // Tasks held by leftover edits: look again every 2 seconds, so they start once the folder is clean.
-  if (shop.tasks.length && !shop.running && !shop.recheck) {
+  watchShop(shop);
+}
+// Recheck holds even without queued tasks, so cleaning up by hand removes the record and hold.
+function watchShop(shop) {
+  if ((shop.tasks.length || shop.blockedBy) && !shop.running && !shop.recheck) {
     shop.recheck = setTimeout(() => { shop.recheck = null; pump(shop).catch(() => {}); }, 2000);
     shop.recheck.unref?.();
   }
 }
+
 function dropTask(shop, t) {
   shop.tasks.splice(shop.tasks.indexOf(t), 1);
   t.origin.workPending--;
@@ -1106,10 +1195,7 @@ export async function start(ctx) {
   if (ctx.replica) { ctx.project = await codeInfo(ctx.cwd); await pushReplica(ctx); }
   showHeader(ctx);
   refreshWorker(ctx).catch(() => {}); // the Worker tab's line; creates nothing
-  // Uncommitted edits found at start (after a Restart, say) belong to no known task: worker tasks
-  // wait until the folder is clean; they are never given to a new task.
-  const shop = shopOf(ctx);
-  if (!shop.blockedBy && !shop.running && !shop.tasks.length && await leftovers(ctx).catch(() => false)) hold(ctx, { origin: null });
+  await recoverWorkerOwner(ctx);
   if (ctx.noScreen) {
     return out(ctx, 'Type a message, /docs to browse the discussions, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
   }
@@ -1271,7 +1357,7 @@ export async function handleLine(line, ctx) {
   if (line === '/autodev') return startAutoDev(ctx);
   if (line === AUTO_DEV_REPORT) return autoDevReport(ctx);
   const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
-  if (move) return void moveDiscussion(ctx, move[1], move[2]);
+  if (move) return void await moveDiscussion(ctx, move[1], move[2]);
   if (line === '/summary' && ctx.paused) return note(ctx, 'Resume the paused discussion before requesting a summary.', true);
   if (line === '/summary') {
     ctx.agentsStarted = true;
@@ -1381,6 +1467,7 @@ async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
   let spoke = 0; // agent replies that weren't passes or failures
   try {
     ctx.busy = true;
+    workNotice(ctx);
     await ctx.room.round(line, { speaker,
       onTurnStart(agent) {
         started = Date.now();
@@ -1443,7 +1530,8 @@ async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
 // The worker works in its own Git worktree of the room's repository, on the branch worker/main, in
 // the sibling folder <repo>.worker/: never in the room's own files (its notes still go in the room's
 // discussion folder). The worktree is created at the first instruction and reused after Restart or
-// Reload (read back from Git; agent-room stores nothing). The only Git writes are `worktree add` and
+// Reload reads it back from Git. Task ownership is saved in the private Git directory.
+// The only branch/worktree writes are `worktree add` and
 // a fast-forward of worker/main when it has nothing of its own: never a reset, merge, rebase or
 // deletion, and never anything in the room's own working copy. Decided by the User, 2026-11-07.
 // That is agent-room's own code: the worker itself may do such Git actions in its worktree when the
@@ -1644,7 +1732,13 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null) {
       // Its own worktree first (created, reattached or caught up); without one it doesn't run.
       const place = await refreshWorker(ctx, { prepare: true });
       if (place.disabled) throw new Error(place.disabled);
-      before = await git(place.path, 'rev-parse', 'HEAD').catch(() => null);
+      before = await git(place.path, 'rev-parse', 'HEAD');
+      if (!recovery) {
+        const file = await ownerFile(place);
+        const record = { version: 1, root: real(ctx.cwd), label, task: text, before, ...(ctx.state.brainstorm && { brainstormId: ctx.state.brainstormId }) };
+        writeFileSync(`${file}.tmp`, JSON.stringify(record) + '\n', { mode: 0o600 });
+        renameSync(`${file}.tmp`, file);
+      }
       // The worker learns the active discussion's folder (for its notes) with its first instruction there.
       // After New discussion, until the next one exists, it learns only that the old one is closed.
       const d = task.discussion;
@@ -1684,6 +1778,8 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null) {
     if (saveError) workNote(ctx, `✗ ${worker.name}: couldn't save to the transcript: ${saveError.message}`, true);
     // Its commits must carry its label: one without it is reported, not trusted.
     if (before) {
+      const finished = await labelledCommits(workerDir(ctx), `${before}..HEAD`);
+      rememberCommits(shop, finished);
       const subjects = (await git(workerDir(ctx), 'log', '--format=%h %s', `${before}..HEAD`).catch(() => '')).split('\n').filter(Boolean);
       const unlabelled = subjects.filter((l) => !l.slice(l.indexOf(' ') + 1).startsWith(`[${label}]`));
       if (unlabelled.length) workNote(ctx, `✗ Commits without the [${label}] label: ${unlabelled.join(' · ')}.`, true);

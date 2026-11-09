@@ -1509,3 +1509,140 @@ test('Open room in folder… opens an existing room, says when it is open elsewh
   await assert.rejects(newRoom(ctx, { token: second.token }), /choose the folder again/);
   assert.deepEqual(added, [fresh]);
 });
+
+test('Stage 2: completed work is reported once before a round, including Worker report rounds, never just by switching', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const { writeFileSync, readFileSync } = await import('node:fs');
+  const commits = [];
+  const { first, contexts, settle } = await multiRoom({ worker: (c) => {
+    const tree = c.shop.workerDir.path;
+    const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+    writeFileSync(`${tree}/changed.txt`, String(commits.length));
+    g('add', 'changed.txt'); g('commit', '-qm', `[${c.discussion.name}] completed`);
+    commits.push(g('rev-parse', 'HEAD')); return 'done';
+  } });
+  await handleLine('topic-a', first); await handleLine('/new', first);
+  const second = contexts()[1]; await handleLine('topic-b', second);
+  const notices = (c) => c.state.transcript.filter((m) => m.text.startsWith('Work finished elsewhere:'));
+  queueWork(second, 'work b'); queueWork(second, 'more work b'); await second.workQueue;
+  await handleLine(`/reopen ${first.discussion.name}`, second);
+  assert.equal(notices(first).length, 0); // viewing starts no round
+  let prompt = '';
+  first.room.agents[0].turn = async (p) => { prompt += p; return 'PASS'; };
+  await handleLine('review', first);
+  assert.equal(notices(first).length, 1);
+  assert.match(notices(first)[0].text, new RegExp(commits[0]));
+  assert.match(notices(first)[0].text, /changed.txt/);
+  assert.ok(notices(first)[0].text.includes(commits[1]));
+  assert.equal(first.events.filter((e) => e.type === 'message' && e.message.html?.includes('Work finished elsewhere:')).length, 1);
+  assert.ok(prompt.includes(notices(first)[0].text));
+  assert.ok(readFileSync(first.logPath, 'utf8').includes(notices(first)[0].text));
+  await handleLine('again', first);
+  assert.equal(notices(first).length, 1);
+  assert.equal(notices(second).length, 0); // own work isn't reported
+  queueWork(second, 'more b'); await second.workQueue;
+  first.autoDev = { status: 'paused', cycle: 1, waiting: true };
+  queueWork(first, 'work a', first.autoDev); await first.workQueue;
+  await settle();
+  assert.equal(notices(first).length, 2);
+  assert.ok(notices(first)[1].text.includes(commits[2]));
+  assert.ok(!notices(first)[1].text.includes(commits[0]));
+  assert.ok(first.state.transcript.some((m) => m.speaker === 'Worker report'));
+});
+
+test('Stage 2: Defer refuses labelled commits absent from main and permits them after a normal merge', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const { existsSync } = await import('node:fs');
+  const { first, contexts, git } = await multiRoom({ worker: (c) => {
+    execFileSync('git', ['-C', c.shop.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', `[${c.discussion.name}] done`]); return 'done';
+  } });
+  await handleLine('topic-a', first); await handleLine('/new', first);
+  const second = contexts()[1]; await handleLine('topic-b', second);
+  queueWork(first, 'work'); await first.workQueue;
+  const name = first.discussion.name;
+  await handleLine(`/move ${name} deferred`, second);
+  assert.match(second.notes.at(-1), /can't be deferred: commits on worker\/main are not merged into main: [0-9a-f]+/);
+  assert.ok(existsSync(`${first.cwd}/discussions/${name}`));
+  git('merge', '--no-ff', 'worker/main', '-m', 'merge worker');
+  await handleLine(`/move ${name} deferred`, second);
+  assert.ok(existsSync(`${first.cwd}/discussions/deferred/${name}`));
+});
+
+test('Stage 2: private owner records survive restart and recovery, invalid records block as unknown, and brainstorms need no folder', async () => {
+  const { queueWork, recoverWorkerOwner } = await import('../src/ui.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const { readFileSync, writeFileSync, existsSync, unlinkSync, readdirSync } = await import('node:fs');
+  let record, original, tree;
+  const { first, contexts, settle } = await multiRoom({ worker: (c, p) => {
+    tree = c.shop.workerDir.path;
+    const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+    record = `${g('rev-parse', '--absolute-git-dir')}/agent-room-task.json`;
+    assert.ok(existsSync(record)); // on disk before the provider starts
+    if (p.endsWith('leave edits')) {
+      original = readFileSync(record, 'utf8');
+      const r = JSON.parse(original);
+      assert.equal(r.task, 'leave edits'); assert.equal(r.before, g('rev-parse', 'HEAD'));
+      writeFileSync(`${tree}/wip`, c.state.brainstorm ? 'brainstorm unfinished' : 'unfinished');
+    } else {
+      assert.equal(readFileSync(record, 'utf8'), original); // recovery doesn't replace ownership
+      g('add', 'wip'); g('commit', '-qm', `[${c.state.brainstorm ? 'brainstorm' : c.discussion.name}] recovered`);
+    }
+    return 'ok';
+  } });
+  await handleLine('topic-a', first); await handleLine('/new', first);
+  const second = contexts()[1]; await handleLine('topic-b', second);
+  queueWork(first, 'leave edits'); await first.workQueue;
+  assert.equal(JSON.parse(original).label, first.discussion.name);
+  const resetShop = () => { for (const c of contexts()) { clearTimeout(c.shop?.recheck); delete c.shop; } };
+  resetShop(); await recoverWorkerOwner(second);
+  assert.equal(second.shop.blockedBy.origin, first);
+  assert.match(first.notes.at(-1), /worker left uncommitted edits/);
+  for (const bad of [null, '{broken', JSON.stringify({ ...JSON.parse(original), before: 'invalid' }), JSON.stringify({ ...JSON.parse(original), label: '2026-11-09-missing' })]) {
+    if (bad === null) unlinkSync(record); else writeFileSync(record, bad);
+    resetShop(); await recoverWorkerOwner(second);
+    assert.equal(second.shop.blockedBy.origin, null);
+  }
+  writeFileSync(record, original); resetShop(); await recoverWorkerOwner(second);
+  queueWork(first, 'recover'); await first.workQueue;
+  assert.equal(existsSync(record), false);
+  assert.equal(first.shop.blockedBy, null);
+  assert.ok(!execFileSync('git', ['-C', tree, 'ls-files']).toString().includes('agent-room-task'));
+  // A brainstorm's label resolves from live memory, never by manufacturing a discussion folder.
+  await handleLine('/brainstorm', second); await settle();
+  const brain = contexts().find((c) => c.state.brainstorm);
+  const folders = readdirSync(`${first.cwd}/discussions`);
+  queueWork(brain, 'leave edits'); await brain.workQueue;
+  assert.equal(JSON.parse(original).label, 'brainstorm');
+  resetShop(); await recoverWorkerOwner(first);
+  assert.equal(first.shop.blockedBy.origin, brain);
+  const id = brain.state.brainstormId;
+  brain.state.brainstormId = 'different-brainstorm-after-restart';
+  resetShop(); await recoverWorkerOwner(first);
+  assert.equal(first.shop.blockedBy.origin, null);
+  brain.state.brainstormId = id;
+  resetShop(); await recoverWorkerOwner(first);
+  queueWork(brain, 'recover'); await brain.workQueue;
+  assert.equal(existsSync(record), false);
+  assert.deepEqual(readdirSync(`${first.cwd}/discussions`), folders);
+});
+
+
+test('Stage 2: cleaning held edits by hand clears the private record and hold without another task', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const { writeFileSync, existsSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { first } = await multiRoom({ worker: (c) => { writeFileSync(`${c.shop.workerDir.path}/wip`, 'unfinished'); return 'stopped'; } });
+  await handleLine('topic-a', first);
+  queueWork(first, 'start'); await first.workQueue;
+  const tree = first.shop.workerDir.path;
+  const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+  const record = `${g('rev-parse', '--absolute-git-dir')}/agent-room-task.json`;
+  g('add', 'wip'); g('commit', '-qm', `[${first.discussion.name}] completed by hand`);
+  for (let n = 0; n < 100 && first.shop.blockedBy; n++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(first.shop.blockedBy, null);
+  assert.equal(existsSync(record), false);
+  assert.equal(first.prompts.length, 1);
+  assert.equal(first.shop.completed[0].id, g('rev-parse', 'HEAD'));
+});

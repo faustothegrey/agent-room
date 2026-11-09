@@ -458,12 +458,21 @@ based on, and says when the room has uncommitted changes the worker can't see, o
   in brackets (`[<discussion folder name>]`, or `[brainstorm]`) and the commit ID in its reply.
   agent-room reports commits without that label. Each instruction in the Worker tab shows its
   origin, and its reply goes back to that discussion's transcript.
+- Before each discussion round, including one started by a worker report, a single chat and
+  transcript notice lists other origins' completed labelled commits and changed files not yet
+  reported to that discussion. Switching to it starts no agents and adds no notice. The record
+  of notices survives Reload; Restart starts a fresh in-memory record.
+- Defer refuses a discussion with `[origin]` commits on `worker/main` absent from `main`'s history;
+  a normal merge into main clears that guard (squash merges are outside this feature).
 - **Leftover edits:** agent-room checks the worktree after each task and again before the next. If
   a task leaves uncommitted edits, the queue holds and its origin is told; only that origin's own
   instructions go through (to finish and commit them, or to abandon them), with the first task's
   details. That discussion can't be closed, archived or deferred meanwhile. Uncommitted edits of
-  unknown origin, for example found at start after a Restart, hold every task until the folder is
-  clean (commit or remove them yourself); they are never given to a new task.
+  unknown origin hold every task until the folder is clean (commit or remove them yourself); they
+  are never given to a new task. Before starting work, agent-room saves the origin, full task text
+  and starting commit in the worktree's private Git directory (never committed). Recovery keeps
+  that original record until the folder is clean. After Restart it holds for that origin if it
+  still exists; a missing or invalid record holds as unknown.
 - Without a Git repository, or in one with no commit yet, the worker is disabled:
   "Worker requires a source Git repository for its isolated worktree." Discussions work as usual.
 - The worker keeps scratch notes in `.worker-notes/<task>/` inside its worktree. Git ignores them
