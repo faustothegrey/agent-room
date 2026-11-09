@@ -310,6 +310,96 @@ test('Restart keeps the launch flags that matter: the same port, agents, worker 
   assert.deepEqual(restartArgs([ctx], { node: 'Mac', peer: ['p=http://x:1'] }, 5566).slice(9, 13), ['--node', 'Mac', '--peer', 'p=http://x:1']);
 });
 
+test('/brainstorm: no title, folder or transcript is created; the agents are told it is a brainstorm', async () => {
+  const { readdirSync } = await import('node:fs');
+  const ctx = await freshSession(['an idea', 'PASS', 'PASS', '- the idea', 'PASS'], async () => { throw new Error('no title should be asked'); });
+  const prompts = [];
+  const turn = ctx.room.agents[0].turn;
+  ctx.room.agents[0].turn = async (p) => { prompts.push(p); return turn(p); };
+  await handleLine('/brainstorm', ctx);
+  assert.deepEqual([ctx.screen.room.discussion, ctx.screen.room.brainstorm, ctx.screen.room.started, ctx.screen.room.active], ['Brainstorm', true, true, null]);
+  await handleLine('hello', ctx); // a round, then its automatic summary
+  assert.deepEqual(readdirSync(ctx.cwd), []); // nothing written in the root
+  assert.equal(ctx.logPath, undefined);
+  assert.equal(ctx.pendingLog, ''); // nothing kept for a later transcript either
+  assert.equal(ctx.discussion, null);
+  assert.deepEqual(ctx.state.transcript.filter((m) => !m.summary).map((m) => m.speaker), ['User', 'A', 'B', 'A', 'Summary']);
+  assert.match(prompts[0], /This is a brainstorm, not a discussion: it has no folder/);
+  assert.doesNotMatch(prompts[0], /Its folder is|discussions\//);
+  assert.doesNotMatch(prompts.at(-1), /pending-instructions/); // the summary prompt
+});
+
+test('New brainstorm replaces the current one, and ends a discussion session keeping its folder and transcript', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const ctx = await freshSession([], async () => ({ title: 'Topic' }));
+  const resets = [];
+  for (const a of [...ctx.room.agents, ctx.worker]) a.reset = () => resets.push(a.name);
+  await handleLine('/autosummary off', ctx);
+  await handleLine('first', ctx); // a discussion
+  const [name] = readdirSync(`${ctx.cwd}/discussions`);
+  const transcript = ctx.logPath;
+  await handleLine('/brainstorm', ctx);
+  assert.deepEqual(resets, ['A', 'B']); // the worker carries on
+  assert.equal(ctx.discussion, null);
+  assert.equal(ctx.logPath, null);
+  assert.deepEqual(ctx.state.transcript, []);
+  assert.match(readFileSync(transcript, 'utf8'), /session ended: starting a brainstorm/);
+  await handleLine('idea one', ctx);
+  assert.equal(ctx.state.transcript[0].text, 'idea one');
+  await handleLine('/brainstorm', ctx); // one brainstorm per room: the old one is discarded
+  assert.deepEqual(resets, ['A', 'B', 'A', 'B']);
+  assert.deepEqual(ctx.state.transcript, []);
+  assert.equal(ctx.screen.room.brainstorm, true);
+  await handleLine('idea two', ctx);
+  assert.deepEqual(ctx.state.transcript.map((m) => m.text), ['idea two', 'PASS', 'PASS']);
+  assert.deepEqual(readdirSync(`${ctx.cwd}/discussions`), [name]);
+  assert.equal(readdirSync(`${ctx.cwd}/discussions/${name}/transcripts`).length, 1);
+  assert.doesNotMatch(readFileSync(transcript, 'utf8'), /idea/);
+});
+
+test('New discussion or Re-open ends the brainstorm; the next message then starts a discussion', async () => {
+  const { mkdirSync, readdirSync } = await import('node:fs');
+  const ctx = await freshSession([], async () => ({ title: 'Real topic' }));
+  await handleLine('/autosummary off', ctx);
+  await handleLine('/brainstorm', ctx);
+  await handleLine('just talking', ctx);
+  await handleLine('/new', ctx);
+  assert.deepEqual([ctx.state.brainstorm, ctx.state.transcript.length, ctx.screen.room.discussion], [false, 0, 'No discussion started']);
+  await handleLine('now for real', ctx);
+  assert.equal(ctx.discussion.title, 'Real topic');
+  assert.match(ctx.logPath, /real-topic\/transcripts\/session-/);
+
+  mkdirSync(`${ctx.cwd}/discussions/2026-11-01-old`);
+  await handleLine('/brainstorm', ctx);
+  await handleLine('more talk', ctx);
+  await handleLine('/reopen 2026-11-01-old', ctx);
+  assert.deepEqual([ctx.state.brainstorm, ctx.state.transcript.length, ctx.discussion.name], [false, 0, '2026-11-01-old']);
+  await handleLine('back to it', ctx);
+  assert.match(ctx.logPath, /2026-11-01-old\/transcripts\/session-/);
+  assert.equal(readdirSync(`${ctx.cwd}/discussions`).length, 2);
+});
+
+test('Reload keeps the brainstorm\'s messages and its mode: the next message still creates no discussion', async () => {
+  const { readdirSync } = await import('node:fs');
+  const { reloaded } = await import('../src/ui.mjs');
+  const ctx = await freshSession([], async () => { throw new Error('no title should be asked'); });
+  await handleLine('/autosummary off', ctx);
+  await handleLine('/brainstorm', ctx);
+  await handleLine('an idea', ctx);
+  const said = ctx.state.transcript.map((m) => m.text);
+  // What cli.mjs does on Reload: load fresh modules on the same ctx, then reloaded().
+  Object.assign(ctx, { agentSpecs: 'claude:A,claude:B', workerSpec: 'claude:W', sessions: new Map(), code: {}, refreshQuota: () => {} });
+  Object.assign(ctx, await load(ctx, `?brainstorm=${Date.now()}`));
+  for (const a of ctx.room.agents) a.turn = async () => 'PASS';
+  await reloaded(ctx);
+  assert.deepEqual(ctx.screen.transcript.map((m) => m.text), said); // a refreshed page gets them
+  assert.deepEqual([ctx.screen.room.brainstorm, ctx.screen.room.discussion], [true, 'Brainstorm']);
+  await handleLine('another idea', ctx);
+  assert.deepEqual(ctx.state.transcript.map((m) => m.text), [...said, 'another idea', 'PASS', 'PASS']);
+  assert.deepEqual(readdirSync(ctx.cwd), []);
+  assert.equal(ctx.logPath, undefined);
+});
+
 test('/new: nothing to end before the first message; it creates nothing and changes nothing', async () => {
   const { readdirSync } = await import('node:fs');
   const ctx = await freshSession([], async () => ({ title: 'Topic' }));
@@ -784,6 +874,85 @@ test('Pause preserves native sessions across New discussion; corrupt Resume leav
   } finally { rmSync(dirname(file), { recursive: true, force: true }); }
 });
 
+
+test('Resume replaces a brainstorm only with a valid Pause; its button asks twice; during a discussion it still refuses', async () => {
+  const { createHash } = await import('node:crypto');
+  const { homedir } = await import('node:os');
+  const { join, dirname } = await import('node:path');
+  const { readFileSync, writeFileSync, renameSync, realpathSync, rmSync, existsSync } = await import('node:fs');
+  const ctx = { ...freshCtx(), cwd: await tmp('brainstorm-resume-test-'), workerSpec: 'claude:W' };
+  Object.assign(ctx, await load(ctx, '?brainstorm-resume'));
+  ctx.suggestTitle = async () => ({ title: 'Saved topic' });
+  const pass = () => { for (const agent of ctx.room.agents) agent.turn = async () => 'PASS'; };
+  pass();
+  await handleLine('/autosummary off', ctx);
+  await handleLine('Remember this', ctx);
+  Object.assign(ctx.sessions.get('A'), { id: 'claude-original', started: true });
+  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-original' });
+  Object.assign(ctx.sessions.get('worker:W'), { id: 'worker-original', started: true });
+  const name = ctx.discussion.name;
+  const file = join(homedir(), '.local', 'state', 'agent-room', 'paused',
+    createHash('sha256').update(realpathSync(ctx.cwd)).digest('hex'),
+    createHash('sha256').update(name).digest('hex') + '.json');
+  try {
+    await handleLine('/pause', ctx);
+    const snapshot = readFileSync(file, 'utf8');
+    const saved = JSON.parse(snapshot);
+    await handleLine('/brainstorm', ctx);
+    await handleLine('a brainstorm idea', ctx);
+    const brainstorm = ctx.state;
+    const said = ctx.state.transcript.map((m) => m.text);
+    const intact = () => {
+      assert.equal(ctx.state, brainstorm);
+      assert.equal(ctx.state.brainstorm, true);
+      assert.deepEqual(ctx.state.transcript.map((m) => m.text), said);
+      assert.equal(ctx.screen.room.brainstorm, true);
+      assert.equal(ctx.discussion, null);
+    };
+
+    // An invalid or missing Pause: the error, and the brainstorm as it was.
+    writeFileSync(file, JSON.stringify({ ...saved, version: 999 }));
+    await assert.rejects(handleLine('/resume ' + name, ctx), /checkpoint is invalid/);
+    intact();
+    renameSync(file, file + '.away');
+    await assert.rejects(handleLine('/resume ' + name, ctx), /No saved Pause/);
+    intact();
+    renameSync(file + '.away', file);
+    writeFileSync(file, snapshot);
+
+    // The page's Resume button (its own code, from the page): the first click only asks.
+    const page = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+    const code = page.slice(page.indexOf('function confirmed('), page.indexOf('const pendingArchives'));
+    const sent = [];
+    const resumeButton = new Function('room', 'localMessages', 'send', 'setTimeout', `${code}; return resumeButton;`)(
+      ctx.screen.room, ctx.screen.transcript, (line) => sent.push(handleLine(line, ctx)), () => {});
+    const button = { textContent: 'Resume', dataset: {} };
+    resumeButton(button, name);
+    const click = () => button.onclick({ stopPropagation() {} });
+    click();
+    assert.equal(button.textContent, 'Click again: the brainstorm will be discarded');
+    assert.equal(sent.length, 0);
+    intact();
+    click();
+    assert.equal(sent.length, 1);
+    await sent[0];
+
+    // Replaced by the paused discussion.
+    assert.equal(ctx.state.brainstorm, undefined);
+    assert.equal(ctx.screen.room.brainstorm, false);
+    assert.equal(ctx.discussion.name, name);
+    assert.deepEqual(ctx.state.transcript, saved.state.transcript);
+    assert.equal(ctx.sessions.get('A').id, 'claude-original');
+    assert.equal(ctx.logPath, saved.logPath);
+    assert.equal(existsSync(file), false);
+
+    // During a real discussion, Resume keeps refusing as before.
+    pass();
+    await handleLine('carry on', ctx);
+    await assert.rejects(handleLine('/resume ' + name, ctx), /^Error: Pause the current discussion before resuming another one\.$/);
+    assert.equal(ctx.discussion.name, name);
+  } finally { rmSync(dirname(file), { recursive: true, force: true }); }
+});
 
 test('Restart leaves a paused checkpoint for Resume instead of re-opening it fresh', () => {
   const ctx = { cwd: '/r', paused: true, discussion: { name: '2026-11-03-paused' } };

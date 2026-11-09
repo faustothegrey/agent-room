@@ -41,8 +41,8 @@ mode; `/docs` opens a document separately in the browser.
 The header has three zones. **Room** (blue): **agent-room ▾**, whose menu holds **Switch room…**,
 **Open room in folder…**, **Peers…** and **Quit room**, above the full **root folder**; hover or focus the room
 name for its replication line, when replication is on. **Current discussion** (green): the selected
-discussion or **No discussion started**, with its state under it (paused, who is thinking, or your
-turn); **Actions ▾** holds **Pause discussion**, **Summarize** and **New discussion**, with
+discussion, **Brainstorm** or **No discussion started**, with its state under it (paused, who is thinking, or your
+turn); **Actions ▾** holds **Pause discussion**, **Summarize**, **New discussion** and **New brainstorm**, with
 **Auto-summarize** beside it. **Server and monitoring** (amber): **● Server ▾**, whose menu holds
 **Reload**, **Restart** and **Shutdown server**, then the subscription usage gauges and **Usage**;
 hover or focus **Server** for its uptime, port and the server's version.
@@ -148,6 +148,17 @@ session carry on, and its log gets a marker line. Nothing is created yet: your n
 a title and creates the new discussion's folder, as in a fresh room. The worker's next instruction
 then gets the new folder; until it exists, the worker is told no discussion is active.
 
+**New brainstorm** (in the header's **Actions ▾** menu, or `/brainstorm`) starts a conversation with
+the same agents, turns and `PASS` rules, but agent-room keeps no record of it: no title, folder,
+transcript, notes or handoff (the providers' own session histories may remain, and changes you ask
+the worker for are real). Its chat lives only in the server's memory: it survives a page refresh and
+Reload, and is lost on Restart or Quit room. A room has one brainstorm at a time: New brainstorm
+discards the current one, and New discussion, Re-open or Resume ends it. Like New discussion, it ends the
+session of the discussion in use, which keeps its folder and transcripts. The agents are told it is
+a brainstorm, write no files and may read the project; the worker carries on as with no active
+discussion. Typing in a room with no discussion still starts a discussion. Pause is not offered in
+a brainstorm.
+
 **Pause discussion** (in the header's **Actions ▾** menu, or `/pause`) waits for the
 current round, including its automatic summary, and queued worker tasks to finish. It saves the
 chat, worker log, provider session IDs, unread-message positions, provider/model choices and usage
@@ -157,7 +168,9 @@ blocked while paused. You can then quit, restart the server or start another dis
 Choose **Resume** under **Paused on this machine** in **Explorer**, or `/resume <folder-name>`,
 to continue those same discussion and worker sessions with the saved chat. In the room you just
 paused, the header's **Actions ▾** menu offers **Resume discussion** (`/resume` with no name). Pause any current
-conversation before resuming another one. Starting a New discussion from a paused one starts a
+discussion before resuming another one. During a brainstorm, Resume replaces it, as Re-open does: the
+button asks for a second click when the brainstorm has messages, and a missing or invalid Pause leaves
+the brainstorm as it was. Starting a New discussion from a paused one starts a
 fresh worker too, keeping the saved worker session untouched. **Re-open** still starts fresh;
 re-opening a paused discussion asks for confirmation and discards its saved Pause.
 
@@ -252,6 +265,8 @@ until you say it was sent, replaced or withdrawn. The drafter rotates between su
 or revising counts as accepting that version; every other agent must pass on it for agreement.
 Each agent gets at most three turns. Without agreement, the last revision is shown as
 **not agreed**. Only the result appears in the chat; the exchange is retained in the transcript.
+In a brainstorm, summaries work the same way, but their prompt leaves out the sentence about
+`pending-instructions.md`: a worker instruction lives only in the chat, and nothing is retained.
 
 **Auto-summarize** is on by default for each room. After a round where an agent spoke and none
 failed, it runs the same summary process, adding up to three turns per agent. It does not run
@@ -288,6 +303,7 @@ node src/cli.mjs --help
 | `/docs` | Browse documents; in terminal mode, ↑/↓ selects, Enter opens, Esc leaves the picker. |
 | `/reopen <folder-name>` | Re-open an existing discussion: a fresh session there, from its handoff. `archive/…` or `deferred/…` is made active first. |
 | `/new` | End this session; your next message starts a new discussion. The worker carries on. |
+| `/brainstorm` | End this session (or brainstorm) and start a brainstorm: nothing saved, lost on Restart or Quit. |
 | `/move <folder-name> active\|archive\|deferred` | Move a whole discussion (not the one in use) into `archive/` or `deferred/`, or back. |
 | `/pause` | Save the discussion and worker sessions locally after their work finishes. |
 | `/resume [folder-name]` | Continue a saved Pause, including its provider sessions and chat. |

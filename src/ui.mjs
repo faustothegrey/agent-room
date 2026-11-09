@@ -50,7 +50,8 @@ Commands: /pause (save discussion and worker sessions locally), /resume <name> (
 /docs (pick a document to view in the browser), /reopen <name> (re-open that
 discussion: a fresh session there, starting from its handoff; one in archive/ or deferred/ is made
 active first), /new (end this session; your next message starts a new discussion; the worker
-carries on), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
+carries on), /brainstorm (New brainstorm: a conversation kept only in memory, with no folder or
+transcript; it ends this session as /new does, and a new one, /new, /reopen or /resume ends it), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
 /summary (the agents agree a short
 summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
 in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
@@ -203,9 +204,10 @@ const red = style('31');
 const labelled = (ctx, text) => (ctx?.label ? String(text).replace(/^(?=.)/gm, `[${ctx.label}] `) : String(text));
 const out = (ctx, text) => console.log(labelled(ctx, text));
 // Until the discussion's folder exists (at the first message), the transcript is kept in memory.
+// A brainstorm (ctx.state.brainstorm) keeps no record at all.
 const log = (ctx, text) => {
   if (ctx.logPath) appendFileSync(ctx.logPath, text);
-  else ctx.pendingLog = (ctx.pendingLog ?? '') + text;
+  else if (!ctx.state?.brainstorm) ctx.pendingLog = (ctx.pendingLog ?? '') + text;
 };
 const describe = (room) => room.agents.map((a) => `${a.name} (${a.provider})`).join(', ');
 const when = (d) => d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
@@ -234,8 +236,9 @@ function wire(ctx) {
 function header(ctx) {
   const d = ctx.discussion;
   return { folder: ctx.cwd, agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name,
-    discussion: d ? d.title : 'No discussion started',
-    active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath,
+    discussion: d ? d.title : ctx.state.brainstorm ? 'Brainstorm' : 'No discussion started',
+    active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath || !!ctx.state.brainstorm,
+    brainstorm: !!ctx.state.brainstorm, // a conversation kept only in memory (see newBrainstorm)
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
     paused: !!ctx.paused, pausedSessions: pausedSessions(ctx),
     back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
@@ -421,7 +424,9 @@ async function resumeDiscussion(ctx, name) {
   name ||= ctx.paused ? ctx.discussion?.name : '';
   if (!discussionRef(join(ctx.cwd, 'discussions'), name) || name.includes('/'))
     throw new Error('Choose a paused active discussion to Resume.');
-  if (!ctx.paused && (ctx.logPath || ctx.state.transcript.length || ctx.screen.worker.length || ctx.screen.working))
+  // A brainstorm can't be paused: Resume replaces it, as Re-open does, once the checkpoint loads.
+  const brainstorm = !ctx.paused && !!ctx.state.brainstorm;
+  if (!ctx.paused && !brainstorm && (ctx.logPath || ctx.state.transcript.length || ctx.screen.worker.length || ctx.screen.working))
     throw new Error('Pause the current discussion before resuming another one.');
   ctx.pausing = true;
   try {
@@ -456,7 +461,7 @@ async function resumeDiscussion(ctx, name) {
       paused: false, agentsStarted: true, workerDir: next.workerDir, previous: null });
     wire(ctx);
     toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
-    note(ctx, 'Resumed the saved discussion and worker sessions.');
+    note(ctx, `Resumed the saved discussion and worker sessions.${brainstorm ? ' The brainstorm was discarded.' : ''}`);
     refreshWorker(ctx).catch(() => {});
   } finally { ctx.pausing = false; }
 }
@@ -485,6 +490,7 @@ async function reopenDiscussion(ctx, name) {
     ctx.workerBriefed = null;
     ctx.workerTree = null; // its fresh session is told about its worktree again
   }
+  if (ctx.state.brainstorm) endSession(ctx, 'ending the brainstorm');
   switchTo(ctx, { name, dir: join(parent, name), title: name, continued: true });
   note(ctx, `Re-opened the discussion ${name}: your next message starts a fresh session there; the agents start from its handoff.`);
 }
@@ -501,6 +507,7 @@ function endSession(ctx, why) {
   for (const a of ctx.room.agents) state.seen.set(a.name, 0);
   state.summaries = 0;
   state.briefing = null;
+  state.brainstorm = false;
   Object.assign(screen, { doc: null, thinking: null, status: null });
   ctx.logPath = null;
   ctx.pendingLog = '';
@@ -524,7 +531,7 @@ function switchTo(ctx, next) {
 // stays (with a marker line), and its session is kept (decided by the User, 2026-11-07).
 function newDiscussion(ctx) {
   const was = ctx.discussion;
-  if (!was && !ctx.logPath) return note(ctx, 'No discussion started yet: your next message starts a new one.');
+  if (!was && !ctx.logPath && !ctx.state.brainstorm) return note(ctx, 'No discussion started yet: your next message starts a new one.');
   if (ctx.paused) {
     // The saved worker session must not receive turns from the new discussion.
     ctx.worker.reset?.();
@@ -532,7 +539,7 @@ function newDiscussion(ctx) {
     ctx.workerBriefed = ctx.workerTree = null;
     ctx.workerHandoff = false;
   }
-  if (ctx.logPath) endSession(ctx, 'starting a new discussion');
+  if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a new discussion');
   if (was && ctx.screen.worker.length) {
     const view = { note: `New discussion: ${was.name} is no longer the active one. The next instruction gets the new discussion's folder once your first message creates it.` };
     ctx.screen.worker.push(view);
@@ -540,6 +547,27 @@ function newDiscussion(ctx) {
   }
   switchTo(ctx, null);
   note(ctx, `New discussion: your next message names it and starts it.${was ? ` To go back, /reopen ${was.name}.` : ''}`);
+}
+
+// /brainstorm (New brainstorm): a conversation like a discussion's, with no title, folder,
+// transcript, notes or handoff; it lives only in server memory (ctx.state, so it survives a
+// Reload and a page refresh, not a Restart or Quit). One per room: a new one discards it, and New
+// discussion, Re-open or Resume ends it. It ends the discussion session in use as New discussion does; the
+// worker carries on as with no discussion.
+function newBrainstorm(ctx) {
+  const was = ctx.discussion;
+  if (ctx.paused) { // as New discussion: the saved worker session must not receive these turns
+    ctx.worker.reset?.();
+    ctx.screen.worker.length = 0;
+    ctx.workerBriefed = ctx.workerTree = null;
+    ctx.workerHandoff = false;
+  }
+  if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a brainstorm');
+  ctx.state.brainstorm = true;
+  ctx.state.briefing = `This is a brainstorm, not a discussion: it has no folder and agent-room keeps no record of it. Write no files; you may read the project in the room's root, ${ctx.cwd}.`;
+  ctx.pendingLog = '';
+  switchTo(ctx, null);
+  note(ctx, `New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.${was ? ` To go back, /reopen ${was.name}.` : ''}`);
 }
 
 // ── Open room in folder… ────────────────────────────────────────
@@ -817,6 +845,7 @@ export async function handleLine(line, ctx) {
   const resume = /^\/resume(?:\s+(.*))?$/.exec(line);
   if (resume) return resumeDiscussion(ctx, (resume[1] ?? '').trim());
   if (line === '/new') return newDiscussion(ctx);
+  if (line === '/brainstorm') return newBrainstorm(ctx);
   const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
   if (move) return void moveDiscussion(ctx, move[1], move[2]);
   if (line === '/summary' && ctx.paused) return note(ctx, 'Resume the paused discussion before requesting a summary.', true);
@@ -839,7 +868,7 @@ export async function handleLine(line, ctx) {
   const to = /^@(\w[\w-]*)/.exec(line)?.[1].toLowerCase();
   const known = !to || ctx.room.agents.some((a) => a.name.toLowerCase() === to);
   if (known) ctx.agentsStarted = true;
-  if (known && !ctx.logPath && !(await openDiscussion(ctx, line))) return;
+  if (known && !ctx.logPath && !ctx.state.brainstorm && !(await openDiscussion(ctx, line))) return;
   return runRound(line, ctx);
 }
 

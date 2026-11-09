@@ -103,8 +103,9 @@ setInterval(async () => {
 // { clients: Set of open event streams, transcript: the room's entries, doc: file or null,
 //   thinking: name or null, status: the last round's end line or null,
 //   room: { folder (the full root path), agents: [names], worker: name, discussion: its title,
-//     active: its folder under the root or null, started: first message sent, transcript: this
-//     session's transcript, under the root, or null } for the header,
+//     active: its folder under the root or null, started: first message sent (or a brainstorm),
+//     brainstorm: a conversation kept only in memory, transcript: this session's transcript,
+//     under the root, or null } for the header,
 //   sections: the root's folders a room serves (discussions/),
 //   worker: the worker tab's messages (messageView, plus meta: time and tokens),
 //   working: the worker's name while it works, else null,
@@ -347,7 +348,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b>agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><span id="folder" title="The room's root folder"></span><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="pause-discussion" hidden>Pause discussion</button><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label></div>
+<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="pause-discussion" hidden>Pause discussion</button><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, kept only in memory: no folder, transcript or notes. It ends this session; Restart or Quit room loses it, and a new one replaces it.">New brainstorm</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label></div>
 <div id="server-zone" class="zone" aria-label="Server and monitoring"><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span><button id="usage">Usage</button></div></div>
 </header>
 <div id="left">
@@ -654,14 +655,16 @@ function updateReplicaView() {
   $('disc-status').textContent = state;
   const panel = $('remote-view'); panel.hidden = !viewing; panel.replaceChildren();
   $('composer').hidden = !viewing && !localInput;
-  $('pause-discussion').hidden = !room?.started || ended || !!viewing || !localInput;
+  $('pause-discussion').hidden = !room?.started || room.brainstorm || ended || !!viewing || !localInput;
   box.hidden = !!viewing;
   $('talk-settings').hidden = !!viewing;
   $('summary').hidden = !!viewing;
   $('auto').parentElement.hidden = !!viewing;
   $('reload').hidden = !!viewing;
   // New discussion (in the header): ends this session, as Re-open does; the next message starts the new one.
-  $('new-discussion').hidden = !(room && localInput && !viewing && room.active);
+  // New brainstorm, beside it, is always offered (it ends a session or a brainstorm the same way).
+  $('new-discussion').hidden = !(room && localInput && !viewing);
+  $('newdisc').hidden = !(room?.active || room?.brainstorm);
   $('actions-menu').hidden = ['pause-discussion', 'summary', 'new-discussion'].every((id) => $(id).hidden);
   if (!viewing) return;
   const label = document.createElement('p');
@@ -755,17 +758,21 @@ function discussionOf(parts) {
 }
 const REOPEN_TIP = 'A fresh session in this discussion: the agents start from its handoff. Its documents and transcripts stay. Any saved Pause for this discussion is discarded.';
 // Re-open and New discussion: once this session has started, they end it (the chat clears), so they
-// take two clicks, like Quit.
-function confirmed(b, run, warning) {
+// take two clicks, like Quit. ask: when the first click only asks (by default, as said above).
+function confirmed(b, run, warning, ask = () => room?.started || warning) {
   const label = b.textContent;
   b.onclick = (e) => {
     e.stopPropagation();
-    if ((room?.started || warning) && !b.dataset.armed) {
+    if (ask() && !b.dataset.armed) {
       b.dataset.armed = '1'; b.textContent = warning || 'Click again: this session ends and the chat clears';
       return setTimeout(() => { delete b.dataset.armed; b.textContent = label; }, 4000);
     }
     run();
   };
+}
+// Resume: during a brainstorm with messages it discards them, so it takes two clicks.
+function resumeButton(b, name) {
+  confirmed(b, () => send('/resume ' + name), 'Click again: the brainstorm will be discarded', () => !!room?.brainstorm && localMessages.length > 0);
 }
 const pendingArchives = new Set();
 function archiveButton(b, ref) {
@@ -921,7 +928,7 @@ async function openFiles(group) {
       const actions = el('div', 'actions');
       const action = (label, onclick, tip, cls) => { const b = el('button', cls || '', label); b.onclick = onclick; b.title = tip; actions.append(b); return b; };
       if (room.pausedSessions?.some((p) => p.name === disc.ref))
-        action('Resume', () => send('/resume ' + disc.ref), 'Continue the saved agent sessions and chat');
+        resumeButton(action('Resume', null, 'Continue the saved agent sessions and chat'), disc.ref);
       // Re-open: not for the discussion in use before anything was said in it (nothing to restart).
       if (!(inUse(group) && !room.started)) {
         const b = action(disc.section ? 'Re-open (makes it active)' : 'Re-open', null, REOPEN_TIP, 'primary');
@@ -959,11 +966,12 @@ async function openFiles(group) {
       row.append(el('span', '', saved.title));
       const resume = el('button', 'reopen', 'Resume');
       resume.title = 'Continue the saved discussion and worker sessions, including their chat';
-      resume.onclick = () => send('/resume ' + saved.name);
+      resumeButton(resume, saved.name);
       row.append(resume); list.append(row);
     }
   }
-  if (!discussions.length && !replica?.received.some((l) => !l.local)) list.append(el('span', 'hint', room?.started ? '' : 'No active discussions: your first message starts one.'));
+  if (room?.brainstorm && canAct) list.append(el('span', 'hint', 'A brainstorm is in progress: agent-room keeps no record of it. New discussion, Re-open or Resume ends it.'));
+  else if (!discussions.length && !replica?.received.some((l) => !l.local)) list.append(el('span', 'hint', room?.started ? '' : 'No active discussions: your first message starts one.'));
   else if (room && !room.started && canAct) list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Re-open on its row.'));
   heading('Discussions');
   for (const d of discussions) {
@@ -996,7 +1004,7 @@ function setRoom(r) {
   $('folder').textContent = r.folder;
   $('disc').textContent = r.discussion || '';
   const pause = $('pause-discussion');
-  pause.hidden = !r.started || ended || viewing || $('composer').hidden;
+  pause.hidden = !r.started || r.brainstorm || ended || viewing || $('composer').hidden;
   pause.textContent = r.paused ? 'Resume discussion' : 'Pause discussion';
   pause.title = r.paused ? 'Continue the saved provider sessions' : 'Wait for the round and worker tasks to finish, then save their sessions on this machine';
   pause.onclick = () => send(r.paused ? '/resume ' + r.active.slice('discussions/'.length) : '/pause');
@@ -1264,6 +1272,7 @@ document.addEventListener('click', (e) => { if (!e.target.closest('details.menu'
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 for (const id of ['switchroom', 'newroom', 'reload', 'pause-discussion', 'summary']) $(id).addEventListener('click', closeMenus);
 confirmed($('newdisc'), () => send('/new'));
+confirmed($('newbrainstorm'), () => send('/brainstorm'));
 $('summary').onclick = () => send('/summary');
 $('usage').onclick = () => send('/usage');
 $('reload').onclick = () => send('/reload');

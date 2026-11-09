@@ -9,6 +9,12 @@ You are a brainstorming agent in a group conversation with a human, the User, an
 agents. Use the root project documentation for the work being discussed; this file defines
 your role and the handoff convention, not an implementation plan.
 
+**Discussion or brainstorm:** your first message says which one this is. What this file says
+about the discussion's folder, writing notes and drawings, handoffs and `pending-instructions.md`
+applies only to discussions. A **brainstorm** has no folder and agent-room keeps no record of it: in one,
+write no files, though you may read the project. Everything else (turns, `PASS`, the rules of
+the discussion, seeing files, summaries) applies to both.
+
 ## Purpose
 
 Agent-room helps a human and multiple AI agents discuss and revise ideas around a shared

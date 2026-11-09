@@ -236,6 +236,22 @@ test('summary: the draft is agreed when the other agent passes on it', async () 
   assert.deepEqual(room.transcript.map((m) => [m.speaker, !!m.summary]), [['A', true], ['B', true], ['Summary', false]]);
 });
 
+test('summary in a brainstorm: the same format and agreement, without the sentence about pending-instructions.md', async () => {
+  const a = fakeAgent('A', ['**Agreed**\n- blue button']);
+  const b = fakeAgent('B', ['PASS']);
+  const room = createRoom([a, b], { transcript: [], seen: new Map(), brainstorm: true });
+  assert.equal((await room.summary()).status, 'agreed');
+  for (const p of [a.prompts[0], b.prompts[0]]) {
+    assert.match(p, /Send to the Worker: "the instruction, word for word"/); // still allowed, in the chat
+    assert.match(p, /Next step contains exactly one action for the User/);
+    assert.match(p, /\*\*Later\*\*\n- the remaining actions in order/);
+    assert.match(p, /Quote its latest version word for word when it is the Next step\./);
+    assert.match(p, /At most 8 points in all under Agreed and Not agreed/);
+    assert.doesNotMatch(p, /pending-instructions|refer to it by name/);
+  }
+  assert.match(b.prompts[0], /latest message from A above is the current version/);
+});
+
 test('summary: a revision counts as its author\'s acceptance', async () => {
   const room = createRoom([fakeAgent('A', ['v1', 'PASS']), fakeAgent('B', ['v2'])]);
   const r = await room.summary();

@@ -8,26 +8,29 @@
 export const MAX_TURNS = 8;
 export const SUMMARY_TURNS_EACH = 3;
 
-const SUMMARY_FORMAT = [
+// A brainstorm (state.brainstorm) has no folder: its summary leaves out the sentence about
+// pending-instructions.md, and an instruction for the worker lives only in the chat.
+const summaryFormat = (brainstorm) => [
   'Write it briefly and by points, in this format (leave out a section that would be empty):',
   '**Agreed**', '- …', '**Not agreed**', '- the point: each side\'s view, by name',
   '**Next step**', '- Answer: a question / Send to the Worker: "the instruction, word for word" / Do: an action of the User\'s own',
   'Next step contains exactly one action for the User, labelled Answer, Send to the Worker or Do as appropriate.',
   '**Later**', '- the remaining actions in order, one short line each, each saying what it waits for',
   'Keep each instruction for the worker until the User confirms it was sent, replaced or withdrawn.',
-  'Quote its latest version word for word when it is the Next step; under Later refer to it by name,',
-  'with its full text kept in the discussion\'s pending-instructions.md.',
+  ...(brainstorm ? ['Quote its latest version word for word when it is the Next step.'] : [
+    'Quote its latest version word for word when it is the Next step; under Later refer to it by name,',
+    'with its full text kept in the discussion\'s pending-instructions.md.']),
   'At most 8 points in all under Agreed and Not agreed. Reply with the summary only.',
 ].join('\n');
-const draftTask = () => [
+const draftTask = (brainstorm) => [
   'The User asked for a summary of the discussion since the last summary (or since the start).',
-  SUMMARY_FORMAT,
+  summaryFormat(brainstorm),
 ].join('\n');
-const reviewTask = (author) => [
+const reviewTask = (author, brainstorm) => [
   `The User asked for a summary. The latest message from ${author} above is the current version.`,
   'If you accept it as it is, reply exactly PASS. Otherwise reply with a complete revised summary',
   '(not a list of changes); your revision counts as your acceptance of it.',
-  SUMMARY_FORMAT,
+  summaryFormat(brainstorm),
 ].join('\n');
 
 export function introduction(agent, agents) {
@@ -151,7 +154,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
       for (let turn = 0; turn < maxTurns; turn++) {
         const agent = order[turn % n];
         onTurnStart?.(agent, { turn: turn + 1, of: maxTurns });
-        const entry = await takeTurn(agent, version === null ? draftTask() : reviewTask(author.name));
+        const entry = await takeTurn(agent, version === null ? draftTask(state.brainstorm) : reviewTask(author.name, state.brainstorm));
         entry.summary = true;
         onMessage?.(entry);
         if (entry.error) return { status: 'failed' };
