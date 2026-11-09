@@ -1646,3 +1646,206 @@ test('Stage 2: cleaning held edits by hand clears the private record and hold wi
   assert.equal(first.prompts.length, 1);
   assert.equal(first.shop.completed[0].id, g('rev-parse', 'HEAD'));
 });
+
+test('Stage 3: a diverged clean worker is instructed to merge main normally before its task', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const { writeFileSync } = await import('node:fs');
+  const { first, git } = await multiRoom({ worker: (c, p) => {
+    if (p.endsWith('catch up task')) {
+      assert.match(p, /first merge main into worker\/main with a normal merge/);
+      assert.match(p, /If it clashes, do not force it or do the requested task/);
+      execFileSync('git', ['-C', c.shop.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', 'main', '-m', `[${c.discussion.name}] catch up with main`]);
+    }
+    return 'done';
+  } });
+  await handleLine('topic-a', first);
+  queueWork(first, 'prepare'); await first.workQueue;
+  const tree = first.shop.workerDir.path;
+  git('-C', tree, 'commit', '--allow-empty', '-qm', `[${first.discussion.name}] own work`);
+  writeFileSync(`${first.cwd}/main-file`, 'new on main'); git('add', 'main-file'); git('commit', '-qm', 'main advances');
+  const main = git('rev-parse', 'main');
+  queueWork(first, 'catch up task'); await first.workQueue;
+  assert.equal(git('rev-parse', 'main'), main); // app and worker leave the User's branch untouched
+  assert.equal(git('-C', tree, 'rev-parse', 'HEAD^2'), main);
+  assert.ok(!first.shop.log.some((m) => m.note?.includes('Commits without'))); // imported main history isn't newly authored worker work
+  assert.equal(first.shop.blockedBy, null);
+});
+
+test('Stage 3: a worker merge conflict holds other origins and recovery keeps the original ownership', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const { writeFileSync, readFileSync, existsSync } = await import('node:fs');
+  let record, saved, otherRan = false;
+  const { first, contexts, git } = await multiRoom({ worker: (c, p) => {
+    const tree = c.shop.workerDir.path;
+    const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'pipe' }).toString().trim();
+    record = `${g('rev-parse', '--absolute-git-dir')}/agent-room-task.json`;
+    if (p.endsWith('conflicting task')) {
+      saved = readFileSync(record, 'utf8');
+      assert.match(p, /first merge main/);
+      assert.throws(() => g('merge', 'main', '--no-edit'));
+      return 'Merge conflicts in shared.txt; task not attempted.';
+    }
+    if (p.endsWith('recover conflict')) {
+      assert.equal(readFileSync(record, 'utf8'), saved);
+      assert.match(p, /earlier task[\s\S]*conflicting task/);
+      writeFileSync(`${tree}/shared.txt`, 'resolved\n'); g('add', 'shared.txt'); g('commit', '-qm', `[${c.discussion.name}] resolve catch up`);
+    }
+    if (p.endsWith('other task')) otherRan = true;
+    return 'done';
+  } });
+  writeFileSync(`${first.cwd}/shared.txt`, 'base\n'); git('add', 'shared.txt'); git('commit', '-qm', 'base');
+  await handleLine('topic-a', first); await handleLine('/new', first);
+  const second = contexts()[1]; await handleLine('topic-b', second);
+  queueWork(first, 'prepare'); await first.workQueue;
+  const tree = first.shop.workerDir.path;
+  writeFileSync(`${tree}/shared.txt`, 'worker\n'); git('-C', tree, 'add', 'shared.txt'); git('-C', tree, 'commit', '-qm', `[${first.discussion.name}] own change`);
+  writeFileSync(`${first.cwd}/shared.txt`, 'main\n'); git('add', 'shared.txt'); git('commit', '-qm', 'main change');
+  queueWork(first, 'conflicting task'); await first.workQueue;
+  assert.equal(first.shop.blockedBy.origin, first);
+  assert.ok(existsSync(`${git('-C', tree, 'rev-parse', '--absolute-git-dir')}/MERGE_HEAD`));
+  queueWork(second, 'other task');
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(otherRan, false);
+  queueWork(first, 'recover conflict'); await first.workQueue; await second.workQueue;
+  assert.equal(otherRan, true); assert.equal(first.shop.blockedBy, null);
+  assert.equal(existsSync(record), false);
+});
+
+test('Stage 3: clean merge, revert and sequencer states hold dispatch and survive ownership restoration', async () => {
+  const { queueWork, recoverWorkerOwner, worktreeStatus, workerPlace } = await import('../src/ui.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const { writeFileSync, unlinkSync, mkdirSync, rmdirSync } = await import('node:fs');
+  for (const marker of ['MERGE_HEAD', 'REVERT_HEAD', 'sequencer']) {
+    let privateDir;
+    const { first, contexts, git } = await multiRoom({ worker: (c, p) => {
+      const tree = c.shop.workerDir.path;
+      privateDir = execFileSync('git', ['-C', tree, 'rev-parse', '--absolute-git-dir']).toString().trim();
+      if (p.endsWith('leave operation')) {
+        if (marker === 'sequencer') mkdirSync(`${privateDir}/${marker}`);
+        else writeFileSync(`${privateDir}/${marker}`, git('rev-parse', 'HEAD') + '\n');
+      } else if (p.endsWith('resolve operation')) {
+        if (marker === 'sequencer') rmdirSync(`${privateDir}/${marker}`);
+        else unlinkSync(`${privateDir}/${marker}`);
+      }
+      return 'done';
+    } });
+    await handleLine('topic-a', first); await handleLine('/new', first);
+    const second = contexts()[1]; await handleLine('topic-b', second);
+    queueWork(first, 'leave operation'); await first.workQueue;
+    const tree = first.shop.workerDir.path;
+    assert.equal(git('-C', tree, 'status', '--porcelain'), ''); // operation alone must hold
+    assert.equal((await worktreeStatus(await workerPlace(first.cwd))).treeDirty, true);
+    for (const c of contexts()) { clearTimeout(c.shop?.recheck); delete c.shop; }
+    await recoverWorkerOwner(second);
+    assert.equal(second.shop.blockedBy.origin, first);
+    queueWork(second, 'later'); await new Promise((r) => setTimeout(r, 100));
+    assert.equal(second.prompts.length, 0);
+    queueWork(first, 'resolve operation'); await first.workQueue; await second.workQueue;
+    assert.equal(first.shop.blockedBy, null);
+  }
+});
+
+test('Stage 3: rollback includes merged implementation, never restores prior rollback, and archives only on explicit confirmation', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const { writeFileSync, existsSync, readFileSync } = await import('node:fs');
+  let implementation, attempts = 0;
+  const { first, contexts, git } = await multiRoom({ worker: (c, p) => {
+    const tree = c.shop.workerDir.path;
+    const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'pipe' }).toString().trim();
+    if (p.endsWith('implement')) {
+      writeFileSync(`${tree}/feature.txt`, 'feature\n'); g('add', 'feature.txt'); g('commit', '-qm', `[${c.discussion.name}] implement`);
+      implementation = g('rev-parse', 'HEAD'); return 'implemented';
+    }
+    assert.match(p, /INCLUDING those already merged into main/);
+    assert.match(p, /never revert a rollback and restore changes already removed/);
+    assert.match(p, /before changing any file/i);
+    assert.match(p, /newest first/);
+    assert.match(p, /dependencies[\s\S]*other origins/);
+    assert.match(p, /Run npm test and read its real output/);
+    assert.match(p, /Do not archive the discussion/);
+    // This scripted worker executes the requested strategy against a real disposable Git history.
+    // Already-reverted targets are read from history, not selected again on a repeated request.
+    if (!g('log', '--format=%B').includes(`Agent-Room-Reverted: ${implementation}`)) {
+      g('merge', 'main', '-m', `[${c.discussion.name}] catch up with main`);
+      g('revert', '--no-commit', implementation);
+      g('commit', '-qm', `[${c.discussion.name}] rollback\n\nAgent-Room-Rollback-Origin: ${c.discussion.name}\nAgent-Room-Reverted: ${implementation}`);
+    } else {
+      assert.equal(existsSync(`${tree}/feature.txt`), false);
+      g('commit', '--allow-empty', '-qm', `[${c.discussion.name}] rollback already undone\n\nAgent-Room-Rollback-Origin: ${c.discussion.name}`);
+    }
+    const output = execFileSync('npm', ['test'], { cwd: tree, encoding: 'utf8' });
+    attempts++;
+    return `Reverted or already undone: ${implementation}\n${output}\nDependencies: no other origin in this fixture uses feature.txt. Semantic dependencies require review.\nNot checked: real provider or deployed state.\nRollback ready: ${g('rev-parse', 'HEAD')}`;
+  } });
+  writeFileSync(`${first.cwd}/package.json`, JSON.stringify({ scripts: { test: 'node -e "console.log(\'fixture tests passed\')"' } }));
+  git('add', 'package.json'); git('commit', '-qm', 'fixture test script');
+  await handleLine('topic-a', first); await handleLine('/new', first);
+  const second = contexts()[1]; await handleLine('topic-b', second);
+  const name = first.discussion.name;
+  queueWork(first, 'implement'); await first.workQueue;
+  git('merge', '--no-ff', 'worker/main', '-m', 'User merges implementation');
+  assert.equal(existsSync(`${first.cwd}/feature.txt`), true);
+  git('commit', '--allow-empty', '-qm', 'main advances again');
+  await handleLine(`/rollback ${name}`, second); await first.workQueue;
+  assert.equal(attempts, 1);
+  assert.equal(first.shop.rollbacks.get(name).status, 'ready');
+  assert.ok(first.state.transcript.some((m) => m.speaker === 'Worker rollback report' && m.text.includes('fixture tests passed')));
+  assert.match(readFileSync(first.logPath, 'utf8'), /Worker rollback report/);
+  assert.equal(existsSync(`${first.cwd}/discussions/${name}`), true); // report alone archives nothing
+  assert.equal(existsSync(`${first.cwd}/feature.txt`), true); // main untouched
+  assert.equal(existsSync(`${first.shop.workerDir.path}/feature.txt`), false);
+  await handleLine(`/move ${name} archive`, second);
+  assert.match(second.notes.at(-1), /explicit archive confirmation/);
+  await handleLine(`/archive-rollback ${name}`, second);
+  assert.equal(existsSync(`${first.cwd}/discussions/archive/${name}`), true);
+  git('merge', '--no-ff', 'worker/main', '-m', 'User merges rollback');
+  assert.equal(existsSync(`${first.cwd}/feature.txt`), false);
+  await handleLine(`/move archive/${name} active`, second);
+  await handleLine(`/rollback ${name}`, second); await first.workQueue;
+  assert.equal(attempts, 2);
+  assert.equal(existsSync(`${first.shop.workerDir.path}/feature.txt`), false);
+  assert.equal(first.shop.rollbacks.get(name).status, 'ready');
+  // A later change invalidates the reviewed snapshot, even if its worktree is clean.
+  git('-C', first.shop.workerDir.path, 'commit', '--allow-empty', '-qm', '[another-origin] subsequent work');
+  await handleLine(`/archive-rollback ${name}`, second);
+  assert.match(second.notes.at(-1), /state changed since the rollback report/);
+  assert.equal(existsSync(`${first.cwd}/discussions/${name}`), true);
+});
+
+test('Stage 3: an ambiguous or failed rollback report cannot authorize archiving', async () => {
+  const { first, contexts, git } = await multiRoom({ worker: (c) => `Ambiguous earlier revert: no files changed.\nRollback ready: ${git('rev-parse', 'worker/main')}` });
+  await handleLine('topic-a', first); await handleLine('/new', first);
+  const second = contexts()[1]; await handleLine('topic-b', second);
+  const name = first.discussion.name;
+  await handleLine(`/rollback ${name}`, second); await first.workQueue;
+  assert.equal(first.shop.rollbacks.get(name).status, 'needs review'); // marker alone isn't sufficient
+  await handleLine(`/archive-rollback ${name}`, second);
+  assert.match(second.notes.at(-1), /No successful rollback report/);
+  assert.equal(git('rev-parse', 'worker/main'), git('rev-parse', 'main'));
+});
+
+test('Stage 3: Explorer queues rollback separately from two-click archive confirmation after a report', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const confirmed = source.slice(source.indexOf('function confirmed('), source.indexOf('// Resume: during a brainstorm'));
+  const buttons = source.slice(source.indexOf('function rollbackButtons('), source.indexOf('const pendingArchives'));
+  const element = () => ({ children: [], dataset: {}, style: {}, append(...items) { this.children.push(...items); } });
+  const sent = [], room = { rollbacks: [] };
+  const build = new Function('room', 'document', 'send', 'setTimeout', confirmed + buttons + '; return rollbackButtons;')(
+    room, { createElement: element }, (line) => sent.push(line), () => {});
+  const name = '2026-11-09-topic', row = element(), details = element(), ev = { stopPropagation() {} };
+  build(row, details, name, name, false, false);
+  row.children[0].onclick(ev); assert.deepEqual(sent, []);
+  row.children[0].onclick(ev); assert.deepEqual(sent, [`/rollback ${name}`]);
+  assert.equal(row.children.length, 1); // no archive confirmation before a successful report
+  room.rollbacks = [{ name, status: 'ready', report: 'Tests passed; review dependencies. Rollback ready: abc' }];
+  const ready = element(); build(ready, details, name, name, false, false);
+  assert.equal(details.children[0].children[1].textContent, room.rollbacks[0].report);
+  ready.children[1].onclick(ev); assert.equal(sent.length, 1);
+  ready.children[1].onclick(ev); assert.equal(sent[1], `/archive-rollback ${name}`);
+  const current = element(); build(current, element(), name, name, false, true);
+  assert.equal(current.children[1].disabled, true); // unchanged Archive guard for the one in use
+});

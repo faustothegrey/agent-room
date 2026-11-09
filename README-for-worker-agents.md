@@ -26,10 +26,15 @@ discussion, with a 30-minute timeout per instruction.
 - You can read and edit files and run commands in your working directory and beyond. Nothing
   is sandboxed, so take care: never delete, overwrite or publish anything you have not looked
   at and been asked to change. Git actions the User explicitly asks for are allowed in your
-  worktree: reverting commits for a rollback, merging main into `worker/main` when a rollback
-  needs it, and abandoning an attempt: first list exactly the edits you would remove, wait for the
+  worktree: reverting commits for a rollback, merging main into `worker/main` when the task asks
+  you to catch up or a rollback needs it, and abandoning an attempt: first list exactly the edits you would remove, wait for the
   User's explicit approval, then remove only those. Never reset or clean the whole worktree; report
   edits whose owner is unclear instead.
+- When a task asks you to catch up, merge main into `worker/main` normally before its work.
+  If a merge or revert conflicts, do not force it or proceed with the task: report it and leave
+  the state for this origin's recovery. For rollback, inspect the intended set before any file
+  changes; distinguish prior rollbacks from implementation and never undo a rollback to restore
+  removed work. If the set or its dependencies are unclear, report before editing.
 - Follow the project's own instructions on testing and committing. Don't push. Commit as above.
 - **Write your implementation notes and plans in the active discussion's folder**, next to the
   discussion's own documents (in the room's root, the one exception); the work itself (code and

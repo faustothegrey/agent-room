@@ -52,6 +52,7 @@ discussion: a fresh session there, starting from its handoff; one in archive/ or
 active first), /new (end this session; your next message starts a new discussion; the worker
 carries on), /brainstorm (New brainstorm: a conversation kept only in memory, with no folder or
 transcript; it ends this session as /new does, and a new one, /new, /reopen or /resume ends it), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
+/rollback <name> (queue archive with rollback), /archive-rollback <name> (confirm archive after reviewing its report),
 /autodev (screen only: Start auto dev, relaying the latest agreed summary's worker instruction
 and the worker's reports, for up to 5 worker cycles), /summary (the agents agree a short
 summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
@@ -271,6 +272,7 @@ function header(ctx) {
     paused: !!ctx.paused, pausedSessions: pausedSessions(ctx),
     back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
     code: ctx.code ?? null, // the version this process runs (see codeInfo)
+    rollbacks: [...(shopOf(ctx).rollbacks?.values() ?? [])].map(({ name, status, report, commit }) => ({ name, status, report, commit })),
     multi: multi(ctx), open: openList(ctx) }; // the folder's open discussions (see openList)
 }
 // Every page of the folder's open discussions: they list each other.
@@ -307,7 +309,7 @@ function discussionRef(parent, ref) {
 
 // /move <discussion> active|archive|deferred: the whole folder moves (documents and transcripts).
 // Not the discussion this session is using (its transcript is open there).
-async function moveDiscussion(ctx, ref, to) {
+async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) {
   const parent = join(ctx.cwd, 'discussions');
   const d = discussionRef(parent, ref ?? '');
   if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent}.`, true), null;
@@ -319,6 +321,8 @@ async function moveDiscussion(ctx, ref, to) {
   if (ctx.discussion?.dir === from) return note(ctx, `✗ ${d.name} is the discussion in use in this room: it can't move now.`, true), null;
   if (pausedSessions(ctx).some((p) => p.name === d.name)) return note(ctx, '✗ Resume the paused discussion before moving it.', true), null;
   const shop = shopOf(ctx);
+  if (target === 'archive' && shop.rollbacks?.has(d.name) && !rollbackConfirmed)
+    return note(ctx, '✗ Review the rollback report and use its explicit archive confirmation; the discussion has not been archived.', true), null;
   if (target === 'deferred') {
     const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
     if (!place.disabled && await gitOk(place.top, 'rev-parse', '--verify', WORKER_BRANCH)) {
@@ -359,6 +363,82 @@ async function moveDiscussion(ctx, ref, to) {
   log(ctx, `_(moved the discussion ${d.name} to ${target ?? 'active'})_\n\n`);
   note(ctx, `Moved the discussion ${d.name} to ${target ? `${target}/` : 'the active discussions'}.`);
   return { name: d.name };
+}
+
+// Rollback is an ordinary, origin-labelled worker task. Git reasoning and changes stay with
+// the worker; only the User's later, explicit command may move the discussion into archive/.
+function rollbackTask(name) {
+  return `Archive with rollback for [${name}]. Work only on worker/main; never merge into main or push, reset, rebase or clean the worktree.
+Before changing any file (including a preliminary merge), inspect the complete history of worker/main and main, commit messages, parents and diffs. Find this discussion's [${name}]-labelled implementation commits, INCLUDING those already merged into main (do not restrict the search to main..worker/main).
+Distinguish implementation commits from catch-up merges and earlier rollback/revert commits. Inspect Agent-Room-Rollback-Origin and Agent-Room-Reverted trailers, standard "This reverts commit" records, and any later reverts of those reverts. Exclude catch-up merges, earlier rollback commits, and implementation changes already undone: never revert a rollback and restore changes already removed. Do not infer the set from labels alone. If the intended set or an earlier rollback's coverage is unclear, stop and report the ambiguity BEFORE changing any file. Do not guess a merge mainline.
+Identify later work by other origins that may depend on the changes, using history, overlapping files and affected symbols/callers; report the origins, commit IDs and dependency evidence. A clean revert or passing tests do not prove there are no semantic dependencies. If dependencies make a safe rollback unclear, stop and report before changing files.
+Once the set is clear, if main has commits worker/main lacks and the worktree has no unresolved edits or Git operation, first merge main into worker/main with a normal merge. Label any merge commit [${name}] catch up with main. If it clashes, do not force it or continue the rollback: leave the state intact and report the conflict for recovery by this origin. Recheck the intended set after the merge; report any new ambiguity before reverting.
+Revert the intended implementation commits newest first. If a revert conflicts, stop and report it; do not force or silently abandon changes. Run npm test and read its real output. Commit the rollback on worker/main with a message starting "[${name}] rollback" and the trailer "Agent-Room-Rollback-Origin: ${name}", plus one "Agent-Room-Reverted: <full implementation commit ID>" trailer per commit undone. If everything was already undone, do not restore it: explain that and make a labelled empty rollback commit with the origin trailer and no reverted IDs.
+Report the commit ID, the exact set undone or already undone, npm test's real output, dependencies found on other origins' work and what you could not check. Only if rollback and tests succeeded and the worktree is clean with no Git operation in progress, end the report with "Rollback ready: <full rollback commit ID>". Otherwise omit that line. Do not archive the discussion: the User must review this report and explicitly confirm archiving; the User retains the final merge into main.`;
+}
+async function requestRollback(ctx, ref) {
+  const d = discussionRef(join(ctx.cwd, 'discussions'), ref);
+  if (!d || d.section === 'archive') return note(ctx, '✗ Choose a local discussion outside archive/ for rollback.', true);
+  if (pausedSessions(ctx).some((p) => p.name === d.name)) return note(ctx, '✗ Resume the saved Pause before requesting rollback.', true);
+  let origin = siblings(ctx).find((c) => c.discussion?.name === d.name);
+  if (!origin) {
+    if (!multi(ctx)) return note(ctx, '✗ Re-open that discussion before requesting rollback in terminal mode.', true);
+    origin = await openBeside(ctx, { reopen: ref });
+  }
+  if (origin.paused || origin.pausing || origin.stopped || origin.screen.workerInfo?.disabled)
+    return note(ctx, '✗ Resume the discussion and enable its worker before requesting rollback.', true);
+  const shop = shopOf(origin), rollbacks = shop.rollbacks ??= new Map();
+  if (['queued', 'running'].includes(rollbacks.get(d.name)?.status)) return note(ctx, 'Rollback is already queued or running.');
+  autoDevInput(origin, 'you requested archive with rollback');
+  const task = rollbackTask(d.name);
+  const rollback = { name: d.name, task, status: 'queued', report: null, commit: null };
+  rollbacks.set(d.name, rollback);
+  queueWork(origin, task, null, rollback);
+  showHeader(origin);
+  note(ctx, `Rollback queued for [${d.name}]. Review its Worker report before confirming archive.`);
+}
+async function confirmRollbackArchive(ctx, ref) {
+  const shop = shopOf(ctx);
+  const d = discussionRef(join(ctx.cwd, 'discussions'), ref);
+  const rollback = d && shop.rollbacks?.get(d.name);
+  if (!rollback || rollback.status !== 'ready') return note(ctx, '✗ No successful rollback report awaiting archive confirmation.', true);
+  if (shop.running || shop.tasks.length || shop.pumping || shop.confirming)
+    return note(ctx, '✗ Wait for the worker queue to be idle before confirming archive.', true);
+  shop.confirming = true;
+  try {
+    const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
+    if (place.disabled || await leftovers(ctx) || await git(place.path, 'rev-parse', 'HEAD') !== rollback.commit)
+      return note(ctx, '✗ The worker state changed since the rollback report. Resolve it and request a fresh rollback report before archiving.', true);
+    if (await moveDiscussion(ctx, ref, 'archive', { rollbackConfirmed: true })) {
+      shop.rollbacks.delete(d.name);
+      showHeader(ctx);
+    }
+  } finally { shop.confirming = false; pump(shop).catch((err) => note(ctx, `✗ ${err.message}`, true)); }
+}
+
+async function rollbackReport(ctx, rollback, entry) {
+  rollback.report = entry.text;
+  rollback.status = 'needs review';
+  rollback.commit = null;
+  const match = /^Rollback ready: ([0-9a-f]{40,64})$/.exec(entry.text.trim().split('\n').at(-1));
+  if (!entry.error && match && !await leftovers(ctx)) {
+    const dir = workerDir(ctx), id = match[1];
+    const body = await git(dir, 'show', '-s', '--format=%B', id).catch(() => '');
+    if (await git(dir, 'rev-parse', 'HEAD') === id && body.startsWith(`[${rollback.name}] rollback`) &&
+        body.split('\n').includes(`Agent-Room-Rollback-Origin: ${rollback.name}`)) {
+      rollback.commit = id;
+      rollback.status = 'ready';
+    }
+  }
+  // It is a report, not a new round: the User decides whether to archive.
+  const m = { speaker: 'Worker rollback report', text: entry.text };
+  ctx.state.transcript.push(m);
+  log(ctx, `**${m.speaker}**\n\n${m.text}\n\n`);
+  toScreen(ctx, { type: 'message', message: ctx.docs.messageView(m) });
+  note(ctx, rollback.status === 'ready'
+    ? `Review the rollback report for [${rollback.name}]; then confirm archive in Explorer (switch away from it first), or /archive-rollback ${rollback.name}. Main is still yours to merge.`
+    : `Rollback for [${rollback.name}] needs review: no verified successful report yet; archiving was not done.`);
+  showHeader(ctx);
 }
 
 // Creates the folder (and discussions/ if needed) and returns its name. mkdir itself is the check
@@ -868,7 +948,7 @@ function release(ctx) {
   showHeader(ctx);
 }
 async function pump(shop) {
-  if (shop.pumping) return;
+  if (shop.pumping || shop.confirming) return;
   shop.pumping = true;
   try {
     if (shop.blockedBy && !shop.running) await recoverWorkerOwner(shop.holdContext);
@@ -886,7 +966,7 @@ async function pump(shop) {
       t.origin.workPending--;
       shop.running = t;
       const recovery = shop.blockedBy?.origin === t.origin ? shop.blockedBy : null;
-      try { t.before = await runWork(t.origin, t.text, t.run, t.cycle, recovery); }
+      try { t.before = await runWork(t.origin, t.text, t.run, t.cycle, recovery, t.rollback); }
       catch (err) { note(t.origin, `✗ ${err.stack}\n`, true); }
       finally { shop.running = null; }
       // After it: edits left uncommitted hold the queue; a recovery keeps the first task's details.
@@ -909,6 +989,7 @@ function watchShop(shop) {
 
 function dropTask(shop, t) {
   shop.tasks.splice(shop.tasks.indexOf(t), 1);
+  if (t.rollback) { t.rollback.status = 'needs review'; t.rollback.report = 'The rollback task was not started.'; showHeader(t.origin); }
   t.origin.workPending--;
   t.origin.workSkipped = (t.origin.workSkipped ?? 0) + 1;
   t.done();
@@ -1356,6 +1437,10 @@ export async function handleLine(line, ctx) {
   if (line === '/close') return closeDiscussion(ctx);
   if (line === '/autodev') return startAutoDev(ctx);
   if (line === AUTO_DEV_REPORT) return autoDevReport(ctx);
+  const rollback = /^\/rollback\s+(\S+)$/.exec(line);
+  if (rollback) return requestRollback(ctx, rollback[1]);
+  const archiveRollback = /^\/archive-rollback\s+(\S+)$/.exec(line);
+  if (archiveRollback) return confirmRollbackArchive(ctx, archiveRollback[1]);
   const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
   if (move) return void await moveDiscussion(ctx, move[1], move[2]);
   if (line === '/summary' && ctx.paused) return note(ctx, 'Resume the paused discussion before requesting a summary.', true);
@@ -1535,7 +1620,7 @@ async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
 // a fast-forward of worker/main when it has nothing of its own: never a reset, merge, rebase or
 // deletion, and never anything in the room's own working copy. Decided by the User, 2026-11-07.
 // That is agent-room's own code: the worker itself may do such Git actions in its worktree when the
-// User explicitly asks (a rollback, or abandoning listed edits after approval). Decided 2026-11-09.
+// task asks (catching up with main, a rollback, or abandoning listed edits after approval). Decided 2026-11-09.
 export const WORKER_BRANCH = 'worker/main';
 const NO_GIT = 'Worker requires a source Git repository for its isolated worktree.';
 const git = (dir, ...args) => new Promise((done, fail) => execFile('git', ['-C', dir, ...args], { maxBuffer: 1 << 22 },
@@ -1609,10 +1694,13 @@ export async function worktreeStatus(place) {
   const exists = existsSync(place.path) && (await worktrees(place.top)).some((w) => w.path === place.path && w.branch === WORKER_BRANCH);
   if (!exists) return { exists, head, roomDirty };
   const count = async (range) => Number(await git(place.top, 'rev-list', '--count', range));
-  const [ahead, behind, base, treeDirty] = await Promise.all([count(`HEAD..${WORKER_BRANCH}`), count(`${WORKER_BRANCH}..HEAD`),
+  const [ahead, behind, base, dirty] = await Promise.all([count(`HEAD..${WORKER_BRANCH}`), count(`${WORKER_BRANCH}..HEAD`),
     git(place.top, 'merge-base', 'HEAD', WORKER_BRANCH).then((sha) => sha.slice(0, 7), () => 'no common commit'),
     git(place.path, 'status', '--porcelain').then((out) => out !== '')]);
-  return { exists, head, roomDirty, ahead, behind, base, treeDirty };
+  const privateDir = await git(place.path, 'rev-parse', '--absolute-git-dir');
+  const operation = existsSync(join(privateDir, 'MERGE_HEAD')) ? 'merge' :
+    existsSync(join(privateDir, 'REVERT_HEAD')) || existsSync(join(privateDir, 'sequencer')) ? 'revert/sequencer' : null;
+  return { exists, head, roomDirty, ahead, behind, base, treeDirty: dirty || !!operation, operation };
 }
 
 // Before each instruction: worker/main moves forward to the room's HEAD only when it is strictly
@@ -1627,6 +1715,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 function worktreeLines(place, s) {
   if (!s.exists) return [`The worker's worktree will be created at ${place.path}, on ${WORKER_BRANCH}, from ${s.head.slice(0, 7)}, with its first instruction.`];
   const lines = [`Worktree ${place.path} · branch ${WORKER_BRANCH} · based on ${s.base}`];
+  if (s.operation) lines.push(`A ${s.operation} is in progress in the worker's worktree: dispatch holds for recovery by its origin.`);
   if (s.roomDirty) lines.push('The room has uncommitted changes: the worker doesn\'t see them.');
   if (s.ahead) lines.push(`${WORKER_BRANCH} has ${plural(s.ahead, 'commit')} not in the room: review and merge them when ready.`);
   if (s.behind) {
@@ -1650,7 +1739,7 @@ export async function codeInfo(dir = dirname(dirname(fileURLToPath(import.meta.u
 
 // Reads the worktree's state for the Worker tab; with `prepare` (before each instruction), creates
 // or reattaches the worktree and catches up first. Returns the place (disabled or not).
-export async function refreshWorker(ctx, { prepare = false } = {}) {
+export async function refreshWorker(ctx, { prepare = false, fastForward = true } = {}) {
   const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
   let info;
   try {
@@ -1658,7 +1747,7 @@ export async function refreshWorker(ctx, { prepare = false } = {}) {
     else {
       if (prepare) { await ensureWorktree(place); await ignoreNotes(place); }
       let s = await worktreeStatus(place);
-      if (prepare) s = await catchUp(place, s);
+      if (prepare && fastForward) s = await catchUp(place, s);
       (ctx.workerDir ??= { path: null }).path = s.exists ? place.cwd : null;
       info = { lines: worktreeLines(place, s) };
     }
@@ -1677,7 +1766,7 @@ export async function refreshWorker(ctx, { prepare = false } = {}) {
 // instruction itself; the origin's own worker session holds the earlier ones. ctx.workQueue settles
 // when this context's queued tasks have run (or were dropped).
 // `run`: an auto dev run relaying this instruction (shown as "Relayed from discussion").
-export function queueWork(ctx, text, run = null) {
+export function queueWork(ctx, text, run = null, rollback = null) {
   if (ctx.paused || ctx.pausing) return note(ctx, 'The discussion is pausing or paused. Resume before sending worker instructions.', true);
   if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
   if (ctx.stopped) return note(ctx, 'This room is ending: the instruction was not sent.', true);
@@ -1685,7 +1774,7 @@ export function queueWork(ctx, text, run = null) {
   const shop = shopOf(ctx);
   let done;
   const finished = new Promise((r) => { done = r; });
-  shop.tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done });
+  shop.tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done, rollback });
   ctx.workPending = (ctx.workPending ?? 0) + 1;
   ctx.workQueue = Promise.all([ctx.workQueue, finished]).then(() => {});
   // A bug here must not jam the queue: report it, and the next instruction still runs.
@@ -1694,10 +1783,12 @@ export function queueWork(ctx, text, run = null) {
 
 // One task, for its origin `ctx`. `recovery`: the edits this origin left uncommitted, which this
 // task is to resolve. Resolves to worker/main's commit before the task (or null).
-async function runWork(ctx, text, run = null, cycle = 0, recovery = null) {
+async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollback = null) {
   const { worker } = ctx;
   const shop = shopOf(ctx), screen = ctx.screen, label = originLabel(ctx);
-  let before = null;
+  if (!rollback && recovery && shop.rollbacks?.get(label)?.task === recovery.task) rollback = shop.rollbacks.get(label);
+  if (rollback) { rollback.status = 'running'; showHeader(ctx); }
+  let before = null, mainAtStart = null;
   const history = ctx.workerHandoff ? screen.worker.filter((m) => m.speaker).map((m) =>
     `${m.speaker}${m.error ? ' (failed)' : ''}:\n${m.html}`).join('\n\n') : '';
   // The task's context, read once, here, before anything awaits: its discussion (for the briefing
@@ -1730,9 +1821,13 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null) {
     let entry;
     try {
       // Its own worktree first (created, reattached or caught up); without one it doesn't run.
-      const place = await refreshWorker(ctx, { prepare: true });
+      // Preserve the existing safe fast-forward contract for ordinary tasks, while still telling
+      // the worker about main's advance. Rollback must inspect ambiguity before any file changes.
+      const owedMain = !recovery && Number(await git(ctx.cwd, 'rev-list', '--count', `${WORKER_BRANCH}..main`).catch(() => '0')) > 0;
+      const place = await refreshWorker(ctx, { prepare: true, fastForward: !rollback });
       if (place.disabled) throw new Error(place.disabled);
       before = await git(place.path, 'rev-parse', 'HEAD');
+      mainAtStart = await git(place.path, 'rev-parse', 'main').catch(() => null);
       if (!recovery) {
         const file = await ownerFile(place);
         const record = { version: 1, root: real(ctx.cwd), label, task: text, before, ...(ctx.state.brainstorm && { brainstormId: ctx.state.brainstormId }) };
@@ -1758,9 +1853,14 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null) {
       // task also gets the first task's details.
       const commit = ctx.workerLabel === label ? '' : `These instructions come from [${label}]. When a task is complete, commit it on ${WORKER_BRANCH} with a message starting "[${label}]" and give the commit ID in your reply.\n\n`;
       const leftover = recovery
-        ? `Uncommitted edits are left in your worktree from the earlier task from [${label}] "${recovery.task}"${recovery.before ? ` (${WORKER_BRANCH} was at ${recovery.before.slice(0, 7)} when it started)` : ''}: other discussions' tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those.\n\n`
+        ? `Uncommitted edits are left in your worktree from the earlier task from [${label}] "${recovery.task}"${recovery.before ? ` (${WORKER_BRANCH} was at ${recovery.before.slice(0, 7)} when it started)` : ''}: other discussions' tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those. Inspect and resolve any merge or revert already in progress before further work; never force it or start a fresh operation over it.\n\n`
         : '';
-      entry = { speaker: worker.name, text: (await worker.turn(brief + tree + commit + leftover + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
+      const mainBehind = owedMain || !recovery && await gitOk(place.path, 'rev-parse', '--verify', 'main^{commit}') &&
+        Number(await git(place.path, 'rev-list', '--count', 'HEAD..main')) > 0;
+      const merge = mainBehind ? (rollback
+        ? 'Main has commits worker/main lacks. Follow the rollback preflight below before merging or changing files.\n\n'
+        : `Before the instruction below, first merge main into worker/main with a normal merge (git merge main). Label any merge commit "[${label}] catch up with main". If it clashes, do not force it or do the requested task: leave the state intact and report the conflict; this origin must resolve it before other worker tasks can run. Never merge into main or push.\n\n`) : '';
+      entry = { speaker: worker.name, text: (await worker.turn(brief + tree + commit + leftover + merge + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
       if (ctx.worker === worker) {
         if (brief) ctx.workerBriefed = d?.dir ?? (ctx.state.brainstorm ? 'brainstorm' : null);
         ctx.workerTree = place.cwd;
@@ -1780,10 +1880,11 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null) {
     if (before) {
       const finished = await labelledCommits(workerDir(ctx), `${before}..HEAD`);
       rememberCommits(shop, finished);
-      const subjects = (await git(workerDir(ctx), 'log', '--format=%h %s', `${before}..HEAD`).catch(() => '')).split('\n').filter(Boolean);
+      const subjects = (await git(workerDir(ctx), 'log', '--format=%h %s', `${before}..HEAD`, ...(mainAtStart ? ['--not', mainAtStart] : [])).catch(() => '')).split('\n').filter(Boolean);
       const unlabelled = subjects.filter((l) => !l.slice(l.indexOf(' ') + 1).startsWith(`[${label}]`));
       if (unlabelled.length) workNote(ctx, `✗ Commits without the [${label}] label: ${unlabelled.join(' · ')}.`, true);
     }
+    if (rollback) await rollbackReport(ctx, rollback, entry);
     if (run) reportBack(ctx, run, entry);
   } finally {
     shop.workingIn = ctx.workingIn = null;

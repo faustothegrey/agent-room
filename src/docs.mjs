@@ -850,6 +850,29 @@ function confirmed(b, run, warning, ask = () => room?.started || warning) {
 function resumeButton(b, name) {
   confirmed(b, () => send('/resume ' + name), 'Click again: the brainstorm will be discarded', () => !!room?.brainstorm && localMessages.length > 0);
 }
+// Rollback queues work; archiving is a separate, two-click action after its report.
+function rollbackButtons(row, details, name, ref, paused, inUse) {
+  const r = room?.rollbacks?.find((r) => r.name === name);
+  const b = document.createElement('button'); b.className = 'reopen';
+  b.textContent = r && ['queued', 'running'].includes(r.status) ? 'Rollback ' + r.status : 'Archive with rollback';
+  b.disabled = !!paused || !!r && ['queued', 'running'].includes(r.status);
+  b.title = paused ? 'Resume the paused discussion before requesting rollback' : 'Queue a worker rollback, including merged commits. Review its report before separately confirming archive; main stays yours to merge.';
+  confirmed(b, () => send('/rollback ' + ref), 'Click again: queue rollback of this discussion’s implementation', () => true);
+  row.append(b);
+  if (r?.report) {
+    const report = document.createElement('details');
+    const summary = document.createElement('summary'); summary.textContent = 'Rollback report · ' + r.status; report.append(summary);
+    const text = document.createElement('pre'); text.style.whiteSpace = 'pre-wrap'; text.textContent = r.report; report.append(text);
+    details.append(report);
+  }
+  if (r?.status === 'ready') {
+    const confirm = document.createElement('button'); confirm.className = 'reopen'; confirm.textContent = 'Confirm archive after rollback';
+    confirm.disabled = !!inUse || !!paused;
+    confirm.title = inUse ? 'Switch to another discussion before confirming archive' : 'Review the rollback report first. Archive the discussion; merging worker/main into main stays manual.';
+    confirmed(confirm, () => send('/archive-rollback ' + ref), 'Click again: I reviewed the rollback report; archive', () => true);
+    row.append(confirm);
+  }
+}
 const pendingArchives = new Set();
 function archiveButton(b, ref) {
   const pending = pendingArchives.has('discussions/' + ref);
@@ -973,6 +996,7 @@ async function openFiles(group) {
         row.append(b);
       }
     }
+    if (canAct) rollbackButtons(row, details, name, name, room.pausedSessions?.some((p) => p.name === name), path === room.active);
     if (remote.length) details.append(el('div', 'local-label', 'Local · ' + (replica?.node || 'this node')));
     inlineFiles(details, path);
     for (const line of remote) details.append(receivedRow(line, 'Received · ' + line.node));
@@ -1022,6 +1046,7 @@ async function openFiles(group) {
         if (disc.section !== 'archive') archiveButton(action('Archive', null, 'Move the whole discussion into archive/'), disc.ref);
         if (disc.section !== 'deferred') action('Defer', () => send('/move ' + disc.ref + ' deferred'), 'Move the whole discussion into deferred/');
       }
+      if (disc.section !== 'archive') rollbackButtons(actions, list, disc.ref.split('/').at(-1), disc.ref, room.pausedSessions?.some((p) => p.name === disc.ref.split('/').at(-1)), inUse(group));
       if (actions.children.length) list.append(actions);
     }
     const rel = files.filter((f) => f.startsWith(group + '/')).map((f) => f.slice(group.length + 1));

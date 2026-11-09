@@ -344,6 +344,8 @@ node src/cli.mjs --help
 | `/new` | On the screen, open a new discussion beside this one (which stays open); an open brainstorm ends. In the terminal, end this session; your next message starts a new discussion. The worker carries on. |
 | `/close` | Close discussion: close the one shown, keeping the others open (not while it holds unresolved worker edits). |
 | `/brainstorm` | End this session (or brainstorm) and start a brainstorm: nothing saved, lost on Restart or Quit. |
+| `/rollback <folder-name>` | Queue Archive with rollback as a worker task; review its report before archiving. |
+| `/archive-rollback <folder-name>` | Explicitly confirm archive after a successful rollback report (switch away first). |
 | `/move <folder-name> active\|archive\|deferred` | Move a whole discussion (not the one in use) into `archive/` or `deferred/`, or back. |
 | `/pause` | Save the discussion and worker sessions locally after their work finishes. |
 | `/resume [folder-name]` | Continue a saved Pause, including its provider sessions and chat. |
@@ -453,7 +455,24 @@ based on, and says when the room has uncommitted changes the worker can't see, o
   tab says why. agent-room's own code never resets, merges, rebases or deletes the worktree or its
   branch, and never touches the room's own index, branch or files. The worker itself may do such Git
   actions in its worktree when you explicitly ask (a rollback's reverts, merging main into
-  `worker/main` for it, or abandoning an attempt after listing the edits and getting your approval).
+  `worker/main` to catch up or for rollback, or abandoning an attempt after listing the edits and
+  getting your approval).
+- When clean `worker/main` still lacks commits from `main` (including diverged history), the
+  task tells the worker to merge main normally before doing its work. A clash is not forced:
+  the worker reports it and the queue holds for that origin's recovery. An unfinished merge or
+  revert holds dispatch even if `git status` otherwise shows no edits. The existing strictly-behind
+  fast-forward remains; agent-room does not perform a normal merge or revert itself.
+- **Archive with rollback** (`/rollback <folder-name>`) queues one ordinary worker task for that
+  discussion. It inspects all labelled implementation commits, including those already merged into
+  main, and earlier rollback/revert history; ambiguous sets or unsafe dependencies are reported
+  before editing. The worker brings in main when needed, reverts the intended commits newest first,
+  runs `npm test`, commits with the discussion label and rollback trailers, and reports its commit,
+  real test output, dependencies on other origins and unchecked limits. It never reverts an earlier
+  rollback to restore removed changes. A clean, successful report offers **Confirm archive after
+  rollback** (two clicks, after switching away from that discussion), or `/archive-rollback <name>`.
+  Nothing is archived automatically; existing Archive guards apply. Changed worker state requires
+  a fresh report. Reload keeps the report; Restart loses this in-memory confirmation, so request a
+  fresh report. The User keeps the final merge into main; no automatic conflict-free rollback is promised.
 - The worker commits every completed task on `worker/main`, with a message starting with its origin
   in brackets (`[<discussion folder name>]`, or `[brainstorm]`) and the commit ID in its reply.
   agent-room reports commits without that label. Each instruction in the Worker tab shows its
