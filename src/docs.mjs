@@ -271,6 +271,9 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .tab.on { border-bottom-color: #3b82f6; font-weight: 600; }
 .tab.news::after { content: ' •'; color: #3b82f6; }
 .view { flex: 1; display: flex; flex-direction: column; min-height: 0; } .view[hidden] { display: none; }
+/* Explorer's line: the room's live activity, whichever left tab is shown. */
+#activity { padding: .35rem 1rem; border-bottom: 1px solid var(--line); font-size: .85rem; color: var(--dim); }
+#activity .on { color: inherit; } #activity .on::before { content: '● '; color: #10b981; } #activity .worker::before { color: #f59e0b; } #activity .idle::before { content: '○ '; }
 #split { cursor: col-resize; background: var(--line); background-clip: content-box; padding: 0 3px; touch-action: none; }
 #split:hover, #split:focus-visible, body.resizing #split { background-color: #3b82f6; outline: none; }
 body.resizing { cursor: col-resize; user-select: none; }
@@ -399,7 +402,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <div id="split" role="separator" aria-orientation="vertical" aria-label="Resize the chat and the document" tabindex="0" title="Drag to resize"></div>
 <div id="right">
   <div id="subtabs" role="tablist"><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button></div>
-  <div class="view" id="explorer"><div id="pane"></div></div>
+  <div class="view" id="explorer"><div id="activity" role="status" aria-live="polite"></div><div id="pane"></div></div>
   <div class="view" id="document" hidden>
     <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
     <div id="docpane"></div>
@@ -702,7 +705,18 @@ function talkStatus() {
   if (room.autoDev?.status === 'running') return 'Auto dev running';
   return room.started && yourTurn ? 'your turn' : '';
 }
+// "Idle", or what runs now: "<Agent> is thinking", "Worker is working", or both.
+function roomActivity() {
+  const parts = [];
+  if (localThinking) parts.push(['on', localThinking + ' is thinking']);
+  if (localWorking) parts.push(['on worker', 'Worker is working']);
+  return parts.length ? parts : [['idle', 'Idle']];
+}
 function updateReplicaView() {
+  $('activity').replaceChildren(...roomActivity().flatMap(([cls, text], i) => {
+    const s = document.createElement('span'); s.className = cls; s.textContent = text;
+    return i ? [' · ', s] : [s];
+  }));
   updateReplicaHeader();
   renderAutoDev();
   if (room) { $('disc').textContent = viewing ? viewing.title : room.discussion; $('disc').dataset.active = !viewing && room.active ? 'true' : 'false'; }

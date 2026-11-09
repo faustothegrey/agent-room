@@ -69,7 +69,9 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   it opens in **Document**, which shows its path and the file. Each tab keeps its place when you
   switch; Document is disabled until a file is chosen. Expand a discussion to reach its files directly; each subfolder (`drawings/`,
   `transcripts/`, …) opens to its files. The chosen document stays selected when agents edit
-  other files. Open documents check for changes every two seconds. Drag the divider to resize
+  other files. A line under Explorer's tabs shows the room's live activity, whichever left tab
+  is shown: **Idle**, "<Agent> is thinking", "Worker is working", or both joined by "·". Open
+  documents check for changes every two seconds. Drag the divider to resize
   the panes. Browsing is available during agent turns and does not notify the agents.
 - **Transcripts** are in each discussion's `transcripts/` folder, under **Explorer**. On an
   earlier session's transcript, **Send to agents** asks the discussion agents to read it as
