@@ -322,6 +322,10 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 @keyframes archive-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { #files button.archiving::before { animation: none; } }
 #files .row .reopen { font-size: .75rem; padding: .1rem .5rem; }
+#files .row-menu > summary { font-size: .75rem; margin-left: 0; }
+#files .row-menu .menu-items { left: auto; right: 0; }
+#files .row-menu .menu-items button { font-size: .85rem; padding: .3rem .6rem; }
+.menu-items button:disabled { color: var(--dim); cursor: default; background: none; }
 #files .discussion-row { align-items: baseline; flex-wrap: wrap; }
 #files .discussion-row > .discussion-lines { flex-basis: 14rem; }
 #files .discussion-row.in-use { background: #3b82f614; box-shadow: inset 3px 0 #60a5fa; border-radius: 4px; padding-left: .5rem; }
@@ -893,6 +897,7 @@ function archiveButton(b, ref) {
   };
 }
 const expandedLines = new Set();
+let openRowMenu = null; // the discussion path whose Explorer ▾ Actions menu is open
 let listed = null; // the list path shown in the pane ('' for the top), or null when a document is shown
 async function openFiles(group) {
   if (typeof group !== 'string') group = ''; // as a click handler, group is the event
@@ -987,16 +992,23 @@ async function openFiles(group) {
         confirmed(b, () => send('/reopen ' + name), paused ? 'Click again: discard the saved Pause and start fresh' : null,
           () => !!paused || (room.started && (!room.multi || path === room.active))); row.append(b);
       }
+      // The other actions (moving and rollback) in one ▾ menu; it stays open across redraws.
+      const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
+      menu.append(el('summary', '', 'Actions'), items);
+      menu.open = openRowMenu === path;
+      menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
       for (const [label, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
-        const b = el('button', 'reopen', label);
+        const b = el('button', '', label);
         b.disabled = path === room.active || paused;
         b.title = path === room.active ? 'The discussion in use cannot be moved' : paused ? 'Resume the paused discussion before moving it' : 'Move the whole discussion into ' + target + '/';
-        b.onclick = () => send('/move ' + name + ' ' + target);
+        b.onclick = () => { closeMenus(); send('/move ' + name + ' ' + target); };
         if (target === 'archive') archiveButton(b, name);
-        row.append(b);
+        items.append(b);
       }
+      items.append(el('hr'));
+      rollbackButtons(items, details, name, name, paused, path === room.active);
+      row.append(menu);
     }
-    if (canAct) rollbackButtons(row, details, name, name, room.pausedSessions?.some((p) => p.name === name), path === room.active);
     if (remote.length) details.append(el('div', 'local-label', 'Local · ' + (replica?.node || 'this node')));
     inlineFiles(details, path);
     for (const line of remote) details.append(receivedRow(line, 'Received · ' + line.node));
@@ -1375,11 +1387,12 @@ $('auto').onchange = async (e) => {
   const res = await post('__auto', { on: e.target.checked });
   if (!res.ok) { status(await res.text(), true); e.target.checked = !e.target.checked; }
 };
-// The header's ▾ menus: one open at a time; a click outside or Escape closes them. Actions that
-// open something else close their menu; the two-click ones keep it open for the second click.
-const menus = [...document.querySelectorAll('details.menu')];
-for (const m of menus) m.ontoggle = () => { if (m.open) menus.forEach((o) => { if (o !== m) o.open = false; }); };
-const closeMenus = () => menus.forEach((m) => { m.open = false; });
+// The ▾ menus (the header's and Explorer's discussion rows): one open at a time; a click outside or
+// Escape closes them. Actions that open something else close their menu; the two-click ones keep it
+// open for the second click.
+const menus = () => [...document.querySelectorAll('details.menu')];
+document.addEventListener('toggle', (e) => { const m = e.target; if (m.matches?.('details.menu') && m.open) menus().forEach((o) => { if (o !== m) o.open = false; }); }, true);
+const closeMenus = () => menus().forEach((m) => { m.open = false; });
 document.addEventListener('click', (e) => { if (!e.target.closest('details.menu')) closeMenus(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 for (const id of ['switchroom', 'newroom', 'reload', 'pause-discussion', 'summary']) $(id).addEventListener('click', closeMenus);
