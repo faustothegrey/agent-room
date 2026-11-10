@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createServer, request } from 'node:http';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { broadcast, handle, listFiles, messageView, pick } from '../src/docs.mjs';
+import { ATTACH_LIMIT, broadcast, handle, listFiles, messageView, pick, saveAttachments } from '../src/docs.mjs';
 
 // A proposal/ folder with a doc, a drawing, a hidden file, and a file just outside it.
 function fixture() {
@@ -369,4 +369,123 @@ test('Open room in folder…: the page\'s request reaches the room, and a refuse
   } finally {
     s.close();
   }
+});
+
+// Attachments: a room root with one started discussion, and a page that sends files with a message.
+const b64 = (text) => Buffer.from(text).toString('base64');
+function attachRoom(say = () => {}) {
+  const root = mkdtempSync(join(tmpdir(), 'attach-test-'));
+  mkdirSync(join(root, 'discussions', '2026-11-10-topic'), { recursive: true });
+  const said = [];
+  const screen = { clients: new Set(), transcript: [], room: { active: 'discussions/2026-11-10-topic', brainstorm: false },
+    say: (line, confirmed) => { said.push(line); return say(line, confirmed); } };
+  return { root, said, screen, files: join(root, 'discussions', '2026-11-10-topic', 'files') };
+}
+
+test('attachments never overwrite: a taken name is saved as name-2.ext, name-3.ext, …', () => {
+  const folder = join(mkdtempSync(join(tmpdir(), 'attach-test-')), 'files'); // created if missing
+  assert.deepEqual(saveAttachments(folder, [{ name: 'sketch.png', data: b64('one') }]), ['sketch.png']);
+  assert.deepEqual(saveAttachments(folder, [{ name: 'sketch.png', data: b64('two') }, { name: 'sketch.png', data: b64('three') }, { name: 'notes', data: b64('n') }]),
+    ['sketch-2.png', 'sketch-3.png', 'notes']);
+  assert.deepEqual(saveAttachments(folder, [{ name: '../notes', data: b64('n2') }]), ['notes-2']); // only the base name counts
+  assert.equal(readFileSync(join(folder, 'sketch.png'), 'utf8'), 'one');
+  assert.equal(readFileSync(join(folder, 'sketch-3.png'), 'utf8'), 'three');
+  assert.deepEqual(readdirSync(folder).sort(), ['notes', 'notes-2', 'sketch-2.png', 'sketch-3.png', 'sketch.png']);
+});
+
+test('a message with attachments: the files are saved in files/ and their paths appended to the text', async () => {
+  const { root, said, screen, files } = attachRoom();
+  const s = await serve(root, screen);
+  try {
+    assert.equal((await postFrom(s, '/__say', { text: 'look', files: [{ name: 'a.txt', data: b64('A') }, { name: 'a.txt', data: b64('B') }] })).status, 204);
+    assert.deepEqual(said, ['look\n\nAttached: files/a.txt, files/a-2.txt']);
+    assert.equal(readFileSync(join(files, 'a-2.txt'), 'utf8'), 'B');
+    assert.equal((await postFrom(s, '/__say', { text: '', files: [{ name: 'b.txt', data: b64('C') }] })).status, 204); // files alone
+    assert.equal(said[1], 'Attached: files/b.txt');
+  } finally {
+    s.close();
+  }
+});
+
+test('attachments over 25 MB are refused, and nothing is saved or sent', async () => {
+  const { root, said, screen, files } = attachRoom();
+  const s = await serve(root, screen);
+  try {
+    const big = Buffer.alloc(ATTACH_LIMIT + 1).toString('base64');
+    assert.throws(() => saveAttachments(files, [{ name: 'big.bin', data: big }]), /over 25 MB/);
+    const res = await postFrom(s, '/__say', { text: 'hi', files: [{ name: 'ok.txt', data: b64('fine') }, { name: 'big.bin', data: big }] });
+    assert.equal(res.status, 413);
+    assert.match(await res.text(), /big\.bin is over 25 MB.*Nothing was sent/);
+    assert.deepEqual(said, []);
+    assert.deepEqual(existsSync(files) ? readdirSync(files) : [], []);
+    // Exactly 25 MB is accepted.
+    assert.deepEqual(saveAttachments(files, [{ name: 'max.bin', data: Buffer.alloc(ATTACH_LIMIT).toString('base64') }]), ['max.bin']);
+  } finally {
+    s.close();
+  }
+});
+
+test('if any attachment fails to save, or the message is not taken, nothing is sent and nothing stays saved', async () => {
+  // A save that fails part way: the second file's name is too long to write.
+  const { root, said, screen, files } = attachRoom();
+  mkdirSync(files, { recursive: true });
+  writeFileSync(join(files, 'first.txt'), 'old');
+  const s = await serve(root, screen);
+  try {
+    const res = await postFrom(s, '/__say', { text: 'hi', files: [{ name: 'first.txt', data: b64('1') }, { name: 'x'.repeat(300) + '.txt', data: b64('2') }] });
+    assert.equal(res.status, 400);
+    assert.match(await res.text(), /Couldn't save the attachments.*Nothing was sent/);
+    assert.deepEqual(said, []);
+    assert.deepEqual(readdirSync(files), ['first.txt']); // first-2.txt removed, the old file untouched
+    assert.equal(readFileSync(join(files, 'first.txt'), 'utf8'), 'old');
+  } finally {
+    s.close();
+  }
+  // The room refuses the message (a warning): the saved files are removed.
+  const refused = attachRoom(() => 'Not now.');
+  const r = await serve(refused.root, refused.screen);
+  try {
+    const res = await postFrom(r, '/__say', { text: 'hi', files: [{ name: 'x.txt', data: b64('x') }] });
+    assert.equal(res.status, 409);
+    assert.deepEqual(readdirSync(refused.files), []);
+    // A brainstorm, a discussion not started yet, or a command: refused before anything is saved.
+    for (const [room, text] of [[{ active: null, brainstorm: true }, 'hi'], [{ active: null, brainstorm: false }, 'hi'], [refused.screen.room, '/summary']]) {
+      refused.screen.room = room;
+      assert.notEqual((await postFrom(r, '/__say', { text, files: [{ name: 'y.txt', data: b64('y') }] })).status, 204);
+    }
+    assert.deepEqual(readdirSync(refused.files), []);
+    assert.deepEqual(refused.said, ['hi\n\nAttached: files/x.txt']); // offered once, refused
+  } finally {
+    r.close();
+  }
+});
+
+test('the page keeps the text and the attachments when sending them fails, and clears them once sent', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const ATTACH_LIMIT = 25'), source.indexOf('async function send(text)'));
+  const node = () => ({ replaceChildren() {}, append() {} });
+  const els = { attachments: node(), attach: {}, 'attach-input': {} };
+  const box = { value: '  see these  ' }, errors = [], posted = [];
+  let answer = { ok: false, text: async () => "Couldn't save the attachments: disk full. Nothing was sent." };
+  class FileReader { readAsDataURL(f) { this.result = 'data:;base64,' + Buffer.from(f.body).toString('base64'); this.onload(); } }
+  const page = new Function('$', 'box', 'room', 'ended', 'status', 'post', 'document', 'FileReader',
+    'let pending = [], attaching = false;' + code + '; return { add: (f) => { pending.push(...f); }, pending: () => pending, sendWithFiles };')(
+    (id) => els[id], box, { active: 'discussions/x' }, false, (text, error) => error && errors.push(text),
+    async (path, body) => { posted.push(body); return answer; }, { createElement: node, createTextNode: () => ({}) }, FileReader);
+  page.add([{ name: 'a.txt', size: 1, body: 'A' }, { name: 'b.txt', size: 1, body: 'B' }]);
+  await page.sendWithFiles();
+  assert.deepEqual(posted, [{ text: 'see these', files: [{ name: 'a.txt', data: b64('A') }, { name: 'b.txt', data: b64('B') }] }]);
+  assert.match(errors[0], /Nothing was sent/);
+  assert.equal(box.value, '  see these  ');
+  assert.equal(page.pending().length, 2);
+  // Over 25 MB: refused on the page, before anything is sent.
+  page.add([{ name: 'big.bin', size: ATTACH_LIMIT + 1, body: '' }]);
+  await page.sendWithFiles();
+  assert.equal(posted.length, 1);
+  assert.match(errors[1], /big\.bin is over 25 MB/);
+  page.pending().pop();
+  answer = { ok: true };
+  await page.sendWithFiles();
+  assert.equal(box.value, '');
+  assert.deepEqual(page.pending(), []);
 });

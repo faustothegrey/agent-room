@@ -9,7 +9,7 @@
 // mode (npm run terminal) the page only watches.
 // cli.mjs loads this module in load(), so /reload swaps it too.
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { Marked } from 'marked';
@@ -291,6 +291,10 @@ body.resizing iframe { pointer-events: none; } /* the document would swallow the
 #system-messages { flex: none; border-top: 1px solid var(--line); padding: .35rem .6rem; font-size: .75rem; line-height: 1.4; min-height: calc(2.8em + .7rem + 1px); }
 #system-messages .status { margin: 0; font-size: inherit; line-height: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer { border-top: 1px solid var(--line); padding: .6rem; }
+#attach-row { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-top: .35rem; font-size: .8rem; }
+#attach { font-size: .8rem; padding: .1rem .5rem; }
+#attachments .chip { display: inline-flex; align-items: center; gap: .25rem; padding: .05rem .2rem .05rem .5rem; border: 1px solid var(--line); border-radius: 9px; margin-right: .3rem; }
+#attachments .chip button { border: 0; background: none; padding: 0 .25rem; font-size: .8rem; cursor: pointer; }
 .box { width: 100%; min-height: 3.2rem; resize: vertical; font: inherit; padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--line); }
 .tools { display: flex; gap: .4rem; align-items: center; margin-top: .4rem; font-size: .85rem; }
 .hint { color: var(--dim); flex: 1; }
@@ -382,6 +386,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <div id="remote-view" hidden></div>
       <div id="autodev" role="status" hidden></div>
       <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"></textarea>
+      <div id="attach-row"><button type="button" id="attach" title="Attach files to your next message: saved into the discussion's files/ folder when you send it (25 MB at most each)">📎 Attach</button><input type="file" id="attach-input" multiple hidden><span id="attachments"></span></div>
     </div>
   </div>
   <div class="view" id="work" hidden>
@@ -415,6 +420,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <script>
 const $ = (id) => document.getElementById(id);
 const pane = $('pane'), docpane = $('docpane'), box = $('box'), wbox = $('wbox');
+let pending = [], attaching = false; // attachments waiting for the next message (see sendWithFiles)
 let replica = null, replicaOff = null, viewing = null, localMessages = [], localInput = true, localThinking = null, yourTurn = false, localWorking = null, viewExpired = false, viewNotice = null;
 // crypto.randomUUID exists only in secure contexts (HTTPS or localhost); over plain HTTP from another machine, use random bytes.
 const viewClient = crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
@@ -730,6 +736,11 @@ function updateReplicaView() {
   $('composer').hidden = !viewing && !localInput;
   $('pause-discussion').hidden = !room?.started || room.brainstorm || ended || !!viewing || !localInput;
   box.hidden = !!viewing;
+  // Attach: in discussions only (disabled until the first message creates the folder), not in brainstorms.
+  $('attach-row').hidden = !!viewing || !room || !!room.brainstorm;
+  if ($('attach-row').hidden && !attaching) pending = [];
+  $('attach').title = room?.active ? "Attach files to your next message: saved into the discussion's files/ folder when you send it (25 MB at most each)" : 'Send a first message to start the discussion; then you can attach files';
+  renderAttachments();
   $('talk-settings').hidden = !!viewing;
   $('summary').hidden = !!viewing;
   $('auto').parentElement.hidden = !!viewing;
@@ -1314,6 +1325,47 @@ $('newroom').onclick = async () => {
   if (win) win.location = new URL(r.url, location.href).href;
   status((r.existing ? 'Opened the room already in ' : 'Opened a new room in ') + r.folder + (win ? '' : ' at ' + r.url + ' (the browser blocked the new window)') + '. This room keeps running.');
 };
+// Attachments: files chosen with Attach wait beside the composer (each removable) and go with the
+// next message, which is sent only once the server has saved them all (see sayWithFiles); on failure
+// the text and the files stay here. Only in a started discussion, never in a brainstorm.
+const ATTACH_LIMIT = 25 * 1024 * 1024, ATTACH_TOTAL = 250 * 1024 * 1024;
+const sizeText = (n) => n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1024 / 1024).toFixed(1) + ' MB';
+function renderAttachments() {
+  const chips = pending.map((f, i) => {
+    const chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = f.name + ' · ' + sizeText(f.size);
+    const x = document.createElement('button'); x.type = 'button'; x.textContent = '✕'; x.title = 'Remove this attachment'; x.disabled = attaching;
+    x.onclick = () => { pending.splice(i, 1); renderAttachments(); };
+    chip.append(x); return chip;
+  });
+  if (attaching) chips.push(document.createTextNode('Saving the attachments…'));
+  $('attachments').replaceChildren(...chips);
+  $('attach').disabled = attaching || !room?.active;
+}
+$('attach').onclick = () => $('attach-input').click();
+$('attach-input').onchange = (e) => { pending.push(...e.target.files); e.target.value = ''; renderAttachments(); };
+const base64 = (file) => new Promise((ok, fail) => {
+  const r = new FileReader();
+  r.onload = () => ok(String(r.result).slice(String(r.result).indexOf(',') + 1));
+  r.onerror = () => fail(r.error || new Error('could not read ' + file.name));
+  r.readAsDataURL(file);
+});
+async function sendWithFiles() {
+  if (attaching || ended) return;
+  const text = box.value.trim();
+  const fail = (message) => status('✗ ' + message + ' Nothing was sent.', true);
+  if (text.startsWith('/')) return fail('Attachments go with a message, not a command.');
+  const big = pending.find((f) => f.size > ATTACH_LIMIT);
+  if (big) return fail(big.name + ' is over 25 MB.');
+  if (pending.reduce((n, f) => n + f.size, 0) > ATTACH_TOTAL) return fail('Over 250 MB at once: attach fewer files per message.');
+  attaching = true; renderAttachments();
+  try {
+    const files = await Promise.all(pending.map(async (f) => ({ name: f.name, data: await base64(f) })));
+    const res = await post('__say', { text, files });
+    if (!res.ok) return status('✗ ' + await res.text(), true);
+    box.value = ''; pending = [];
+  } catch (err) { fail("Couldn't send the attachments: " + err.message + '.'); }
+  finally { attaching = false; renderAttachments(); }
+}
 async function send(text) {
   text = text.trim();
   if (!text || ended) return;
@@ -1330,7 +1382,7 @@ async function send(text) {
   if (!res.ok) status(await res.text(), true);
 }
 box.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(box.value); box.value = ''; }
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (pending.length) return sendWithFiles(); send(box.value); box.value = ''; }
 });
 async function sendWork(text) {
   text = text.trim();
@@ -1533,6 +1585,45 @@ export function fromOwnPage(req) {
   return (req.headers['content-type'] ?? '').startsWith('application/json');
 }
 
+// Attachments to a discussion message: saved into its files/ folder, each file at most 25 MB. They
+// travel base64-encoded inside /__say's JSON body (so the same-page check applies), at most
+// ATTACH_TOTAL bytes per message.
+export const ATTACH_LIMIT = 25 * 1024 * 1024;
+export const ATTACH_TOTAL = 250 * 1024 * 1024;
+const attachName = (name) => String(name ?? '').split(/[\\/]/).pop().replace(/[\x00-\x1f]/g, '').replace(/^\.+/, '').trim() || 'file';
+// Saves files ([{ name, data: base64 }]) into folder, created if missing. A name already there is saved
+// as name-2.ext, name-3.ext, …: nothing is overwritten. All or nothing: on any failure, the files saved
+// by this call are removed and the error is thrown. Returns the names saved, in order.
+export function saveAttachments(folder, files) {
+  const blobs = files.map((f) => {
+    const name = attachName(f?.name);
+    if (typeof f?.data !== 'string') throw new Error(`${name}: no content.`);
+    const data = Buffer.from(f.data, 'base64');
+    if (data.length > ATTACH_LIMIT) throw new Error(`${name} is over 25 MB.`);
+    return { name, data };
+  });
+  const saved = [];
+  try {
+    mkdirSync(folder, { recursive: true });
+    for (const { name, data } of blobs) {
+      const ext = extname(name), stem = name.slice(0, name.length - ext.length);
+      for (let n = 1; ; n++) {
+        const candidate = n === 1 ? name : `${stem}-${n}${ext}`;
+        try { writeFileSync(join(folder, candidate), data, { flag: 'wx' }); saved.push(candidate); break; } catch (err) {
+          if (err.code === 'EEXIST') continue;
+          try { rmSync(join(folder, candidate), { force: true }); } catch {} // created by this call, partly written
+          throw err;
+        }
+      }
+    }
+  } catch (err) {
+    removeAttachments(folder, saved);
+    throw err;
+  }
+  return saved;
+}
+const removeAttachments = (folder, names) => { for (const f of names) rmSync(join(folder, f), { force: true }); };
+
 function readJson(req, limit = 100_000) {
   return new Promise((done) => {
     let body = '';
@@ -1591,7 +1682,7 @@ function handleScreen(req, res, url, dir, screen) {
   }
   if (['/__say', '/__show', '/__work', '/__auto', '/__newroom'].includes(url.pathname)) {
     if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain; charset=utf-8', 'Refused: only the room page can send input.'); return true; }
-    readJson(req).then((body) => {
+    readJson(req, url.pathname === '/__say' ? ATTACH_TOTAL * 1.4 : undefined).then((body) => {
       if (url.pathname === '/__newroom') {
         if (!screen.newRoom) return send(409, 'text/plain; charset=utf-8', 'This room can\'t open another one.');
         // {}: the chooser's answer; { token }: Create room for that answer (see newRoom in ui.mjs).
@@ -1618,14 +1709,32 @@ function handleScreen(req, res, url, dir, screen) {
         return send(204, 'text/plain', '');
       }
       if (!screen.say) return send(409, 'text/plain; charset=utf-8', 'This room is typed in the terminal; the page only watches.');
-      if (typeof body?.text !== 'string' || !body.text.trim()) return send(400, 'text/plain; charset=utf-8', 'Nothing to send.');
+      const files = Array.isArray(body?.files) && body.files.length ? body.files : null;
+      if (typeof body?.text !== 'string' || (!body.text.trim() && !files)) return send(400, 'text/plain; charset=utf-8', 'Nothing to send.');
       // While another node's line is open in View, it is read-only: only these commands pass.
       if (screen.isViewing?.(req.headers['x-view-client']) && !VIEW_COMMANDS.includes(body.text.trim())) return send(409, 'text/plain; charset=utf-8', `Read-only: you are viewing a received line. Go back to this node's line first.`);
+      if (files) return sayWithFiles(body.text.trim(), files, body.confirmed === true);
       const warning = screen.say(body.text.trim(), body.confirmed === true);
       if (typeof warning === 'string') return send(409, 'text/plain; charset=utf-8', warning);
       send(204, 'text/plain', '');
     });
     return true;
+  }
+  // A message with attachments: every file is saved into the discussion's files/ first, and their
+  // paths are appended to the text; if any save fails, or the message isn't taken, nothing stays saved.
+  function sayWithFiles(text, files, confirmed) {
+    const fail = (status, message) => send(status, 'text/plain; charset=utf-8', message + ' Nothing was sent.');
+    const active = screen.room?.active;
+    if (!active || screen.room.brainstorm) return fail(409, 'Attachments need a started discussion (not a brainstorm).');
+    if (text.startsWith('/')) return fail(400, 'Attachments go with a message, not a command.');
+    const folder = join(dir, active, 'files');
+    let saved;
+    try { saved = saveAttachments(folder, files); } catch (err) { return fail(/over 25 MB/.test(err.message) ? 413 : 400, `Couldn't save the attachments: ${err.message}`); }
+    const line = (text ? text + '\n\n' : '') + 'Attached: ' + saved.map((f) => 'files/' + f).join(', ');
+    let warning;
+    try { warning = screen.say(line, confirmed); } catch (err) { warning = err.message; }
+    if (typeof warning === 'string') { removeAttachments(folder, saved); return fail(409, warning); }
+    send(204, 'text/plain', '');
   }
   if (url.pathname !== '/__events') return false;
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });

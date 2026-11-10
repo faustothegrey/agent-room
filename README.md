@@ -57,6 +57,14 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   a line. Start with `@name` to address one agent. Agents take turns in the configured order,
   stopping when everyone passes consecutively, a turn fails, or eight agent turns are reached.
   Passes are hidden in the chat and retained in the transcript. Replies appear when complete.
+  **📎 Attach** (under the message box, in discussions only, not brainstorms; a new discussion
+  allows it after its first message) adds files of any type to your next message; each waits
+  there, removable with ✕. Sending saves them into the discussion's `files/` folder (created if
+  missing; a taken name becomes `name-2.ext`, `name-3.ext`, …, never overwritten) and appends
+  their paths to the message, e.g. `Attached: files/sketch.png`, for the agents and the
+  transcript. Each file can be at most 25 MB, and 250 MB together per message. If any file can't
+  be saved, nothing is sent and nothing stays saved: the text and attachments stay in the box,
+  with the error. Attaching alone never starts a turn; there is no drag-and-drop or paste.
 - **Worker:** send implementation instructions to a separate agent. It receives only the
   instructions in this tab and remembers its earlier worker turns; it does not receive the
   Discussion chat. Supply the relevant file paths and decisions yourself. Once a discussion is
