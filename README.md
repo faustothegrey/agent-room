@@ -81,6 +81,10 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   is shown: **Idle**, "<Agent> is thinking", "Worker is working", or both joined by "·". Open
   documents check for changes every two seconds. Drag the divider to resize
   the panes. Browsing is available during agent turns and does not notify the agents.
+- **Terminal** (below Explorer/Document, collapsed): a shell on this computer, in the room's
+  folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening it starts a
+  fresh shell; collapsing it, reloading the page or stopping the server ends it. It appears only
+  in pages opened on this computer (`127.0.0.1` or `localhost`); see **Access and limits**.
 - **Transcripts** are in each discussion's `transcripts/` folder, under **Explorer**. On an
   earlier session's transcript, **Send to agents** asks the discussion agents to read it as
   background; it does not resume its sessions.
@@ -519,7 +523,11 @@ agents and workers run without a sandbox and with live web search configured.
 
 The server listens on `0.0.0.0`: devices on the LAN can open its printed IP address and
 send instructions to local agents. This version has no authentication; use it on a trusted LAN. Browser input endpoints require the room's own origin
-when supplied and JSON requests. There is no remote stop, agent-session crash recovery,
+when supplied and JSON requests. The **Terminal** pane is for this computer only: its token
+and WebSocket requests are refused unless they come from a loopback address, name the server
+as `localhost`, `127.0.0.1` or `[::1]`, and (for the WebSocket) carry a matching Origin and the
+server's random token, as in ghostty-web's demo server. It runs with your account's rights, like
+the agents; any program on this computer that sends those headers can reach it. There is no remote stop, agent-session crash recovery,
 streaming reply display, or live app preview. Discussion-to-worker relay exists only as auto dev
 (above), started from the screen; merging `worker/main` stays manual.
 

@@ -13,7 +13,8 @@ import { mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, w
 import { hostname, networkInterfaces } from 'node:os';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { Marked } from 'marked';
-import { handleShell, shellAttach, shellPage } from './host-shell.mjs'; // UNSAFE TEST, off unless --unsafe-shell-test
+import { handleShell } from './host-shell.mjs';
+export { handleUpgrade } from './host-shell.mjs'; // the terminal pane's WebSocket (ui.mjs)
 
 const TYPES = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
@@ -314,9 +315,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #current { color: var(--dim); } #feed { margin-left: auto; }
 #siblings { max-height: 60vh; overflow-y: auto; } #siblings .shown { font-weight: 600; }
 #pane, #docpane { flex: 1; min-height: 0; }
-/* UNSAFE TEST: the host shell pane (host-shell.mjs), shown only in host pages of a --unsafe-shell-test server. */
+/* The terminal pane (host-shell.mjs): a shell on this computer, shown only in pages opened on this computer. */
 #hostshell { border-top: 1px solid var(--line); } #hostshell[hidden], #hostshell-term[hidden] { display: none; }
-#hostshell-toggle { width: 100%; text-align: left; border: 0; border-radius: 0; background: #b91c1c; color: #fff; padding: .3rem .6rem; font-size: .8rem; }
+#hostshell-toggle { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: .3rem .6rem; font-size: .8rem; }
 #hostshell-term { height: 16rem; padding: .3rem; background: #1e1e1e; overflow: hidden; }
 #pane { overflow-y: auto; }
 #doc { border: 0; width: 100%; height: 100%; }
@@ -430,7 +431,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
     <div id="docpane"></div>
   </div>
-  <div id="hostshell" hidden><button id="hostshell-toggle" aria-expanded="false">▸ Terminal: UNSAFE TEST ONLY, not for ordinary use</button><div id="hostshell-term" hidden></div></div>
+  <div id="hostshell" hidden><button id="hostshell-toggle" aria-expanded="false" title="A shell on this computer, in the room's folder. Only from this computer, not from other devices.">▸ Terminal (this computer only)</button><div id="hostshell-term" hidden></div></div>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -1582,23 +1583,16 @@ events.onmessage = (e) => {
   if (ev.type === 'restarting') { restarting = true; status('Restarting the server: this page reloads when the new one answers.'); events.close(); box.disabled = true; wbox.disabled = true; }
 };
 
-// UNSAFE TEST: the host shell pane. Only a page loaded from a --unsafe-shell-test server's host gets
-// the token (a <meta>) and its event stream's id. Opening the pane starts a fresh shell; collapsing
-// it stops the shell, reloading the page closes the stream and the server ends it.
-const SHELL_LABEL = 'Terminal: UNSAFE TEST ONLY, not for ordinary use';
-const shellToken = document.querySelector('meta[name="agent-room-shell"]')?.content;
-let shellStream = null, hostShell = null;
-if (shellToken) $('hostshell').hidden = false;
-const shellPost = (what, body) => fetch('__shell/' + what, { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-room-shell': shellToken }, body: JSON.stringify({ stream: shellStream, ...body }) });
-events.addEventListener('message', (e) => {
-  const ev = JSON.parse(e.data);
-  if (ev.type === 'shellstream') shellStream = ev.id;
-  else if (ev.type === 'shell') hostShell?.term.write(ev.data);
-  else if (ev.type === 'shellexit') hostShell?.term.write('\\r\\n[the shell ended]\\r\\n');
-});
+// The terminal pane (host-shell.mjs, after ghostty-web's demo): opening it fetches the token and
+// opens a WebSocket, and the server starts a fresh shell; collapsing it or reloading the page
+// closes the socket, and the server ends the shell. Shown only in pages opened on this computer
+// (the server refuses the others anyway).
+const SHELL_LABEL = 'Terminal (this computer only)';
+let hostShell = null;
+if (['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname)) $('hostshell').hidden = false;
 $('hostshell-toggle').onclick = () => (hostShell ? closeHostShell() : openHostShell());
 function closeHostShell() {
-  shellPost('stop', {}).catch(() => {});
+  try { hostShell.ws?.close(); } catch {}
   try { hostShell.term.dispose(); } catch {}
   hostShell = null; $('hostshell-term').hidden = true; $('hostshell-term').replaceChildren();
   $('hostshell-toggle').textContent = '▸ ' + SHELL_LABEL; $('hostshell-toggle').setAttribute('aria-expanded', 'false');
@@ -1606,20 +1600,24 @@ function closeHostShell() {
 async function openHostShell() {
   const box = $('hostshell-term'); box.hidden = false;
   $('hostshell-toggle').textContent = '▾ ' + SHELL_LABEL; $('hostshell-toggle').setAttribute('aria-expanded', 'true');
-  // The library with the token header too: fetched, then imported from a blob URL.
-  const lib = await fetch('__shell/lib', { headers: { 'x-agent-room-shell': shellToken } });
-  const { init, Terminal, FitAddon } = await import(URL.createObjectURL(new Blob([await lib.text()], { type: 'text/javascript' })));
+  const { init, Terminal, FitAddon } = await import('./__shell/ghostty-web.js');
   await init();
   const term = new Terminal({ fontSize: 13, fontFamily: 'ui-monospace, Menlo, monospace', cursorBlink: true });
   const fit = new FitAddon(); term.loadAddon(fit); term.open(box); fit.fit(); fit.observeResize();
-  hostShell = { term };
-  // Keystrokes in order: one request at a time; what is typed meanwhile goes in the next one.
-  let pending = '', busy = false;
-  const flush = async () => { if (busy || !pending) return; busy = true; const data = pending; pending = ''; try { await shellPost('input', { data }); } catch {} busy = false; flush(); };
-  term.onData((data) => { pending += data; flush(); });
-  term.onResize(({ cols, rows }) => shellPost('resize', { cols, rows }).catch(() => {}));
-  const r = await shellPost('start', { cols: term.cols, rows: term.rows });
-  if (!r.ok) term.write('\\r\\n' + (await r.text()) + '\\r\\n');
+  const shell = hostShell = { term, ws: null };
+  let token;
+  try {
+    const r = await fetch('__shell/token', { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status + ' ' + await r.text());
+    token = (await r.json()).token;
+  } catch (err) { term.write('\\r\\nNo terminal: ' + err.message + '\\r\\n'); return; }
+  if (hostShell !== shell) return; // collapsed meanwhile
+  const params = new URLSearchParams({ token, cols: term.cols, rows: term.rows });
+  const ws = shell.ws = new WebSocket((location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + location.pathname.replace(/[^/]*$/, '') + '__shell/ws?' + params);
+  ws.onmessage = (e) => term.write(e.data);
+  ws.onclose = () => { if (hostShell === shell) term.write('\\r\\n\\x1b[31mConnection closed. Collapse and open the pane for a new shell.\\x1b[0m\\r\\n'); };
+  term.onData((data) => { if (ws.readyState === WebSocket.OPEN) ws.send(data); });
+  term.onResize(({ cols, rows }) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
   term.focus();
 }
 </script></body></html>`;
@@ -1692,8 +1690,8 @@ function readJson(req, limit = 100_000) {
 // for any other path.
 function handleScreen(req, res, url, dir, screen) {
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
-  if (url.pathname === '/__room') { send(200, 'text/html; charset=utf-8', shellPage(req, SCREEN)); return true; }
-  if (handleShell(req, res, url, dir)) return true; // UNSAFE TEST
+  if (url.pathname === '/__room') { send(200, 'text/html; charset=utf-8', SCREEN); return true; }
+  if (handleShell(req, res, url)) return true; // the terminal pane (host-shell.mjs)
   // The heartbeat: the page and the Dock app ask every few seconds; a new pid means a new process.
   if (url.pathname === '/__health') {
     send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, root: dir,
@@ -1799,7 +1797,6 @@ function handleScreen(req, res, url, dir, screen) {
   req.on('close', () => screen.clients.delete(res));
   // A page that (re)connects first gets everything so far, so it never shows a partial room.
   res.write(`data: ${JSON.stringify(resetEvent(screen))}\n\n`);
-  shellAttach(req, res); // UNSAFE TEST: only with --unsafe-shell-test, only for host pages
   return true;
 }
 

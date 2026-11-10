@@ -25,14 +25,8 @@ const { values } = parseArgs({
     // Used by Restart only: another room to bring back, as JSON { cwd, agents, worker, reopen?, context? }.
     room: { type: 'string', multiple: true },
     help: { type: 'boolean', short: 'h' },
-    // UNSAFE TEST ONLY (host-shell.mjs): a host shell in the room page; the server listens on 127.0.0.1 only.
-    'unsafe-shell-test': { type: 'boolean' },
   },
 });
-if (values['unsafe-shell-test']) {
-  (await import('./host-shell.mjs')).enableShellTest();
-  console.log('UNSAFE TEST: --unsafe-shell-test is on: a host shell in the room page, listening on 127.0.0.1 only.');
-}
 
 if (!/^\d+$/.test(values.port) || Number(values.port) > 65535) {
   console.error(`--port must be a number from 0 to 65535, not "${values.port}"`);
@@ -76,7 +70,7 @@ async function addRoom(folder, { launch = false, agents, worker, reopen, context
   const ctx = {
     cwd, key, hub, launch, added: !launch, context: context ?? null,
     agentSpecs: agents, workerSpec: worker,
-    port: Number(values.port), listen: values['unsafe-shell-test'] ? '127.0.0.1' : '0.0.0.0', noScreen, open: launch && !!values.open,
+    port: Number(values.port), noScreen, open: launch && !!values.open,
     node: launch ? values.node ?? null : null, peers: launch ? peers : [],
     state: { transcript: [], seen: new Map() },
     sessions: new Map(),

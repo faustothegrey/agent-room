@@ -16,7 +16,9 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@lydell/node-pty": "^1.1.0",
     "ghostty-web": "^0.4.0",
-    "marked": "^18.1.1"
+    "marked": "^18.1.1",
+    "ws": "^8.22.2"
   }
 }

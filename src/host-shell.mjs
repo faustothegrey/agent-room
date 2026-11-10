@@ -1,123 +1,132 @@
-// UNSAFE THROWAWAY TEST, step 1 (2026-11-10-quick-access-host-terminal-panel): a host shell in a pane
-// of the room page, through the system `script` command. Off unless agent-room is started with
-// --unsafe-shell-test (which also makes the server listen on 127.0.0.1 only). Output goes over the
-// page's own room event stream (/__events), keystrokes over POST.
-// Checks, unverified and not claimed to stop other websites: every shell request must come from a
-// loopback address, with Host 127.0.0.1 or localhost, and carry the header X-Agent-Room-Shell with
-// a random token made at startup and written only into room pages loaded from the host.
-import { spawn, execFileSync } from 'node:child_process';
+// The terminal pane's server side: a shell on this computer, shown in the room page with ghostty-web.
+// It follows ghostty-web's demo server (github.com/coder/ghostty-web, demo/bin/demo.js and auth.js,
+// MIT): @lydell/node-pty for the shell, a `ws` WebSocket, a random token from a token endpoint,
+// and the demo's Host and Origin checks. agent-room listens on every address (the LAN too), unlike
+// the demo's 127.0.0.1, so every request here must also come from a loopback address.
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { dirname, join } from 'node:path';
-import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
+import { WebSocketServer } from 'ws';
 
-let token = null; // set by enableShellTest(), from cli.mjs
-export function enableShellTest() { token = randomBytes(32).toString('hex'); }
-export const shellTestOn = () => !!token;
+// One token per server process, as in the demo (this module isn't reloaded by /reload).
+const TOKEN = randomBytes(32).toString('base64url');
+const ALLOWED_HOSTS = ['localhost', '127.0.0.1', '::1'];
+const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
-const mac = process.platform === 'darwin';
-const q = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
-const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-const fromHost = (req) => LOOPBACK.has(req.socket.remoteAddress)
-  && ['127.0.0.1', 'localhost'].includes((req.headers.host ?? '').toLowerCase().replace(/:\d+$/, ''));
-const hasToken = (req) => {
-  const got = Buffer.from(String(req.headers['x-agent-room-shell'] ?? '')), want = Buffer.from(token);
-  return got.length === want.length && timingSafeEqual(got, want);
-};
+// Host header → { hostname, port }, or null when malformed (the demo's parseHostHeader, shortened).
+function parseHost(value) {
+  if (typeof value !== 'string' || !value || value.trim() !== value) return null;
+  const m = /^(?:\[([0-9a-f:.]+)\]|([a-z0-9.-]+))(?::([0-9]{1,5}))?$/i.exec(value);
+  if (!m) return null;
+  const hostname = (m[1] ?? m[2]).toLowerCase(), port = m[3] ?? '';
+  if (m[1] && isIP(hostname) !== 6) return null;
+  if (port && (Number(port) < 1 || Number(port) > 65535)) return null;
+  return { hostname, port: port ? String(Number(port)) : '' };
+}
+// Origin header → { protocol, hostname, port }, or null (the demo's parseOriginHeader).
+function parseOrigin(value) {
+  if (typeof value !== 'string' || !value || value.trim() !== value) return null;
+  let u; try { u = new URL(value); } catch { return null; }
+  if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password || u.pathname !== '/' || u.search || u.hash) return null;
+  const host = parseHost(u.host);
+  return host && { protocol: u.protocol, ...host };
+}
+const defaultPort = (protocol) => (protocol === 'https:' ? '443' : '80');
 
-// The room page: for a page loaded from the host, the token in a <meta>; other pages get none.
-export function shellPage(req, html) {
-  if (!token || !fromHost(req)) return html;
-  return html.replace('<head>', `<head><meta name="agent-room-shell" content="${token}">`);
+// The checks: null when allowed, else [status, reason]. Every request: from a loopback address
+// (added for agent-room), Host one of the allowed names (demo). Origin: optional for the token,
+// required for the WebSocket, and when present the same host and port as Host (demo). The
+// WebSocket also needs the token (demo).
+export function refusal(req, { originRequired, token }) {
+  if (!LOOPBACK_ADDRESSES.has(req.socket.remoteAddress)) return [403, 'Forbidden: not from this computer'];
+  const host = parseHost(req.headers.host);
+  if (!host) return [400, 'Bad Request'];
+  if (!ALLOWED_HOSTS.includes(host.hostname)) return [403, 'Forbidden: Host not allowed'];
+  const originHeader = req.headers.origin;
+  if (originHeader === undefined) { if (originRequired) return [403, 'Forbidden: no Origin']; }
+  else {
+    const origin = parseOrigin(originHeader);
+    if (!origin) return [400, 'Bad Request: Origin'];
+    const fallback = defaultPort(origin.protocol);
+    if (origin.hostname !== host.hostname || (origin.port || fallback) !== (host.port || fallback)) return [403, 'Forbidden: Origin does not match Host'];
+  }
+  if (token !== undefined) {
+    const got = Buffer.from(String(token ?? '')), want = Buffer.from(TOKEN);
+    if (got.length !== want.length || !timingSafeEqual(got, want)) return [401, 'Unauthorized'];
+  }
+  return null;
+}
+const log = (req, what, why) => console.log(`[terminal] refused ${what}: ${why} (from ${req.socket.remoteAddress}, Host ${req.headers.host ?? 'none'}, Origin ${req.headers.origin ?? 'none'})`);
+
+const LIB = join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', 'ghostty-web', 'dist', 'ghostty-web.js');
+
+// __shell/token and __shell/ghostty-web.js (GET); false for other paths.
+export function handleShell(req, res, url) {
+  if (url.pathname !== '/__shell/token' && url.pathname !== '/__shell/ghostty-web.js') return false;
+  const headers = { 'content-type': 'text/plain; charset=utf-8', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' };
+  if (req.method !== 'GET') { res.writeHead(405, { ...headers, allow: 'GET' }); res.end('Method Not Allowed'); return true; }
+  const why = refusal(req, { originRequired: false });
+  if (why) { log(req, url.pathname.slice(9), why[1]); res.writeHead(why[0], headers); res.end(why[1]); return true; }
+  if (url.pathname === '/__shell/token') { res.writeHead(200, { ...headers, 'content-type': 'application/json' }); res.end(JSON.stringify({ token: TOKEN })); return true; }
+  // ghostty-web's module, straight from node_modules (its WebAssembly is inside it, as a data URI).
+  res.writeHead(200, { ...headers, 'content-type': 'text/javascript; charset=utf-8' }); res.end(readFileSync(LIB));
+  return true;
 }
 
-// Each host page's event stream gets an id (sent only to it); a shell belongs to one stream and
-// ends when that stream closes (page reloaded or closed).
-const streams = new Map(); // id → { res, shell }
-export function shellAttach(req, res) {
-  if (!token || !fromHost(req)) return;
-  const id = randomBytes(8).toString('hex');
-  streams.set(id, { res, shell: null });
-  res.write(`data: ${JSON.stringify({ type: 'shellstream', id })}\n\n`);
-  req.on('close', () => { streams.get(id)?.shell?.kill(); streams.delete(id); });
-}
-
-// `script` needs a pipe for input (macOS refuses Node's socket pair), so `cat` feeds it. Its
-// terminal starts at 0×0: the size is set from outside with stty on the shell's terminal.
-function startScript(cwd, cols, rows, onData, onExit) {
-  const shell = process.env.SHELL || '/bin/sh';
-  const args = mac ? ['-q', '/dev/null', shell, '-l'] : ['-q', '-f', '-c', `${q(shell)} -l`, '/dev/null'];
-  const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
-  const p = spawn('/bin/sh', ['-c', 'cat | exec script ' + args.map(q).join(' ')], { cwd, env, detached: true });
-  const dec = new StringDecoder('utf8');
-  p.stdout.on('data', (d) => onData(dec.write(d))); p.stderr.on('data', (d) => onData(dec.write(d)));
-  p.stdin.on('error', () => {});
-  p.on('exit', onExit);
-  let tty = null, inner = null, size = [cols, rows];
-  const setSize = () => { if (tty) try { execFileSync('stty', [mac ? '-f' : '-F', tty, 'rows', String(size[1]), 'cols', String(size[0])]); } catch {} };
-  const find = (tries) => { // the shell: the child of `script`, in its own session
-    if (!tries || p.exitCode !== null) return;
-    const ps = execFileSync('ps', ['-axo', 'pid=,ppid=,tty=,comm='], { encoding: 'utf8' }).split('\n').map((l) => l.trim().split(/\s+/));
-    const scr = ps.find((f) => /script$/.test(f[3] ?? '') && (f[0] === String(p.pid) || f[1] === String(p.pid)));
-    const child = scr && ps.find((f) => f[1] === scr[0] && f[2] && !/^\?+$/.test(f[2]));
-    if (!child) return setTimeout(() => find(tries - 1), 50);
-    inner = Number(child[0]); tty = '/dev/' + child[2]; setSize();
-  };
-  find(40);
-  return {
-    pid: p.pid, write: (s) => p.stdin.write(s), resize: (c, r) => { size = [c, r]; setSize(); },
-    // Hang up the shell's session (on Linux `script` outlives a TERM of its group), then the group.
-    kill: () => { for (const [g, sig] of [[inner, 'SIGHUP'], [p.pid, 'SIGTERM']]) if (g) try { process.kill(-g, sig); } catch {} },
-  };
-}
-
-const live = new Set();
+// The shells, one per WebSocket. Closing the socket (pane collapsed, page reloaded or closed) ends
+// the shell; the shell ending closes the socket; the server stopping ends them all.
+const sessions = new Map(); // ws → pty
+const wss = new WebSocketServer({ noServer: true });
 let hooked = false;
-function hookExit() { // the server stopping ends the shells (a SIGKILL can't be caught)
+function hookExit() {
   if (hooked) return; hooked = true;
-  const all = () => { for (const s of live) s.kill(); };
+  const all = () => { for (const p of sessions.values()) try { p.kill(); } catch {} };
   process.on('exit', all);
   for (const sig of ['SIGINT', 'SIGTERM']) {
+    // Then the default action, as if this handler weren't there.
     const on = () => { all(); if (process.listenerCount(sig) === 1) { process.off(sig, on); process.kill(process.pid, sig); } };
     process.on(sig, on);
   }
 }
 
-const LIB = join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', 'ghostty-web', 'dist', 'ghostty-web.js');
-const readJson = (req) => new Promise((done) => {
-  let body = ''; req.on('data', (d) => { body += d; if (body.length > 1e6) req.destroy(); });
-  req.on('end', () => { try { done(JSON.parse(body)); } catch { done(null); } });
-});
-
-// __shell/…: lib (the ghostty-web module), start, input, resize, stop. False for other paths, and
-// for every path when the test is off.
-export function handleShell(req, res, url, cwd) {
-  if (!token || !url.pathname.startsWith('/__shell/')) return false;
-  const send = (status, body, type = 'text/plain; charset=utf-8') => { res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' }); res.end(body); };
-  const what = url.pathname.slice('/__shell/'.length);
-  const why = !fromHost(req) ? 'not from the host (address or Host header)' : !hasToken(req) ? 'missing or wrong X-Agent-Room-Shell token' : null;
-  if (why) { console.log(`[shell test] refused ${req.method} ${what}: ${why}`); send(403, `Refused: ${why}.`); return true; }
-  if (what === 'lib') { send(200, readFileSync(LIB), 'text/javascript; charset=utf-8'); return true; }
-  if (req.method !== 'POST') { send(405, 'Use POST.'); return true; }
-  readJson(req).then((body) => {
-    const s = streams.get(String(body?.stream ?? ''));
-    if (!s) return send(409, 'No event stream of this page with that id.');
-    const cols = Math.max(2, Math.min(500, body.cols | 0 || 80)), rows = Math.max(2, Math.min(300, body.rows | 0 || 24));
-    if (what === 'start') {
-      s.shell?.kill(); hookExit();
-      const shell = startScript(cwd, cols, rows,
-        (data) => s.res.write(`data: ${JSON.stringify({ type: 'shell', data })}\n\n`),
-        () => { live.delete(shell); if (s.shell === shell) { s.shell = null; s.res.write(`data: ${JSON.stringify({ type: 'shellexit' })}\n\n`); } });
-      s.shell = shell; live.add(shell);
-      console.log(`[shell test] started a shell (pid ${shell.pid})`);
-      return send(204, '');
-    }
-    if (!s.shell) return send(409, 'No shell is running for this page.');
-    if (what === 'input') { if (typeof body.data === 'string') s.shell.write(body.data); return send(204, ''); }
-    if (what === 'resize') { s.shell.resize(cols, rows); return send(204, ''); }
-    if (what === 'stop') { const sh = s.shell; s.shell = null; sh.kill(); console.log('[shell test] stopped a shell'); return send(204, ''); }
-    send(404, 'No such shell request.');
+// /__shell/ws?token=…&cols=…&rows=…: true when handled (accepted or refused).
+export function handleUpgrade(req, socket, head, cwd) {
+  const url = new URL(req.url, 'http://localhost');
+  if (url.pathname !== '/__shell/ws') return false;
+  const why = refusal(req, { originRequired: true, token: url.searchParams.get('token') });
+  if (why) {
+    log(req, 'ws', why[1]);
+    const body = why[1] + '\n';
+    socket.end(`HTTP/1.1 ${why[0]} ${why[1]}\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+    socket.destroy();
+    return true;
+  }
+  wss.handleUpgrade(req, socket, head, async (ws) => {
+    let pty;
+    try { pty = (await import('@lydell/node-pty')).default; } catch (err) { ws.send(`\r\nThe terminal needs @lydell/node-pty: ${err.message}\r\n`); return ws.close(); }
+    const size = (v, d) => Math.max(2, Math.min(1000, Number.parseInt(v ?? '', 10) || d));
+    const p = pty.spawn(process.env.SHELL || '/bin/bash', [], {
+      name: 'xterm-256color', cols: size(url.searchParams.get('cols'), 80), rows: size(url.searchParams.get('rows'), 24), cwd,
+      env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+    });
+    sessions.set(ws, p); hookExit();
+    console.log(`[terminal] shell started (pid ${p.pid})`);
+    p.onData((data) => { if (ws.readyState === ws.OPEN) ws.send(data); });
+    p.onExit(({ exitCode }) => {
+      sessions.delete(ws);
+      if (ws.readyState === ws.OPEN) { ws.send(`\r\n\x1b[33mShell exited (code: ${exitCode})\x1b[0m\r\n`); ws.close(); }
+    });
+    ws.on('message', (data) => {
+      const message = data.toString('utf8');
+      if (message.startsWith('{')) {
+        try { const msg = JSON.parse(message); if (msg.type === 'resize') { p.resize(size(msg.cols, 80), size(msg.rows, 24)); return; } } catch {}
+      }
+      p.write(message);
+    });
+    ws.on('close', () => { if (sessions.get(ws) === p) { sessions.delete(ws); try { p.kill(); } catch {} console.log(`[terminal] shell ended (pid ${p.pid})`); } });
+    ws.on('error', () => {});
   });
   return true;
 }

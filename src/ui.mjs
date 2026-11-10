@@ -1325,7 +1325,7 @@ export function note(ctx, text, error = false) {
 export async function reloaded(ctx) {
   if (ctx.node) await setupReplica(ctx).catch((err) => note(ctx, `✗ Replication: ${err.message}`, true));
   wire(ctx);
-  if (ctx.hub) ctx.hub.route = route; // the server's routing runs the new code too
+  if (ctx.hub) { ctx.hub.route = route; ctx.hub.upgrade = upgrade; } // the server's routing runs the new code too
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   log(ctx, '_(code reloaded)_\n\n');
   // A relay whose worker result can't come back any more: pause visibly rather than send again.
@@ -1929,8 +1929,13 @@ async function viewerUrl(ctx) {
   const hub = hubOf(ctx);
   if (!hub.server) {
     hub.route ??= route;
+    hub.upgrade ??= upgrade;
     const server = createServer((req, res) => {
       try { hub.route(hub, req, res); } catch (err) { res.writeHead(500); res.end(String(err)); }
+    });
+    // WebSocket upgrades: only the terminal pane's (docs.mjs, host-shell.mjs) are accepted.
+    server.on('upgrade', (req, socket, head) => {
+      try { hub.upgrade(hub, req, socket, head); } catch { socket.destroy(); }
     });
     server.on('connection', (socket) => socket.unref());
     // The fixed port gives the screen the same address every time; if another server (or anything
@@ -1938,7 +1943,7 @@ async function viewerUrl(ctx) {
     // instead: its peers know it by that port. It listens on every address (the LAN too).
     const listen = (port) => new Promise((ok, fail) => {
       server.once('error', fail);
-      server.listen(port, ctx.listen ?? '0.0.0.0', () => { server.off('error', fail); ok(); }); // 127.0.0.1 with --unsafe-shell-test
+      server.listen(port, '0.0.0.0', () => { server.off('error', fail); ok(); });
     });
     const port = ctx.port ?? 5566;
     try {
@@ -1963,6 +1968,16 @@ async function viewerUrl(ctx) {
 // from its own folder and state (docs.mjs keeps file access inside that folder). The few addresses
 // without a room are the server's: its heartbeat, Shutdown, /__room (the first room's page) and
 // /replica/… (the launch room's peer endpoint, unchanged for peers).
+// A WebSocket upgrade for /r/<id>/…: that room's terminal pane, or nothing (the socket is closed).
+export function upgrade(hub, req, socket, head) {
+  const url = new URL(req.url, 'http://localhost');
+  const m = /^\/r\/([^/]+)(\/.*)?$/.exec(url.pathname);
+  const ctx = m && [...hub.rooms.values()].find((r) => r.id === m[1] && r.docs && r.screen);
+  if (!ctx?.docs.handleUpgrade) return socket.destroy();
+  req.url = (m[2] ?? '/') + url.search;
+  if (!ctx.docs.handleUpgrade(req, socket, head, ctx.cwd)) socket.destroy();
+}
+
 export function route(hub, req, res) {
   const url = new URL(req.url, 'http://localhost');
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
