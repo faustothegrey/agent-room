@@ -341,7 +341,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .menu-items button:disabled { color: var(--dim); cursor: default; background: none; }
 #files .discussion-row { align-items: baseline; flex-wrap: wrap; }
 #files .discussion-row > .discussion-lines { flex-basis: 14rem; }
-#files .discussion-row.in-use { background: #3b82f614; box-shadow: inset 3px 0 #60a5fa; border-radius: 4px; padding-left: .5rem; }
+#files .discussion-row.in-use { background: linear-gradient(#3b82f614, #3b82f614), Canvas; box-shadow: inset 3px 0 #60a5fa; border-radius: 4px; padding-left: .5rem; }
 .inline-folder { margin-left: 1rem; }
 .inline-folder > summary { cursor: pointer; padding: .3rem; }
 .local-label { color: var(--dim); font-size: .8rem; margin: .3rem 0; }
