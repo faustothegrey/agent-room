@@ -1398,6 +1398,7 @@ export function quitRequested(ctx, graceMs = QUIT_GRACE_MS) {
 // runs are stopped, and queued worker instructions are not started. What couldn't end cleanly is
 // reported on the room's screen and in the log. Resolves to those report lines.
 export async function stopRoom(ctx) {
+  for (const socket of ctx.upgraded ?? []) socket.destroy(); // its Terminal panes' WebSockets: their shells end
   clearTimeout(ctx.quitTimer);
   await ctx.quitStop;
   const report = await stopPrograms(ctx);
@@ -1978,6 +1979,9 @@ export function upgrade(hub, req, socket, head) {
   const m = /^\/r\/([^/]+)(\/.*)?$/.exec(url.pathname);
   const ctx = m && [...hub.rooms.values()].find((r) => r.id === m[1] && r.docs && r.screen);
   if (!ctx?.docs.handleUpgrade) return socket.destroy();
+  // Kept per room as well: when the room ends (Quit room, its discussion closed), stopRoom closes
+  // its Terminal panes' sockets, and so their shells end; other rooms' shells keep running.
+  (ctx.upgraded ??= new Set()).add(socket); socket.on('close', () => ctx.upgraded.delete(socket));
   req.url = (m[2] ?? '/') + url.search;
   if (!ctx.docs.handleUpgrade(req, socket, head, ctx.cwd)) socket.destroy();
 }
