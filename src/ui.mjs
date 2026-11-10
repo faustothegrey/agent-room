@@ -1938,7 +1938,7 @@ async function viewerUrl(ctx) {
     // instead: its peers know it by that port. It listens on every address (the LAN too).
     const listen = (port) => new Promise((ok, fail) => {
       server.once('error', fail);
-      server.listen(port, '0.0.0.0', () => { server.off('error', fail); ok(); });
+      server.listen(port, ctx.listen ?? '0.0.0.0', () => { server.off('error', fail); ok(); }); // 127.0.0.1 with --unsafe-shell-test
     });
     const port = ctx.port ?? 5566;
     try {
