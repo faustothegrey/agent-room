@@ -144,6 +144,9 @@ export function endAll(screen, event) {
   return Promise.race([Promise.all(sent), new Promise((done) => setTimeout(done, 1000))]);
 }
 
+// The conversation's wallpaper: one doodle tile (black strokes), faint, behind the message lists.
+const DOODLE = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(30 30)"><circle r="9"/><path d="M0-15v-5M0 15v5M-15 0h-5M15 0h5M-11-11l-3-3M11 11l3 3M-11 11l-3 3M11-11l3-3"/></g><path d="M90 42h34a9 9 0 0 0 0-18 13 13 0 0 0-25-3 10 10 0 0 0-9 21z"/><g transform="translate(175 22)"><path d="M0 14L40 0 26 34 18 20z"/><path d="M18 20L40 0"/></g><path d="M60 95c-6-8-20-4-16 8 3 7 16 16 16 16s13-9 16-16c4-12-10-16-16-8z"/><g transform="translate(120 78)"><path d="M0 0h26v18a8 8 0 0 1-8 8h-10a8 8 0 0 1-8-8z"/><path d="M26 5h4a5 5 0 0 1 0 10h-4"/><path d="M7-6c-2-3 2-4 0-8M15-6c-2-3 2-4 0-8"/></g><g transform="translate(195 85)"><path d="M8 0v24M8 0l14 4v18"/><ellipse cx="4" cy="25" rx="5" ry="4"/><ellipse cx="18" cy="23" rx="5" ry="4"/></g><g transform="translate(20 150)"><path d="M0 30C0 10 15 0 35 0c0 20-15 30-35 30z"/><path d="M0 30L22 10"/></g><g transform="translate(100 165)"><circle r="16"/><circle cx="-6" cy="-4" r="1.2"/><circle cx="6" cy="-4" r="1.2"/><path d="M-7 5c4 5 10 5 14 0"/></g><g transform="translate(170 140)"><path d="M-22 0a22 22 0 0 1 44 0c-5-4-10-4-14 0-5-4-11-4-16 0-4-4-9-4-14 0z"/><path d="M0 0v22a5 5 0 0 1-10 0"/></g><path d="M215 195l3 7 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z"/><path d="M60 220a12 12 0 1 1 14-15 9 9 0 1 0-14 15z"/><g transform="translate(150 200)"><ellipse rx="10" ry="13"/><path d="M0 13l-3 4h6zM0 17c-3 6 3 9 0 16"/></g><circle cx="70" cy="60" r="3"/><circle cx="155" cy="60" r="2"/><circle cx="225" cy="60" r="3"/><circle cx="95" cy="125" r="2"/><circle cx="215" cy="135" r="2"/><circle cx="30" cy="110" r="3"/><circle cx="60" cy="175" r="2"/><circle cx="125" cy="225" r="3"/><circle cx="200" cy="230" r="2"/><path d="M120 130h12M140 130h4M10 205h10M228 165h6"/></svg>')}")`;
+
 const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>agent-room</title><style>
 :root { color-scheme: light dark; --line: #8884; --dim: #888; }
@@ -279,11 +282,13 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 body.resizing { cursor: col-resize; user-select: none; }
 body.resizing iframe { pointer-events: none; } /* the document would swallow the drag */
 .chat-wrap { position: relative; display: flex; flex: 1; min-height: 0; }
-.chat { flex: 1; min-width: 0; overflow-y: auto; padding: 1rem; }
+.chat-wrap::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .07; background: ${DOODLE} 0 0 / 240px repeat; }
+@media (prefers-color-scheme: dark) { .chat-wrap::before { opacity: .09; filter: invert(1); } }
+.chat { position: relative; flex: 1; min-width: 0; overflow-y: auto; padding: 1rem; }
 .scroll-end { position: absolute; right: 1rem; bottom: .6rem; width: 2rem; height: 2rem; padding: 0; border-radius: 50%; background: Canvas; color: CanvasText; box-shadow: 0 2px 8px #0004; }
-.msg { margin: 0 0 .9rem; padding: .5rem .75rem; border-radius: 8px; background: #8881; }
-.msg.user { background: #3b82f622; } .msg.error { background: #ef444422; }
-.msg.summary { background: #10b98122; border-left: 3px solid #10b981; } .msg.summary.not-agreed { background: #f59e0b22; border-left-color: #f59e0b; }
+.msg { margin: 0 0 .9rem; padding: .5rem .75rem; border-radius: 8px; background: linear-gradient(#8881, #8881), Canvas; }
+.msg.user { background: linear-gradient(#3b82f622, #3b82f622), Canvas; } .msg.error { background: linear-gradient(#ef444422, #ef444422), Canvas; }
+.msg.summary { background: linear-gradient(#10b98122, #10b98122), Canvas; border-left: 3px solid #10b981; } .msg.summary.not-agreed { background: linear-gradient(#f59e0b22, #f59e0b22), Canvas; border-left-color: #f59e0b; }
 .who { font-weight: 600; font-size: .85rem; margin-bottom: .2rem; } .who .meta { font-weight: 400; color: var(--dim); }
 .msg p { margin: .3rem 0; } .msg pre { overflow-x: auto; } .msg img { max-width: 100%; }
 .status { color: var(--dim); font-size: .85rem; margin: .4rem 0 .9rem; white-space: pre-wrap; }
@@ -360,7 +365,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #work .box:focus, #talk .box:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .msg { border-left: 3px solid #14b8a6; }
 .msg.user { border-left-color: #3b82f6; }
-#wchat .msg:not(.user):not(.error) { border-left-color: #a855f7; background: #a855f712; }
+#wchat .msg:not(.user):not(.error) { border-left-color: #a855f7; background: linear-gradient(#a855f712, #a855f712), Canvas; }
 .msg.error { border-left-color: #ef4444; }
 .tools { flex-wrap: wrap; }
 </style></head><body>
