@@ -1593,18 +1593,20 @@ if (['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname)) $('hostshel
 $('hostshell-toggle').onclick = () => (hostShell ? closeHostShell() : openHostShell());
 function closeHostShell() {
   try { hostShell.ws?.close(); } catch {}
-  try { hostShell.term.dispose(); } catch {}
+  try { hostShell.term?.dispose(); } catch {}
   hostShell = null; $('hostshell-term').hidden = true; $('hostshell-term').replaceChildren();
   $('hostshell-toggle').textContent = '▸ ' + SHELL_LABEL; $('hostshell-toggle').setAttribute('aria-expanded', 'false');
 }
 async function openHostShell() {
   const box = $('hostshell-term'); box.hidden = false;
   $('hostshell-toggle').textContent = '▾ ' + SHELL_LABEL; $('hostshell-toggle').setAttribute('aria-expanded', 'true');
+  // Open from the first click: a click while it loads collapses it, and each step below stops then.
+  const shell = hostShell = { term: null, ws: null };
   const { init, Terminal, FitAddon } = await import('./__shell/ghostty-web.js');
   await init();
-  const term = new Terminal({ fontSize: 13, fontFamily: 'ui-monospace, Menlo, monospace', cursorBlink: true });
+  if (hostShell !== shell) return; // collapsed meanwhile
+  const term = shell.term = new Terminal({ fontSize: 13, fontFamily: 'ui-monospace, Menlo, monospace', cursorBlink: true });
   const fit = new FitAddon(); term.loadAddon(fit); term.open(box); fit.fit(); fit.observeResize();
-  const shell = hostShell = { term, ws: null };
   let token;
   try {
     const r = await fetch('__shell/token', { cache: 'no-store' });

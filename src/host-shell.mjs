@@ -104,13 +104,21 @@ export function handleUpgrade(req, socket, head, cwd) {
     return true;
   }
   wss.handleUpgrade(req, socket, head, async (ws) => {
-    let pty;
-    try { pty = (await import('@lydell/node-pty')).default; } catch (err) { ws.send(`\r\nThe terminal needs @lydell/node-pty: ${err.message}\r\n`); return ws.close(); }
     const size = (v, d) => Math.max(2, Math.min(1000, Number.parseInt(v ?? '', 10) || d));
-    const p = pty.spawn(process.env.SHELL || '/bin/bash', [], {
-      name: 'xterm-256color', cols: size(url.searchParams.get('cols'), 80), rows: size(url.searchParams.get('rows'), 24), cwd,
-      env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
-    });
+    let p;
+    // A shell that can't start (spawn throws) is reported in the pane; it must not end agent-room.
+    try {
+      const pty = (await import('@lydell/node-pty')).default;
+      p = pty.spawn(process.env.SHELL || '/bin/bash', [], {
+        name: 'xterm-256color', cols: size(url.searchParams.get('cols'), 80), rows: size(url.searchParams.get('rows'), 24), cwd,
+        env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+      });
+    } catch (err) {
+      console.log(`[terminal] the shell did not start: ${err.message}`);
+      if (ws.readyState === ws.OPEN) { ws.send(`\r\n\x1b[31mThe shell did not start: ${err.message}\x1b[0m\r\n`); ws.close(); }
+      return;
+    }
+    if (ws.readyState !== ws.OPEN) { try { p.kill(); } catch {} return; } // the pane closed meanwhile
     sessions.set(ws, p); hookExit();
     console.log(`[terminal] shell started (pid ${p.pid})`);
     p.onData((data) => { if (ws.readyState === ws.OPEN) ws.send(data); });

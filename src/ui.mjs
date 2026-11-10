@@ -1439,6 +1439,7 @@ export function restartArgs(rooms, values, port) {
 export async function restart(hub, rooms, values) {
   const args = restartArgs(rooms, values, hub.server.address().port);
   hub.server.closeAllConnections();
+  for (const socket of hub.upgraded ?? []) socket.destroy(); // the Terminal panes' WebSockets (their shells end)
   await new Promise((done) => hub.server.close(done));
   spawn(process.execPath, args, { cwd: rooms[0].cwd, detached: true, stdio: 'inherit' }).unref();
 }
@@ -1934,7 +1935,10 @@ async function viewerUrl(ctx) {
       try { hub.route(hub, req, res); } catch (err) { res.writeHead(500); res.end(String(err)); }
     });
     // WebSocket upgrades: only the terminal pane's (docs.mjs, host-shell.mjs) are accepted.
+    // Their sockets leave the server's own connection list, so they are kept here: Restart ends them.
+    hub.upgraded = new Set();
     server.on('upgrade', (req, socket, head) => {
+      hub.upgraded.add(socket); socket.on('close', () => hub.upgraded.delete(socket));
       try { hub.upgrade(hub, req, socket, head); } catch { socket.destroy(); }
     });
     server.on('connection', (socket) => socket.unref());

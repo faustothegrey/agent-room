@@ -544,6 +544,7 @@ agent-room's source.
 | `src/room.mjs` | Discussion turns, unseen messages, passes and summary agreement. |
 | `src/ui.mjs` | Room setup, persistent defaults, commands, discussions, worker queue, logging and launch integration. |
 | `src/docs.mjs` | Local HTTP server handlers, document rendering, browser UI and live events. |
+| `src/host-shell.mjs` | The Terminal pane's shell: token endpoint, WebSocket, host-only checks and shell lifetime. |
 | `src/replicate.mjs` | Separate discussion Git storage, pairing, background transfer and immutable received snapshots. |
 | `src/usage.mjs` | Token accounting and optional quota-meter data. |
 
