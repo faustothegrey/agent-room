@@ -13,6 +13,7 @@ import { mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, w
 import { hostname, networkInterfaces } from 'node:os';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { Marked } from 'marked';
+import { handleShell } from './host-shell.mjs'; // THROWAWAY TEST, off unless AGENT_ROOM_HOST_SHELL is set
 
 const TYPES = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
@@ -313,6 +314,10 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #current { color: var(--dim); } #feed { margin-left: auto; }
 #siblings { max-height: 60vh; overflow-y: auto; } #siblings .shown { font-weight: 600; }
 #pane, #docpane { flex: 1; min-height: 0; }
+/* THROWAWAY TEST: the host shell pane (host-shell.mjs), shown only when the server offers it. */
+#hostshell { border-top: 1px solid var(--line); } #hostshell[hidden], #hostshell-term[hidden] { display: none; }
+#hostshell-toggle { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: .3rem .6rem; font-size: .8rem; }
+#hostshell-term { height: 16rem; padding: .3rem; background: #1e1e1e; overflow: hidden; }
 #pane { overflow-y: auto; }
 #doc { border: 0; width: 100%; height: 100%; }
 .empty { display: grid; place-items: center; color: var(--dim); height: 100%; padding: 1rem; text-align: center; }
@@ -425,6 +430,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
     <div id="docpane"></div>
   </div>
+  <div id="hostshell" hidden><button id="hostshell-toggle" aria-expanded="false">▸ Terminal (host only, test)</button><div id="hostshell-term" hidden></div></div>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -1575,6 +1581,65 @@ events.onmessage = (e) => {
   if (ev.type === 'ended') { ended = true; status('This room has ended. You can close this window.'); events.close(); box.disabled = true; wbox.disabled = true; }
   if (ev.type === 'restarting') { restarting = true; status('Restarting the server: this page reloads when the new one answers.'); events.close(); box.disabled = true; wbox.disabled = true; }
 };
+
+// THROWAWAY TEST: the host shell pane. Opening it starts a fresh shell; collapsing it, or reloading
+// the page, closes the output stream and the server ends the shell. Latencies (keystroke sent →
+// next output) go to window.__shellLatency.
+let hostShell = null;
+window.__shellLatency = [];
+if (['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname))
+  fetch('__shell/ghostty-web.js', { method: 'HEAD' }).then((r) => { if (r.ok) $('hostshell').hidden = false; }, () => {});
+$('hostshell-toggle').onclick = () => (hostShell ? closeHostShell() : openHostShell());
+function closeHostShell() {
+  if (!hostShell) return;
+  hostShell.ctl.abort(); try { hostShell.term.dispose(); } catch {}
+  hostShell = null; $('hostshell-term').hidden = true; $('hostshell-term').replaceChildren();
+  $('hostshell-toggle').textContent = '▸ Terminal (host only, test)'; $('hostshell-toggle').setAttribute('aria-expanded', 'false');
+}
+async function openHostShell() {
+  const box = $('hostshell-term'); box.hidden = false;
+  $('hostshell-toggle').textContent = '▾ Terminal (host only, test)'; $('hostshell-toggle').setAttribute('aria-expanded', 'true');
+  const { init, Terminal, FitAddon } = await import('./__shell/ghostty-web.js');
+  await init();
+  const term = new Terminal({ fontSize: 13, fontFamily: 'ui-monospace, Menlo, monospace', cursorBlink: true });
+  const fit = new FitAddon(); term.loadAddon(fit); term.open(box); fit.fit(); fit.observeResize();
+  const ctl = new AbortController();
+  hostShell = { term, ctl };
+  const post = (path, body, extra) => fetch('__shell/' + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), ...extra });
+  const started = await post('start', { cols: term.cols, rows: term.rows });
+  if (!started.ok) { term.write('\\r\\n' + (await started.text()) + '\\r\\n'); return; }
+  const { id, token } = await started.json();
+  // Keystrokes in order: one request at a time, what is typed meanwhile goes in the next one.
+  let pending = '', busy = false, sentAt = 0;
+  const flush = async () => {
+    if (busy || !pending) return;
+    busy = true; const data = pending; pending = '';
+    try { await post('input', { id, token, data }); } catch {}
+    busy = false; flush();
+  };
+  term.onData((data) => { if (!sentAt) sentAt = performance.now(); pending += data; flush(); });
+  term.onResize(({ cols, rows }) => post('resize', { id, token, cols, rows }).catch(() => {}));
+  term.focus();
+  let out;
+  try { out = await post('output', { id, token }, { signal: ctl.signal }); } catch { return; }
+  const reader = out.body.getReader(), decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let at;
+      while ((at = buffer.indexOf('\\n\\n')) >= 0) {
+        const chunk = buffer.slice(0, at); buffer = buffer.slice(at + 2);
+        if (chunk.startsWith('event: exit')) { term.write('\\r\\n[the shell ended]\\r\\n'); continue; }
+        if (!chunk.startsWith('data: ')) continue;
+        if (sentAt) { window.__shellLatency.push(performance.now() - sentAt); sentAt = 0; }
+        term.write(JSON.parse(chunk.slice(6)));
+      }
+    }
+  } catch {}
+}
 </script></body></html>`;
 
 // Input endpoints accept only the page itself: same host, JSON. A page on another site can't send
@@ -1646,6 +1711,7 @@ function readJson(req, limit = 100_000) {
 function handleScreen(req, res, url, dir, screen) {
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
   if (url.pathname === '/__room') { send(200, 'text/html; charset=utf-8', SCREEN); return true; }
+  if (handleShell(req, res, url, dir)) return true; // THROWAWAY TEST
   // The heartbeat: the page and the Dock app ask every few seconds; a new pid means a new process.
   if (url.pathname === '/__health') {
     send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, root: dir,
