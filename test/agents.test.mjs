@@ -242,6 +242,23 @@ test('leftovers: another live server\'s program is not one; a server PID reused 
   assert.deepEqual(readdirSync(dir).sort(), ['201.json', '202.json', '203.json', '204.json']); // 201 kept for its server
 });
 
+test('a record is written through a temporary file; a scan ignores an incomplete one and never deletes it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'programs-'));
+  const now = Date.now();
+  const alive = { group: true, leader: true, startedAt: now };
+  const probe = async (pid) => (pid === 301 ? alive : { group: false, leader: false, startedAt: null });
+  // Another server, mid-write: half a record under its temporary name.
+  const temp = '302.json.4242.tmp';
+  writeFileSync(join(dir, temp), '{"pid": 302, "sta');
+  recordProgram({ pid: 301, started: new Date(now).toISOString(), provider: 'claude', agent: 'A', room: '/r', server: { pid: 999, started: new Date(now).toISOString() } }, dir);
+  // Only the renamed record: this write left no temporary file of its own.
+  assert.deepEqual(readdirSync(dir).sort(), ['301.json', temp]);
+  const found = await findLeftovers(new Set(), { dir, probe });
+  assert.deepEqual(found.map((f) => [f.pid, f.agent, f.unverified]), [[301, 'A', false]]);
+  assert.equal(readFileSync(join(dir, temp), 'utf8'), '{"pid": 302, "sta');
+  assert.deepEqual(readdirSync(dir).sort(), ['301.json', temp]);
+});
+
 test('leftovers with real processes: a live group is found until it ends; a reused PID (other start) is not', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'programs-'));
   const procs = new Set();

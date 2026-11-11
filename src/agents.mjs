@@ -8,7 +8,7 @@
 // a Claude worker is created with `shell: true` to add pre-approved Bash.
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -70,8 +70,16 @@ export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOU
 // of another agent-room server still running are not taken for leftovers.
 const SERVER = { pid: process.pid, started: new Date(Date.now() - process.uptime() * 1000).toISOString() };
 export const programsDirectory = () => join(homedir(), '.local', 'state', 'agent-room', 'programs');
+// Written whole or not at all: first to a temporary file, unique to this server, that the scan
+// (findLeftovers) neither reads nor deletes, then renamed to <pid>.json; so another server scanning
+// meanwhile never sees, and deletes, half a record.
 export function recordProgram(entry, dir = programsDirectory()) {
-  try { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, `${entry.pid}.json`), JSON.stringify(entry) + '\n'); } catch {}
+  const temp = join(dir, `${entry.pid}.json.${process.pid}.tmp`);
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(temp, JSON.stringify(entry) + '\n');
+    renameSync(temp, join(dir, `${entry.pid}.json`));
+  } catch { try { unlinkSync(temp); } catch {} }
 }
 export function forgetProgram(pid, dir = programsDirectory()) {
   try { unlinkSync(join(dir, `${pid}.json`)); } catch {}
