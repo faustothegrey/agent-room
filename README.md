@@ -64,17 +64,19 @@ programs are running now. Login is checked once per server, at startup and every
 
 A **leftover** is a program agent-room started that is still alive after a crash or a Restart.
 Each program is written, when it starts, to `~/.local/state/agent-room/programs/<pid>.json` (PID,
-start time, provider, agent name, room folder), and removed when its process group ends. At startup
+start time, provider, agent name, room folder, and the PID and start time of the server that
+started it), and removed when its process group ends. At startup
 and every minute the server looks for entries whose program isn't one of its rooms' running
-programs and whose process group is still alive (with, while the leader is alive, the recorded
+programs, whose process group is still alive, and whose server is gone (its PID isn't alive, or
+is alive with another start time: reused), so another agent-room server's programs are left to it
+(with, while the leader is alive, the recorded
 start time; another start means the number was reused, and the entry is dropped). Its tooltip gives
 the PID, agent, room folder, start time and the command to stop it, `kill -TERM -<pid>`; there is no
-Stop button. A group still alive after its leader ended is shown as **unverified** (its number may
-have been reused), with `ps -g <pid>` to look at it instead. A leftover shows in its own room's
+Stop button. A group still alive after its leader ended, or one whose server's start time can't be
+read, is shown as **unverified** (a number may have been reused), with `ps -g <pid>` to look at it instead. A leftover shows in its own room's
 panel, or in every room's panel when its room isn't open on this server; a provider with a leftover
-shows even when no agent of the room uses it. Known limits: a crash between starting a program and
-recording it leaves that program unseen, and the programs of another agent-room server running on
-this computer at the same time count as leftovers too.
+shows even when no agent of the room uses it. Known limit: a crash between starting a program and
+recording it leaves that program unseen.
 The version is the commit
 of agent-room's checkout when the server started and its start time, such as `4cb41bd · started
 12:28`, with `+` when the checkout had uncommitted changes (outside `discussions/`). After a

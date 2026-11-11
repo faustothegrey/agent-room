@@ -192,8 +192,11 @@ test('a recorded program: written at spawn with its start, removed when its proc
   const turn = run('sh', ['-c', 'sleep 0.3; echo done'], { procs, record: { agent: 'A', room: '/room', dir } });
   const [proc] = procs;
   const entry = JSON.parse(readFileSync(join(dir, `${proc.pid}.json`), 'utf8'));
-  assert.deepEqual({ ...entry, started: typeof entry.started }, { pid: proc.pid, started: 'string', provider: 'sh', agent: 'A', room: '/room' });
+  assert.deepEqual({ ...entry, started: typeof entry.started, server: { ...entry.server, started: typeof entry.server.started } },
+    { pid: proc.pid, started: 'string', provider: 'sh', agent: 'A', room: '/room', server: { pid: process.pid, started: 'string' } });
   assert.ok(Math.abs(Date.parse(entry.started) - Date.now()) < 5000);
+  // The server's start is this process's, as ps reports it.
+  assert.ok(Math.abs(Date.parse(entry.server.started) - (await probeProcess(process.pid)).startedAt) <= 5000);
   assert.equal(await turn, 'done\n');
   assert.deepEqual(readdirSync(dir), []);
   // Without `record` nothing is written.
@@ -220,6 +223,25 @@ test('leftovers: not in this server\'s procs and group alive, with the same star
   assert.deepEqual(readdirSync(dir).sort(), ['101.json', '102.json', '104.json']);
 });
 
+test('leftovers: another live server\'s program is not one; a server PID reused by another process counts as gone', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'programs-'));
+  const now = Date.now();
+  const at = (ms) => new Date(ms).toISOString();
+  const entry = (pid, server) => recordProgram({ pid, started: at(now), provider: 'codex', agent: 'B', room: '/r', server: { pid: server, started: at(now - 600_000) } }, dir);
+  entry(201, 901); entry(202, 902); entry(203, 903); entry(204, 904);
+  const program = { group: true, leader: true, startedAt: now };
+  const probes = {
+    201: program, 202: program, 203: program, 204: program,
+    901: { group: true, leader: true, startedAt: now - 600_000 + 2000 }, // that server, still running
+    902: { group: false, leader: true, startedAt: now - 60_000 }, // its number, reused by another process
+    903: { group: false, leader: false, startedAt: null }, // gone
+    904: { group: true, leader: true, startedAt: null }, // alive, start unreadable
+  };
+  const found = await findLeftovers(new Set(), { dir, probe: async (pid) => probes[pid] });
+  assert.deepEqual(found.map((f) => [f.pid, f.unverified]), [[202, false], [203, false], [204, true]]);
+  assert.deepEqual(readdirSync(dir).sort(), ['201.json', '202.json', '203.json', '204.json']); // 201 kept for its server
+});
+
 test('leftovers with real processes: a live group is found until it ends; a reused PID (other start) is not', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'programs-'));
   const procs = new Set();
@@ -229,11 +251,15 @@ test('leftovers with real processes: a live group is found until it ends; a reus
   assert.equal(p.group, true); assert.equal(p.leader, true);
   assert.ok(Math.abs(p.startedAt - Date.now()) < 5000);
   assert.deepEqual(await findLeftovers(new Set([proc.pid]), { dir }), []); // in procs: not a leftover
-  assert.deepEqual((await findLeftovers(new Set(), { dir })).map((f) => [f.pid, f.agent, f.unverified]), [[proc.pid, 'W', false]]);
-  // The same number recorded with an hour-older start: another program now has it.
+  assert.deepEqual(await findLeftovers(new Set(), { dir }), []); // its server (this process) still runs
+  // The server's number recorded with a day-older start: this process merely reuses it, so that server is gone.
   const file = join(dir, `${proc.pid}.json`);
   const entry = JSON.parse(readFileSync(file, 'utf8'));
-  writeFileSync(file, JSON.stringify({ ...entry, started: new Date(Date.now() - 3600_000).toISOString() }));
+  const day = new Date(Date.now() - 86_400_000).toISOString();
+  writeFileSync(file, JSON.stringify({ ...entry, server: { pid: process.pid, started: day } }));
+  assert.deepEqual((await findLeftovers(new Set(), { dir })).map((f) => [f.pid, f.agent, f.unverified]), [[proc.pid, 'W', false]]);
+  // The same number recorded with an hour-older start: another program now has it.
+  writeFileSync(file, JSON.stringify({ ...entry, server: { pid: process.pid, started: day }, started: new Date(Date.now() - 3600_000).toISOString() }));
   assert.deepEqual(await findLeftovers(new Set(), { dir }), []);
   assert.equal(existsSync(file), false);
   proc.stopGroup('SIGTERM');

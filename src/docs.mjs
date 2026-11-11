@@ -1472,7 +1472,7 @@ function providerHealth(provider) {
     for (const o of m.leftovers) {
       problems.push([{ text: 'PID ' + o.pid + ' · ' + o.agent + ' · room ' + o.room + ' · started ' + startTime(o.started) }]);
       problems.push(o.unverified
-        ? [{ text: 'unverified: its leader is gone or its start time cannot be read, so the number may have been reused. Look at it: ', code: 'ps -g ' + o.pid }]
+        ? [{ text: 'unverified: its leader is gone, or a start time cannot be read, so the number may have been reused. Look at it: ', code: 'ps -g ' + o.pid }]
         : [{ text: 'stop it: ', code: 'kill -TERM -' + o.pid }]);
     }
   }

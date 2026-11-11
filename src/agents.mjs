@@ -36,7 +36,7 @@ export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOU
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, { cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     proc.provider = command;
-    if (record && proc.pid) recordProgram({ pid: proc.pid, started: new Date().toISOString(), provider: command, agent: record.agent, room: record.room }, record.dir);
+    if (record && proc.pid) recordProgram({ pid: proc.pid, started: new Date().toISOString(), provider: command, agent: record.agent, room: record.room, server: SERVER }, record.dir);
     const forget = () => { if (record && proc.pid) forgetProgram(proc.pid, record.dir); };
     procs?.add(proc);
     // Keep the group tracked even if the provider exits before its commands.
@@ -66,6 +66,9 @@ export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOU
 // Restart (leftovers) can be found: one small file per program, <pid>.json, so that several servers
 // never write the same file. Known limit: a crash between the spawn and the write leaves that
 // program unrecorded, so unseen.
+// The server that started a program (this process): its PID and start time, so that the programs
+// of another agent-room server still running are not taken for leftovers.
+const SERVER = { pid: process.pid, started: new Date(Date.now() - process.uptime() * 1000).toISOString() };
 export const programsDirectory = () => join(homedir(), '.local', 'state', 'agent-room', 'programs');
 export function recordProgram(entry, dir = programsDirectory()) {
   try { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, `${entry.pid}.json`), JSON.stringify(entry) + '\n'); } catch {}
@@ -83,10 +86,22 @@ export async function probeProcess(pid) {
 }
 // ps gives the start to the second; the record is written just after the spawn.
 const SAME_START_MS = 5000;
-// The recorded programs left over: not in `tracked` (the pids in this server's rooms' procs) and
-// their process group still alive. While the leader is alive it must have the recorded start time
+// The recorded programs left over: not in `tracked` (the pids in this server's rooms' procs), their
+// process group still alive, and the server that started them gone (its PID not alive, or alive with
+// another start time: reused). While the leader is alive it must have the recorded start time
 // (otherwise its number was reused and the entry is dropped); a group alive after its leader ended
-// is a possible leftover, `unverified`. Entries whose group is gone are dropped.
+// is a possible leftover, `unverified`, as is one whose server's start can't be read. Entries whose
+// group is gone are dropped.
+const sameStart = (ms, iso) => Math.abs(ms - Date.parse(iso)) <= SAME_START_MS;
+// 'running', 'gone' or 'unknown' (alive, start unreadable). A record without a server (written
+// before servers were recorded) counts as gone.
+async function serverState(server, probe) {
+  if (!server?.pid) return 'gone';
+  const s = await probe(server.pid);
+  if (!s.leader) return 'gone';
+  if (s.startedAt === null) return 'unknown';
+  return sameStart(s.startedAt, server.started) ? 'running' : 'gone';
+}
 export async function findLeftovers(tracked, { dir = programsDirectory(), probe = probeProcess } = {}) {
   let names = [];
   try { names = readdirSync(dir).filter((n) => /^\d+\.json$/.test(n)); } catch {}
@@ -99,9 +114,11 @@ export async function findLeftovers(tracked, { dir = programsDirectory(), probe 
     const p = await probe(pid);
     if (!p.group) { forgetProgram(pid, dir); continue; }
     if (tracked.has(pid)) continue;
+    const server = await serverState(entry.server, probe);
+    if (server === 'running') continue; // another server's program, still in its hands
     if (p.leader && p.startedAt !== null) {
-      if (Math.abs(p.startedAt - Date.parse(entry.started)) > SAME_START_MS) { forgetProgram(pid, dir); continue; }
-      found.push({ ...entry, unverified: false });
+      if (!sameStart(p.startedAt, entry.started)) { forgetProgram(pid, dir); continue; }
+      found.push({ ...entry, unverified: server === 'unknown' });
     } else found.push({ ...entry, unverified: true });
   }
   return found;
