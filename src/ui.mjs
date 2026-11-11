@@ -8,7 +8,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
-import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,22 +44,24 @@ commit in <root>/.agent-room/ (not the project's repository). --peer NAME=http:/
 sent rounds. Rooms added with Open room in folder… don't replicate.
 The --cwd folder is the room's root. Opening it writes nothing: the first message starts a new
 discussion in DIR/discussions/<date>-<title>/ (its documents, drawings and transcripts/), unless
-/reopen <name> (or --reopen <name> at launch) picked an existing one first.
+/resume <name> (or --reopen <name> at launch) picked an existing one first.
+Every discussion saves a checkpoint on this machine after each round, so it can continue later.
 Type a message to start a round; start it with @name to address one agent.
-Commands: /pause (save discussion and worker sessions locally), /resume <name> (continue a saved session),
-/docs (pick a document to view in the browser), /reopen <name> (re-open that
-discussion: a fresh session there, starting from its handoff; one in archive/ or deferred/ is made
-active first), /new (end this session; your next message starts a new discussion; the worker
+Commands: /resume <name> (continue that discussion where it stopped: the same agent and worker
+sessions, and its chat; from its handoff if it was never saved; one in archive/ or deferred/ is made
+active first), /fresh <name> (Start fresh: new sessions there, from its handoff and notes and its
+latest saved summary; its saved sessions are discarded), /docs (pick a document to view in the
+browser), /new (end this session; your next message starts a new discussion; the worker
 carries on), /brainstorm (New brainstorm: a conversation kept only in memory, with no folder or
-transcript; it ends this session as /new does, and a new one, /new, /reopen or /resume ends it), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
+transcript; it ends this session as /new does, and a new one, /new or /resume ends it), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
 /rollback <name> (queue archive with rollback), /archive-rollback <name> (confirm archive after reviewing its report),
 /autodev (screen only: Start auto dev, relaying the latest agreed summary's worker instruction
 and the worker's reports, for up to 5 worker cycles), /summary (the agents agree a short
-summary by points; only the result is shown), /autosummary [on|off] (a summary after every round
-in which an agent spoke; on by default), /usage (tokens this session and subscription quotas),
+summary by points; only the result is shown; a summary also follows every round in which an
+agent spoke), /usage (tokens this session and subscription quotas),
 /reload (load edited code and both agent rulebooks, in every room; conversations continue), /restart
 (screen only: a new process on the same port, with every room, each in its discussion in use, from
-its handoff), /quit (Quit room: ends this room only, after its round in progress or at most 30s,
+its checkpoint), /quit (Quit room: ends this room only, after its round in progress or at most 30s,
 then stopping its agent and worker programs), /shutdown (screen only: Shutdown server, ending every
 room; the same as POST /__shutdown, which the Dock app uses)
 Refresh the browser after /reload to see page changes.`;
@@ -108,7 +110,6 @@ export function modelChoices() {
   return { claude: ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) })), codex };
 }
 export async function saveSettings(ctx, value, file = defaultsFile()) {
-  if (ctx.paused || ctx.pausing) throw new Error('Resume the discussion before changing agent settings.');
   const settings = validateSettings(value);
   const next = { ...ctx, agentSpecs: settings.agents.map(specFor).join(','), workerSpec: specFor(settings.worker), sessions: new Map(), state: { ...ctx.state, seen: new Map(ctx.state.seen) } };
   // Build first so validation/loading errors cannot replace defaults or the running room.
@@ -238,7 +239,6 @@ const when = (d) => d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 
 function wire(ctx) {
   ctx.screen.room = header(ctx);
   ctx.screen.sections = ['discussions'];
-  ctx.screen.auto = autoOn(ctx);
   // With --node only the launch room replicates: its Peers panel works, the others' says why.
   ctx.screen.replicaOff = ctx.hub?.node && !ctx.node ? replicaOff(ctx) : null;
   if (ctx.replica) wireReplica(ctx); // its peer endpoint works in terminal mode too
@@ -251,8 +251,6 @@ function wire(ctx) {
     if (line.trim() === '/quit') for (const c of siblings(ctx)) if (c !== ctx) c.say?.('/quit');
     return ctx.say(line, confirmed);
   };
-  // The screen's checkbox: applied at once, not queued behind a round, so it can stop the next summary.
-  ctx.screen.setAuto = (on) => setAuto(ctx, on);
   ctx.screen.newRoom = (body) => newRoom(ctx, body);
   ctx.screen.listRooms = async () => listRooms(ctx);
   ctx.screen.getSettings = () => ({ settings: currentSettings(ctx), defaults: readDefaults(), models: modelChoices(), started: !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length || !!ctx.screen.worker.length });
@@ -269,7 +267,7 @@ function header(ctx) {
     brainstorm: !!ctx.state.brainstorm, // a conversation kept only in memory (see newBrainstorm)
     autoDev: autoDevView(ctx),
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
-    paused: !!ctx.paused, pausedSessions: pausedSessions(ctx),
+    checkpoints: checkpoints(ctx), // the saved discussions, for Explorer's Resume (see "Checkpoints")
     back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
     code: ctx.code ?? null, // the version this process runs (see codeInfo)
     rollbacks: [...(shopOf(ctx).rollbacks?.values() ?? [])].map(({ name, status, report, commit }) => ({ name, status, report, commit })),
@@ -319,7 +317,6 @@ async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) 
   await recoverWorkerOwner(ctx);
   const from = join(parent, d.section ?? '', d.name);
   if (ctx.discussion?.dir === from) return note(ctx, `✗ ${d.name} is the discussion in use in this room: it can't move now.`, true), null;
-  if (pausedSessions(ctx).some((p) => p.name === d.name)) return note(ctx, '✗ Resume the paused discussion before moving it.', true), null;
   const shop = shopOf(ctx);
   if (target === 'archive' && shop.rollbacks?.has(d.name) && !rollbackConfirmed)
     return note(ctx, '✗ Review the rollback report and use its explicit archive confirmation; the discussion has not been archived.', true), null;
@@ -379,14 +376,15 @@ Report the commit ID, the exact set undone or already undone, npm test's real ou
 async function requestRollback(ctx, ref) {
   const d = discussionRef(join(ctx.cwd, 'discussions'), ref);
   if (!d || d.section === 'archive') return note(ctx, '✗ Choose a local discussion outside archive/ for rollback.', true);
-  if (pausedSessions(ctx).some((p) => p.name === d.name)) return note(ctx, '✗ Resume the saved Pause before requesting rollback.', true);
   let origin = siblings(ctx).find((c) => c.discussion?.name === d.name);
   if (!origin) {
-    if (!multi(ctx)) return note(ctx, '✗ Re-open that discussion before requesting rollback in terminal mode.', true);
-    origin = await openBeside(ctx, { reopen: ref });
+    if (!multi(ctx)) return note(ctx, '✗ Resume that discussion before requesting rollback in terminal mode.', true);
+    origin = await openBeside(ctx);
+    try { await resumeDiscussion(origin, ref); } catch (err) { closeContext(origin); throw err; }
+    if (fresh(origin)) return closeContext(origin); // it couldn't open there (its note says why)
   }
-  if (origin.paused || origin.pausing || origin.stopped || origin.screen.workerInfo?.disabled)
-    return note(ctx, '✗ Resume the discussion and enable its worker before requesting rollback.', true);
+  if (origin.stopped || origin.screen.workerInfo?.disabled)
+    return note(ctx, '✗ This discussion\'s worker must be enabled before requesting rollback.', true);
   const shop = shopOf(origin), rollbacks = shop.rollbacks ??= new Map();
   if (['queued', 'running'].includes(rollbacks.get(d.name)?.status)) return note(ctx, 'Rollback is already queued or running.');
   autoDevInput(origin, 'you requested archive with rollback');
@@ -510,141 +508,241 @@ async function openDiscussion(ctx, line) {
 function briefing(ctx) {
   const { dir, continued } = ctx.discussion;
   if (continued) {
+    // Start fresh: its checkpoint's latest summary, marked if it wasn't agreed (see startFresh).
+    const s = ctx.freshSummary;
+    const summary = !s ? '' : `\n\nThe latest summary from the previous session (${s.outcome === 'agreed' ? `agreed, by ${s.by}` : `**not agreed**: the last version, by ${s.by}; treat its points as proposals`}):\n\n${s.text}`;
     return `This session continues the discussion in ${dir}: create, read and write this discussion's documents (notes, drawings) there. Start from its handoff `
-      + '(see "Where to start reading" in your rulebook); you can also read its notes and its transcripts/ folder.';
+      + '(see "Where to start reading" in your rulebook); you can also read its notes and its transcripts/ folder.' + summary;
   }
   return `This is a new discussion. Its folder is ${dir}: create, read and write this discussion's documents (notes, drawings) there. `
     + `The room's root, ${ctx.cwd}, holds the work itself.`;
 }
 
-// Checkpoints are local application data: never placed in the discussion's replicated files.
-const pauseDirectory = (ctx) => join(homedir(), '.local', 'state', 'agent-room', 'paused',
+// ── Checkpoints ───────────────────────────────────────────────────────
+// Every discussion saves itself, on this machine: after each round (with or without its summary) and
+// each /summary, after each worker task, when its session ends and when its room stops. A
+// checkpoint holds what Resume needs to continue it: the provider session IDs of its agents and its
+// worker, its chat and unread positions, its transcript path and the shown document. Its
+// discussion part is the copy taken at the end of the latest round (ctx.lastRound), when it is
+// consistent; its worker part is current. Start fresh leaves a small one instead (fresh: true),
+// holding only the summary its fresh session is briefed with, until that session's first round.
+// Local application data, never in the discussion's replicated files. The folder keeps its former
+// name, paused/: checkpoints saved by the former Pause are read as they are.
+const checkpointDirectory = (ctx) => join(homedir(), '.local', 'state', 'agent-room', 'paused',
   createHash('sha256').update(realpathSync(ctx.cwd)).digest('hex'));
-const pauseFile = (ctx, name) => join(pauseDirectory(ctx), createHash('sha256').update(name).digest('hex') + '.json');
-function pausedSessions(ctx) {
-  const dir = pauseDirectory(ctx);
+const checkpointFile = (ctx, name) => join(checkpointDirectory(ctx), createHash('sha256').update(name).digest('hex') + '.json');
+const listedCheckpoints = new Map(); // file → { stamp, entry }: the header lists them often
+// [{ name, at, kind: 'full' | 'fresh' }], for the page's Resume tooltips.
+function checkpoints(ctx) {
+  const dir = checkpointDirectory(ctx);
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter((f) => f.endsWith('.json')).flatMap((f) => {
+    const file = join(dir, f);
     try {
-      const saved = JSON.parse(readFileSync(join(dir, f), 'utf8'));
-      return saved.version === 1 && saved.root === realpathSync(ctx.cwd)
-        ? [{ name: saved.discussion.name, title: saved.discussion.title, at: saved.at }] : [];
+      const { mtimeMs, size } = statSync(file), stamp = `${mtimeMs}:${size}`;
+      const had = listedCheckpoints.get(file);
+      if (had?.stamp === stamp) return had.entry;
+      const saved = JSON.parse(readFileSync(file, 'utf8'));
+      const entry = saved.version === 1 && saved.root === realpathSync(ctx.cwd) && typeof saved.discussion?.name === 'string'
+        ? [{ name: saved.discussion.name, at: saved.at, kind: saved.fresh ? 'fresh' : 'full' }] : [];
+      listedCheckpoints.set(file, { stamp, entry });
+      return entry;
     } catch { return []; }
   });
 }
-
-async function pauseDiscussion(ctx) {
-  if (ctx.paused) return note(ctx, 'This discussion is already paused.');
-  if (!ctx.discussion || !ctx.logPath) return note(ctx, 'Start a discussion before pausing it.', true);
-  const shop = shopOf(ctx);
-  if (shop.blockedBy && shop.blockedBy.origin !== ctx && shop.tasks.some((t) => t.origin === ctx))
-    return note(ctx, '✗ This discussion\'s worker tasks are waiting for another discussion\'s edits to be resolved: Pause once they have run.', true);
-  ctx.pausing = true;
+function writeCheckpoint(ctx, name, data) {
+  const file = checkpointFile(ctx, name);
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  const temp = `${file}.${process.pid}.tmp`;
   try {
-    await ctx.workQueue; // commands already wait for the round; also drain the independent worker
-    const snapshot = {
+    writeFileSync(temp, JSON.stringify(data), { mode: 0o600 });
+    renameSync(temp, file); // replaces the previous one at once
+  } finally { if (existsSync(temp)) unlinkSync(temp); }
+}
+function readCheckpoint(ctx, name) {
+  const file = checkpointFile(ctx, name);
+  if (!existsSync(file)) return null;
+  try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return { invalid: true }; }
+}
+// A started discussion, with its agents' and worker's specs (a room built by hand, without them,
+// couldn't be resumed).
+const saveable = (ctx) => !!ctx.discussion && !!ctx.logPath && !ctx.state.brainstorm && !!ctx.agentSpecs && !!ctx.workerSpec;
+// At the end of a round, and of /summary: the discussion part, copied, then saved.
+function captureRound(ctx) {
+  if (!saveable(ctx)) return;
+  const agents = new Set(ctx.room.agents.map((a) => a.name));
+  ctx.lastRound = JSON.parse(JSON.stringify({
+    sessions: [...ctx.sessions].filter(([key]) => agents.has(key)),
+    state: { ...ctx.state, seen: [...ctx.state.seen] }, totals: ctx.totals ?? {}, doc: ctx.screen.doc ?? null,
+  }));
+  saveCheckpoint(ctx);
+}
+// The latest round's copy and the worker's current session and briefing. Nothing before the first
+// round of this session (or a Resume): until then the previous checkpoint stands.
+function saveCheckpoint(ctx) {
+  const d = ctx.discussion, r = ctx.lastRound;
+  if (!r || !saveable(ctx)) return;
+  const worker = `worker:${parseSpec(ctx.workerSpec, true).name}`;
+  try {
+    writeCheckpoint(ctx, d.name, {
       version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
-      discussion: ctx.discussion, agentSpecs: ctx.agentSpecs, workerSpec: ctx.workerSpec,
-      sessions: [...ctx.sessions], state: { ...ctx.state, seen: [...ctx.state.seen] },
-      logPath: ctx.logPath, pendingLog: ctx.pendingLog ?? '', totals: ctx.totals,
-      autoSummary: autoOn(ctx), worker: ctx.screen.worker, doc: ctx.screen.doc,
-      workerBriefed: ctx.workerBriefed ?? null, workerTree: ctx.workerTree ?? null, workerHandoff: !!ctx.workerHandoff,
-    };
-    const file = pauseFile(ctx, ctx.discussion.name);
-    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-    const temp = file + '.' + process.pid + '.tmp';
-    try {
-      writeFileSync(temp, JSON.stringify(snapshot), { mode: 0o600 });
-      linkSync(temp, file); // Publish without overwriting another room's saved Pause.
-    } finally { if (existsSync(temp)) unlinkSync(temp); }
-    ctx.paused = true;
-    ctx.autoDev = null; // Pause ends an auto dev run
-    showHeader(ctx);
-    note(ctx, 'Paused. The discussion and worker sessions are saved on this machine; you can quit or start another discussion, then Resume later.');
-  } finally { ctx.pausing = false; }
+      discussion: d, agentSpecs: ctx.agentSpecs, workerSpec: ctx.workerSpec,
+      sessions: [...r.sessions, [worker, ctx.sessions.get(worker) ?? {}]],
+      state: r.state, logPath: ctx.logPath, totals: r.totals, doc: r.doc,
+      worker: shopOf(ctx).log.filter((m) => m.origin === originLabel(ctx)),
+      workerBriefed: ctx.workerBriefed ?? null, workerTree: ctx.workerTree ?? null,
+      workerLabel: ctx.workerLabel ?? null, workerHandoff: !!ctx.workerHandoff,
+    });
+    ctx.checkpointError = null;
+  } catch (err) {
+    if (ctx.checkpointError !== err.message) note(ctx, `✗ Couldn't save this discussion's checkpoint: ${err.message}. Resume would continue from an earlier one.`, true);
+    ctx.checkpointError = err.message;
+  }
+}
+// The summary a Start fresh briefs with: the checkpoint's latest one, or none.
+function checkpointSummary(saved) {
+  if (!saved || saved.invalid) return null;
+  if (saved.fresh) return saved.summary && typeof saved.summary.text === 'string' ? saved.summary : null;
+  const s = (Array.isArray(saved.state?.transcript) ? saved.state.transcript : []).findLast((m) => m.speaker === 'Summary' && m.outcome);
+  return s ? { text: s.text, outcome: s.outcome, by: s.by } : null;
 }
 
-async function resumeDiscussion(ctx, name) {
-  name ||= ctx.paused ? ctx.discussion?.name : '';
-  if (!discussionRef(join(ctx.cwd, 'discussions'), name) || name.includes('/'))
-    throw new Error('Choose a paused active discussion to Resume.');
-  // A brainstorm can't be paused: Resume replaces it, as Re-open does, once the checkpoint loads.
-  const brainstorm = !ctx.paused && !!ctx.state.brainstorm;
-  const shop = shopOf(ctx), ownWork = !!ctx.workerTree || shop.running?.origin === ctx || shop.tasks.some((t) => t.origin === ctx);
-  if (!ctx.paused && !brainstorm && (ctx.logPath || ctx.state.transcript.length || ownWork))
-    throw new Error('Pause the current discussion before resuming another one.');
-  ctx.pausing = true;
-  try {
-    await ctx.workQueue;
-    const file = pauseFile(ctx, name);
-    if (!existsSync(file)) throw new Error('No saved Pause is available for this discussion on this machine.');
-    const saved = JSON.parse(readFileSync(file, 'utf8'));
-    if (saved.version !== 1 || saved.root !== realpathSync(ctx.cwd) || saved.discussion?.name !== name
-      || !Array.isArray(saved.sessions) || !Array.isArray(saved.state?.transcript) || !Array.isArray(saved.state?.seen))
-      throw new Error('The paused discussion checkpoint is invalid.');
-    const sessions = new Map(saved.sessions), seen = new Map(saved.state.seen);
-    const specs = saved.agentSpecs.split(',').map((spec) => ({ ...parseSpec(spec), worker: false }));
-    specs.push({ ...parseSpec(saved.workerSpec, true), worker: true });
-    for (const spec of specs) {
-      const session = sessions.get(spec.worker ? `worker:${spec.name}` : spec.name);
-      if (!session || typeof session !== 'object'
-        || (spec.provider === 'claude' && !session.id)
-        || (spec.provider === 'codex' && !spec.worker && seen.get(spec.name) > 0 && !session.threadId))
-        throw new Error(`The saved provider session for ${spec.name} is missing. The checkpoint was kept.`);
-    }
-    if (!existsSync(saved.logPath)) throw new Error('The paused discussion transcript is missing.');
-    const next = { ...ctx, ...saved, sessions: new Map(saved.sessions),
-      state: { ...saved.state, seen: new Map(saved.state.seen) }, paused: false,
-      screen: { ...ctx.screen, transcript: saved.state.transcript, worker: shopOf(ctx).log, doc: saved.doc,
-        thinking: null, working: null, status: null }, agentsStarted: true,
-      workerDir: { path: null } };
-    // Build before consuming the checkpoint; a failed load leaves it available for retry.
-    const loaded = await load(next, `?resume=${Date.now()}`);
-    unlinkSync(file);
-    const { root, version, at, worker: workerLog, ...restored } = saved;
-    Object.assign(ctx, restored, loaded, { state: next.state, sessions: next.sessions,
-      paused: false, agentsStarted: true, workerDir: next.workerDir, previous: null, autoDev: null, autoDevSent: [] });
-    if (!ctx.shop.log.length) ctx.shop.log.push(...workerLog); // shared by the folder's open discussions
-    wire(ctx);
-    toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
-    note(ctx, `Resumed the saved discussion and worker sessions.${brainstorm ? ' The brainstorm was discarded.' : ''}`);
-    refreshWorker(ctx).catch(() => {});
-  } finally { ctx.pausing = false; }
+// Checks a full checkpoint and builds its room, changing nothing; resolves to the function that
+// puts it in ctx. A checkpoint that can't be used is kept, and the room stays as it is.
+async function loadCheckpoint(ctx, saved, name) {
+  const invalid = () => new Error(`The checkpoint of ${name} is invalid. It was kept; Start fresh starts the discussion from its handoff instead.`);
+  if (saved.invalid || saved.version !== 1 || saved.root !== realpathSync(ctx.cwd) || saved.discussion?.name !== name
+    || typeof saved.agentSpecs !== 'string' || typeof saved.workerSpec !== 'string' || typeof saved.logPath !== 'string'
+    || !Array.isArray(saved.sessions) || !Array.isArray(saved.state?.transcript) || !Array.isArray(saved.state?.seen))
+    throw invalid();
+  const sessions = new Map(saved.sessions), seen = new Map(saved.state.seen);
+  const specs = saved.agentSpecs.split(',').map((spec) => ({ ...parseSpec(spec), worker: false }));
+  specs.push({ ...parseSpec(saved.workerSpec, true), worker: true });
+  for (const spec of specs) {
+    const session = sessions.get(spec.worker ? `worker:${spec.name}` : spec.name);
+    if (!session || typeof session !== 'object'
+      || (spec.provider === 'claude' && !session.id)
+      || (spec.provider === 'codex' && !spec.worker && seen.get(spec.name) > 0 && !session.threadId))
+      throw new Error(`The saved provider session for ${spec.name} is missing. The checkpoint was kept; Start fresh starts the discussion from its handoff instead.`);
+  }
+  // Its folder as it is now (it may have moved while open elsewhere), and the transcript in it.
+  const dir = join(ctx.cwd, 'discussions', name), was = saved.discussion.dir;
+  const logPath = typeof was === 'string' && saved.logPath.startsWith(was + sep) ? dir + saved.logPath.slice(was.length) : saved.logPath;
+  if (!existsSync(logPath)) throw new Error(`The transcript of ${name}'s checkpoint is missing (${logPath}). The checkpoint was kept.`);
+  const state = { ...saved.state, seen };
+  const next = { ...ctx, agentSpecs: saved.agentSpecs, workerSpec: saved.workerSpec, sessions, state };
+  const loaded = await load(next, `?resume=${Date.now()}`);
+  return () => {
+    const label = name, shop = shopOf(ctx);
+    Object.assign(ctx, loaded, {
+      discussion: { ...saved.discussion, dir }, agentSpecs: saved.agentSpecs, workerSpec: saved.workerSpec,
+      sessions, state, logPath, pendingLog: '', totals: saved.totals ?? {},
+      workerBriefed: saved.workerBriefed ?? null, workerTree: saved.workerTree ?? null,
+      workerLabel: saved.workerLabel ?? null, workerHandoff: !!saved.workerHandoff,
+      agentsStarted: true, autoDev: null, autoDevSent: [], freshSummary: null,
+      lastRound: { sessions: saved.sessions.filter(([key]) => !String(key).startsWith('worker:')), state: saved.state, totals: saved.totals ?? {}, doc: saved.doc ?? null },
+    });
+    Object.assign(ctx.screen, { transcript: state.transcript, doc: saved.doc ?? null, thinking: null, status: null });
+    // Its own part of the Worker tab, unless the tab (shared by the folder's discussions) still has it.
+    const own = Array.isArray(saved.worker) ? saved.worker.filter((m) => m?.origin === label) : [];
+    if (own.length && !shop.log.some((m) => m.origin === label)) shop.log.push(...own);
+  };
 }
 
-// /reopen <name> (Re-open this discussion): make an existing discussion the active one. It runs
-// between rounds (commands are queued). Once this session has started, the session ends first: its
-// transcript is closed, the chat is cleared, and the agents and the worker get fresh CLI sessions;
-// the next message starts a new session in the re-opened discussion, from its handoff. Discussions
-// retain native agent memory only through an explicit Pause, not through Re-open.
-async function reopenDiscussion(ctx, name) {
-  const parent = join(ctx.cwd, 'discussions');
-  // A discussion is a folder named <date>-<title>; other folders there are the room's own material.
-  // One in archive/ or deferred/ is made active first.
-  const d = discussionRef(parent, name ?? '');
-  if (!d) return note(ctx, `✗ No discussion "${name}" in ${parent} (discussions are folders named <date>-<title>).`, true);
-  if (d.section && !await moveDiscussion(ctx, name, 'active')) return;
-  name = d.name;
-  const checkpoint = pauseFile(ctx, name);
-  if (existsSync(checkpoint)) unlinkSync(checkpoint); // Re-open explicitly starts fresh.
+// The session in use ends (Resume and Start fresh in place): its checkpoint is saved first; the
+// agents and the worker get fresh CLI sessions.
+async function leaveSession(ctx, why) {
   if (ctx.logPath) {
     await ctx.workQueue; // let a running worker instruction finish in this session
-    endSession(ctx, `re-opening the discussion ${name}`);
+    endSession(ctx, why);
     ctx.worker.reset?.();
     if (siblings(ctx).length === 1) ctx.screen.worker.length = 0; // the Worker tab is shared otherwise
     ctx.workerBriefed = null;
     ctx.workerTree = ctx.workerLabel = null; // its fresh session is told about its worktree again
   }
   if (ctx.state.brainstorm) endSession(ctx, 'ending the brainstorm');
-  switchTo(ctx, { name, dir: join(parent, name), title: name, continued: true });
-  note(ctx, `Re-opened the discussion ${name}: your next message starts a fresh session there; the agents start from its handoff.`);
 }
 
-// Ends this room's discussion session (Re-open and New discussion): a last line in its transcript,
-// which is then closed; the chat clears and the discussion agents get fresh CLI sessions. The worker
-// is left alone here: Re-open resets it itself, New discussion doesn't.
+// /resume <name> (Resume): a discussion that isn't on screen. Open in another context of this folder,
+// it is only shown there, as it is. Otherwise it continues from its checkpoint (the same agent and
+// worker sessions, and its chat), or, with none, starts from its handoff: a fresh session at the
+// next message. One in archive/ or deferred/ is made active first. On the screen it opens beside
+// the open discussions (in this context, if it is still empty); in the terminal the session in use
+// ends first. It runs between rounds (commands are queued).
+async function resumeDiscussion(ctx, ref) {
+  const parent = join(ctx.cwd, 'discussions');
+  if (!ref) return note(ctx, '✗ Name the discussion to resume: /resume <name> (its folder\'s name).', true);
+  // A discussion is a folder named <date>-<title>; other folders there are the room's own material.
+  const d = discussionRef(parent, ref);
+  if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent} (discussions are folders named <date>-<title>).`, true);
+  const open = siblings(ctx).find((c) => c !== ctx && c.discussion?.name === d.name);
+  if (open) return goto(ctx, open);
+  if (ctx.discussion?.name === d.name) return note(ctx, `${d.name} is the discussion in use here.`);
+  if (multi(ctx) && !fresh(ctx)) return besideWith(ctx, (next) => resumeDiscussion(next, ref));
+  if (d.section && !await moveDiscussion(ctx, ref, 'active')) return;
+  const name = d.name, saved = readCheckpoint(ctx, name);
+  if (saved && !saved.fresh) {
+    const apply = await loadCheckpoint(ctx, saved, name); // built before anything changes
+    const was = ctx.discussion;
+    await leaveSession(ctx, `resuming the discussion ${name}`);
+    apply();
+    if (was && was.name !== name) ctx.previous = { name: was.name, title: was.title };
+    if (ctx.previous?.name === name) ctx.previous = null;
+    wire(ctx);
+    showHeader(ctx);
+    toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
+    note(ctx, `Resumed the discussion ${name}: the same agent and worker sessions continue, with its chat.`);
+    refreshWorker(ctx).catch(() => {});
+    return;
+  }
+  if (saved?.fresh && (saved.version !== 1 || saved.root !== realpathSync(ctx.cwd) || saved.discussion?.name !== name))
+    throw new Error(`The checkpoint of ${name} is invalid. It was kept; Start fresh starts the discussion from its handoff instead.`);
+  await leaveSession(ctx, `resuming the discussion ${name}`);
+  switchTo(ctx, { name, dir: join(parent, name), title: name, continued: true });
+  ctx.freshSummary = checkpointSummary(saved);
+  note(ctx, `Resumed the discussion ${name}: it has no saved session, so your next message starts a fresh one there, from its handoff and notes${ctx.freshSummary ? ' and the summary chosen at Start fresh' : ''}.`);
+}
+
+// /fresh <name> (Start fresh): new agent and worker sessions, from the discussion's handoff and
+// notes and its checkpoint's latest summary (marked if it wasn't agreed). The saved sessions and
+// chat are discarded: the checkpoint is replaced by one holding only that summary, so a Restart or
+// Resume before the first message still briefs with it.
+async function startFresh(ctx, ref) {
+  const parent = join(ctx.cwd, 'discussions');
+  if (!ref) return note(ctx, '✗ Name the discussion to start afresh: /fresh <name> (its folder\'s name).', true);
+  const d = discussionRef(parent, ref);
+  if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent} (discussions are folders named <date>-<title>).`, true);
+  const open = siblings(ctx).find((c) => c !== ctx && c.discussion?.name === d.name);
+  if (open) { open.say?.(`/fresh ${d.name}`); return goto(ctx, open); } // it starts afresh there
+  if (multi(ctx) && !fresh(ctx) && ctx.discussion?.name !== d.name) return besideWith(ctx, (next) => startFresh(next, ref));
+  if (d.section && !await moveDiscussion(ctx, ref, 'active')) return;
+  const name = d.name;
+  await leaveSession(ctx, `starting the discussion ${name} afresh`); // saves its checkpoint first
+  const summary = checkpointSummary(readCheckpoint(ctx, name));
+  writeCheckpoint(ctx, name, { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
+    discussion: { name, title: name }, fresh: true, summary });
+  switchTo(ctx, { name, dir: join(parent, name), title: name, continued: true });
+  ctx.freshSummary = summary;
+  note(ctx, `Started ${name} afresh: your next message starts a new session there, from its handoff and notes${summary ? `, with its latest summary${summary.outcome === 'agreed' ? '' : ' (not agreed)'}` : ''}. Its saved sessions and chat were discarded.`);
+}
+
+// On the screen: `run` in a new context beside the open discussions, which the window then shows.
+// If it fails, the empty context closes again.
+async function besideWith(ctx, run) {
+  const next = await openBeside(ctx);
+  try { await run(next); } catch (err) { closeContext(next); throw err; }
+  if (fresh(next)) return closeContext(next); // nothing opened there (its note says why)
+  goto(ctx, next);
+}
+
+// Ends this room's discussion session (Resume, Start fresh, New discussion, Close): its checkpoint
+// is saved, a last line goes in its transcript, which is then closed; the chat clears and the
+// discussion agents get fresh CLI sessions. The worker is left alone here: Resume and Start fresh
+// reset it themselves (leaveSession), New discussion doesn't.
 function endSession(ctx, why) {
-  ctx.paused = false;
+  saveCheckpoint(ctx); // the latest checkpoint stays: Resume continues from it
+  ctx.lastRound = null;
+  ctx.freshSummary = null;
   log(ctx, `_(session ended: ${why})_\n\n`);
   for (const a of ctx.room.agents) a.reset?.();
   const { state, screen } = ctx;
@@ -653,7 +751,7 @@ function endSession(ctx, why) {
   state.summaries = 0;
   state.briefing = null;
   state.brainstorm = false;
-  ctx.autoDev = null; // Re-open, New discussion and New brainstorm end an auto dev run
+  ctx.autoDev = null; // Resume, Start fresh, New discussion and New brainstorm end an auto dev run
   ctx.autoDevSent = [];
   Object.assign(screen, { doc: null, thinking: null, status: null });
   ctx.logPath = null;
@@ -672,20 +770,13 @@ function switchTo(ctx, next) {
   toScreen(ctx, ctx.docs.resetEvent(ctx.screen)); // open pages start over with the empty chat
 }
 
-// /new (New discussion): between rounds, like every command. The discussion session ends as with
-// Re-open; the next message names and creates the new discussion, as in a fresh room. Nothing is
+// /new (New discussion): between rounds, like every command. The discussion session ends (its
+// checkpoint is kept); the next message names and creates the new discussion, as in a fresh room. Nothing is
 // created until then. The worker is not affected: a task already running keeps its target, its log
 // stays (with a marker line), and its session is kept (decided by the User, 2026-11-07).
 function newDiscussion(ctx) {
   const was = ctx.discussion;
   if (!was && !ctx.logPath && !ctx.state.brainstorm) return note(ctx, 'No discussion started yet: your next message starts a new one.');
-  if (ctx.paused) {
-    // The saved worker session must not receive turns from the new discussion.
-    ctx.worker.reset?.();
-    ctx.screen.worker.length = 0;
-    ctx.workerBriefed = ctx.workerTree = ctx.workerLabel = null;
-    ctx.workerHandoff = false;
-  }
   if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a new discussion');
   if (was && ctx.screen.worker.length) {
     const view = { note: `New discussion: ${was.name} is no longer the active one. The next instruction gets the new discussion's folder once your first message creates it.` };
@@ -693,29 +784,23 @@ function newDiscussion(ctx) {
     toScreen(ctx, { type: 'work', message: view });
   }
   switchTo(ctx, null);
-  note(ctx, `New discussion: your next message names it and starts it.${was ? ` To go back, /reopen ${was.name}.` : ''}`);
+  note(ctx, `New discussion: your next message names it and starts it.${was ? ` To go back, /resume ${was.name}.` : ''}`);
 }
 
 // /brainstorm (New brainstorm): a conversation like a discussion's, with no title, folder,
 // transcript, notes or handoff; it lives only in server memory (ctx.state, so it survives a
 // Reload and a page refresh, not a Restart or Quit). One per room: a new one discards it, and New
-// discussion, Re-open or Resume ends it. It ends the discussion session in use as New discussion does; the
+// discussion or Resume ends it. It ends the discussion session in use as New discussion does; the
 // worker carries on as with no discussion.
 function newBrainstorm(ctx) {
   const was = ctx.discussion;
-  if (ctx.paused) { // as New discussion: the saved worker session must not receive these turns
-    ctx.worker.reset?.();
-    ctx.screen.worker.length = 0;
-    ctx.workerBriefed = ctx.workerTree = ctx.workerLabel = null;
-    ctx.workerHandoff = false;
-  }
   if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a brainstorm');
   ctx.state.brainstorm = true;
   ctx.state.brainstormId = randomBytes(12).toString('hex');
   ctx.state.briefing = `This is a brainstorm, not a discussion: it has no folder and agent-room keeps no record of it. Write no files; you may read the project in the room's root, ${ctx.cwd}.`;
   ctx.pendingLog = '';
   switchTo(ctx, null);
-  note(ctx, `New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.${was ? ` To go back, /reopen ${was.name}.` : ''}`);
+  note(ctx, `New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.${was ? ` To go back, /resume ${was.name}.` : ''}`);
 }
 
 // ── Several open discussions ──────────────────────────────────────────
@@ -724,8 +809,9 @@ function newBrainstorm(ctx) {
 // with a `context` tag (ctx.key is then "<folder>#<tag>"). They share the folder's workshop
 // (ctx.shop): one worker queue, worktree and Worker tab; each task is labelled with its origin and
 // its report goes back there, and each context has its own worker session. One window shows one
-// context; Explorer and the header switch between them ('goto'). New discussion and Re-open open
-// another context and keep this one; Close discussion closes one; Quit room closes them all.
+// context; Explorer and the header switch between them ('goto'). New discussion, Resume and Start
+// fresh open another context and keep this one; Close discussion closes one (its checkpoint stays);
+// Quit room closes them all.
 // Terminal mode keeps one discussion at a time: its one input can't switch between contexts.
 const baseKey = (ctx) => String(ctx.key ?? ctx.cwd).split('#')[0];
 export function siblings(ctx) {
@@ -733,15 +819,17 @@ export function siblings(ctx) {
   return list.includes(ctx) ? list : [ctx, ...list];
 }
 const multi = (ctx) => !ctx.noScreen;
-// A context with nothing in it yet: New discussion, Re-open and New brainstorm use it in place.
-const fresh = (ctx) => !ctx.discussion && !ctx.logPath && !ctx.state.brainstorm && !ctx.state.transcript.length && !ctx.paused;
+// A context with nothing in it yet: New discussion, Resume, Start fresh and New brainstorm use it in place.
+const fresh = (ctx) => !ctx.discussion && !ctx.logPath && !ctx.state.brainstorm && !ctx.state.transcript.length;
 // The task label: the discussion's folder name, or the brainstorm.
 const originLabel = (ctx) => ctx.discussion?.name ?? (ctx.state.brainstorm ? 'brainstorm' : 'no discussion');
 const pageOf = (ctx) => `${roomPath(ctx)}__room`;
+// started: its first message was sent (Explorer shows Resume for it then, Go to before; and always
+// Go to for the brainstorm, which has nothing to resume).
 function openList(ctx) {
   return siblings(ctx).filter((c) => c.state && c.id).map((c) => ({ url: pageOf(c), current: c === ctx,
     title: c.discussion?.title ?? (c.state.brainstorm ? 'Brainstorm' : 'New discussion (not started)'),
-    active: c.discussion ? `discussions/${c.discussion.name}` : null, brainstorm: !!c.state.brainstorm, paused: !!c.paused }));
+    active: c.discussion ? `discussions/${c.discussion.name}` : null, brainstorm: !!c.state.brainstorm, started: !!c.logPath }));
 }
 function newShop(workerDir, log) {
   return { tasks: [], running: null, blockedBy: null, workingIn: null, contexts: 0, workerDir, log };
@@ -764,11 +852,11 @@ function workNote(ctx, text, error = false) {
 }
 // Sends this context's pages to another one (the window switches discussion).
 const goto = (ctx, target) => toScreen(ctx, { type: 'goto', url: pageOf(target) });
-async function openBeside(ctx, opts = {}) {
+async function openBeside(ctx) {
   const shop = shopOf(ctx);
   let tag;
   do tag = `d${++shop.contexts}`; while (ctx.hub.rooms.has(`${baseKey(ctx)}#${tag}`));
-  const { ctx: next } = await ctx.hub.addRoom(ctx.cwd, { agents: ctx.agentSpecs, worker: ctx.workerSpec, context: tag, reopen: opts.reopen });
+  const { ctx: next } = await ctx.hub.addRoom(ctx.cwd, { agents: ctx.agentSpecs, worker: ctx.workerSpec, context: tag });
   showHeader(ctx);
   return next;
 }
@@ -802,7 +890,7 @@ async function newDiscussionBeside(ctx) {
   if (fresh(ctx)) return note(ctx, 'No discussion started yet: your next message starts a new one.');
   const next = await openBeside(ctx);
   goto(ctx, next);
-  note(ctx, `New discussion: ${originLabel(ctx)} stays open (Explorer: Go to).`);
+  note(ctx, `New discussion: ${originLabel(ctx)} stays open (Explorer: Resume shows it again).`);
 }
 // /brainstorm on the screen: at most one per folder, beside the discussions.
 async function newBrainstormBeside(ctx) {
@@ -811,24 +899,6 @@ async function newBrainstormBeside(ctx) {
   if (ctx.state.brainstorm || fresh(ctx)) return newBrainstorm(ctx);
   const next = await openBeside(ctx);
   next.say?.('/brainstorm');
-  goto(ctx, next);
-}
-// /reopen on the screen: a discussion open in another context is shown there, as it is; otherwise
-// it opens in a context of its own (this one, if it is still empty), fresh from its handoff.
-async function reopenBeside(ctx, name) {
-  const d = discussionRef(join(ctx.cwd, 'discussions'), name ?? '');
-  const open = d && siblings(ctx).find((c) => c !== ctx && c.discussion?.name === d.name);
-  if (open) return goto(ctx, open);
-  if (!d || ctx.discussion?.name === d.name || fresh(ctx)) return reopenDiscussion(ctx, name);
-  goto(ctx, await openBeside(ctx, { reopen: name }));
-}
-// /resume on the screen: as Re-open, for a paused discussion.
-async function resumeBeside(ctx, name) {
-  const open = name && siblings(ctx).find((c) => c !== ctx && c.discussion?.name === name);
-  if (open) { if (open.paused) open.say?.(`/resume ${name}`); return goto(ctx, open); }
-  if (!name || ctx.paused || fresh(ctx) || ctx.state.brainstorm) return resumeDiscussion(ctx, name);
-  const next = await openBeside(ctx);
-  next.say?.(`/resume ${name}`);
   goto(ctx, next);
 }
 // /close (Close discussion): this discussion (or brainstorm) closes; the others stay open. The last
@@ -841,9 +911,8 @@ function closeDiscussion(ctx) {
     if (fresh(ctx)) return note(ctx, 'Nothing to close: no discussion is open here.');
     const was = ctx.discussion;
     if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'closing the discussion');
-    ctx.paused = false;
     switchTo(ctx, null);
-    return note(ctx, `Closed${was ? ` ${was.name}` : ' the brainstorm'}. To go back, Re-open it in Explorer.`);
+    return note(ctx, was ? `Closed ${was.name}; its checkpoint is kept. To go back, Resume it in Explorer.` : 'Closed the brainstorm.');
   }
   if (ctx.replicaOwner) return note(ctx, '✗ This discussion holds the room\'s replication (its peers and storage): it stays open while others are. Close them first, or Quit room.', true);
   closeContext(ctx, others[0]);
@@ -1073,7 +1142,7 @@ function latestAgreed(ctx) {
 // What the page offers: the latest agreed summary's instruction, unless it was sent (or a run is
 // going, or this is no saved discussion): { text } with a Start or Restart button, or { error }.
 function autoDevOffer(ctx) {
-  if (!ctx.logPath || ctx.state.brainstorm || ctx.paused || ctx.autoDev?.status === 'running') return null;
+  if (!ctx.logPath || ctx.state.brainstorm || ctx.autoDev?.status === 'running') return null;
   const s = latestAgreed(ctx);
   return s && !(ctx.autoDevSent ?? []).includes(s.index) ? s.instruction : null;
 }
@@ -1086,7 +1155,7 @@ function autoDevView(ctx) {
 function startAutoDev(ctx) {
   const s = latestAgreed(ctx);
   const why = ctx.state.brainstorm ? 'auto dev is for discussions; a brainstorm keeps no saved record'
-    : !ctx.logPath || ctx.paused ? 'it needs a started discussion that isn\'t paused'
+    : !ctx.logPath ? 'it needs a started discussion'
     : !ctx.say ? 'it works from the browser screen'
     : ctx.autoDev?.status === 'running' ? 'it is already running'
     : ctx.screen.workerInfo?.disabled ? ctx.screen.workerInfo.lines[0]
@@ -1097,7 +1166,7 @@ function startAutoDev(ctx) {
   if (why) return note(ctx, `✗ Auto dev can't start: ${why}.`, true);
   ctx.autoDev = { status: 'running', cycle: 0, reason: null, waiting: false, report: null };
   log(ctx, `_(auto dev started: up to ${AUTO_DEV_CYCLES} worker cycles)_\n\n`);
-  note(ctx, `Auto dev started: up to ${AUTO_DEV_CYCLES} worker cycles. Auto-summarize is on for this run; your saved setting is unchanged.`);
+  note(ctx, `Auto dev started: up to ${AUTO_DEV_CYCLES} worker cycles.`);
   relay(ctx, s);
 }
 function relay(ctx, s) {
@@ -1246,16 +1315,6 @@ function replicaOff(ctx) {
   const launch = [...ctx.hub.rooms.values()].find((r) => r.launch);
   return `Replication runs only for this server's launch room${launch ? ` (${launch.cwd})` : ''}. A --peer address names a whole server, `
     + 'not one of its rooms, so this room has no peer: its rounds are neither saved for replication nor sent.';
-}
-
-// Auto-summarize: on unless turned off (ctx.autoSummary, so it survives a reload).
-const autoOn = (ctx) => ctx.autoSummary !== false;
-function setAuto(ctx, on) {
-  ctx.autoSummary = on;
-  ctx.screen.auto = on;
-  toScreen(ctx, { type: 'auto', on });
-  log(ctx, `_(auto-summarize ${on ? 'on' : 'off'})_\n\n`);
-  note(ctx, `Auto-summarize is ${on ? 'on: a summary follows every round in which an agent spoke' : 'off'}.`);
 }
 
 // The header's quota gauges, for the room's and the worker's providers: refreshed every minute and
@@ -1409,21 +1468,21 @@ export async function stopRoom(ctx) {
   ctx.workSkipped = 0;
   // The stopped instruction's own reply (an error) is recorded before the room closes.
   await Promise.race([ctx.workQueue, new Promise((r) => setTimeout(r, 3000))]);
+  saveCheckpoint(ctx); // the worker's latest session and briefing; Resume continues from here
   for (const line of report) note(ctx, `✗ ${line}`, true);
   return report;
 }
 
 // /restart (the whole server): this process frees its port and a new agent-room process takes it
 // over with the same launch flags and every room, each with its current agents and worker, and the
-// discussion in use re-opened (a fresh session from its handoff, as /reopen). A paused discussion
-// instead stays saved for explicit Resume; no --reopen is passed. An unpaused chat in memory doesn't
-// carry over. The first room is passed as --cwd (replicating, with --node, only if it is the launch
+// discussion in use resumed (as /resume: from its checkpoint, or from its handoff without one; the
+// flag keeps its former name, --reopen). A brainstorm doesn't carry over. The first room is passed as --cwd (replicating, with --node, only if it is the launch
 // room); the others as --room. The new process writes where this one did (the terminal or the Dock
 // app's log) and runs on its own once this one exits.
 export function restartArgs(rooms, values, port) {
-  const reopen = (r) => (r.discussion && !r.paused ? r.discussion.name : null);
-  // A folder's other open discussions come back too, each in its own context; empty ones,
-  // brainstorms and paused ones don't (a paused one stays saved for Resume).
+  const reopen = (r) => (r.discussion ? r.discussion.name : null);
+  // A folder's other open discussions come back too, each in its own context; empty ones and
+  // brainstorms don't.
   const [first, ...rest] = rooms.filter((r) => !r.context || reopen(r));
   const args = [fileURLToPath(new URL('./cli.mjs', import.meta.url)), '--cwd', first.cwd, '--port', String(port)];
   if (first.agentSpecs) args.push('--agents', first.agentSpecs);
@@ -1445,15 +1504,24 @@ export async function restart(hub, rooms, values) {
   spawn(process.execPath, args, { cwd: rooms[0].cwd, detached: true, stdio: 'inherit' }).unref();
 }
 
+function removedHint(command, name) {
+  const n = name || '<name>';
+  if (command === 'pause') return 'Pause is gone: every discussion saves itself after each round, and Resume continues it where it stopped.';
+  if (command === 'autosummary') return 'Auto-summarize is always on now: a summary follows every round in which an agent spoke.';
+  return `/${command} is now /resume ${n} (it continues where the discussion stopped, or starts from its handoff if it was never saved), or /fresh ${n} to start new sessions from its handoff.`;
+}
+
 export async function handleLine(line, ctx) {
   if (!line) return;
   if (line === '/docs') return showDocs(ctx);
-  const reopen = /^\/(?:reopen|continue)(?:\s+(.*))?$/.exec(line); // /continue: its former name
+  // Commands that were removed: a hint, rather than a message to the agents.
+  const removed = /^\/(pause|reopen|continue|autosummary)(?:\s+(.*))?$/.exec(line);
+  if (removed) return note(ctx, removedHint(removed[1], (removed[2] ?? '').trim()));
   // On the screen, several discussions stay open (see "Several open discussions").
-  if (reopen) return (multi(ctx) ? reopenBeside : reopenDiscussion)(ctx, (reopen[1] ?? '').trim());
-  if (line === '/pause') return pauseDiscussion(ctx);
   const resume = /^\/resume(?:\s+(.*))?$/.exec(line);
-  if (resume) return (multi(ctx) ? resumeBeside : resumeDiscussion)(ctx, (resume[1] ?? '').trim());
+  if (resume) return resumeDiscussion(ctx, (resume[1] ?? '').trim());
+  const fresh = /^\/fresh(?:\s+(.*))?$/.exec(line);
+  if (fresh) return startFresh(ctx, (fresh[1] ?? '').trim());
   if (line === '/new') return multi(ctx) ? newDiscussionBeside(ctx) : newDiscussion(ctx);
   if (line === '/brainstorm') return multi(ctx) ? newBrainstormBeside(ctx) : newBrainstorm(ctx);
   if (line === '/close') return closeDiscussion(ctx);
@@ -1465,21 +1533,18 @@ export async function handleLine(line, ctx) {
   if (archiveRollback) return confirmRollbackArchive(ctx, archiveRollback[1]);
   const move = /^\/move\s+(\S+)\s+(\S+)$/.exec(line);
   if (move) return void await moveDiscussion(ctx, move[1], move[2]);
-  if (line === '/summary' && ctx.paused) return note(ctx, 'Resume the paused discussion before requesting a summary.', true);
   if (line === '/summary') {
     ctx.agentsStarted = true;
     const status = await runSummary(ctx);
     if (status !== 'empty') await saveRound(ctx, { kind: 'summary', outcome: status === 'failed' ? 'failed' : 'completed', ending: `summary ${status}`, summary: status });
+    captureRound(ctx);
     return;
   }
   if (line === '/restart') return note(ctx, '/restart is for the browser screen; in the terminal, /quit and start the room again.');
-  const auto = /^\/autosummary(?:\s+(on|off))?$/.exec(line);
-  if (auto) return setAuto(ctx, auto[1] ? auto[1] === 'on' : !autoOn(ctx));
   if (line === '/usage') {
     const quota = await ctx.usage.fetchQuota();
     return note(ctx, `${ctx.usage.usageReport({ totals: ctx.totals, agents: [...ctx.room.agents, ctx.worker], quota })}\n`);
   }
-  if (ctx.paused) return note(ctx, 'This discussion is paused. Resume it before sending messages.', true);
   autoDevInput(ctx, 'you sent a message');
   // The session's first message opens its discussion, unless it names an unknown agent (runRound
   // then refuses it, and nothing is created).
@@ -1613,19 +1678,21 @@ async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
     // A failed turn pauses auto dev; otherwise its round is always summarized, to decide what's next.
     const deciding = run && ctx.autoDev === run && run.status === 'running';
     if (deciding && ending.endsWith('failed')) pauseAutoDev(ctx, ending);
-    // Auto-summarize: after a round in which an agent spoke and none failed. Its own end line is
-    // then the "your turn" one; this round's line is just a note.
-    if ((autoOn(ctx) && spoke || deciding) && !ending.endsWith('failed')) {
+    // Auto-summarize (always on): after a round in which an agent spoke and none failed. Its own end
+    // line is then the "your turn" one; this round's line is just a note.
+    if ((spoke || deciding) && !ending.endsWith('failed')) {
       out(ctx, dim(`── round over · ${parts.filter(Boolean).join(' · ')} · summarizing ──`));
       toScreen(ctx, { type: 'note', text: `round over · ${parts.filter(Boolean).join(' · ')} · summarizing` });
       const summary = await runSummary(ctx, true, deciding ? autoDevTask(run) : undefined);
       await saveRound(ctx, { kind: 'round', outcome: summary === 'failed' ? 'failed' : 'completed', ending, summary });
+      captureRound(ctx);
       if (deciding) decide(ctx, run, summary);
       return;
     }
     out(ctx, dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
     toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
     await saveRound(ctx, { kind: 'round', outcome: ending.endsWith('failed') ? 'failed' : 'completed', ending, summary: null });
+    captureRound(ctx);
   } catch (err) {
     if (ctx.replica && ctx.state.transcript.at(-1)?.error) await saveRound(ctx, { kind: 'round', outcome: 'interrupted', ending: err.message, summary: null });
     // An unknown @name: nothing was sent or recorded.
@@ -1789,7 +1856,6 @@ export async function refreshWorker(ctx, { prepare = false, fastForward = true }
 // when this context's queued tasks have run (or were dropped).
 // `run`: an auto dev run relaying this instruction (shown as "Relayed from discussion").
 export function queueWork(ctx, text, run = null, rollback = null) {
-  if (ctx.paused || ctx.pausing) return note(ctx, 'The discussion is pausing or paused. Resume before sending worker instructions.', true);
   if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
   if (ctx.stopped) return note(ctx, 'This room is ending: the instruction was not sent.', true);
   ctx.agentsStarted = true;
@@ -1814,7 +1880,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   const history = ctx.workerHandoff ? screen.worker.filter((m) => m.speaker).map((m) =>
     `${m.speaker}${m.error ? ' (failed)' : ''}:\n${m.html}`).join('\n\n') : '';
   // The task's context, read once, here, before anything awaits: its discussion (for the briefing
-  // and the /move lock) and its transcript. If New discussion or Re-open changes the room's
+  // and the /move lock) and its transcript. If New discussion or Resume changes the room's
   // meanwhile, the task keeps its own; the reply still goes into its transcript.
   const task = { discussion: ctx.discussion ?? null, logPath: ctx.logPath ?? null };
   const started = task.logPath;
@@ -1912,6 +1978,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     shop.workingIn = ctx.workingIn = null;
     working(null);
   }
+  saveCheckpoint(ctx); // its worker session and briefing, with the discussion's latest round
   refreshWorker(ctx).catch(() => {});
   refreshQuota(ctx).catch(() => {});
   return before;

@@ -117,8 +117,8 @@ async function addRoom(folder, { launch = false, agents, worker, reopen, context
     ready();
     throw err;
   }
-  // --reopen <discussion> (or a restored room's): start in that discussion, as /reopen would.
-  if (reopen) { try { await ctx.ui.handleLine(`/reopen ${reopen}`, ctx); } catch (err) { report(ctx, `✗ ${err.message}\n`); } }
+  // --reopen <discussion> (or a restored room's): start in that discussion, as /resume would.
+  if (reopen) { try { await ctx.ui.handleLine(`/resume ${reopen}`, ctx); } catch (err) { report(ctx, `✗ ${err.message}\n`); } }
   await ctx.ui.recoverWorkerOwner(ctx);
   ctx.done = runRoom(ctx);
   ready();

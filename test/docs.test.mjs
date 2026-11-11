@@ -222,26 +222,19 @@ test('without a worker input (terminal mode), /__work is refused', async () => {
   s.close();
 });
 
-test('the auto-summarize checkbox reaches the room only from the page, and a new page gets its state and the gauges', async () => {
-  const set = [];
+test('a new page gets the gauges; the former auto-summarize endpoint is gone', async () => {
   const gauges = [{ provider: 'claude', label: '5h', used: 20, resets: null }];
-  const screen = { clients: new Set(), transcript: [], say: () => {}, auto: true, quota: gauges, setAuto: (on) => set.push(on) };
+  const screen = { clients: new Set(), transcript: [], say: () => {}, quota: gauges };
   const s = await serve(fixture(), screen);
   try {
-    assert.equal((await postFrom(s, '/__auto', { on: false })).status, 204);
-    assert.equal((await postFrom(s, '/__auto', { on: 'no' })).status, 400);
-    assert.equal((await postFrom(s, '/__auto', { on: true }, { origin: 'https://evil.example' })).status, 403);
-    assert.deepEqual(set, [false]);
+    assert.notEqual((await postFrom(s, '/__auto', { on: false })).status, 204);
     const next = eventReader(await s.get('/__events'));
     const reset = await next();
-    assert.deepEqual([reset.auto, reset.quota], [true, gauges]);
+    assert.deepEqual([reset.auto, reset.quota], [undefined, gauges]);
     for (const c of screen.clients) c.end();
   } finally {
     s.close();
   }
-  const watcher = await serve(fixture(), { clients: new Set(), transcript: [] });
-  assert.equal((await postFrom(watcher, '/__auto', { on: true })).status, 409);
-  watcher.close();
 });
 
 test('a room serves only its sections of the root: discussions/ and proposal/, with transcripts as text', async () => {

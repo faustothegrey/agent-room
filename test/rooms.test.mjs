@@ -243,7 +243,6 @@ process.stdin.on('end', () => {
     const say = (base, text) => fetch(base + '__say', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
     const a = await stream(baseA);
     await a.next();
-    await say(baseA, '/autosummary off');
     await say(baseA, 'about alpha');
     await a.until((e) => e.type === 'turn');
     // New discussion: this window goes to a second discussion's page; the first stays open.
@@ -256,12 +255,11 @@ process.stdin.on('end', () => {
     const resetB = await b.next();
     assert.equal(resetB.room.discussion, 'No discussion started');
     assert.deepEqual(resetB.room.open.map((o) => [o.title, o.current]), [['Alpha topic', false], ['New discussion (not started)', true]]);
-    await say(baseB, '/autosummary off');
     await say(baseB, 'about beta');
     await b.until((e) => e.type === 'turn');
-    // Re-open the first from the second: the window goes back to it, as it was.
+    // Resume the first from the second: it is open, so the window only goes back to it, as it was.
     const alpha = readdirSync(join(repo, 'discussions')).find((n) => n.endsWith('alpha-topic'));
-    await say(baseB, `/reopen ${alpha}`);
+    await say(baseB, `/resume ${alpha}`);
     assert.equal((await b.until((e) => e.type === 'goto')).url, new URL(baseA).pathname + '__room');
     const pageA = await stream(baseA);
     const resetA = await pageA.next();
@@ -351,8 +349,8 @@ test('Restart with two rooms: both come back at the same addresses, with their c
     const changed = { agents: [{ provider: 'claude', name: 'Zed', model: '' }], worker: { provider: 'claude', name: 'Wz', model: '' } };
     const saved = await fetch(baseB + '__settings', { method: 'POST', headers: { 'content-type': 'application/json', origin: new URL(baseB).origin }, body: JSON.stringify(changed) });
     assert.equal((await saved.json()).applied, true);
-    await say(baseA, '/reopen 2026-11-08-topic');
-    await say(baseB, '/reopen 2026-11-08-topic');
+    await say(baseA, '/resume 2026-11-08-topic');
+    await say(baseB, '/resume 2026-11-08-topic');
     const before = await until(async () => {
       const [a, b] = [await json(baseA + '__health'), await json(baseB + '__health')];
       return a?.discussion && b?.discussion && [a, b];

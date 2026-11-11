@@ -63,7 +63,6 @@ test('two rooms: pairing, round hooks, independent browser pins, deletion and re
     let own=(await R.ownLines(a.replica.s))[line.discussion];
     let meta=JSON.parse(await R.git(a.replica.s.store,['cat-file','blob',`${own.commit}:${R.META}`]));
     assert.equal(meta.outcome,'failed');
-    await ui.handleLine('/autosummary on',a);
     const replies=['an idea','PASS',new Error('summary failed')];
     a.room=createRoom([{name:'A',provider:'claude',turn:async()=>{const r=replies.shift();if(r instanceof Error)throw r;return r??'PASS';}}],a.state);
     await ui.handleLine('failed auto summary',a);

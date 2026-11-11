@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/cli.mjs --dev",
     "terminal": "node src/cli.mjs --no-screen",
-    "test": "node --test 'test/*.test.mjs'"
+    "test": "HOME=\"$(mktemp -d)\" node --test 'test/*.test.mjs'"
   },
   "engines": {
     "node": ">=20"

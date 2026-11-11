@@ -101,7 +101,7 @@ test('saved provider/model choices survive CLI restarts and explicit CLI flags o
 });
 
 // /restart: a new process takes over the same address, in the discussion in use; the old one exits.
-test('Restart: a new server process on the same port, re-opening the discussion in use', { timeout: 20000 }, async () => {
+test('Restart: a new server process on the same port, resuming the discussion in use', { timeout: 20000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'restart-test-'));
   mkdirSync(join(dir, 'discussions', '2026-11-03-a-topic'), { recursive: true });
   const cli = spawn(process.execPath, [new URL('../src/cli.mjs', import.meta.url).pathname, '--cwd', dir, '--port', '0'],
@@ -122,14 +122,14 @@ test('Restart: a new server process on the same port, re-opening the discussion 
     const before = await health();
     assert.equal(before.app, 'agent-room');
     assert.equal(before.pid, cli.pid);
-    await say('/reopen 2026-11-03-a-topic');
+    await say('/resume 2026-11-03-a-topic');
     await until((h) => h?.discussion === 'discussions/2026-11-03-a-topic');
 
     await say('/restart');
     assert.equal(await exited, 0);
     const after = await until((h) => h && h.pid !== before.pid);
     newPid = after.pid;
-    assert.equal(after.discussion, 'discussions/2026-11-03-a-topic'); // re-opened there
+    assert.equal(after.discussion, 'discussions/2026-11-03-a-topic'); // resumed there
     assert.match(out, /Restarting: a new process takes over the server\./);
 
     await say('/quit');
@@ -143,7 +143,8 @@ test('Restart: a new server process on the same port, re-opening the discussion 
 
 // Two real server processes, with fake provider CLIs: proves the app restores native session
 // identifiers and unread-message positions after Quit, rather than replaying the chat as context.
-test('Pause survives Quit: Resume restores discussion and worker provider sessions', { timeout: 20000 }, async () => {
+// The second starts in the discussion with --reopen, as Restart starts the new process.
+test('Quit room, then start again in the discussion: its checkpoint restores the discussion and worker provider sessions', { timeout: 20000 }, async () => {
   const { writeFileSync, readFileSync } = await import('node:fs');
   const { execFileSync } = await import('node:child_process');
   const home = mkdtempSync(join(tmpdir(), 'pause-home-'));
@@ -205,43 +206,33 @@ process.stdin.on('end', () => {
   try {
     const first = await open(['--agents', 'claude:A:sonnet,codex:B:my-model', '--worker', 'claude:W:haiku']);
     await first.next();
-    await first.say('/autosummary off');
-    await first.say('Before pause');
+    await first.say('Before quit');
+    const room = await first.until((e) => e.type === 'room' && e.room.active);
+    const name = room.room.active.slice('discussions/'.length);
     await first.until((e) => e.type === 'message' && e.message.speaker === 'B');
-    await first.work('Worker before pause');
-    // Pause must also wait for the independent worker, even though the discussion is idle.
-    await first.say('/pause');
-    const paused = await first.until((e) => e.type === 'room' && e.room.paused);
-    const name = paused.room.active.slice('discussions/'.length);
+    await first.work('Worker before quit');
+    await first.until((e) => e.type === 'work' && e.message.speaker === 'W');
     const original = calls();
-    const claude = original.find((c) => c.input.includes('Before pause') && !c.args.includes('--no-session-persistence'));
-    const worker = original.find((c) => c.input.includes('Worker before pause'));
+    const claude = original.find((c) => c.input.includes('Before quit') && !c.args.includes('--no-session-persistence'));
+    const worker = original.find((c) => c.input.includes('Worker before quit'));
     assert.ok(worker);
-    await first.say('Must not reach providers');
-    await first.until((e) => e.type === 'note' && /paused.*Resume/.test(e.text));
-    assert.equal(calls().length, original.length);
     await first.say('/quit'); assert.equal(await first.exited, 0);
 
-    const second = await open(); // no original provider/model flags supplied
-    const initial = await second.next();
-    assert.equal(initial.room.pausedSessions[0].name, name);
-    await second.say('/resume ' + name);
-    const resumed = await second.until((e) => e.type === 'reset' && e.room?.active);
-    assert.equal(resumed.room.paused, false);
-    assert.ok(resumed.messages.some((m) => m.speaker === 'User' && /Before pause/.test(m.html)));
+    const second = await open(['--reopen', name]); // no original provider/model flags supplied
+    const resumed = await second.until((e) => e.type === 'reset' && e.room?.active && e.messages.length);
+    assert.equal(resumed.room.active, 'discussions/' + name);
+    assert.ok(resumed.messages.some((m) => m.speaker === 'User' && /Before quit/.test(m.html)));
     assert.ok(resumed.worker.some((m) => m.speaker === 'W' && /Worker reply/.test(m.html)));
-    assert.equal(resumed.auto, false);
-    assert.equal(resumed.room.pausedSessions.length, 0);
+    assert.deepEqual(resumed.room.checkpoints.map((c) => [c.name, c.kind]), [[name, 'full']]);
     await second.say('After resume');
     await second.until((e) => e.type === 'message' && e.message.speaker === 'B');
     await second.work('Worker after resume');
-    await second.say('/pause');
-    await second.until((e) => e.type === 'room' && e.room.paused);
+    await second.until((e) => e.type === 'work' && e.message.speaker === 'W');
     const continued = calls().slice(original.length);
     const a = continued.find((c) => !c.codex && c.input.includes('After resume'));
     assert.equal(a.args[a.args.indexOf('--resume') + 1], claude.args[claude.args.indexOf('--session-id') + 1]);
     assert.equal(a.args[a.args.indexOf('--model') + 1], 'sonnet');
-    assert.doesNotMatch(a.input, /Before pause|Participants:/);
+    assert.doesNotMatch(a.input, /Before quit|Participants:/);
     const b = continued.find((c) => c.codex);
     assert.deepEqual(b.args.slice(0, 2), ['exec', 'resume']);
     assert.ok(b.args.includes('saved-thread'));
@@ -249,7 +240,7 @@ process.stdin.on('end', () => {
     const w = continued.find((c) => c.input.includes('Worker after resume'));
     assert.equal(w.args[w.args.indexOf('--resume') + 1], worker.args[worker.args.indexOf('--session-id') + 1]);
     assert.equal(w.args[w.args.indexOf('--model') + 1], 'haiku');
-    assert.doesNotMatch(w.input, /Worker before pause|Your working directory is/);
+    assert.doesNotMatch(w.input, /Worker before quit|Your working directory is/);
     await second.say('/quit'); assert.equal(await second.exited, 0);
   } finally {
     for (const cli of children) cli.kill();

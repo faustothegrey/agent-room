@@ -60,7 +60,7 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, s
     name,
     provider: 'claude',
     lastUsage: null,
-    // A fresh CLI session from the next turn on (re-opening a discussion); `session` is kept, emptied.
+    // A fresh CLI session from the next turn on (Resume or Start fresh elsewhere); `session` is kept, emptied.
     reset() { session.id = randomUUID(); session.started = false; },
     async turn(prompt) {
       agent.lastUsage = null;

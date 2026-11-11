@@ -111,9 +111,9 @@ setInterval(async () => {
 //   sections: the root's folders a room serves (discussions/),
 //   worker: the worker tab's messages (messageView, plus meta: time and tokens),
 //   working: the worker's name while it works, else null,
-//   auto: whether auto-summarize is on, quota: the header's gauges ([{ provider, label, used,
+//   quota: the header's gauges ([{ provider, label, used,
 //   resets }], null if the meter can't be read, undefined until first read),
-//   say: (line) => void, work: (text) => void, setAuto: (on) => void and newRoom: () => Promise,
+//   say: (line) => void, work: (text) => void and newRoom: () => Promise,
 //   set only when the page is the input (UI mode) }.
 
 // A transcript entry as the page shows it: the text rendered as Markdown. Summary turns are
@@ -183,12 +183,11 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #disc-text { flex: 0 1 auto; min-width: 5rem; display: flex; flex-direction: column; overflow-wrap: anywhere; }
 #disc-heading { display: flex; align-items: baseline; gap: .15rem; min-width: 0; }
 #disc { min-width: 0; }
-#actions-menu, #auto-controls { flex: none; }
+#actions-menu { flex: none; }
 #disc-status { font-size: .7rem; color: var(--dim); line-height: 1.35; }
 #actions-menu > summary { padding: .15rem .3rem; margin-left: 0; }
 #actions-menu > summary::after { content: '▾'; }
 #actions-menu[hidden] { display: none; }
-#auto-controls { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); font-size: .75rem; white-space: nowrap; }
 #new-discussion { display: contents; }
 #new-discussion[hidden] { display: none; }
 #server-zone { flex-direction: row; align-items: center; gap: .5rem; }
@@ -267,7 +266,6 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #autodev p { margin: .25rem 0; } #autodev .next { white-space: pre-wrap; max-height: 6rem; overflow-y: auto; }
 .msg.report .who { color: #3a9a52; }
 #remote-view { border-bottom: 1px solid var(--line); padding-bottom: .5rem; margin-bottom: .5rem; font-size: .85rem; }
-#auto-controls[hidden] { display: none; }
 #remote-view p { margin: .2rem 0; } #remote-view .local-activity { color: var(--dim); font-size: .75rem; }
 .tools label { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); }
 #left { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
@@ -381,7 +379,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b>agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><span id="folder" title="The room's root folder"></span><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="pause-discussion" hidden>Pause discussion</button><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, kept only in memory: no folder, transcript or notes. It ends this session; Restart or Quit room loses it, and a new one replaces it.">New brainstorm</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Re-open it from Explorer.">Close discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><label id="auto-controls" title="After every round in which an agent spoke, the agents agree a short summary"><input type="checkbox" id="auto"> Auto-summarize</label></div>
+<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, kept only in memory: no folder, transcript or notes. It ends this session; Restart or Quit room loses it, and a new one replaces it.">New brainstorm</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Explorer.">Close discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div></div>
 <div id="server-zone" class="zone" aria-label="Server and monitoring"><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span><button id="usage">Usage</button></div></div>
 </header>
 <div id="left">
@@ -584,7 +582,7 @@ function renderAutoDev() {
   const target = summaries.at(-1);
   if (!target) return;
   const offer = document.createElement('div'); offer.className = 'autodev-offer';
-  if (a.offer.text) offer.append(button('Start auto dev'), span('Sends this instruction as cycle 1 of up to ' + a.max + '. Auto-summarize is on for this run; your saved setting is unchanged.'));
+  if (a.offer.text) offer.append(button('Start auto dev'), span('Sends this instruction as cycle 1 of up to ' + a.max + '.'));
   else offer.append(span("Auto dev can’t send this instruction: " + a.offer.error + '.'));
   // Right after the instruction: before the summary's next section (Later) or its Outcome line.
   const after = [...target.children].find((c) => /^(Later|Outcome:)/.test(c.textContent.trim()));
@@ -726,7 +724,6 @@ function talkStatus() {
   if (tab === 'work') return localWorking ? localWorking + ' is working' : 'idle';
   if (!room) return '';
   if (viewing) return 'read-only';
-  if (room.paused) return 'paused';
   if (localThinking) return localThinking + ' is thinking';
   if (room.autoDev?.status === 'running') return 'Auto dev running';
   return room.started && yourTurn ? 'your turn' : '';
@@ -750,7 +747,6 @@ function updateReplicaView() {
   $('disc-status').textContent = talkStatus();
   const panel = $('remote-view'); panel.hidden = !viewing; panel.replaceChildren();
   $('composer').hidden = !viewing && !localInput;
-  $('pause-discussion').hidden = !room?.started || room.brainstorm || ended || !!viewing || !localInput;
   box.hidden = !!viewing;
   // Attach: in discussions only (disabled until the first message creates the folder), not in brainstorms.
   $('attach-row').hidden = !!viewing || !room || !!room.brainstorm;
@@ -759,20 +755,19 @@ function updateReplicaView() {
   renderAttachments();
   $('talk-settings').hidden = !!viewing;
   $('summary').hidden = !!viewing;
-  $('auto').parentElement.hidden = !!viewing;
   $('reload').hidden = !!viewing;
-  // New discussion (in the header): ends this session, as Re-open does; the next message starts the new one.
+  // New discussion (in the header): ends this session (in the terminal); the next message starts the new one.
   // New brainstorm, beside it, is always offered (it ends a session or a brainstorm the same way).
   $('new-discussion').hidden = !(room && localInput && !viewing);
   $('newdisc').hidden = !(room?.active || room?.brainstorm);
-  // With several discussions open (the screen), New discussion and Re-open keep this one open;
+  // With several discussions open (the screen), New discussion and Resume keep this one open;
   // Close discussion closes it. Their tooltips say so.
   $('closedisc').hidden = !room?.multi || !(room.active || room.brainstorm || room.open?.length > 1);
   if (room?.multi) {
-    $('newdisc').title = 'Open a new discussion beside this one, which stays open (Explorer: Go to). An open brainstorm ends.';
+    $('newdisc').title = 'Open a new discussion beside this one, which stays open (Explorer: Resume shows it again). An open brainstorm ends.';
     $('newbrainstorm').title = 'A conversation with the same agents, kept only in memory, beside the open discussions (one per folder; a new one replaces it).';
   }
-  $('actions-menu').hidden = ['pause-discussion', 'summary', 'new-discussion'].every((id) => $(id).hidden);
+  $('actions-menu').hidden = ['summary', 'new-discussion'].every((id) => $(id).hidden);
   if (!viewing) return;
   const label = document.createElement('p');
   label.textContent = viewExpired ? 'View expired. Select the received line again.' : viewing.node + "'s line, round " + viewing.round + ', received ' + receivedTime(viewing.receivedAt) + '. Read-only.';
@@ -851,21 +846,35 @@ setInterval(async () => { if (viewing) { try { const r = await post('__view', { 
 // Discussions: the room's active discussions (newest first), then its own documents, then archive/
 // and deferred/ (always shown, at the bottom), which hold whole discussions moved there. Open a
 // discussion to see its documents, and its subfolders (drawings/, transcripts/, …) one level at a
-// time. Looking is not switching: Re-open this discussion is a separate action, and Archive / Defer /
+// time. Looking is not switching: Resume and Start fresh are separate actions, and Archive / Defer /
 // Make active move the whole discussion. A discussion is a folder named <date>-<title> (as ui.mjs
 // creates them); anything else directly in discussions/ is the room's own material (in agent-room
 // itself: the index of its discussions).
 const isDiscussion = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(name);
 const SECTIONS = { archive: 'Archive', deferred: 'Deferred' };
-// The discussion a list path shows, as /reopen and /move name it ("<name>" or "archive/<name>"), or null.
+// The discussion a list path shows, as /resume and /move name it ("<name>" or "archive/<name>"), or null.
 function discussionOf(parts) {
   if (parts.length === 2 && isDiscussion(parts[1])) return { ref: parts[1], section: null };
   if (parts.length === 3 && SECTIONS[parts[1]] && isDiscussion(parts[2])) return { ref: parts[1] + '/' + parts[2], section: parts[1] };
   return null;
 }
-const REOPEN_TIP = 'A fresh session in this discussion: the agents start from its handoff. Its documents and transcripts stay. Any saved Pause for this discussion is discarded.';
-// Re-open and New discussion: once this session has started, they end it (the chat clears), so they
-// take two clicks, like Quit. ask: when the first click only asks (by default, as said above).
+// Resume (one button for a discussion not on screen): what it does, by the discussion's state.
+// open: its entry in room.open when it is open in another context (started: Resume only shows it).
+function resumeTip(name, open, section) {
+  const saved = room?.checkpoints?.find((c) => c.name === name);
+  const what = open ? 'Show it: its agents carry on, nothing is restarted.'
+    : saved?.kind === 'full' ? 'Continue where it stopped: the same agent and worker sessions, and its chat.'
+    : saved?.kind === 'fresh' ? 'Start from its handoff and notes, with the summary chosen at Start fresh.'
+    : 'No saved session: start from its handoff and notes.';
+  return (section ? 'Makes it active first. ' : '') + what;
+}
+// Start fresh: discards the saved sessions and chat, so it always takes two clicks.
+function freshButton(b, ref) {
+  b.title = 'New agent and worker sessions, from its handoff and notes and its latest saved summary. Its saved sessions and chat are discarded.';
+  confirmed(b, () => send('/fresh ' + ref), 'Click again: its saved sessions and chat are discarded; it starts from its handoff', () => true);
+}
+// New discussion: once this session has started, it ends it (the chat clears), so it takes two
+// clicks, like Quit. ask: when the first click only asks (by default, as said above).
 function confirmed(b, run, warning, ask = () => room?.started || warning) {
   const label = b.textContent;
   b.onclick = (e) => {
@@ -877,17 +886,13 @@ function confirmed(b, run, warning, ask = () => room?.started || warning) {
     run();
   };
 }
-// Resume: during a brainstorm with messages it discards them, so it takes two clicks.
-function resumeButton(b, name) {
-  confirmed(b, () => send('/resume ' + name), 'Click again: the brainstorm will be discarded', () => !!room?.brainstorm && localMessages.length > 0);
-}
 // Rollback queues work; archiving is a separate, two-click action after its report.
-function rollbackButtons(row, details, name, ref, paused, inUse) {
+function rollbackButtons(row, details, name, ref, inUse) {
   const r = room?.rollbacks?.find((r) => r.name === name);
   const b = document.createElement('button'); b.className = 'reopen';
   b.textContent = r && ['queued', 'running'].includes(r.status) ? 'Rollback ' + r.status : 'Archive with rollback';
-  b.disabled = !!paused || !!r && ['queued', 'running'].includes(r.status);
-  b.title = paused ? 'Resume the paused discussion before requesting rollback' : 'Queue a worker rollback, including merged commits. Review its report before separately confirming archive; main stays yours to merge.';
+  b.disabled = !!r && ['queued', 'running'].includes(r.status);
+  b.title = 'Queue a worker rollback, including merged commits. Review its report before separately confirming archive; main stays yours to merge.';
   confirmed(b, () => send('/rollback ' + ref), 'Click again: queue rollback of this discussion’s implementation', () => true);
   row.append(b);
   if (r?.report) {
@@ -898,7 +903,7 @@ function rollbackButtons(row, details, name, ref, paused, inUse) {
   }
   if (r?.status === 'ready') {
     const confirm = document.createElement('button'); confirm.className = 'reopen'; confirm.textContent = 'Confirm archive after rollback';
-    confirm.disabled = !!inUse || !!paused;
+    confirm.disabled = !!inUse;
     confirm.title = inUse ? 'Switch to another discussion before confirming archive' : 'Review the rollback report first. Archive the discussion; merging worker/main into main stays manual.';
     confirmed(confirm, () => send('/archive-rollback ' + ref), 'Click again: I reviewed the rollback report; archive', () => true);
     row.append(confirm);
@@ -1003,7 +1008,8 @@ async function openFiles(group) {
     const details = el('details', 'discussion-lines');
     details.open = expandedLines.has(path);
     details.ontoggle = () => { if (details.open) expandedLines.add(path); else expandedLines.delete(path); };
-    // Open in another context of this folder (the screen keeps several open): Go to it.
+    // Open in another context of this folder (the screen keeps several open): Resume shows it, or
+    // Go to before its first message (it has nothing to resume yet).
     const openHere = room?.open?.find((o) => !o.current && o.active === path);
     details.append(el('summary', '', name + (path === room?.active ? ' · in use' : openHere ? ' · open' : '')));
     const row = el('div', 'row discussion-row' + (path === room?.active ? ' in-use' : '')); row.append(details);
@@ -1011,13 +1017,11 @@ async function openFiles(group) {
       (own ? Object.entries(own.sent).map(([n, sent]) => ' · ' + (sent ? 'sent to ' + n + ' ✓' : n + ' pending')).join('') : '');
     row.append(info(label));
     if (canAct) {
-      const paused = room.pausedSessions?.some((p) => p.name === name);
-      if (openHere) {
-        const b = el('button', 'reopen', 'Go to'); b.title = 'Show this open discussion, as it is: same sessions and chat'; b.onclick = () => { location.href = openHere.url; }; row.append(b);
-      } else if (!(path === room.active && !room.started)) {
-        const b = el('button', 'reopen', 'Re-open'); b.title = room.multi && path !== room.active ? 'Open it beside the open discussions, fresh from its handoff. Any saved Pause for it is discarded.' : REOPEN_TIP;
-        confirmed(b, () => send('/reopen ' + name), paused ? 'Click again: discard the saved Pause and start fresh' : null,
-          () => !!paused || (room.started && (!room.multi || path === room.active))); row.append(b);
+      if (openHere && !openHere.started) {
+        const b = el('button', 'reopen', 'Go to'); b.title = 'Show this open discussion: it has not started yet'; b.onclick = () => { location.href = openHere.url; }; row.append(b);
+      } else if (path !== room.active) {
+        const b = el('button', 'reopen', 'Resume'); b.title = resumeTip(name, openHere, null);
+        b.onclick = (e) => { e.stopPropagation(); send('/resume ' + name); }; row.append(b);
       }
       // The other actions (moving and rollback) in one ▾ menu; it stays open across redraws.
       const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
@@ -1026,14 +1030,16 @@ async function openFiles(group) {
       menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
       for (const [label, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
         const b = el('button', '', label);
-        b.disabled = path === room.active || paused;
-        b.title = path === room.active ? 'The discussion in use cannot be moved' : paused ? 'Resume the paused discussion before moving it' : 'Move the whole discussion into ' + target + '/';
+        b.disabled = path === room.active;
+        b.title = path === room.active ? 'The discussion in use cannot be moved' : 'Move the whole discussion into ' + target + '/';
         b.onclick = () => { closeMenus(); send('/move ' + name + ' ' + target); };
         if (target === 'archive') archiveButton(b, name);
         items.append(b);
       }
+      // Start fresh: not for the discussion in use before its first message (nothing to discard).
+      if (!(path === room.active && !room.started)) { const f = el('button', '', 'Start fresh'); freshButton(f, name); items.append(f); }
       items.append(el('hr'));
-      rollbackButtons(items, details, name, name, paused, path === room.active);
+      rollbackButtons(items, details, name, name, path === room.active);
       row.append(menu);
     }
     if (remote.length) details.append(el('div', 'local-label', 'Local · ' + (replica?.node || 'this node')));
@@ -1068,16 +1074,14 @@ async function openFiles(group) {
       title(parts.at(-1), status[0], status[1]);
     } else title(parts.slice(1).join('/'));
     if (disc && canAct) {
-      // Actions, apart from the files: Re-open, then moving the whole discussion.
+      // Actions, apart from the files: Resume (or Go to) and Start fresh, then moving the whole discussion.
       const actions = el('div', 'actions');
       const action = (label, onclick, tip, cls) => { const b = el('button', cls || '', label); b.onclick = onclick; b.title = tip; actions.append(b); return b; };
-      if (room.pausedSessions?.some((p) => p.name === disc.ref))
-        resumeButton(action('Resume', null, 'Continue the saved agent sessions and chat'), disc.ref);
-      // Re-open: not for the discussion in use before anything was said in it (nothing to restart).
-      if (!(inUse(group) && !room.started)) {
-        const b = action(disc.section ? 'Re-open (makes it active)' : 'Re-open', null, REOPEN_TIP, 'primary');
-        confirmed(b, () => send('/reopen ' + disc.ref), room.pausedSessions?.some((p) => p.name === disc.ref) ? 'Click again: discard the saved Pause and start fresh' : null);
-      }
+      const name = disc.ref.split('/').at(-1), openHere = room.open?.find((o) => !o.current && o.active === 'discussions/' + name);
+      if (openHere && !openHere.started) action('Go to', () => { location.href = openHere.url; }, 'Show this open discussion: it has not started yet', 'primary');
+      else if (!inUse(group)) action(disc.section ? 'Resume (makes it active)' : 'Resume', () => send('/resume ' + disc.ref), resumeTip(name, openHere, disc.section), 'primary');
+      // Start fresh: not for the discussion in use before anything was said in it (nothing to discard).
+      if (!(inUse(group) && !room.started)) freshButton(action('Start fresh', null, ''), disc.ref);
       // Moving the whole discussion; not the one in use (its transcript is open there).
       if (!inUse(group)) {
         if (actions.children.length) actions.append(el('span', 'sep'));
@@ -1085,7 +1089,7 @@ async function openFiles(group) {
         if (disc.section !== 'archive') archiveButton(action('Archive', null, 'Move the whole discussion into archive/'), disc.ref);
         if (disc.section !== 'deferred') action('Defer', () => send('/move ' + disc.ref + ' deferred'), 'Move the whole discussion into deferred/');
       }
-      if (disc.section !== 'archive') rollbackButtons(actions, list, disc.ref.split('/').at(-1), disc.ref, room.pausedSessions?.some((p) => p.name === disc.ref.split('/').at(-1)), inUse(group));
+      if (disc.section !== 'archive') rollbackButtons(actions, list, name, disc.ref, inUse(group));
       if (actions.children.length) list.append(actions);
     }
     const rel = files.filter((f) => f.startsWith(group + '/')).map((f) => f.slice(group.length + 1));
@@ -1104,25 +1108,14 @@ async function openFiles(group) {
   // The discussion in use first; the others newest first.
   const active = room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
   const discussions = discussionsIn('discussions').sort((a, b) => (b === active) - (a === active));
-  if (canAct && room.pausedSessions?.length) {
-    heading('Paused on this machine');
-    for (const saved of room.pausedSessions) {
-      const row = el('div', 'row');
-      row.append(el('span', '', saved.title));
-      const resume = el('button', 'reopen', 'Resume');
-      resume.title = 'Continue the saved discussion and worker sessions, including their chat';
-      resumeButton(resume, saved.name);
-      row.append(resume); list.append(row);
-    }
-  }
   // The folder's other open contexts that have no discussion row: the brainstorm, a new one.
   for (const o of (room?.open ?? []).filter((x) => !x.current && !x.active)) {
     const r = el('div', 'row'); r.append(el('span', '', o.title + ' · open'));
     const b = el('button', 'reopen', 'Go to'); b.onclick = () => { location.href = o.url; }; r.append(b); list.append(r);
   }
-  if (room?.brainstorm && canAct) list.append(el('span', 'hint', room.multi ? 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Close discussion ends it.' : 'A brainstorm is in progress: agent-room keeps no record of it. New discussion, Re-open or Resume ends it.'));
+  if (room?.brainstorm && canAct) list.append(el('span', 'hint', room.multi ? 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Close discussion ends it.' : 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Resume ends it.'));
   else if (!discussions.length && !replica?.received.some((l) => !l.local)) list.append(el('span', 'hint', room?.started ? '' : 'No active discussions: your first message starts one.'));
-  else if (room && !room.started && canAct) list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Re-open on its row.'));
+  else if (room && !room.started && canAct) list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Resume on its row.'));
   heading('Discussions');
   for (const d of discussions) {
     const path = 'discussions/' + d;
@@ -1154,11 +1147,6 @@ function setRoom(r) {
   renderAutoDev();
   $('folder').textContent = r.folder;
   $('disc').textContent = r.discussion || '';
-  const pause = $('pause-discussion');
-  pause.hidden = !r.started || r.brainstorm || ended || viewing || $('composer').hidden;
-  pause.textContent = r.paused ? 'Resume discussion' : 'Pause discussion';
-  pause.title = r.paused ? 'Continue the saved provider sessions' : 'Wait for the round and worker tasks to finish, then save their sessions on this machine';
-  pause.onclick = () => send(r.paused ? '/resume ' + r.active.slice('discussions/'.length) : '/pause');
   $('disc').dataset.active = r.active ? 'true' : 'false';
   showVersion(r.code);
   updateReplicaView();
@@ -1451,10 +1439,6 @@ function showQuota(gauges, at) {
   }
   box.append(quotaUpdated(at));
 }
-$('auto').onchange = async (e) => {
-  const res = await post('__auto', { on: e.target.checked });
-  if (!res.ok) { status(await res.text(), true); e.target.checked = !e.target.checked; }
-};
 // The ▾ menus (the header's and Explorer's discussion rows): one open at a time; a click outside or
 // Escape closes them. Actions that open something else close their menu; the two-click ones keep it
 // open for the second click.
@@ -1463,7 +1447,7 @@ document.addEventListener('toggle', (e) => { const m = e.target; if (m.matches?.
 const closeMenus = () => menus().forEach((m) => { m.open = false; });
 document.addEventListener('click', (e) => { if (!e.target.closest('details.menu')) closeMenus(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
-for (const id of ['switchroom', 'newroom', 'reload', 'pause-discussion', 'summary']) $(id).addEventListener('click', closeMenus);
+for (const id of ['switchroom', 'newroom', 'reload', 'summary']) $(id).addEventListener('click', closeMenus);
 // On the screen with several discussions, New discussion asks twice only when it ends a brainstorm,
 // and New brainstorm only when it discards one.
 const brainstormOpen = () => !!room?.open?.some((o) => o.brainstorm);
@@ -1549,7 +1533,6 @@ events.onmessage = (e) => {
     if (!ev.workInput) { $('wcomposer').hidden = true; }
     setWorkerInfo(ev.workerInfo);
     showQuota(ev.quota, ev.quotaAt);
-    $('auto').checked = !!ev.auto;
     if (ev.room) setRoom(ev.room);
     $('newroom').hidden = !ev.newRoom;
     replicaOff = ev.replicaOff ?? null;
@@ -1559,7 +1542,6 @@ events.onmessage = (e) => {
   if (ev.type === 'room') { setRoom(ev.room); if (listed !== null) openFiles(listed); } // its buttons and "in use" follow
   if (ev.type === 'work') workMessage(ev.message, true);
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
-  if (ev.type === 'auto') $('auto').checked = ev.on;
   if (ev.type === 'working') setWorking(ev.name);
   if (ev.type === 'workerinfo') setWorkerInfo(ev.info);
   if (ev.type === 'message') message(ev.message);
@@ -1737,7 +1719,7 @@ function handleScreen(req, res, url, dir, screen) {
       (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
-  if (['/__say', '/__show', '/__work', '/__auto', '/__newroom'].includes(url.pathname)) {
+  if (['/__say', '/__show', '/__work', '/__newroom'].includes(url.pathname)) {
     if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain; charset=utf-8', 'Refused: only the room page can send input.'); return true; }
     readJson(req, url.pathname === '/__say' ? ATTACH_TOTAL * 1.4 : undefined).then((body) => {
       if (url.pathname === '/__newroom') {
@@ -1751,12 +1733,6 @@ function handleScreen(req, res, url, dir, screen) {
         if (!file) return send(404, 'text/plain; charset=utf-8', 'No such document.');
         screen.doc = file;
         broadcast(screen, { type: 'doc', file });
-        return send(204, 'text/plain', '');
-      }
-      if (url.pathname === '/__auto') {
-        if (!screen.setAuto) return send(409, 'text/plain; charset=utf-8', 'This room is typed in the terminal: use /autosummary there.');
-        if (typeof body?.on !== 'boolean') return send(400, 'text/plain; charset=utf-8', 'Expected { on: true | false }.');
-        screen.setAuto(body.on);
         return send(204, 'text/plain', '');
       }
       if (url.pathname === '/__work') {
@@ -1803,12 +1779,12 @@ function handleScreen(req, res, url, dir, screen) {
 }
 
 // Everything a page shows, to start over from: sent to a page that (re)connects, and to every open
-// page when a discussion is re-opened.
+// page when a discussion is resumed or started afresh.
 export function resetEvent(screen) {
   return { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc,
     thinking: screen.thinking, status: screen.status, input: !!screen.say,
     room: screen.room ?? null, worker: screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
-    auto: screen.auto ?? false, quota: screen.quota, quotaAt: screen.quotaAt ?? null, newRoom: !!screen.newRoom, page: PAGE,
+    quota: screen.quota, quotaAt: screen.quotaAt ?? null, newRoom: !!screen.newRoom, page: PAGE,
     replica: screen.replica ?? null, replicaOff: screen.replicaOff ?? null, viewing: screen.viewing ?? null };
 }
 

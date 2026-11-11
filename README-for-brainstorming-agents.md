@@ -93,8 +93,12 @@ Do not present an archived work order or deferred idea as current behavior or ne
 
 ## Where to start reading
 Your first message says whether this is a **new discussion** (its folder is new and empty:
-start from the User's message) or a session that **continues** one. Older sessions are not
-replayed to you; a continued discussion starts from its handoff.
+start from the User's message) or a session that **continues** one. agent-room saves each
+discussion after every round, so the User normally resumes your own session: you then get no new
+first message, you keep your memory of the conversation, and you don't read the handoff again.
+When the User starts a discussion afresh instead, older sessions are not replayed to you; the
+first message says it continues the discussion and may carry its latest summary (marked when it
+wasn't agreed: treat those points as proposals); start from its handoff, as below.
 
 When continuing, first check `handoff.md` in the discussion's folder. This exact filename is
 the pending handoff for the next session; preparing or reviewing it in the outgoing session

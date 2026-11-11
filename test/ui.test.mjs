@@ -66,18 +66,10 @@ test('auto-summarize: on by default, a summary follows a round in which an agent
   assert.deepEqual([result.speaker, result.outcome, result.text], ['Summary', 'agreed', '- the idea']);
 });
 
-test('auto-summarize: no summary after a round of passes, or when turned off', async () => {
+test('auto-summarize: no summary after a round of passes', async () => {
   const quiet = await scriptedCtx([]);
   await handleLine('hello', quiet);
   assert.ok(!quiet.state.transcript.some((m) => m.speaker === 'Summary'));
-
-  const off = await scriptedCtx(['an idea']);
-  await handleLine('/autosummary off', off);
-  assert.equal(off.autoSummary, false);
-  await handleLine('hello', off);
-  assert.ok(!off.state.transcript.some((m) => m.speaker === 'Summary'));
-  await handleLine('/autosummary', off); // toggles
-  assert.equal(off.autoSummary, true);
 });
 
 // ── Discussions ──
@@ -138,7 +130,6 @@ test('the first message creates the discussion (titled by Claude) and its transc
   const prompts = [];
   const ctx = await freshSession([], async (text) => ({ title: `About ${text}` }));
   ctx.room.agents[0].turn = async (p) => { prompts.push(p); return 'PASS'; };
-  await handleLine('/autosummary off', ctx); // said before the folder exists: kept for the transcript
   assert.deepEqual(readdirSync(ctx.cwd), []); // nothing written yet
   await handleLine('pendulums', ctx);
   const [name] = readdirSync(`${ctx.cwd}/discussions`);
@@ -147,7 +138,7 @@ test('the first message creates the discussion (titled by Claude) and its transc
   assert.match(prompts[0], new RegExp(`Its folder is ${ctx.cwd}/discussions/${name}: create, read and write this discussion's documents`));
   const text = readFileSync(ctx.logPath, 'utf8');
   assert.match(text, /^# About pendulums — session of/);
-  assert.match(text, /auto-summarize off[\s\S]*title by Claude[\s\S]*\*\*User\*\*\n\npendulums/);
+  assert.match(text, /title by Claude[\s\S]*\*\*User\*\*\n\npendulums/); // said before the folder existed: kept for the transcript
   assert.match(ctx.logPath, new RegExp(`discussions/${name}/transcripts/session-.*\\.md$`));
 });
 
@@ -160,23 +151,23 @@ test('if the title fails, the folder is named after the date and time; an unknow
   assert.match(readdirSync(`${ctx.cwd}/discussions`)[0], /^\d{4}-\d{2}-\d{2}-\d{4}$/);
 });
 
-test('/continue: only before the first message; no title asked, the transcript goes in that discussion', async () => {
+test('/resume without a checkpoint, before the first message: no title asked, the transcript goes in that discussion', async () => {
   const { mkdirSync, readdirSync } = await import('node:fs');
   const prompts = [];
   const ctx = await freshSession([], async () => { throw new Error('no title should be asked'); });
   ctx.room.agents[0].turn = async (p) => { prompts.push(p); return 'PASS'; };
   mkdirSync(`${ctx.cwd}/discussions/2026-11-01-old`, { recursive: true });
-  await handleLine('/continue nosuch', ctx);
-  await handleLine('/continue ../x', ctx);
+  await handleLine('/resume nosuch', ctx);
+  await handleLine('/resume ../x', ctx);
   assert.equal(ctx.discussion, undefined);
-  await handleLine('/continue 2026-11-01-old', ctx);
+  await handleLine('/resume 2026-11-01-old', ctx);
   await handleLine('where were we?', ctx);
   assert.deepEqual(readdirSync(`${ctx.cwd}/discussions`), ['2026-11-01-old']);
   assert.equal(readdirSync(`${ctx.cwd}/discussions/2026-11-01-old/transcripts`).length, 1);
   assert.match(prompts[0], /continues the discussion in .*2026-11-01-old.*Start from its handoff/);
 });
 
-test('/reopen after the session started: a fresh session in that discussion, from its handoff', async () => {
+test('/resume, after the session started, of a discussion without a checkpoint: a fresh session there, from its handoff', async () => {
   const { mkdirSync, readdirSync, readFileSync } = await import('node:fs');
   const prompts = [];
   const ctx = await freshSession([], async () => ({ title: 'First topic' }));
@@ -184,19 +175,18 @@ test('/reopen after the session started: a fresh session in that discussion, fro
   const resets = [];
   for (const a of [...ctx.room.agents, ctx.worker]) a.reset = () => resets.push(a.name);
   ctx.room.agents[0].turn = async (p) => { prompts.push(p); return 'PASS'; };
-  await handleLine('/autosummary off', ctx);
   await handleLine('hello', ctx);
   const first = ctx.logPath;
   const [name] = readdirSync(`${ctx.cwd}/discussions`);
   mkdirSync(`${ctx.cwd}/discussions/2026-11-01-old`);
 
-  await handleLine('/reopen 2026-11-01-old', ctx);
+  await handleLine('/resume 2026-11-01-old', ctx);
   assert.equal(ctx.discussion.name, '2026-11-01-old');
   assert.deepEqual(resets, ['A', 'B', 'W']); // fresh CLI sessions for the agents and the worker
   assert.equal(ctx.logPath, null);
   assert.deepEqual(ctx.state.transcript, []); // the chat starts over (the same array, emptied)
   assert.equal(ctx.screen.transcript, ctx.state.transcript);
-  assert.match(readFileSync(first, 'utf8'), /session ended: re-opening the discussion 2026-11-01-old/);
+  assert.match(readFileSync(first, 'utf8'), /session ended: resuming the discussion 2026-11-01-old/);
 
   await handleLine('back to it', ctx);
   assert.match(ctx.logPath, /discussions\/2026-11-01-old\/transcripts\/session-/);
@@ -205,9 +195,9 @@ test('/reopen after the session started: a fresh session in that discussion, fro
   assert.match(prompts[1], /continues the discussion in .*2026-11-01-old.*Start from its handoff/);
   assert.equal(readdirSync(`${ctx.cwd}/discussions/${name}/transcripts`).length, 1); // the first discussion keeps its transcript
 
-  await handleLine('/reopen ../x', ctx);
+  await handleLine('/resume ../x', ctx);
   mkdirSync(`${ctx.cwd}/discussions/archive`); // the room's own material, not a discussion
-  await handleLine('/reopen archive', ctx);
+  await handleLine('/resume archive', ctx);
   assert.equal(ctx.discussion.name, '2026-11-01-old');
 });
 
@@ -217,7 +207,6 @@ test('the worker is told the active discussion\'s folder with its first instruct
   const ctx = await freshSession([], async () => ({ title: 'Topic' }));
   await gitRoom(ctx.cwd);
   ctx.worker.turn = async (p) => { got.push(p); return 'done'; };
-  await handleLine('/autosummary off', ctx);
   await handleLine('hello', ctx);
   queueWork(ctx, 'fix the bug'); // as the Worker tab sends it
   queueWork(ctx, 'and the test');
@@ -275,19 +264,18 @@ test('/move: a whole discussion into archive/ or deferred/ and back; never the o
   await handleLine('/move nosuch archive', ctx);
   assert.ok(existsSync(`${root}/2026-11-01-old`));
 
-  await handleLine('/autosummary off', ctx);
   await handleLine('hello', ctx); // creates the discussion in use
   await handleLine(`/move ${ctx.discussion.name} archive`, ctx);
   assert.ok(existsSync(ctx.discussion.dir));
 });
 
-test('/reopen of an archived discussion makes it active first; new names skip archived ones', async () => {
+test('/resume of an archived discussion makes it active first; new names skip archived ones', async () => {
   const { existsSync, mkdirSync } = await import('node:fs');
   const { createDiscussionFolder } = await import('../src/ui.mjs');
   const ctx = await freshSession([], async () => { throw new Error('no title should be asked'); });
   const root = `${ctx.cwd}/discussions`;
   mkdirSync(`${root}/archive/2026-11-01-old`, { recursive: true });
-  await handleLine('/reopen archive/2026-11-01-old', ctx);
+  await handleLine('/resume archive/2026-11-01-old', ctx);
   assert.equal(ctx.discussion.dir, `${root}/2026-11-01-old`);
   assert.ok(existsSync(`${root}/2026-11-01-old`) && !existsSync(`${root}/archive/2026-11-01-old`));
 
@@ -336,7 +324,6 @@ test('New brainstorm replaces the current one, and ends a discussion session kee
   ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
   const resets = [];
   for (const a of [...ctx.room.agents, ctx.worker]) a.reset = () => resets.push(a.name);
-  await handleLine('/autosummary off', ctx);
   await handleLine('first', ctx); // a discussion
   const [name] = readdirSync(`${ctx.cwd}/discussions`);
   const transcript = ctx.logPath;
@@ -359,11 +346,10 @@ test('New brainstorm replaces the current one, and ends a discussion session kee
   assert.doesNotMatch(readFileSync(transcript, 'utf8'), /idea/);
 });
 
-test('New discussion or Re-open ends the brainstorm; the next message then starts a discussion', async () => {
+test('New discussion or Resume ends the brainstorm; the next message then starts a discussion', async () => {
   const { mkdirSync, readdirSync } = await import('node:fs');
   const ctx = await freshSession([], async () => ({ title: 'Real topic' }));
   ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
-  await handleLine('/autosummary off', ctx);
   await handleLine('/brainstorm', ctx);
   await handleLine('just talking', ctx);
   await handleLine('/new', ctx);
@@ -375,7 +361,7 @@ test('New discussion or Re-open ends the brainstorm; the next message then start
   mkdirSync(`${ctx.cwd}/discussions/2026-11-01-old`);
   await handleLine('/brainstorm', ctx);
   await handleLine('more talk', ctx);
-  await handleLine('/reopen 2026-11-01-old', ctx);
+  await handleLine('/resume 2026-11-01-old', ctx);
   assert.deepEqual([ctx.state.brainstorm, ctx.state.transcript.length, ctx.discussion.name], [false, 0, '2026-11-01-old']);
   await handleLine('back to it', ctx);
   assert.match(ctx.logPath, /2026-11-01-old\/transcripts\/session-/);
@@ -386,7 +372,6 @@ test('Reload keeps the brainstorm\'s messages and its mode: the next message sti
   const { readdirSync } = await import('node:fs');
   const { reloaded } = await import('../src/ui.mjs');
   const ctx = await freshSession([], async () => { throw new Error('no title should be asked'); });
-  await handleLine('/autosummary off', ctx);
   await handleLine('/brainstorm', ctx);
   await handleLine('an idea', ctx);
   const said = ctx.state.transcript.map((m) => m.text);
@@ -411,7 +396,7 @@ test('/new: nothing to end before the first message; it creates nothing and chan
   assert.deepEqual(readdirSync(ctx.cwd), []);
 });
 
-test('/new after a round: the session ends as with Re-open; the next message starts a new titled discussion', async () => {
+test('/new after a round: the session ends as with Resume; the next message starts a new titled discussion', async () => {
   const { mkdirSync, readdirSync, readFileSync, chmodSync } = await import('node:fs');
   const ctx = await freshSession([], async (text) => ({ title: text === 'hello' ? 'First topic' : 'Second topic' }));
   ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
@@ -419,7 +404,6 @@ test('/new after a round: the session ends as with Re-open; the next message sta
   for (const a of [...ctx.room.agents, ctx.worker]) a.reset = () => resets.push(a.name);
   const prompts = [];
   ctx.room.agents[0].turn = async (p) => { prompts.push(p); return 'PASS'; };
-  await handleLine('/autosummary off', ctx);
   await handleLine('hello', ctx);
   const first = ctx.logPath;
   const [name] = readdirSync(`${ctx.cwd}/discussions`);
@@ -448,9 +432,9 @@ test('/new after a round: the session ends as with Re-open; the next message sta
   assert.match(prompts[1], /This is a new discussion/);
   assert.equal(readdirSync(`${ctx.cwd}/discussions/${name}/transcripts`).length, 1);
 
-  // Going back: Re-open the first one (it remembers this one in turn).
+  // Going back: Resume the first one (it remembers this one in turn).
   mkdirSync(`${ctx.cwd}/discussions/x`, { recursive: true });
-  await handleLine(`/reopen ${name}`, ctx);
+  await handleLine(`/resume ${name}`, ctx);
   assert.equal(ctx.discussion.name, name);
   assert.equal(ctx.screen.room.back.title, 'Second topic');
 });
@@ -467,7 +451,6 @@ test('/new leaves the worker alone: a running task keeps its transcript, its log
   const got = [];
   let finish;
   ctx.worker.turn = async (p) => { got.push(p); return got.length === 2 ? new Promise((done) => { finish = done; }) : 'ok'; };
-  await handleLine('/autosummary off', ctx);
   await handleLine('hello', ctx);
   const first = ctx.logPath, firstDir = ctx.discussion.dir;
   queueWork(ctx, 'one');
@@ -504,7 +487,6 @@ test('after New discussion, the previous one can\'t move while its worker task r
   let finish;
   await gitRoom(ctx.cwd);
   ctx.worker.turn = () => new Promise((done) => { finish = done; });
-  await handleLine('/autosummary off', ctx);
   await handleLine('hello', ctx);
   const name = ctx.discussion.name, first = ctx.logPath;
   queueWork(ctx, 'long task');
@@ -535,7 +517,6 @@ test('a transcript that can\'t be written keeps the worker\'s reply visible, rep
   ctx.worker.turn = () => new Promise((done) => { finish = done; });
   const events = [];
   ctx.docs = { ...ctx.docs, broadcast: (screen, ev) => events.push(ev) };
-  await handleLine('/autosummary off', ctx);
   await handleLine('hello', ctx);
   queueWork(ctx, 'task');
   await until(() => finish);
@@ -743,7 +724,6 @@ test('a worker task keeps the discussion it started in, even if New discussion c
   await gitRoom(ctx.cwd);
   let finish;
   ctx.worker.turn = (p) => { got.push(p); return new Promise((done) => { finish = done; }); };
-  await handleLine('/autosummary off', ctx);
   await handleLine('hello', ctx);
   const first = ctx.discussion, transcript = ctx.logPath;
   queueWork(ctx, 'the task');
@@ -833,155 +813,200 @@ test('Switch room lists this server\'s rooms, with the pages open on each and wh
   ]);
 });
 
-test('Pause preserves native sessions across New discussion; corrupt Resume leaves the checkpoint and room intact', async () => {
+// ── Checkpoints (continue by default) ──
+// Where a room's discussion saves itself (npm test runs with a temporary HOME).
+async function checkpointPath(cwd, name) {
   const { createHash } = await import('node:crypto');
   const { homedir } = await import('node:os');
-  const { join, dirname } = await import('node:path');
-  const { readFileSync, writeFileSync, realpathSync, rmSync, existsSync } = await import('node:fs');
-  const ctx = { ...freshCtx(), cwd: await tmp('paused-state-test-'), workerSpec: 'claude:W' };
-  ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
-  Object.assign(ctx, await load(ctx, '?pause-unit'));
+  const { join } = await import('node:path');
+  const { realpathSync } = await import('node:fs');
+  return join(homedir(), '.local', 'state', 'agent-room', 'paused',
+    createHash('sha256').update(realpathSync(cwd)).digest('hex'), createHash('sha256').update(name).digest('hex') + '.json');
+}
+// A loaded room (real agents' adapters, their turns scripted), in terminal mode.
+async function savedRoom(cwd, tag) {
+  const ctx = { ...freshCtx(), cwd, workerSpec: 'claude:W', noScreen: true };
+  Object.assign(ctx, await load(ctx, `?${tag}`));
   ctx.suggestTitle = async () => ({ title: 'Saved context' });
   for (const agent of ctx.room.agents) agent.turn = async () => 'PASS';
-  await handleLine('/autosummary off', ctx);
-  await handleLine('Remember this', ctx);
+  return ctx;
+}
+
+test('every round saves a checkpoint; Close keeps it; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions', async () => {
+  const { readFileSync, writeFileSync, existsSync } = await import('node:fs');
+  const ctx = await savedRoom(await tmp('checkpoint-test-'), 'checkpoint-unit');
   Object.assign(ctx.sessions.get('A'), { id: 'claude-original', started: true });
   Object.assign(ctx.sessions.get('B'), { threadId: 'codex-original' });
   Object.assign(ctx.sessions.get('worker:W'), { id: 'worker-original', started: true });
-  ctx.screen.worker.push({ speaker: 'W', html: '<p>Saved worker</p>' });
   ctx.totals.A = { input: 42, output: 10 };
   ctx.state.summaries = 3;
-  const name = ctx.discussion.name;
-  const file = join(homedir(), '.local', 'state', 'agent-room', 'paused',
-    createHash('sha256').update(realpathSync(ctx.cwd)).digest('hex'),
-    createHash('sha256').update(name).digest('hex') + '.json');
-  try {
-    let finish;
-    ctx.workQueue = new Promise((resolve) => { finish = resolve; });
-    const pausing = handleLine('/pause', ctx);
-    assert.equal(ctx.pausing, true);
-    assert.equal(existsSync(file), false);
-    finish(); await pausing;
-    const snapshot = readFileSync(file, 'utf8');
-    const saved = JSON.parse(snapshot);
-    const before = ctx.state.transcript.length;
-    await handleLine('Blocked while paused', ctx);
-    await handleLine('/summary', ctx);
-    assert.equal(ctx.state.transcript.length, before);
-    const { queueWork } = await import('../src/ui.mjs');
-    queueWork(ctx, 'Blocked worker');
-    assert.equal(ctx.screen.worker.length, 1);
-    await handleLine('/new', ctx);
-    assert.equal(ctx.paused, false);
-    assert.equal(ctx.screen.worker.length, 0);
-    assert.notEqual(ctx.sessions.get('worker:W').id, 'worker-original');
-    assert.notEqual(ctx.sessions.get('A').id, 'claude-original');
-    const emptyState = ctx.state;
-    writeFileSync(file, JSON.stringify({ ...saved, version: 999 }));
-    await assert.rejects(handleLine('/resume ' + name, ctx), /checkpoint is invalid/);
-    assert.equal(ctx.state, emptyState);
-    assert.equal(ctx.discussion, null);
-    assert.equal(existsSync(file), true);
-    assert.equal(ctx.pausing, false);
-    writeFileSync(file, JSON.stringify({ ...saved, sessions: [] }));
-    await assert.rejects(handleLine('/resume ' + name, ctx), /provider session.*missing/);
-    assert.equal(ctx.state, emptyState);
-    assert.equal(existsSync(file), true);
-    writeFileSync(file, snapshot);
-    await handleLine('/resume ' + name, ctx);
-    assert.equal(ctx.sessions.get('A').id, 'claude-original');
-    assert.equal(ctx.sessions.get('B').threadId, 'codex-original');
-    assert.equal(ctx.sessions.get('worker:W').id, 'worker-original');
-    assert.deepEqual(ctx.state.transcript, saved.state.transcript);
-    assert.deepEqual([...ctx.state.seen], saved.state.seen);
-    assert.equal(ctx.state.summaries, 3);
-    assert.deepEqual(ctx.totals, saved.totals);
-    assert.deepEqual(ctx.screen.worker, saved.worker);
-    assert.equal(ctx.logPath, saved.logPath);
-    assert.doesNotMatch(ctx.room.promptFor(ctx.room.agents[0]), /Remember this/);
-    assert.equal(existsSync(file), false);
-  } finally { rmSync(dirname(file), { recursive: true, force: true }); }
+  await handleLine('Remember this', ctx);
+  const name = ctx.discussion.name, file = await checkpointPath(ctx.cwd, name);
+  const first = JSON.parse(readFileSync(file, 'utf8')); // written by the round, which had no summary
+  assert.equal(new Map(first.sessions).get('A').id, 'claude-original');
+  assert.equal(new Map(first.sessions).get('worker:W').id, 'worker-original');
+  assert.deepEqual(first.state.transcript.map((m) => m.text), ['Remember this', 'PASS', 'PASS']);
+  ctx.screen.worker.push({ speaker: 'W', html: '<p>Saved worker</p>', origin: name });
+  await handleLine('And this', ctx); // the next round saves again, with this discussion's Worker tab
+  const snapshot = readFileSync(file, 'utf8'), saved = JSON.parse(snapshot);
+  assert.deepEqual(saved.worker.map((m) => m.html), ['<p>Saved worker</p>']);
+  assert.equal(saved.state.transcript.length, 6);
+
+  await handleLine('/close', ctx);
+  assert.equal(ctx.discussion, null);
+  assert.equal(readFileSync(file, 'utf8').length > 0 && JSON.parse(readFileSync(file, 'utf8')).state.transcript.length, 6); // kept
+  assert.notEqual(ctx.sessions.get('A').id, 'claude-original'); // fresh agent sessions here
+  const emptyState = ctx.state;
+  writeFileSync(file, JSON.stringify({ ...saved, version: 999 }));
+  await assert.rejects(handleLine('/resume ' + name, ctx), /checkpoint of .* is invalid/);
+  assert.equal(ctx.state, emptyState);
+  assert.equal(ctx.discussion, null);
+  assert.equal(existsSync(file), true);
+  writeFileSync(file, JSON.stringify({ ...saved, sessions: [] }));
+  await assert.rejects(handleLine('/resume ' + name, ctx), /provider session.*missing/);
+  assert.equal(ctx.state, emptyState);
+  assert.equal(existsSync(file), true);
+  writeFileSync(file, snapshot);
+  await handleLine('/resume ' + name, ctx);
+  assert.equal(ctx.sessions.get('A').id, 'claude-original');
+  assert.equal(ctx.sessions.get('B').threadId, 'codex-original');
+  assert.equal(ctx.sessions.get('worker:W').id, 'worker-original');
+  assert.deepEqual(ctx.state.transcript, saved.state.transcript);
+  assert.deepEqual([...ctx.state.seen], saved.state.seen);
+  assert.equal(ctx.state.summaries, 3);
+  assert.deepEqual(ctx.totals, saved.totals);
+  assert.ok(ctx.screen.worker.some((m) => m.html === '<p>Saved worker</p>'));
+  assert.equal(ctx.logPath, saved.logPath);
+  assert.doesNotMatch(ctx.room.promptFor(ctx.room.agents[0]), /Remember this|And this/); // nothing sent again
+  assert.equal(existsSync(file), true); // kept: the next round replaces it
 });
 
-
-test('Resume replaces a brainstorm only with a valid Pause; its button asks twice; during a discussion it still refuses', async () => {
-  const { createHash } = await import('node:crypto');
-  const { homedir } = await import('node:os');
-  const { join, dirname } = await import('node:path');
-  const { readFileSync, writeFileSync, renameSync, realpathSync, rmSync, existsSync } = await import('node:fs');
-  const ctx = { ...freshCtx(), cwd: await tmp('brainstorm-resume-test-'), workerSpec: 'claude:W' };
-  ctx.noScreen = true; // terminal mode: one discussion at a time (on the screen, see "Several open discussions")
-  Object.assign(ctx, await load(ctx, '?brainstorm-resume'));
-  ctx.suggestTitle = async () => ({ title: 'Saved topic' });
-  const pass = () => { for (const agent of ctx.room.agents) agent.turn = async () => 'PASS'; };
-  pass();
-  await handleLine('/autosummary off', ctx);
-  await handleLine('Remember this', ctx);
+test('Resume replaces a brainstorm only with a valid checkpoint; on the discussion in use it changes nothing; Start fresh asks twice and keeps only the latest summary', async () => {
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const ctx = await savedRoom(await tmp('brainstorm-resume-test-'), 'brainstorm-resume');
   Object.assign(ctx.sessions.get('A'), { id: 'claude-original', started: true });
-  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-original' });
-  Object.assign(ctx.sessions.get('worker:W'), { id: 'worker-original', started: true });
-  const name = ctx.discussion.name;
-  const file = join(homedir(), '.local', 'state', 'agent-room', 'paused',
-    createHash('sha256').update(realpathSync(ctx.cwd)).digest('hex'),
-    createHash('sha256').update(name).digest('hex') + '.json');
-  try {
-    await handleLine('/pause', ctx);
-    const snapshot = readFileSync(file, 'utf8');
-    const saved = JSON.parse(snapshot);
-    await handleLine('/brainstorm', ctx);
-    await handleLine('a brainstorm idea', ctx);
-    const brainstorm = ctx.state;
-    const said = ctx.state.transcript.map((m) => m.text);
-    const intact = () => {
-      assert.equal(ctx.state, brainstorm);
-      assert.equal(ctx.state.brainstorm, true);
-      assert.deepEqual(ctx.state.transcript.map((m) => m.text), said);
-      assert.equal(ctx.screen.room.brainstorm, true);
-      assert.equal(ctx.discussion, null);
-    };
+  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-original' }); // a real Codex turn sets it
+  await handleLine('Remember this', ctx);
+  const name = ctx.discussion.name, file = await checkpointPath(ctx.cwd, name);
+  const snapshot = readFileSync(file, 'utf8'), saved = JSON.parse(snapshot);
+  await handleLine('/brainstorm', ctx);
+  await handleLine('a brainstorm idea', ctx);
+  const brainstorm = ctx.state;
+  const said = ctx.state.transcript.map((m) => m.text);
+  const intact = () => {
+    assert.equal(ctx.state, brainstorm);
+    assert.equal(ctx.state.brainstorm, true);
+    assert.deepEqual(ctx.state.transcript.map((m) => m.text), said);
+    assert.equal(ctx.screen.room.brainstorm, true);
+    assert.equal(ctx.discussion, null);
+  };
+  // An invalid checkpoint: the error, and the brainstorm as it was.
+  writeFileSync(file, JSON.stringify({ ...saved, version: 999 }));
+  await assert.rejects(handleLine('/resume ' + name, ctx), /checkpoint of .* is invalid/);
+  intact();
+  writeFileSync(file, snapshot);
+  // Replaced by the saved discussion.
+  await handleLine('/resume ' + name, ctx);
+  assert.equal(ctx.state.brainstorm, undefined);
+  assert.equal(ctx.screen.room.brainstorm, false);
+  assert.equal(ctx.discussion.name, name);
+  assert.deepEqual(ctx.state.transcript, saved.state.transcript);
+  assert.equal(ctx.sessions.get('A').id, 'claude-original');
+  assert.equal(ctx.logPath, saved.logPath);
 
-    // An invalid or missing Pause: the error, and the brainstorm as it was.
-    writeFileSync(file, JSON.stringify({ ...saved, version: 999 }));
-    await assert.rejects(handleLine('/resume ' + name, ctx), /checkpoint is invalid/);
-    intact();
-    renameSync(file, file + '.away');
-    await assert.rejects(handleLine('/resume ' + name, ctx), /No saved Pause/);
-    intact();
-    renameSync(file + '.away', file);
-    writeFileSync(file, snapshot);
+  // The discussion in use: Resume says so and changes nothing.
+  await handleLine('carry on', ctx);
+  const length = ctx.state.transcript.length;
+  await handleLine('/resume ' + name, ctx);
+  assert.deepEqual([ctx.discussion.name, ctx.state.transcript.length, ctx.sessions.get('A').id], [name, length, 'claude-original']);
 
-    // The page's Resume button (its own code, from the page): the first click only asks.
-    const page = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
-    const code = page.slice(page.indexOf('function confirmed('), page.indexOf('const pendingArchives'));
-    const sent = [];
-    const resumeButton = new Function('room', 'localMessages', 'send', 'setTimeout', `${code}; return resumeButton;`)(
-      ctx.screen.room, ctx.screen.transcript, (line) => sent.push(handleLine(line, ctx)), () => {});
-    const button = { textContent: 'Resume', dataset: {} };
-    resumeButton(button, name);
-    const click = () => button.onclick({ stopPropagation() {} });
-    click();
-    assert.equal(button.textContent, 'Click again: the brainstorm will be discarded');
-    assert.equal(sent.length, 0);
-    intact();
-    click();
-    assert.equal(sent.length, 1);
-    await sent[0];
+  // Start fresh, from the page's own button: the first click only asks.
+  const page = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = page.slice(page.indexOf('function resumeTip('), page.indexOf('const pendingArchives'));
+  const sent = [];
+  const freshButton = new Function('room', 'send', 'setTimeout', `${code}; return freshButton;`)(
+    ctx.screen.room, (line) => sent.push(handleLine(line, ctx)), () => {});
+  const button = { textContent: 'Start fresh', dataset: {} };
+  freshButton(button, name);
+  const click = () => button.onclick({ stopPropagation() {} });
+  click();
+  assert.equal(button.textContent, 'Click again: its saved sessions and chat are discarded; it starts from its handoff');
+  assert.equal(sent.length, 0);
+  click();
+  assert.equal(sent.length, 1);
+  await sent[0];
+  assert.deepEqual([ctx.discussion.name, ctx.logPath, ctx.state.transcript.length], [name, null, 0]);
+  assert.notEqual(ctx.sessions.get('A').id, 'claude-original');
+  const left = JSON.parse(readFileSync(file, 'utf8'));
+  assert.deepEqual([left.fresh, left.summary, left.sessions, left.state], [true, null, undefined, undefined]); // no summary was agreed here
+  assert.deepEqual(ctx.screen.room.checkpoints.find((c) => c.name === name).kind, 'fresh');
+});
 
-    // Replaced by the paused discussion.
-    assert.equal(ctx.state.brainstorm, undefined);
-    assert.equal(ctx.screen.room.brainstorm, false);
-    assert.equal(ctx.discussion.name, name);
-    assert.deepEqual(ctx.state.transcript, saved.state.transcript);
-    assert.equal(ctx.sessions.get('A').id, 'claude-original');
-    assert.equal(ctx.logPath, saved.logPath);
-    assert.equal(existsSync(file), false);
+test('Start fresh briefs with the latest summary, marked if not agreed, or none; a Restart before the first message keeps it; the first round replaces it', async () => {
+  const { readFileSync, writeFileSync, mkdirSync } = await import('node:fs');
+  const cwd = await tmp('fresh-summary-test-');
+  const ctx = await savedRoom(cwd, 'fresh-1');
+  const script = ['an idea', 'PASS', '- the idea'];
+  ctx.room.agents[0].turn = async () => script.shift() ?? 'PASS';
+  await handleLine('hello', ctx); // A speaks, so the round is summarized: agreed, by A
+  const name = ctx.discussion.name, file = await checkpointPath(cwd, name);
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).state.transcript.at(-1), { speaker: 'Summary', text: '- the idea', outcome: 'agreed', by: 'A' });
+  await handleLine('/fresh ' + name, ctx);
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).summary, { text: '- the idea', outcome: 'agreed', by: 'A' });
 
-    // During a real discussion, Resume keeps refusing as before.
-    pass();
-    await handleLine('carry on', ctx);
-    await assert.rejects(handleLine('/resume ' + name, ctx), /^Error: Pause the current discussion before resuming another one\.$/);
-    assert.equal(ctx.discussion.name, name);
-  } finally { rmSync(dirname(file), { recursive: true, force: true }); }
+  // Restart before the first message: a new process resumes it (as cli.mjs does with --reopen).
+  const after = await savedRoom(cwd, 'fresh-2');
+  const prompts = [];
+  after.room.agents[0].turn = async (p) => { prompts.push(p); return 'PASS'; };
+  await handleLine('/resume ' + name, after);
+  assert.ok(!after.logPath);
+  await handleLine('go on', after);
+  assert.match(prompts[0], /You are A, one of several AI agents/); // a fresh session
+  assert.match(prompts[0], /Start from its handoff[\s\S]*The latest summary from the previous session \(agreed, by A\):\n\n- the idea/);
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).fresh, undefined); // the first round saved a full checkpoint
+
+  // A summary that wasn't agreed is marked so.
+  await handleLine('/close', after);
+  const full = JSON.parse(readFileSync(file, 'utf8'));
+  full.state.transcript.push({ speaker: 'Summary', text: '- maybe', outcome: 'not agreed', by: 'B' });
+  writeFileSync(file, JSON.stringify(full));
+  await handleLine('/fresh ' + name, after);
+  await handleLine('again', after);
+  assert.match(prompts.at(-1), /The latest summary from the previous session \(\*\*not agreed\*\*: the last version, by B; treat its points as proposals\):\n\n- maybe/);
+
+  // No checkpoint: only the handoff and notes.
+  mkdirSync(`${cwd}/discussions/2026-11-01-none`);
+  await handleLine('/fresh 2026-11-01-none', after);
+  await handleLine('hi', after);
+  assert.match(prompts.at(-1), /continues the discussion in .*2026-11-01-none.*Start from its handoff/);
+  assert.doesNotMatch(prompts.at(-1), /latest summary/);
+});
+
+test('removed commands answer with a hint and reach no agent', async () => {
+  const ctx = await scriptedCtx([]);
+  const notes = [];
+  ctx.docs = { ...ctx.docs, broadcast: (screen, ev) => { if (ev.type === 'note') notes.push(ev.text); } };
+  let turns = 0;
+  for (const a of ctx.room.agents) a.turn = async () => { turns++; return 'PASS'; };
+  for (const line of ['/pause', '/reopen 2026-11-01-x', '/continue', '/autosummary off']) await handleLine(line, ctx);
+  assert.equal(turns, 0);
+  assert.deepEqual(ctx.state.transcript, []);
+  assert.match(notes[0], /^Pause is gone: every discussion saves itself after each round/);
+  assert.match(notes[1], /^\/reopen is now \/resume 2026-11-01-x .* or \/fresh 2026-11-01-x/);
+  assert.match(notes[2], /^\/continue is now \/resume <name>/);
+  assert.match(notes[3], /^Auto-summarize is always on now/);
+});
+
+test('Explorer\'s Resume says what it will do: show an open one, continue a saved one, or start from the handoff', async () => {
+  const { readFileSync } = await import('node:fs');
+  const page = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = page.slice(page.indexOf('function resumeTip('), page.indexOf('// Start fresh: discards'));
+  const room = { checkpoints: [{ name: 'full', kind: 'full' }, { name: 'fresh', kind: 'fresh' }] };
+  const tip = new Function('room', `${code}; return resumeTip;`)(room);
+  assert.match(tip('full', { started: true }, null), /^Show it: its agents carry on, nothing is restarted/);
+  assert.match(tip('full', null, null), /^Continue where it stopped: the same agent and worker sessions/);
+  assert.match(tip('fresh', null, null), /with the summary chosen at Start fresh/);
+  assert.match(tip('other', null, 'archive'), /^Makes it active first\. No saved session: start from its handoff and notes/);
 });
 
 // ── Auto dev ──
@@ -1005,7 +1030,6 @@ async function autoDevRoom({ summaries, review = () => 'PASS', worker = async ()
   ctx.notes = [];
   ctx.docs = { ...ctx.docs, broadcast: (screen, ev) => { if (ev.type === 'note') ctx.notes.push(ev.text); } };
   const settle = async () => { for (;;) { await ctx.workQueue; if (!queued.length) return; await handleLine(queued.shift(), ctx); } };
-  await handleLine('/autosummary off', ctx); // the saved setting stays off throughout
   await handleLine('plan it', ctx);
   await handleLine('/summary', ctx); // the agreed summary auto dev starts from
   return { ctx, prompts, got, settle };
@@ -1043,7 +1067,6 @@ test('auto dev: Start relays the instruction; the report starts a round; one SEN
   await settle();
   assert.deepEqual(sentTo(got), ['Do "step" 1', 'Do step 2']);
   assert.deepEqual([ctx.autoDev.status, ctx.autoDev.cycle], ['finished', 2]);
-  assert.equal(ctx.autoSummary, false); // the saved setting is unchanged
   // Ordinary messages on both sides, in the transcript too.
   assert.deepEqual(ctx.state.transcript.filter((m) => m.speaker === 'Worker report').map((m) => m.text), ['did step 1', 'did step 2']);
   assert.deepEqual(ctx.screen.worker.filter((m) => m.speaker === 'Relayed from discussion').length, 2);
@@ -1148,7 +1171,6 @@ test('auto dev: while paused, any agreed summary ending in Outcome: FINISH finis
   assert.ok(!ctx.state.transcript.some((m) => m.speaker === 'Auto dev' && /"D"/.test(m.text)));
 
   // An automatic summary after a User round agrees it is done.
-  await handleLine('/autosummary on', ctx);
   await handleLine('is it done?', ctx);
   await settle();
   assert.deepEqual([ctx.autoDev.status, ctx.autoDev.reason, ctx.autoDev.cycle, got.length], ['finished', null, 1, 1]);
@@ -1238,11 +1260,10 @@ async function multiRoom({ worker } = {}) {
   };
   hub.addRoom = async (folder, { context, reopen }) => {
     const c = await make(context);
-    if (reopen) await handleLine(`/reopen ${reopen}`, c);
+    if (reopen) await handleLine(`/resume ${reopen}`, c); // as cli.mjs does
     return { ctx: c };
   };
   const first = await make(null);
-  await handleLine('/autosummary off', first);
   // The lines contexts queued for themselves (except /quit, recorded only), run as their input would.
   const settle = async () => {
     for (let more = true; more;) {
@@ -1257,7 +1278,7 @@ async function multiRoom({ worker } = {}) {
   return { hub, first, settle, git, gotoOf, pageOf, contexts: () => [...hub.rooms.values()] };
 }
 
-test('on the screen, New discussion keeps the discussion open with its sessions; Re-open of an open one goes there; New discussion ends an open brainstorm', async () => {
+test('on the screen, New discussion keeps the discussion open with its sessions; Resume of an open one goes there; New discussion ends an open brainstorm', async () => {
   const { readFileSync } = await import('node:fs');
   const { hub, first, settle, gotoOf, pageOf, contexts } = await multiRoom();
   await handleLine('topic-a', first);
@@ -1273,7 +1294,7 @@ test('on the screen, New discussion keeps the discussion open with its sessions;
   assert.equal(second.discussion.title, 'topic-b');
   assert.deepEqual(first.screen.room.open.map((o) => [o.title, o.current]), [['topic-a', true], ['topic-b', false]]);
 
-  await handleLine(`/reopen ${a.name}`, second); // open already: shown as it is
+  await handleLine(`/resume ${a.name}`, second); // open already: shown as it is
   assert.equal(gotoOf(second), pageOf(first));
   assert.equal(first.resets, 0);
   assert.equal(contexts().length, 2);
@@ -1429,10 +1450,6 @@ test('Restart brings back every open discussion of a folder, each in its own con
     [{ cwd: '/r', agents: 'claude:A', worker: 'claude:W', reopen: '2026-11-09-b', context: 'd1' }]); // not the brainstorm
 });
 
-test('Restart leaves a paused checkpoint for Resume instead of re-opening it fresh', () => {
-  const ctx = { cwd: '/r', paused: true, discussion: { name: '2026-11-03-paused' } };
-  assert.deepEqual(restartArgs([ctx], {}, 5566).slice(1), ['--cwd', '/r', '--port', '5566']);
-});
 
 test('Quit room during a round: after the grace period the agent mid-turn is stopped, and no new one starts', { timeout: 20000 }, async () => {
   const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } = await import('node:fs');
@@ -1526,7 +1543,7 @@ test('Stage 2: completed work is reported once before a round, including Worker 
   const second = contexts()[1]; await handleLine('topic-b', second);
   const notices = (c) => c.state.transcript.filter((m) => m.text.startsWith('Work finished elsewhere:'));
   queueWork(second, 'work b'); queueWork(second, 'more work b'); await second.workQueue;
-  await handleLine(`/reopen ${first.discussion.name}`, second);
+  await handleLine(`/resume ${first.discussion.name}`, second);
   assert.equal(notices(first).length, 0); // viewing starts no round
   let prompt = '';
   first.room.agents[0].turn = async (p) => { prompt += p; return 'PASS'; };
@@ -1830,23 +1847,23 @@ test('Stage 3: an ambiguous or failed rollback report cannot authorize archiving
 test('Stage 3: Explorer queues rollback separately from two-click archive confirmation after a report', async () => {
   const { readFileSync } = await import('node:fs');
   const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
-  const confirmed = source.slice(source.indexOf('function confirmed('), source.indexOf('// Resume: during a brainstorm'));
+  const confirmed = source.slice(source.indexOf('function confirmed('), source.indexOf('// Rollback queues work'));
   const buttons = source.slice(source.indexOf('function rollbackButtons('), source.indexOf('const pendingArchives'));
   const element = () => ({ children: [], dataset: {}, style: {}, append(...items) { this.children.push(...items); } });
   const sent = [], room = { rollbacks: [] };
   const build = new Function('room', 'document', 'send', 'setTimeout', confirmed + buttons + '; return rollbackButtons;')(
     room, { createElement: element }, (line) => sent.push(line), () => {});
   const name = '2026-11-09-topic', row = element(), details = element(), ev = { stopPropagation() {} };
-  build(row, details, name, name, false, false);
+  build(row, details, name, name, false);
   row.children[0].onclick(ev); assert.deepEqual(sent, []);
   row.children[0].onclick(ev); assert.deepEqual(sent, [`/rollback ${name}`]);
   assert.equal(row.children.length, 1); // no archive confirmation before a successful report
   room.rollbacks = [{ name, status: 'ready', report: 'Tests passed; review dependencies. Rollback ready: abc' }];
-  const ready = element(); build(ready, details, name, name, false, false);
+  const ready = element(); build(ready, details, name, name, false);
   assert.equal(details.children[0].children[1].textContent, room.rollbacks[0].report);
   ready.children[1].onclick(ev); assert.equal(sent.length, 1);
   ready.children[1].onclick(ev); assert.equal(sent[1], `/archive-rollback ${name}`);
-  const current = element(); build(current, element(), name, name, false, true);
+  const current = element(); build(current, element(), name, name, true);
   assert.equal(current.children[1].disabled, true); // unchanged Archive guard for the one in use
 });
 

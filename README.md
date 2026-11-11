@@ -26,7 +26,7 @@ The browser opens the discussion screen, normally at `http://127.0.0.1:5566/__ro
 If that port is occupied, the server uses a free one and prints its address.
 One server process runs several rooms, one per folder (identified by its real path, so a symbolic
 link can't open a second room there). Each room has its own address, `/r/<room>/__room`, and its
-own agents, worker, discussion, transcript, pause, pages and input queue: a round in one room never
+own agents, worker, discussion, transcript, pages and input queue: a round in one room never
 waits for another. `/__room` opens the server's first room. Every request names its room, and the
 server serves each room's files only from inside its folder (no `../`, and no symbolic link leading
 out of it). In the log, each room's lines start with `[<folder name>]`. The starting
@@ -41,9 +41,9 @@ mode; `/docs` opens a document separately in the browser.
 The header has three zones. **Room** (blue): **agent-room ▾**, whose menu holds **Switch room…**,
 **Open room in folder…**, **Peers…** and **Quit room**, above the full **root folder**; hover or focus the room
 name for its replication line, when replication is on. **Current discussion** (green): the selected
-discussion, **Brainstorm** or **No discussion started**, with its state under it (paused, who is thinking, or your
-turn); **Actions ▾** holds **Pause discussion**, **Summarize**, **New discussion** and **New brainstorm**, with
-**Auto-summarize** beside it. **Server and monitoring** (amber): **● Server ▾**, whose menu holds
+discussion, **Brainstorm** or **No discussion started**, with its state under it (who is thinking, or your
+turn); **Actions ▾** holds **Summarize**, **New discussion**, **New brainstorm** and (on the screen)
+**Close discussion**. **Server and monitoring** (amber): **● Server ▾**, whose menu holds
 **Reload**, **Restart** and **Shutdown server**, then the subscription usage gauges and **Usage**;
 hover or focus **Server** for its uptime, port and the server's version.
 An amber ⚠ under **Server** means a replication peer is unreachable (hover for how many); click it to open **Peers…**.
@@ -93,9 +93,9 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   keeping what you were typing.
 - **Restart:** click twice to replace the server process on the same address, for changes Reload
   can't load (such as `cli.mjs`). It acts on the whole server: the new process brings back every
-  room, each with its current agents and worker, and re-opens each one's discussion in use, a fresh
-  session from its handoff; the chats clear, transcripts are kept, and open pages reload by
-  themselves. Reload also applies to every room, each between its own rounds.
+  room, each with its current agents and worker, and resumes each one's discussion in use from its
+  latest checkpoint (below): the same agent and worker sessions and chat, as of its last round.
+  Open pages reload by themselves. Reload also applies to every room, each between its own rounds.
 - **Quit room:** click twice to end this room only, closing every discussion open in its folder. It waits for the round in progress (and lines
   queued before it) for at most 30 seconds; then the room's agents are stopped mid-turn, so the
   round ends as failed. Its running agent and worker programs are stopped before its state goes; a
@@ -120,7 +120,7 @@ In this project (the agent-room room itself), its design history is five discuss
 its documents and its transcripts: `2026-11-02-discussions-and-folders/` is active, three are in
 `archive/` and one in `deferred/`; [`discussions/README.md`](discussions/README.md) is their index.
 Files directly in `discussions/` that aren't dated folders (here, just that index) are listed
-under "This room's own documents", with no Re-open button.
+under "This room's own documents", with no Resume button.
 
 ## Discussions and saved files
 
@@ -153,26 +153,28 @@ buttons (or `/move <folder-name> archive|deferred`), which move the whole discus
 transcripts, into `discussions/archive/` or `discussions/deferred/`; **Make active**
 (`/move archive/<folder-name> active`) moves it back. `archive/` and `deferred/` are created when
 first needed, and always listed at the bottom of **Explorer**, after the active discussions.
-Archive and Defer are disabled for the discussion in use and paused discussions, with the reason in a tooltip. New discussion names also skip names already
+Archive and Defer are disabled for the discussion in use, with the reason in a tooltip. New discussion names also skip names already
 taken in `archive/` and `deferred/`.
 
 **Several open discussions** (on the screen; an intermediate first version). A folder can have
 several discussions open at once, each with its own agents' sessions, chat and auto dev, sharing
-one worker. One window shows one of them; Explorer marks the others "open", with **Go to**, which
-shows it as it was. **New discussion** opens the new one beside the discussion in use, which stays
-open, and ends an open brainstorm. **Re-open** shows a discussion that is already open, and opens
-any other beside, fresh from its handoff. At most one brainstorm is open per folder. **Close
+one worker. One window shows one of them; Explorer marks the others "open". **Resume** shows an open one as
+it is: its agents carry on, nothing is restarted. An open brainstorm, or an open discussion that
+hasn't started (no message yet), has **Go to** instead, which only shows it. **New discussion** opens
+the new one beside the discussion in use, which stays open, and ends an open brainstorm. Resume
+and Start fresh open any other discussion beside the open ones. At most one brainstorm is open per folder. **Close
 discussion** (in **Actions ▾**, or `/close`) closes the one shown and its agents; it can't close one
-whose worker edits are unresolved (below). **Quit room** closes them all, and Restart brings back
-every open discussion fresh from its handoff (not brainstorms, paused or unstarted ones). In a
+whose worker edits are unresolved (below); its checkpoint is kept. **Quit room** closes them all, and
+Restart brings back every open discussion from its checkpoint (not brainstorms or empty ones). In a
 `--node` launch room every open discussion replicates, through the room's one replica; the first one
 holds it, so it closes last (or with Quit room). The worker's provider and model are one setting for
 all open discussions; each keeps its own worker session. In the terminal one discussion is open at
 a time, as described next: its one input can't switch between discussions.
 
 **New discussion** in the terminal (`/new`) works between rounds. It ends this
-room's session the way Re-open does (below), except for the worker: its running task, log and CLI
-session carry on, and its log gets a marker line. Nothing is created yet: your next message gets
+room's session the way Resume does (below; its checkpoint is kept), except for the worker: its
+running task, log and CLI session carry on, and its log gets a marker line. (So a discussion
+resumed later continues that same worker session, which has had the new discussion's turns.) Nothing is created yet: your next message gets
 a title and creates the new discussion's folder, as in a fresh room. The worker's next instruction
 then gets the new folder; until it exists, the worker is told no discussion is active.
 
@@ -181,46 +183,53 @@ the same agents, turns and `PASS` rules, but agent-room keeps no record of it: n
 transcript, notes or handoff (the providers' own session histories may remain, and changes you ask
 the worker for are real). Its chat lives only in the server's memory: it survives a page refresh and
 Reload, and is lost on Restart or Quit room. A room has one brainstorm at a time: New brainstorm
-discards the current one, and New discussion, Re-open or Resume ends it. Like New discussion, it ends the
+discards the current one, and New discussion or Resume ends it. Like New discussion, it ends the
 session of the discussion in use, which keeps its folder and transcripts. The agents are told it is
 a brainstorm, write no files and may read the project; the worker carries on as with no active
-discussion. Typing in a room with no discussion still starts a discussion. Pause is not offered in
-a brainstorm.
+discussion. Typing in a room with no discussion still starts a discussion. A brainstorm has no
+checkpoint.
 
-**Pause discussion** (in the header's **Actions ▾** menu, or `/pause`) waits for the
-current round, including its automatic summary, and queued worker tasks to finish. It saves the
-chat, worker log, provider session IDs, unread-message positions, provider/model choices and usage
-totals on this machine. Messages, summaries, worker instructions and agent-setting changes are
-blocked while paused. You can then quit, restart the server or start another discussion.
+**Every discussion saves itself.** After every round (with or without its summary), every
+`/summary` and every worker task, and when its session ends (Close, New discussion, Quit room,
+Restart), agent-room saves the discussion's checkpoint on this machine: the provider session IDs
+of its agents and its worker, its chat and unread-message positions, its own entries in the Worker
+tab, its provider/model choices and usage totals. The discussion part is as of the end of its
+latest round. Checkpoints are private local files under `~/.local/state/agent-room/paused/` (the
+folder keeps the name it had when only Pause saved them), separated by root folder; they are not
+replicated to peers. A Pause saved by an earlier version is read as a checkpoint.
 
-Choose **Resume** under **Paused on this machine** in **Explorer**, or `/resume <folder-name>`,
-to continue those same discussion and worker sessions with the saved chat. In the room you just
-paused, the header's **Actions ▾** menu offers **Resume discussion** (`/resume` with no name). Pause any current
-discussion before resuming another one. During a brainstorm, Resume replaces it, as Re-open does: the
-button asks for a second click when the brainstorm has messages, and a missing or invalid Pause leaves
-the brainstorm as it was. Starting a New discussion from a paused one starts a
-fresh worker too, keeping the saved worker session untouched. **Re-open** still starts fresh;
-re-opening a paused discussion asks for confirmation and discards its saved Pause.
+**Resume** (on a discussion's row in **Explorer** or on its page, or `/resume <folder-name>`), for
+any discussion not on screen, works between rounds:
+- open in another discussion of this folder: it is only shown, as it is;
+- with a checkpoint: it continues there, with the same agent and worker sessions and its chat;
+- without one: no title is requested and your next message starts a fresh session from its
+  handoff and notes, in a new session transcript;
+- an archived or deferred one (`/resume archive/<folder-name>`) is first moved back to the active
+  discussions.
 
-Checkpoints are private local files under `~/.local/state/agent-room/paused/`, separated by root
-folder. They are not replicated to peers. Resume needs the providers' original local session
+The button's tooltip says which case applies. On the screen it opens beside the open discussions;
+in the terminal the session in use ends first (its checkpoint is saved; the chat clears, and the
+discussion agents and the worker get fresh CLI sessions). A checkpoint that can't be used (invalid,
+or a provider session missing) is kept, the room stays as it was, and the error suggests Start
+fresh: Resume never starts fresh by itself. Continuing needs the providers' original local session
 storage; if a provider cannot resume its session, its turn fails without a silent fresh start.
 This is native session continuation, subject to provider context compaction and changes to files,
-models or rulebooks. It is not recovery of a turn interrupted by a crash. Once resumed, Pause again
-before quitting to save the latest state. Paused discussions must be resumed before moving them
-to archive or deferred.
+models or rulebooks. A round cut off by Quit, Restart or a crash is not in the restored chat (it is
+in the transcript file), though the agents' sessions may remember it.
 
-To go back to an existing discussion, choose **Re-open** on its row in **Explorer** (or on its
-page), or use `/reopen <folder-name>`. It works at any time between rounds. An archived or deferred
-discussion (`/reopen archive/<folder-name>`) is moved back to the active discussions first. No title is requested; the
-next message creates a new session transcript in that discussion. If this room's session had
-already started, it ends first: its transcript is kept and closed, the chat clears (the button
-asks for a second click), and the discussion agents and the worker get fresh CLI sessions. The
-agents are instructed to read the handoff; old conversations are not automatically replayed, and
-discussions don't keep their own agent memory. Preparing and consuming handoffs is an agent convention described
-in [the brainstorming rulebook](README-for-brainstorming-agents.md), not automatic app behavior.
+**Start fresh** (in a row's **Actions ▾**, or on the discussion's page; two clicks; `/fresh
+<folder-name>`) discards the saved sessions and chat: new agent and worker sessions start from the
+handoff and notes, briefed with the checkpoint's latest summary, marked when it wasn't agreed (none
+without a checkpoint). Until the fresh session's first round, a small checkpoint holds only that
+summary, so a Restart or Resume in between still briefs with it. The agents are instructed to read
+the handoff; old conversations are not replayed. Preparing and consuming handoffs is an agent
+convention described in [the brainstorming rulebook](README-for-brainstorming-agents.md), not
+automatic app behavior.
 
-Looking at another discussion does not switch the one in use (marked "in use" in the list); only Re-open does. Display-title
+The former commands `/pause`, `/reopen`, `/continue` and `/autosummary` answer with a hint instead
+of reaching the agents.
+
+Looking at another discussion does not switch the one in use (marked "in use" in the list); only Resume and Start fresh do. Display-title
 editing is not available yet; see [remaining decisions](discussions/2026-11-02-discussions-and-folders/discussions.md).
 
 Worker turns and other log entries before the first discussion message remain in memory until
@@ -296,10 +305,9 @@ Each agent gets at most three turns. Without agreement, the last revision is sho
 In a brainstorm, summaries work the same way, but their prompt leaves out the sentence about
 `pending-instructions.md`: a worker instruction lives only in the chat, and nothing is retained.
 
-**Auto-summarize** is on by default for each room. After a round where an agent spoke and none
-failed, it runs the same summary process, adding up to three turns per agent. It does not run
-after a round of only passes. Toggle the checkbox or use `/autosummary on|off`; the bare command
-toggles it. This setting survives Reload but is not stored as a default across launches.
+**Auto-summarize** is always on. After a round where an agent spoke and none failed, it runs the
+same summary process, adding up to three turns per agent. It does not run after a round of only
+passes.
 
 **Auto dev** relays instructions between the Discussion and the Worker, so you don't copy and
 paste them. When the latest agreed summary's **Next step** is `Send to the Worker: "…"`, a
@@ -308,8 +316,7 @@ cycle 1 of up to 5, shown in the Worker tab as **Relayed from discussion**; each
 also announced in the Discussion ("Auto dev sent the instruction "…" to the Worker (cycle n of 5)."),
 which the agents receive and the transcript keeps. The worker's full reply,
 or its failure, comes back to the Discussion as a **Worker report** and starts a round; both are in
-the transcript like typed messages. That round is always summarized (auto-summarize is on for the
-run; your saved setting doesn't change), and the summary must end with `Outcome: SEND`, `FINISH` or
+the transcript like typed messages. That round is always summarized, and the summary must end with `Outcome: SEND`, `FINISH` or
 `WAIT FOR USER`; passing on it accepts its quoted instruction exactly as it stands. Only an agreed
 SEND summary written after the latest report sends its instruction, once; repeating earlier text
 there is a deliberate retry. The run pauses, with its reason above the message box, on `WAIT FOR
@@ -320,9 +327,9 @@ auto dev**, which grants another 5 cycles. While paused, any summary asks for `O
 or `WAIT FOR USER` instead, and sends nothing. An agreed `FINISH`, running or paused, ends the run:
 review and merge `worker/main` yourself, as ever. An instruction that can't be read reliably from Next step (two of them, no
 closing quotation mark…) is never sent, and the page says why. Reload keeps a run, its cycle count
-and what was sent; a relay whose result is lost pauses the run. Pause, Resume, Close discussion, Restart
-and Quit room end it; in the terminal, New discussion, New brainstorm and Re-open do too (on the
-screen they leave the discussion and its run open). Auto dev is for discussions only, not brainstorms.
+and what was sent; a relay whose result is lost pauses the run. Resume, Start fresh, Close discussion, Restart
+and Quit room end it (a resumed discussion comes back without its run); in the terminal, New
+discussion and New brainstorm do too (on the screen they leave the discussion and its run open). Auto dev is for discussions only, not brainstorms.
 
 **Usage**, or `/usage`, reports session token totals for discussion agents and the worker.
 Claude's reported dollar value is an API-price equivalent, not your subscription bill.
@@ -352,21 +359,19 @@ node src/cli.mjs --help
 | Command | Effect |
 |---|---|
 | `/docs` | Browse documents; in terminal mode, ↑/↓ selects, Enter opens, Esc leaves the picker. |
-| `/reopen <folder-name>` | Re-open an existing discussion: a fresh session there, from its handoff. `archive/…` or `deferred/…` is made active first. |
+| `/resume <folder-name>` | Resume a discussion not on screen: show it if it is open, else continue from its checkpoint (same sessions and chat), or from its handoff without one. `archive/…` or `deferred/…` is made active first. |
+| `/fresh <folder-name>` | Start fresh: new sessions there, from its handoff and notes and its checkpoint's latest summary; the saved sessions and chat are discarded. |
 | `/new` | On the screen, open a new discussion beside this one (which stays open); an open brainstorm ends. In the terminal, end this session; your next message starts a new discussion. The worker carries on. |
 | `/close` | Close discussion: close the one shown, keeping the others open (not while it holds unresolved worker edits). |
 | `/brainstorm` | End this session (or brainstorm) and start a brainstorm: nothing saved, lost on Restart or Quit. |
 | `/rollback <folder-name>` | Queue Archive with rollback as a worker task; review its report before archiving. |
 | `/archive-rollback <folder-name>` | Explicitly confirm archive after a successful rollback report (switch away first). |
 | `/move <folder-name> active\|archive\|deferred` | Move a whole discussion (not the one in use) into `archive/` or `deferred/`, or back. |
-| `/pause` | Save the discussion and worker sessions locally after their work finishes. |
-| `/resume [folder-name]` | Continue a saved Pause, including its provider sessions and chat. |
 | `/summary` | Request an agreed summary. |
 | `/autodev` | Start (or restart) auto dev from the latest agreed summary's worker instruction. |
-| `/autosummary [on\|off]` | Toggle automatic summaries, or set them explicitly. |
 | `/usage` | Show session tokens and subscription quotas. |
 | `/reload` | Reload source modules and both agent rulebooks; retain conversation and provider sessions. |
-| `/restart` | Screen only: a new server process on the same port, with every room, each re-opening its discussion in use. |
+| `/restart` | Screen only: a new server process on the same port, with every room, each resuming its discussion in use from its checkpoint. |
 | `/quit` | Quit room: end this room only, closing every discussion open in its folder and stopping its running agent and worker programs. |
 | `/shutdown` | Screen only: Shutdown server, ending every room (the same as `POST /__shutdown`). |
 
