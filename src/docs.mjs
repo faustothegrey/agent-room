@@ -15,6 +15,7 @@ import { extname, join, relative, resolve, sep } from 'node:path';
 import { Marked } from 'marked';
 import { handleShell } from './host-shell.mjs';
 export { handleUpgrade } from './host-shell.mjs'; // the terminal pane's WebSocket (ui.mjs)
+import { handleNotes } from './notes.mjs';
 
 const TYPES = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
@@ -317,6 +318,21 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #hostshell { border-top: 1px solid var(--line); } #hostshell[hidden], #hostshell-term[hidden] { display: none; }
 #hostshell-toggle { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: .3rem .6rem; font-size: .8rem; }
 #hostshell-term { height: 16rem; padding: .3rem; background: #1e1e1e; overflow: hidden; }
+/* The Notes pane (notes.mjs): the User's own notes, in the same place and only one of the two open. */
+#notes { border-top: 1px solid var(--line); } #notes[hidden], #notes-body[hidden], #notes-ask[hidden] { display: none; }
+#notes-toggle { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: .3rem .6rem; font-size: .8rem; }
+#notes-body { height: 16rem; display: grid; grid-template-columns: minmax(8rem, 30%) 1fr; }
+#notes-side { display: flex; flex-direction: column; gap: .3rem; min-height: 0; padding: .3rem; border-right: 1px solid var(--line); }
+#notes-new { align-self: flex-start; font-size: .8rem; } #notes-list { overflow-y: auto; min-height: 0; }
+#notes-list .note { display: block; width: 100%; text-align: left; border: 0; border-radius: 4px; background: none; padding: .2rem .4rem; font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#notes-list .note:hover { background: #8882; } #notes-list .note.on { background: #3b82f622; }
+#notes-list .when { display: block; color: var(--dim); font-size: .7rem; } #notes-list .hint { font-size: .8rem; }
+#notes-main { display: flex; flex-direction: column; gap: .3rem; min-width: 0; min-height: 0; padding: .3rem; }
+#notes-text { flex: 1; min-height: 0; resize: none; font-family: ui-monospace, Menlo, monospace; font-size: .8rem; }
+#notes-bar { display: flex; gap: .4rem; align-items: center; font-size: .8rem; } #notes-bar button { font-size: .8rem; }
+#notes-status { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } #notes-status.error { color: #ef4444; }
+#notes-ask { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; padding: .3rem .5rem; border: 1px solid #b08900; border-radius: 6px; background: #b0890018; font-size: .8rem; }
+#notes-ask button { font-size: .8rem; }
 #pane { overflow-y: auto; }
 #doc { border: 0; width: 100%; height: 100%; }
 .empty { display: grid; place-items: center; color: var(--dim); height: 100%; padding: 1rem; text-align: center; }
@@ -429,6 +445,11 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
     <div id="docpane"></div>
   </div>
+  <div id="notes" hidden><button id="notes-toggle" aria-expanded="false" title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents don't see them.">▸ Notes (this computer only)</button><div id="notes-body" hidden>
+    <div id="notes-side"><button id="notes-new" title="Start a new note: the first line is its title">New</button><div id="notes-list"></div></div>
+    <div id="notes-main"><div id="notes-ask" role="alertdialog" aria-labelledby="notes-ask-text" hidden><span id="notes-ask-text"></span><span id="notes-ask-buttons"></span></div><textarea class="box" id="notes-text" aria-label="Note" placeholder="Choose a note, or New. The first line is the note's title." disabled></textarea>
+      <div id="notes-bar"><button id="notes-save" disabled title="Save this note (nothing is saved until you press Save)">Save</button><button id="notes-remove" disabled>Remove</button><span id="notes-status" role="status"></span></div></div>
+  </div></div>
   <div id="hostshell" hidden><button id="hostshell-toggle" aria-expanded="false" title="A shell on this computer, in the room's folder. Only from this computer, not from other devices.">▸ Terminal (this computer only)</button><div id="hostshell-term" hidden></div></div>
 </div>
 <script>
@@ -439,12 +460,14 @@ let replica = null, replicaOff = null, viewing = null, localMessages = [], local
 // crypto.randomUUID exists only in secure contexts (HTTPS or localhost); over plain HTTP from another machine, use random bytes.
 const viewClient = crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 let ended = false, doc = null, tab = 'talk', page = null;
-// Refreshing the page keeps what was being typed in the two message boxes.
+// Refreshing the page keeps what was being typed in the two message boxes, and an unsaved note.
+let refreshing = false, noteDraftKept = null;
 function refreshPage() {
-  sessionStorage.setItem('drafts', JSON.stringify([box.value, wbox.value]));
+  sessionStorage.setItem('drafts', JSON.stringify([box.value, wbox.value, noteDraft()]));
+  refreshing = true; // no leave-page warning: the draft is kept
   location.reload();
 }
-try { [box.value, wbox.value] = JSON.parse(sessionStorage.getItem('drafts')) ?? ['', '']; } catch {}
+try { [box.value, wbox.value, noteDraftKept = null] = JSON.parse(sessionStorage.getItem('drafts')) ?? ['', '']; } catch {}
 sessionStorage.removeItem('drafts');
 
 // A chat list that keeps its "is thinking" line last and follows new messages when already at the bottom.
@@ -1279,7 +1302,7 @@ $('rooms').onchange = () => {
   const menu = $('rooms'), at = menu.value.indexOf(':'), mode = menu.value.slice(0, at), path = menu.value.slice(at + 1);
   if (!path) return;
   const url = new URL(path, location.href);
-  if (mode === 'tab') return location.assign(url.href);
+  if (mode === 'tab') return notesGuard(() => location.assign(url.href), () => { menu.value = ''; menu.hidden = true; });
   // Opened during the choice, so the browser doesn't block it; this window stays on its room.
   const win = window.open(url.href, '_blank', 'width=' + window.outerWidth + ',height=' + window.outerHeight);
   menu.value = '';
@@ -1572,7 +1595,8 @@ events.onmessage = (e) => {
 const SHELL_LABEL = 'Terminal (this computer only)';
 let hostShell = null;
 if (['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname)) $('hostshell').hidden = false;
-$('hostshell-toggle').onclick = () => (hostShell ? closeHostShell() : openHostShell());
+// Opening the terminal collapses Notes, after asking about unsaved changes there.
+$('hostshell-toggle').onclick = () => (hostShell ? closeHostShell() : notesGuard(() => { closeNotes(); openHostShell(); }));
 function closeHostShell() {
   try { hostShell.ws?.close(); } catch {}
   try { hostShell.term?.dispose(); } catch {}
@@ -1604,6 +1628,124 @@ async function openHostShell() {
   term.onResize(({ cols, rows }) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
   term.focus();
 }
+
+// The Notes pane (notes.mjs): the User's notes for this room's folder, on this computer only. A note
+// is saved only by Save. Unsaved changes are never dropped without asking: inside the pane before
+// another note, New, collapsing, the terminal or another room; the browser's leave-page warning
+// otherwise; a refresh after a code change keeps them (refreshPage).
+const NOTES_LABEL = 'Notes (this computer only)';
+const notes = { open: false, list: [], id: null, base: '', editing: false }; // id null: a new note; base: its saved text
+const noteText = $('notes-text');
+const notesDirty = () => notes.editing && noteText.value !== notes.base;
+function noteDraft() { return notesDirty() ? { id: notes.id, base: notes.base, text: noteText.value } : null; }
+if (['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname)) {
+  $('notes').hidden = false;
+  if (noteDraftKept) openNotes(noteDraftKept);
+}
+addEventListener('beforeunload', (e) => { if (notesDirty() && !refreshing) { e.preventDefault(); e.returnValue = ''; } });
+function notesStatus(text, error) { $('notes-status').textContent = text; $('notes-status').className = error ? 'error' : ''; }
+// A question inside the pane: buttons [label, act]; any button closes it.
+function notesAsk(text, buttons) {
+  $('notes-ask-text').textContent = text;
+  $('notes-ask-buttons').replaceChildren(...buttons.map(([label, act]) => {
+    const b = document.createElement('button'); b.textContent = label;
+    b.onclick = () => { $('notes-ask').hidden = true; act?.(); };
+    return b;
+  }));
+  $('notes-ask').hidden = false;
+  $('notes-ask-buttons').lastChild.focus(); // the safe choice: Keep editing, Cancel
+}
+const noteTitle = () => noteText.value.split('\\n')[0].replace(/^\\s*#+\\s*/, '').trim() || 'Untitled';
+// Runs act now, or once the User agrees to discard the unsaved changes (cancel: if they don't).
+function notesGuard(act, cancel) {
+  if (!notesDirty()) return act();
+  if (!notes.open) openNotes();
+  notesAsk('"' + noteTitle() + '" has unsaved changes.', [
+    ['Discard changes', () => { noteText.value = notes.base; act(); }],
+    ['Keep editing', () => { cancel?.(); noteText.focus(); }],
+  ]);
+}
+function setEditor(id, text, base = text) {
+  Object.assign(notes, { id, base, editing: true });
+  noteText.value = text; noteText.disabled = false;
+  $('notes-save').disabled = $('notes-remove').disabled = false;
+  $('notes-remove').textContent = id ? 'Remove' : 'Discard';
+  showNoteList();
+}
+function clearEditor() {
+  Object.assign(notes, { id: null, base: '', editing: false });
+  noteText.value = ''; noteText.disabled = true;
+  $('notes-save').disabled = $('notes-remove').disabled = true;
+  $('notes-ask').hidden = true; notesStatus('');
+  showNoteList();
+}
+function showNoteList() {
+  const list = $('notes-list');
+  if (!notes.list.length) { list.replaceChildren(Object.assign(document.createElement('span'), { className: 'hint', textContent: 'No notes yet.' })); return; }
+  list.replaceChildren(...notes.list.map((n) => {
+    const b = document.createElement('button'); b.className = 'note' + (n.id === notes.id ? ' on' : '');
+    b.textContent = n.title; b.title = n.title;
+    b.append(Object.assign(document.createElement('span'), { className: 'when', textContent: 'Saved ' + new Date(n.savedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) }));
+    b.onclick = () => { if (n.id !== notes.id) notesGuard(() => readNote(n.id)); };
+    return b;
+  }));
+}
+async function loadNotes() {
+  const r = await fetch('__notes', { cache: 'no-store' });
+  if (!r.ok) throw new Error(r.status + ' ' + await r.text());
+  notes.list = await r.json(); showNoteList();
+}
+async function readNote(id) {
+  try {
+    const r = await fetch('__notes/read?id=' + encodeURIComponent(id), { cache: 'no-store' });
+    if (!r.ok) throw new Error(await r.text());
+    const n = await r.json();
+    setEditor(n.id, n.text); notesStatus('');
+  } catch (err) { notesStatus('✗ ' + err.message, true); loadNotes().catch(() => {}); }
+}
+async function openNotes(draft) {
+  if (hostShell) closeHostShell();
+  notes.open = true; $('notes-body').hidden = false;
+  $('notes-toggle').textContent = '▾ ' + NOTES_LABEL; $('notes-toggle').setAttribute('aria-expanded', 'true');
+  if (draft) setEditor(draft.id, draft.text, draft.base);
+  try { await loadNotes(); } catch (err) { return notesStatus('✗ Notes: ' + err.message, true); }
+  if (!draft) return;
+  if (draft.id && !notes.list.some((n) => n.id === draft.id)) { setEditor(null, draft.text, ''); return notesStatus('Kept your unsaved text; its note was removed meanwhile, so Save makes it a new note.'); }
+  notesStatus('Kept your unsaved changes from before the page refreshed.');
+}
+function closeNotes() {
+  if (!notes.open) return;
+  clearEditor(); notes.open = false; $('notes-body').hidden = true;
+  $('notes-toggle').textContent = '▸ ' + NOTES_LABEL; $('notes-toggle').setAttribute('aria-expanded', 'false');
+}
+$('notes-toggle').onclick = () => (notes.open ? notesGuard(closeNotes) : openNotes());
+$('notes-new').onclick = () => notesGuard(() => { setEditor(null, ''); notesStatus('A new note: the first line is its title. Nothing is saved until Save.'); noteText.focus(); });
+$('notes-save').onclick = async () => {
+  const text = noteText.value, id = notes.id;
+  $('notes-save').disabled = true;
+  try {
+    const r = await post(id ? '__notes/save' : '__notes/new', id ? { id, text } : { text });
+    if (r.status === 404) { setEditor(null, noteText.value, ''); return notesStatus('✗ That note was removed elsewhere: Save again keeps this text as a new note.', true); }
+    if (!r.ok) throw new Error(await r.text());
+    const n = await r.json();
+    if (notes.editing && notes.id === id) setEditor(n.id, noteText.value, text);
+    notesStatus('Saved ' + new Date(n.savedAt).toLocaleTimeString() + '.');
+    await loadNotes();
+  } catch (err) { notesStatus('✗ Not saved: ' + err.message, true); }
+  finally { $('notes-save').disabled = !notes.editing; }
+};
+$('notes-remove').onclick = () => {
+  if (!notes.id) return notesAsk('Discard this new note? It was never saved.', [['Discard', clearEditor], ['Cancel']]);
+  const id = notes.id;
+  notesAsk('Remove "' + noteTitle() + '"? Its file is deleted from this computer.', [['Remove', async () => {
+    try {
+      const r = await post('__notes/remove', { id });
+      if (!r.ok && r.status !== 404) throw new Error(await r.text());
+      if (notes.id === id) clearEditor();
+      notesStatus('Removed.'); await loadNotes();
+    } catch (err) { notesStatus('✗ Not removed: ' + err.message, true); }
+  }], ['Cancel']]);
+};
 </script></body></html>`;
 
 // Input endpoints accept only the page itself: same host, JSON. A page on another site can't send
@@ -1676,6 +1818,7 @@ function handleScreen(req, res, url, dir, screen) {
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
   if (url.pathname === '/__room') { send(200, 'text/html; charset=utf-8', SCREEN); return true; }
   if (handleShell(req, res, url)) return true; // the terminal pane (host-shell.mjs)
+  if (handleNotes(req, res, url, dir)) return true; // the Notes pane (notes.mjs)
   // The heartbeat: the page and the Dock app ask every few seconds; a new pid means a new process.
   if (url.pathname === '/__health') {
     send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, root: dir,

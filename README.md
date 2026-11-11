@@ -89,6 +89,17 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening it starts a
   fresh shell; collapsing it, reloading the page or stopping the server ends it. It appears only
   in pages opened on this computer (`127.0.0.1` or `localhost`); see **Access and limits**.
+- **Notes** (in the same place, collapsed; only one of Notes and Terminal is open, so opening
+  Notes ends the shell): your own free-text notes for this room's folder. **New**, a list of
+  notes (title and last-saved date), and an editor with **Save** and **Remove**; a note's first
+  line is its title. A note is saved only by **Save**; **Remove** asks inside the pane first.
+  Unsaved changes are never dropped without asking: the pane asks before another note, New,
+  collapsing it, opening the Terminal or switching room in this window; leaving or reloading the
+  page gets the browser's leave-page warning, and the automatic refresh after a code change keeps
+  them. Notes are Markdown files in `~/.local/share/agent-room/notes/<hash of the room folder>/`,
+  one per note, named by time and random letters (never the title): never in the room's folder,
+  never replicated, and not shown to the agents. Like the Terminal, only in pages opened on this
+  computer.
 - **Transcripts** are in each discussion's `transcripts/` folder, under **Explorer**. On an
   earlier session's transcript, **Send to agents** asks the discussion agents to read it as
   background; it does not resume its sessions.
@@ -559,7 +570,9 @@ when supplied and JSON requests. The **Terminal** pane is for this computer only
 and WebSocket requests are refused unless they come from a loopback address, name the server
 as `localhost`, `127.0.0.1` or `[::1]`, and (for the WebSocket) carry a matching Origin and the
 server's random token, as in ghostty-web's demo server. It runs with your account's rights, like
-the agents; any program on this computer that sends those headers can reach it. There is no remote stop,
+the agents; any program on this computer that sends those headers can reach it. The **Notes**
+pane's requests get the same loopback, Host and Origin checks (without a token), and its changes
+must be JSON. There is no remote stop,
 automatic recovery after a crash (Resume each discussion from its checkpoint), streaming reply
 display, or live app preview. Discussion-to-worker relay exists only as auto dev
 (above), started from the screen; merging `worker/main` stays manual.
@@ -579,6 +592,7 @@ agent-room's source.
 | `src/ui.mjs` | Room setup, persistent defaults, commands, discussions, worker queue, logging and launch integration. |
 | `src/docs.mjs` | Local HTTP server handlers, document rendering, browser UI and live events. |
 | `src/host-shell.mjs` | The Terminal pane's shell: token endpoint, WebSocket, host-only checks and shell lifetime. |
+| `src/notes.mjs` | The Notes pane's storage and endpoints: list, read, create, save and remove, with the Terminal's host-only checks. |
 | `src/replicate.mjs` | Separate discussion Git storage, pairing, background transfer and immutable received snapshots. |
 | `src/usage.mjs` | Token accounting and optional quota-meter data. |
 
