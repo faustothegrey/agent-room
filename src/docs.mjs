@@ -1743,14 +1743,17 @@ $('notes-save').onclick = async () => {
 };
 $('notes-remove').onclick = () => {
   if (!notes.id) return notesAsk('Discard this new note? It was never saved.', [['Discard', clearEditor], ['Cancel']]);
-  const id = notes.id;
-  notesAsk('Remove "' + noteTitle() + '"? Its file is deleted from this computer.', [['Remove', async () => {
+  const id = notes.id, session = notes.session, title = noteTitle();
+  const current = () => notes.session === session; // as in Save: still the editing session it was asked in
+  notesAsk('Remove "' + title + '"? Its file is deleted from this computer.', [['Remove', async () => {
     try {
       const r = await post('__notes/remove', { id });
       if (!r.ok && r.status !== 404) throw new Error(await r.text());
-      if (notes.id === id) clearEditor();
-      notesStatus('Removed.'); await loadNotes();
-    } catch (err) { notesStatus('✗ Not removed: ' + err.message, true); }
+      if (current()) { clearEditor(); notesStatus('Removed.'); }
+      // A later session: its text stays; if it shows the removed note, it becomes an unsaved new one.
+      else if (notes.id === id) { setEditor(null, noteText.value, ''); notesStatus('✗ That note was removed elsewhere: Save again keeps this text as a new note.', true); }
+    } catch (err) { notesStatus('✗ ' + (current() ? 'Not removed: ' : '"' + title + '" was not removed: ') + err.message, true); }
+    loadNotes().catch(() => {});
   }], ['Cancel']]);
 };
 </script></body></html>`;
