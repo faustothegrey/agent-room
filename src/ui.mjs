@@ -544,7 +544,7 @@ function checkpoints(ctx) {
       if (had?.stamp === stamp) return had.entry;
       const saved = JSON.parse(readFileSync(file, 'utf8'));
       const entry = saved.version === 1 && saved.root === realpathSync(ctx.cwd) && typeof saved.discussion?.name === 'string'
-        ? [{ name: saved.discussion.name, at: saved.at, kind: saved.fresh ? 'fresh' : 'full' }] : [];
+        ? [{ name: saved.discussion.name, at: saved.at, kind: saved.fresh ? 'fresh' : 'full', ...(saved.fresh && { summary: !!saved.summary }) }] : [];
       listedCheckpoints.set(file, { stamp, entry });
       return entry;
     } catch { return []; }
@@ -621,14 +621,22 @@ function cleanWork(w) {
     interrupted: list(w?.interrupted), notStarted: list(w?.notStarted) };
 }
 // Saves a discussion's work record: through its open context when it has a round to save with,
-// otherwise into its checkpoint file as it is (a closed or not yet started discussion).
+// otherwise into its checkpoint file as it is (a closed or not yet started discussion). A named
+// discussion with no checkpoint yet (before its first message, after Resume without one) gets a
+// small one, as Start fresh leaves: it starts from the handoff, and holds only this record.
+// Brainstorms have no name, so their tasks are never recorded.
 function persistWork(ctx, name) {
   const shop = shopOf(ctx), w = workOf(shop, name);
   const owner = siblings(ctx).find((c) => c.discussion?.name === name && c.lastRound && saveable(c));
   if (owner) return saveCheckpoint(owner);
   try {
     const saved = readCheckpoint(ctx, name);
-    if (saved && !saved.invalid && saved.version === 1 && saved.root === realpathSync(ctx.cwd)) writeCheckpoint(ctx, name, { ...saved, work: w });
+    if (!saved) {
+      writeCheckpoint(ctx, name, { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
+        discussion: { name, title: name }, fresh: true, summary: null, work: w });
+      showHeader(ctx); // Explorer's Resume tooltip follows
+    }
+    else if (!saved.invalid && saved.version === 1 && saved.root === realpathSync(ctx.cwd)) writeCheckpoint(ctx, name, { ...saved, work: w });
   } catch (err) { note(ctx, `✗ Couldn't save the worker task record of ${name}: ${err.message}`, true); }
 }
 // On Resume or Restart: a running task with no live run was interrupted; a queued one that is no
@@ -2063,7 +2071,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       const merge = mainBehind ? (rollback
         ? 'Main has commits worker/main lacks. Follow the rollback preflight below before merging or changing files.\n\n'
         : `Before the instruction below, first merge main into worker/main with a normal merge (git merge main). Label any merge commit "[${label}] catch up with main". If it clashes, do not force it or do the requested task: leave the state intact and report the conflict; this origin must resolve it before other worker tasks can run. Never merge into main or push.\n\n`) : '';
-      const interrupted = told.map((r) => `Your previous instruction "${firstLine(r.task)}" was interrupted by a Restart or Quit: check the worktree before continuing.\n\n`).join('');
+      const interrupted = told.map((r) => `Your previous instruction "${firstLine(r.task)}" was interrupted by a Restart, Quit or a crash: check the worktree before continuing.\n\n`).join('');
       if (told.length) work.interrupted = work.interrupted.filter((r) => !told.includes(r));
       entry = { speaker: worker.name, text: (await worker.turn(interrupted + brief + tree + commit + leftover + merge + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
       if (ctx.worker === worker) {

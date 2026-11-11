@@ -864,7 +864,7 @@ function resumeTip(name, open, section) {
   const saved = room?.checkpoints?.find((c) => c.name === name);
   const what = open ? 'Show it: its agents carry on, nothing is restarted.'
     : saved?.kind === 'full' ? 'Continue where it stopped: the same agent and worker sessions, and its chat.'
-    : saved?.kind === 'fresh' ? 'Start from its handoff and notes, with the summary chosen at Start fresh.'
+    : saved?.kind === 'fresh' && saved.summary !== false ? 'Start from its handoff and notes, with the summary chosen at Start fresh.'
     : 'No saved session: start from its handoff and notes.';
   return (section ? 'Makes it active first. ' : '') + what;
 }

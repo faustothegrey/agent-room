@@ -1952,7 +1952,7 @@ test('a worker task cut off with a clean worktree: Resume reports it and the tas
   // The next instruction from this discussion carries the notice, once.
   queueWork(after, 'next task');
   await after.workQueue;
-  assert.match(prompts[0], /^Your previous instruction "first task" was interrupted by a Restart or Quit: check the worktree before continuing\./);
+  assert.match(prompts[0], /^Your previous instruction "first task" was interrupted by a Restart, Quit or a crash: check the worktree before continuing\./);
   queueWork(after, 'another task');
   await after.workQueue;
   assert.doesNotMatch(prompts[1], /was interrupted/);
@@ -2068,4 +2068,30 @@ test('Quit room during a worker task: the stopped task is kept as interrupted, t
   const notes = after.screen.worker.filter((m) => m.note).map((m) => m.note);
   assert.match(notes[0], new RegExp(`^✗ Interrupted: \\[${name}\\] "long task" `));
   assert.match(notes[1], new RegExp(`^✗ Not started: \\[${name}\\] "waiting task" `));
+});
+
+test('a worker task from a discussion with no full checkpoint yet is recorded too, and reported on the next Resume', async () => {
+  const { readFileSync, mkdirSync, existsSync } = await import('node:fs');
+  const { queueWork } = await import('../src/ui.mjs');
+  const cwd = await tmp('work-unsaved-');
+  await gitRoom(cwd);
+  mkdirSync(`${cwd}/discussions/2026-11-01-old`, { recursive: true });
+  const ctx = await savedRoom(cwd, 'unsaved-1');
+  await handleLine('/resume 2026-11-01-old', ctx); // no checkpoint: from its handoff, no message yet
+  const file = await checkpointPath(cwd, '2026-11-01-old');
+  assert.equal(existsSync(file), false);
+  ctx.worker.turn = () => new Promise(() => {}); // the process "crashes" during this turn
+  queueWork(ctx, 'early task');
+  let saved;
+  await eventually(() => existsSync(file) && !!(saved = JSON.parse(readFileSync(file, 'utf8'))).work?.running?.before);
+  assert.deepEqual([saved.fresh, saved.summary, saved.sessions, saved.work.running.task], [true, null, undefined, 'early task']);
+  assert.deepEqual(ctx.screen.room.checkpoints.find((c) => c.name === '2026-11-01-old'), { name: '2026-11-01-old', at: saved.at, kind: 'fresh', summary: false });
+
+  const after = await savedRoom(cwd, 'unsaved-2');
+  await handleLine('/resume 2026-11-01-old', after);
+  assert.equal(after.discussion.name, '2026-11-01-old');
+  assert.ok(!after.logPath); // still from its handoff
+  assert.match(after.screen.worker.find((m) => m.note).note,
+    /^✗ Interrupted: \[2026-11-01-old\] "early task" \(started \d\d:\d\d\) left no commits or edits in the worktree\./);
+  assert.match(after.state.transcript.at(-1)?.text ?? '', /Interrupted: \[2026-11-01-old\] "early task"/);
 });

@@ -232,8 +232,11 @@ the worktree shows now: uncommitted edits (the queue holds as usual), commits ma
 was lost, nothing left in the worktree, or "Result unknown: … Check the worktree" when it stopped
 before its starting commit was recorded. A task still queued is reported as not started; nothing is
 re-sent. The next instruction from that discussion tells the worker, once, that its previous
-instruction was interrupted. Tasks sent before a discussion's first message (or from a brainstorm)
-aren't recorded until there is a checkpoint to hold them.
+instruction was interrupted. A task from a discussion that has no full checkpoint yet (after Start
+fresh, or a Resume from its handoff, before the first message) is recorded in a small checkpoint
+that holds only these records; the discussion still starts from its handoff. What remains
+unrecorded: tasks sent from a brainstorm (it has no name or checkpoint), and tasks sent before a new
+discussion's first message, which names and creates it.
 
 **Start fresh** (in a row's **Actions ▾**, or on the discussion's page; two clicks; `/fresh
 <folder-name>`) discards the saved sessions and chat: new agent and worker sessions start from the
