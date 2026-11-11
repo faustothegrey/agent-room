@@ -98,7 +98,7 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   page gets the browser's leave-page warning, and the automatic refresh after a code change keeps
   them. Notes are Markdown files in `~/.local/share/agent-room/notes/<hash of the room folder>/`,
   one per note, named by time and random letters (never the title): never in the room's folder,
-  never replicated, and not shown to the agents. Like the Terminal, only in pages opened on this
+  never replicated, and the agents are not told about them. Like the Terminal, only in pages opened on this
   computer.
 - **Transcripts** are in each discussion's `transcripts/` folder, under **Explorer**. On an
   earlier session's transcript, **Send to agents** asks the discussion agents to read it as

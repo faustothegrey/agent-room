@@ -445,7 +445,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
     <div id="docpane"></div>
   </div>
-  <div id="notes" hidden><button id="notes-toggle" aria-expanded="false" title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents don't see them.">▸ Notes (this computer only)</button><div id="notes-body" hidden>
+  <div id="notes" hidden><button id="notes-toggle" aria-expanded="false" title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder.">▸ Notes (this computer only)</button><div id="notes-body" hidden>
     <div id="notes-side"><button id="notes-new" title="Start a new note: the first line is its title">New</button><div id="notes-list"></div></div>
     <div id="notes-main"><div id="notes-ask" role="alertdialog" aria-labelledby="notes-ask-text" hidden><span id="notes-ask-text"></span><span id="notes-ask-buttons"></span></div><textarea class="box" id="notes-text" aria-label="Note" placeholder="Choose a note, or New. The first line is the note's title." disabled></textarea>
       <div id="notes-bar"><button id="notes-save" disabled title="Save this note (nothing is saved until you press Save)">Save</button><button id="notes-remove" disabled>Remove</button><span id="notes-status" role="status"></span></div></div>
@@ -1634,7 +1634,10 @@ async function openHostShell() {
 // another note, New, collapsing, the terminal or another room; the browser's leave-page warning
 // otherwise; a refresh after a code change keeps them (refreshPage).
 const NOTES_LABEL = 'Notes (this computer only)';
-const notes = { open: false, list: [], id: null, base: '', editing: false }; // id null: a new note; base: its saved text
+const notes = { open: false, list: [], id: null, base: '', editing: false, session: 0 }; // id null: a new note; base: its saved text
+// session: changed whenever the editor starts something else (setEditor, clearEditor, a read). A
+// save or read response is applied to the editor only if the session it started in is still current;
+// otherwise it only refreshes the list.
 const noteText = $('notes-text');
 const notesDirty = () => notes.editing && noteText.value !== notes.base;
 function noteDraft() { return notesDirty() ? { id: notes.id, base: notes.base, text: noteText.value } : null; }
@@ -1666,14 +1669,14 @@ function notesGuard(act, cancel) {
   ]);
 }
 function setEditor(id, text, base = text) {
-  Object.assign(notes, { id, base, editing: true });
+  Object.assign(notes, { id, base, editing: true }); notes.session++;
   noteText.value = text; noteText.disabled = false;
   $('notes-save').disabled = $('notes-remove').disabled = false;
   $('notes-remove').textContent = id ? 'Remove' : 'Discard';
   showNoteList();
 }
 function clearEditor() {
-  Object.assign(notes, { id: null, base: '', editing: false });
+  Object.assign(notes, { id: null, base: '', editing: false }); notes.session++;
   noteText.value = ''; noteText.disabled = true;
   $('notes-save').disabled = $('notes-remove').disabled = true;
   $('notes-ask').hidden = true; notesStatus('');
@@ -1696,12 +1699,14 @@ async function loadNotes() {
   notes.list = await r.json(); showNoteList();
 }
 async function readNote(id) {
+  const session = ++notes.session; // a later click on another note wins, whichever answer comes first
   try {
     const r = await fetch('__notes/read?id=' + encodeURIComponent(id), { cache: 'no-store' });
     if (!r.ok) throw new Error(await r.text());
     const n = await r.json();
+    if (notes.session !== session) return loadNotes().catch(() => {});
     setEditor(n.id, n.text); notesStatus('');
-  } catch (err) { notesStatus('✗ ' + err.message, true); loadNotes().catch(() => {}); }
+  } catch (err) { if (notes.session === session) notesStatus('✗ ' + err.message, true); loadNotes().catch(() => {}); }
 }
 async function openNotes(draft) {
   if (hostShell) closeHostShell();
@@ -1721,17 +1726,19 @@ function closeNotes() {
 $('notes-toggle').onclick = () => (notes.open ? notesGuard(closeNotes) : openNotes());
 $('notes-new').onclick = () => notesGuard(() => { setEditor(null, ''); notesStatus('A new note: the first line is its title. Nothing is saved until Save.'); noteText.focus(); });
 $('notes-save').onclick = async () => {
-  const text = noteText.value, id = notes.id;
+  const text = noteText.value, id = notes.id, session = notes.session, title = noteTitle();
+  const current = () => notes.session === session; // still the editing session this save started in
   $('notes-save').disabled = true;
   try {
     const r = await post(id ? '__notes/save' : '__notes/new', id ? { id, text } : { text });
+    if (!current() && (r.ok || r.status === 404)) return loadNotes().catch(() => {}); // a failure is still reported below
     if (r.status === 404) { setEditor(null, noteText.value, ''); return notesStatus('✗ That note was removed elsewhere: Save again keeps this text as a new note.', true); }
     if (!r.ok) throw new Error(await r.text());
     const n = await r.json();
-    if (notes.editing && notes.id === id) setEditor(n.id, noteText.value, text);
+    setEditor(n.id, noteText.value, text);
     notesStatus('Saved ' + new Date(n.savedAt).toLocaleTimeString() + '.');
     await loadNotes();
-  } catch (err) { notesStatus('✗ Not saved: ' + err.message, true); }
+  } catch (err) { notesStatus('✗ ' + (current() ? 'Not saved: ' : '"' + title + '" was not saved: ') + err.message, true); }
   finally { $('notes-save').disabled = !notes.editing; }
 };
 $('notes-remove').onclick = () => {
