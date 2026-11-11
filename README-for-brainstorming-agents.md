@@ -20,13 +20,12 @@ the discussion, seeing files, summaries) applies to both.
 Agent-room helps a human and multiple AI agents discuss and revise ideas around a shared
 document or drawing, keeping the conversation and its subject visible together.
 
-The longer-term purpose is educational maths and science software built through conversation,
-with engaging interactions and controlled running costs. Live application previews and animation
-selection remain possible later work, not current room capabilities.
+It is a collaboration platform for a human and AI agents, and domain-agnostic: the work in a
+room can be of any kind.
 
 ## Where you are
 - A **discussion room**. Your working directory is the room's **root**: it holds the work
-  itself (code, educational material, other artifacts). Read anything in it.
+  itself (code, documents, other artifacts). Read anything in it.
 - You are in one **discussion**: a folder `discussions/<name>/` in the root, given with your
   first message (its full path). Its only output is the notes and drawings you write there;
   its session transcripts are saved by agent-room in its `transcripts/` folder.

@@ -1,12 +1,16 @@
 # agent-room
 
-A human and several AI agents discuss and revise ideas around a shared document or drawing,
-with the conversation and its subject visible together. Agents run through your installed
-Claude Code and Codex CLIs, using their existing authentication and subscriptions.
+agent-room is a collaboration platform for a human and several AI agents. You and the agents
+discuss and revise ideas around shared documents and drawings, with the conversation and its
+subject visible together, and a separate worker agent carries out your instructions in its own
+Git worktree. It is domain-agnostic: a room is any folder, holding any kind of work. Agents run
+through your installed Claude Code and Codex CLIs, using their existing authentication and
+subscriptions.
 
-The project stays deliberately small: seven source modules and one dependency, `marked`.
-Its longer-term purpose is to help build educational maths and science software through
-conversation, with running costs under control.
+The project stays deliberately small: eight source modules and four dependencies: `marked`, and for
+the Terminal pane `@lydell/node-pty`, `ws` and `ghostty-web`. How it works (the two harnesses,
+the main loop, the core protocol, the summary contract, current restrictions) is described in
+[docs/architecture.md](docs/architecture.md); this README covers how to use it.
 
 ## Start a room
 
@@ -116,11 +120,9 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   answer and turns red when the server stops. The page asks every three seconds; it says when
   the server stops answering, and reloads when a server answers again on that address.
 
-In this project (the agent-room room itself), its design history is five discussions, each with
-its documents and its transcripts: `2026-11-02-discussions-and-folders/` is active, three are in
-`archive/` and one in `deferred/`; [`discussions/README.md`](discussions/README.md) is their index.
-Files directly in `discussions/` that aren't dated folders (here, just that index) are listed
-under "This room's own documents", with no Resume button.
+Files directly in `discussions/` that aren't dated folders (in this project, its index
+[`discussions/README.md`](discussions/README.md)) are listed under "This room's own documents",
+with no Resume button.
 
 ## Discussions and saved files
 
@@ -156,7 +158,7 @@ first needed, and always listed at the bottom of **Explorer**, after the active 
 Archive and Defer are disabled for the discussion in use, with the reason in a tooltip. New discussion names also skip names already
 taken in `archive/` and `deferred/`.
 
-**Several open discussions** (on the screen; an intermediate first version). A folder can have
+**Several open discussions** (on the screen). A folder can have
 several discussions open at once, each with its own agents' sessions, chat and auto dev, sharing
 one worker. One window shows one of them; Explorer marks the others "open". **Resume** shows an open one as
 it is: its agents carry on, nothing is restarted. An open brainstorm, or an open discussion that
@@ -194,9 +196,8 @@ checkpoint.
 Restart), agent-room saves the discussion's checkpoint on this machine: the provider session IDs
 of its agents and its worker, its chat and unread-message positions, its own entries in the Worker
 tab, its provider/model choices and usage totals. The discussion part is as of the end of its
-latest round. Checkpoints are private local files under `~/.local/state/agent-room/paused/` (the
-folder keeps the name it had when only Pause saved them), separated by root folder; they are not
-replicated to peers. A Pause saved by an earlier version is read as a checkpoint.
+latest round. Checkpoints are private local files under `~/.local/state/agent-room/paused/`,
+separated by root folder; they are not replicated to peers.
 
 **Resume** (on a discussion's row in **Explorer** or on its page, or `/resume <folder-name>`), for
 any discussion not on screen, works between rounds:
@@ -247,8 +248,8 @@ the handoff; old conversations are not replayed. Preparing and consuming handoff
 convention described in [the brainstorming rulebook](README-for-brainstorming-agents.md), not
 automatic app behavior.
 
-The former commands `/pause`, `/reopen`, `/continue` and `/autosummary` answer with a hint instead
-of reaching the agents.
+`/pause`, `/reopen`, `/continue` and `/autosummary` are no longer commands: they answer with a
+hint instead of reaching the agents.
 
 Looking at another discussion does not switch the one in use (marked "in use" in the list); only Resume and Start fresh do. Display-title
 editing is not available yet; see [remaining decisions](discussions/2026-11-02-discussions-and-folders/discussions.md).
@@ -315,11 +316,14 @@ independently of the selected discussion and worker models.
 
 ## Summaries and usage
 
-**Summarize**, or `/summary`, asks the discussion agents to agree a summary under **Agreed**,
-**Not agreed**, and **Questions for the User**, in at most eight points. When the discussion has
-proposed instructions for the worker, a last section, **Instructions for the Worker**, quotes the
-latest version of each word for word, marked "sending unconfirmed"; later summaries repeat it
-until you say it was sent, replaced or withdrawn. The drafter rotates between summaries. Writing
+**Summarize**, or `/summary`, asks the discussion agents to agree a summary by points under
+**Agreed**, **Not agreed**, **Next step** and **Later**, leaving out empty sections, with at most
+eight points under Agreed and Not agreed. **Next step** holds exactly one action for you: `Answer:`
+a question, `Send to the Worker: "…"` with the instruction word for word, or `Do:` an action of your
+own; **Later** lists the remaining actions in order. An instruction for the worker is kept until
+you say it was sent, replaced or withdrawn: under Later it is referred to by name, with its full
+text in the discussion's `pending-instructions.md`. The format and what the code reads from it are
+in [the summary contract](docs/architecture.md#summary-contract). The drafter rotates between summaries. Writing
 or revising counts as accepting that version; every other agent must pass on it for agreement.
 Each agent gets at most three turns. Without agreement, the last revision is shown as
 **not agreed**. Only the result appears in the chat; the exchange is retained in the transcript.
@@ -471,8 +475,8 @@ New received rounds do not change an open View. Each browser pins its selected s
 Back releases it, and closing/reloading the page releases it after two minutes without renewal.
 Keep the page connected while reading: a suspended or disconnected page must select View again
 when its lease expires. The latest snapshot and all open, leased Views are kept; older snapshot
-folders are deleted while their commits remain in Git. No Continue here, reconciliation or Fork
-is available in this slice. Replication has been tested locally; LAN and Raspberry Pi validation
+folders are deleted while their commits remain in Git. There is no Continue here, reconciliation
+or Fork. Replication has been tested locally; LAN and Raspberry Pi validation
 remain separate deployment checks.
 
 ## The worker's worktree
@@ -553,13 +557,15 @@ when supplied and JSON requests. The **Terminal** pane is for this computer only
 and WebSocket requests are refused unless they come from a loopback address, name the server
 as `localhost`, `127.0.0.1` or `[::1]`, and (for the WebSocket) carry a matching Origin and the
 server's random token, as in ghostty-web's demo server. It runs with your account's rights, like
-the agents; any program on this computer that sends those headers can reach it. There is no remote stop, agent-session crash recovery,
-streaming reply display, or live app preview. Discussion-to-worker relay exists only as auto dev
+the agents; any program on this computer that sends those headers can reach it. There is no remote stop,
+automatic recovery after a crash (Resume each discussion from its checkpoint), streaming reply
+display, or live app preview. Discussion-to-worker relay exists only as auto dev
 (above), started from the screen; merging `worker/main` stays manual.
 
 ## Working on the project
 
-Read [AGENT.md](AGENT.md) for contribution rules. The two agent rulebooks apply only to agents
+Read [AGENT.md](AGENT.md) for contribution rules and [docs/architecture.md](docs/architecture.md)
+for the design. The two agent rulebooks apply only to agents
 started by the room in their respective roles; they are not instructions for someone editing
 agent-room's source.
 
@@ -590,5 +596,4 @@ agent's edits to agent-room itself; a half-finished save that doesn't load leave
 code running.
 
 For unfinished decisions, historical designs and deferred research, start at
-[the discussions index](discussions/README.md). Archived status labels describe their original date,
-not today's implementation or a fresh instruction to work.
+[the discussions index](discussions/README.md).

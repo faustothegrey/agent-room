@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#444"/></marker>
+  </defs>
+  <rect width="1000" height="700" fill="#fff"/>
+  <text x="20" y="30" font-size="18" font-weight="bold">agent-room — containers + components (C4 levels 2–3), checked against src/ on 2026-11-11</text>
+
+  <!-- User -->
+  <rect x="20" y="60" width="150" height="70" rx="35" fill="#08427b"/>
+  <text x="95" y="92" fill="#fff" text-anchor="middle" font-weight="bold">User</text>
+  <text x="95" y="110" fill="#fff" text-anchor="middle" font-size="11">human participant</text>
+
+  <!-- Browser -->
+  <rect x="20" y="180" width="150" height="90" fill="#438dd5"/>
+  <text x="95" y="210" fill="#fff" text-anchor="middle" font-weight="bold">Browser page</text>
+  <text x="95" y="228" fill="#fff" text-anchor="middle" font-size="11">Discussion · Worker ·</text>
+  <text x="95" y="242" fill="#fff" text-anchor="middle" font-size="11">Explorer · Terminal</text>
+  <text x="95" y="258" fill="#fff" text-anchor="middle" font-size="10">(served by docs.mjs)</text>
+  <line x1="95" y1="130" x2="95" y2="178" stroke="#444" marker-end="url(#a)"/>
+
+  <!-- Harness boundary -->
+  <rect x="220" y="55" width="400" height="420" fill="#f3f7fb" stroke="#1168bd" stroke-dasharray="8 4"/>
+  <text x="232" y="78" fill="#1168bd" font-weight="bold">ROOM HARNESS: agent-room (one Node process, many rooms)</text>
+  <text x="232" y="96" fill="#1168bd" font-size="10">enforces: turn order, PASS stop, turn cap, summary rounds, tools, worker queue</text>
+
+  <rect x="240" y="110" width="170" height="60" fill="#1168bd"/>
+  <text x="325" y="135" fill="#fff" text-anchor="middle" font-weight="bold">cli.mjs</text>
+  <text x="325" y="152" fill="#fff" text-anchor="middle" font-size="11">rooms, queue, Reload/Restart</text>
+
+  <rect x="430" y="110" width="170" height="60" fill="#1168bd"/>
+  <text x="515" y="135" fill="#fff" text-anchor="middle" font-weight="bold">docs.mjs</text>
+  <text x="515" y="152" fill="#fff" text-anchor="middle" font-size="11">HTTP, UI, live events</text>
+
+  <rect x="240" y="190" width="170" height="60" fill="#1168bd"/>
+  <text x="325" y="215" fill="#fff" text-anchor="middle" font-weight="bold">room.mjs</text>
+  <text x="325" y="232" fill="#fff" text-anchor="middle" font-size="11">turns, passes, agreement</text>
+
+  <rect x="430" y="190" width="170" height="60" fill="#1168bd"/>
+  <text x="515" y="215" fill="#fff" text-anchor="middle" font-weight="bold">ui.mjs</text>
+  <text x="515" y="232" fill="#fff" text-anchor="middle" font-size="11">discussions, worker, checkpoints</text>
+
+  <rect x="240" y="270" width="170" height="60" fill="#1168bd"/>
+  <text x="325" y="295" fill="#fff" text-anchor="middle" font-weight="bold">agents.mjs</text>
+  <text x="325" y="312" fill="#fff" text-anchor="middle" font-size="11">spawns CLIs, grants tools</text>
+
+  <rect x="430" y="270" width="170" height="60" fill="#1168bd"/>
+  <text x="515" y="295" fill="#fff" text-anchor="middle" font-weight="bold">host-shell.mjs</text>
+  <text x="515" y="312" fill="#fff" text-anchor="middle" font-size="11">Terminal pty (loopback only)</text>
+
+  <rect x="240" y="350" width="170" height="60" fill="#1168bd"/>
+  <text x="325" y="375" fill="#fff" text-anchor="middle" font-weight="bold">replicate.mjs</text>
+  <text x="325" y="392" fill="#fff" text-anchor="middle" font-size="11">optional, --node/--peer</text>
+
+  <rect x="430" y="350" width="170" height="60" fill="#1168bd"/>
+  <text x="515" y="375" fill="#fff" text-anchor="middle" font-weight="bold">usage.mjs</text>
+  <text x="515" y="392" fill="#fff" text-anchor="middle" font-size="11">tokens, quota meter</text>
+
+  <text x="232" y="440" fill="#1168bd" font-size="11">Role instructions, sent with every turn:</text>
+  <text x="232" y="456" fill="#1168bd" font-size="11">README-for-brainstorming-agents.md · README-for-worker-agents.md</text>
+  <text x="232" y="470" fill="#1168bd" font-size="10">+ per-turn prompts from room.mjs, ui.mjs (intro, summary format, auto dev)</text>
+
+  <line x1="170" y1="225" x2="428" y2="140" stroke="#444" marker-end="url(#a)"/>
+  <text x="250" y="186" font-size="10" fill="#444" transform="rotate(-18 250 186)">HTTP + events :5566</text>
+
+  <!-- Provider CLIs -->
+  <rect x="680" y="60" width="300" height="200" fill="#fdf6ec" stroke="#b07a1f" stroke-dasharray="8 4"/>
+  <text x="692" y="82" fill="#b07a1f" font-weight="bold">PROVIDER CLI HARNESSES (required)</text>
+  <rect x="700" y="95" width="125" height="70" fill="#999"/>
+  <text x="762" y="120" fill="#fff" text-anchor="middle" font-weight="bold">claude -p</text>
+  <text x="762" y="137" fill="#fff" text-anchor="middle" font-size="10">--append-system-prompt</text>
+  <text x="762" y="151" fill="#fff" text-anchor="middle" font-size="10">--tools / --allowedTools</text>
+  <rect x="840" y="95" width="125" height="70" fill="#999"/>
+  <text x="902" y="120" fill="#fff" text-anchor="middle" font-weight="bold">codex exec</text>
+  <text x="902" y="137" fill="#fff" text-anchor="middle" font-size="10">developer_instructions</text>
+  <text x="902" y="151" fill="#fff" text-anchor="middle" font-size="10">sandbox: full access</text>
+  <text x="692" y="190" fill="#b07a1f" font-size="11">Discussion agents (Claude: no Bash), Worker (Bash).</text>
+  <text x="692" y="206" fill="#b07a1f" font-size="11">Role instructions: asked, not enforced.</text>
+  <text x="692" y="222" fill="#b07a1f" font-size="11">Skills: agent-room ships none; providers may add theirs.</text>
+  <text x="692" y="238" fill="#b07a1f" font-size="11">One process per turn; sessions resumed by ID.</text>
+  <line x1="410" y1="300" x2="698" y2="150" stroke="#444" marker-end="url(#a)"/>
+  <text x="540" y="245" font-size="10" fill="#444" transform="rotate(-27 540 245)">prompt on stdin, reply JSON</text>
+
+  <!-- Storage -->
+  <text x="20" y="510" font-weight="bold">Storage (files, not processes)</text>
+  <rect x="20" y="520" width="215" height="80" fill="#e8e8e8" stroke="#888"/>
+  <text x="127" y="545" text-anchor="middle" font-weight="bold">Room root</text>
+  <text x="127" y="562" text-anchor="middle" font-size="11">the work + discussions/</text>
+  <text x="127" y="577" text-anchor="middle" font-size="11">notes, drawings, transcripts</text>
+  <rect x="250" y="520" width="215" height="80" fill="#e8e8e8" stroke="#888"/>
+  <text x="357" y="545" text-anchor="middle" font-weight="bold">Worker worktree</text>
+  <text x="357" y="562" text-anchor="middle" font-size="11">&lt;repo&gt;.worker/, worker/main</text>
+  <text x="357" y="577" text-anchor="middle" font-size="11">needs Git · not a sandbox</text>
+  <rect x="480" y="520" width="215" height="80" fill="#e8e8e8" stroke="#888"/>
+  <text x="587" y="545" text-anchor="middle" font-weight="bold">Local state</text>
+  <text x="587" y="562" text-anchor="middle" font-size="11">~/.config/…/defaults.json</text>
+  <text x="587" y="577" text-anchor="middle" font-size="11">~/.local/state/…/paused/ checkpoints</text>
+  <rect x="710" y="520" width="270" height="80" fill="#e8e8e8" stroke="#888"/>
+  <text x="845" y="545" text-anchor="middle" font-weight="bold">Replication store (optional)</text>
+  <text x="845" y="562" text-anchor="middle" font-size="11">&lt;root&gt;/.agent-room/store.git</text>
+  <text x="845" y="577" text-anchor="middle" font-size="11">→ peer servers over HTTP</text>
+  <line x1="420" y1="475" x2="420" y2="518" stroke="#444" marker-end="url(#a)"/>
+  <line x1="830" y1="260" x2="400" y2="518" stroke="#b07a1f" stroke-dasharray="4 3" marker-end="url(#a)"/>
+  <line x1="800" y1="260" x2="180" y2="518" stroke="#b07a1f" stroke-dasharray="4 3" marker-end="url(#a)"/>
+  <text x="640" y="400" font-size="10" fill="#b07a1f">agents read/write files directly</text>
+  <text x="640" y="413" font-size="10" fill="#b07a1f">(working directory: the room root for discussion</text>
+  <text x="640" y="426" font-size="10" fill="#b07a1f">agents, the worktree for the worker; full file access)</text>
+
+  <!-- Externals -->
+  <rect x="680" y="290" width="140" height="50" fill="#999"/>
+  <text x="750" y="312" fill="#fff" text-anchor="middle" font-weight="bold">Quota meter</text>
+  <text x="750" y="328" fill="#fff" text-anchor="middle" font-size="10">optional, :9899</text>
+  <line x1="600" y1="380" x2="680" y2="330" stroke="#444" marker-end="url(#a)"/>
+  <rect x="840" y="290" width="140" height="50" fill="#999"/>
+  <text x="910" y="312" fill="#fff" text-anchor="middle" font-weight="bold">Peer servers</text>
+  <text x="910" y="328" fill="#fff" text-anchor="middle" font-size="10">other agent-room nodes</text>
+
+  <!-- Legend -->
+  <rect x="20" y="625" width="960" height="60" fill="#fafafa" stroke="#ccc"/>
+  <text x="35" y="648" font-weight="bold">Legend</text>
+  <rect x="110" y="637" width="16" height="16" fill="#1168bd"/><text x="132" y="650">harness code (enforces)</text>
+  <rect x="300" y="637" width="16" height="16" fill="#999"/><text x="322" y="650">external system</text>
+  <rect x="450" y="637" width="16" height="16" fill="#e8e8e8" stroke="#888"/><text x="472" y="650">storage</text>
+  <text x="560" y="650" fill="#b07a1f">amber = agent side: role instructions + optional skills (asked)</text>
+  <text x="35" y="672" font-size="11" fill="#666">Simplified: arrows show main flows only; title generation, Dock launcher and terminal mode omitted.</text>
+</svg>
