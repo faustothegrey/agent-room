@@ -233,7 +233,7 @@ process.stdin.on('end', () => {
     assert.equal(a.args[a.args.indexOf('--resume') + 1], claude.args[claude.args.indexOf('--session-id') + 1]);
     assert.equal(a.args[a.args.indexOf('--model') + 1], 'sonnet');
     assert.doesNotMatch(a.input, /Before quit|Participants:/);
-    const b = continued.find((c) => c.codex);
+    const b = continued.find((c) => c.codex && c.args[0] === 'exec'); // not the startup's `codex login status`
     assert.deepEqual(b.args.slice(0, 2), ['exec', 'resume']);
     assert.ok(b.args.includes('saved-thread'));
     assert.equal(b.args[b.args.indexOf('-m') + 1], 'my-model');

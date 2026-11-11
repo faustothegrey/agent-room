@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { addUsage, fetchQuota, formatUsage, quotaGauges, quotaSummary, usageReport } from '../src/usage.mjs';
+import { addUsage, checkLogin, fetchQuota, parseClaudeAuth, parseCodexLogin, formatUsage, quotaGauges, quotaSummary, usageReport } from '../src/usage.mjs';
 
 // The shape the quota meter returned on 2026-10-20 (trimmed).
 const QUOTA = {
@@ -79,4 +79,36 @@ test('reset dates share a local 24-hour format without changing the clock or zon
     assert.equal(quotaGauges(quota, ['claude'])[0].resets, expected);
     assert.ok(usageReport({ totals: {}, agents: [{ name: 'A', provider: 'claude' }], quota }).includes('(at ' + expected + ')'));
   }
+});
+
+test('claude login: from loginExpiresAt in claude auth status; ending in 2 days or less, expired, logged out, unreadable', () => {
+  const now = Date.parse('2026-11-11T10:00:00Z');
+  const status = (o) => JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', ...o });
+  assert.deepEqual(parseClaudeAuth(status({ loginExpiresAt: '2026-12-08T05:24:23.660Z' }), now), { state: 'ok', expiresAt: '2026-12-08T05:24:23.660Z' });
+  assert.equal(parseClaudeAuth(status({ loginExpiresAt: '2026-11-13T10:00:00Z' }), now).state, 'ending');
+  assert.equal(parseClaudeAuth(status({ loginExpiresAt: '2026-11-13T10:00:01Z' }), now).state, 'ok');
+  assert.equal(parseClaudeAuth(status({ loginExpiresAt: '2026-11-11T09:59:00Z' }), now).state, 'expired');
+  assert.deepEqual(parseClaudeAuth(status({}), now), { state: 'ok', expiresAt: null });
+  assert.deepEqual(parseClaudeAuth(JSON.stringify({ loggedIn: false }), now), { state: 'out' });
+  assert.equal(parseClaudeAuth('Logged in', now).state, 'unknown');
+  assert.equal(parseClaudeAuth('{}', now).state, 'unknown');
+  assert.match(parseClaudeAuth(status({ loginExpiresAt: 'soon' }), now).error, /unreadable loginExpiresAt: soon/);
+});
+
+test('codex login: logged in with no expiry, logged out, or unknown', () => {
+  assert.deepEqual(parseCodexLogin('Logged in using ChatGPT\n'), { state: 'ok', expiresAt: null });
+  assert.deepEqual(parseCodexLogin('\nNot logged in\n'), { state: 'out' });
+  assert.match(parseCodexLogin('something else').error, /unreadable output: something else/);
+});
+
+test('checkLogin: a command that fails or times out is unknown, with its error; a logged-out exit code still reads', async () => {
+  const exec = (result) => (command, args, options, done) => done(...result);
+  const missing = Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' });
+  assert.deepEqual(await checkLogin('codex', exec([missing])), { state: 'unknown', error: 'codex login status: spawn codex ENOENT' });
+  const killed = Object.assign(new Error('timed out'), { code: null, killed: true });
+  assert.equal((await checkLogin('claude', exec([killed]))).state, 'unknown');
+  const out = Object.assign(new Error('exit 1'), { code: 1 });
+  assert.deepEqual(await checkLogin('claude', exec([out, '{"loggedIn": false}', ''])), { state: 'out' });
+  assert.deepEqual(await checkLogin('codex', exec([null, '', 'Logged in using ChatGPT\n'])), { state: 'ok', expiresAt: null });
+  assert.match((await checkLogin('codex', exec([out, '', 'boom']))).error, /exit 1: boom/);
 });

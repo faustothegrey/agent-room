@@ -48,9 +48,33 @@ name for its replication line, when replication is on. **Current discussion** (g
 discussion, **Brainstorm** or **No discussion started**, with its state under it (who is thinking, or your
 turn); **Actions ▾** holds **Summarize**, **New discussion**, **New brainstorm** and (on the screen)
 **Close discussion**. **Server and monitoring** (amber): **● Server ▾**, whose menu holds
-**Reload**, **Restart** and **Shutdown server**, then the subscription usage gauges and **Usage**;
+**Reload**, **Restart** and **Shutdown server**, then the monitor panel: the subscription usage gauges, with a
+warning per provider (below);
 hover or focus **Server** for its uptime, port and the server's version.
 An amber ⚠ under **Server** means a replication peer is unreachable (hover for how many); click it to open **Peers…**.
+
+The monitor panel watches agent-room's own Claude and Codex programs and their login, for the room
+being viewed. A ⚠ right of a provider's name means a problem: **amber** when its login ends in 2
+days or less, its login status is unknown (the status command failed or its output couldn't be
+read; the error is shown), or one of its programs is left over; **red** when logged out or the login
+has expired. No ⚠ when all is fine. Hover or focus the name for the problems, then the state: the
+login (for Claude, "Claude reports login ends …", from `loginExpiresAt` in `claude auth status`; for
+Codex "logged in, no expiry given", from `codex login status`) and how many of this room's
+programs are running now. Login is checked once per server, at startup and every 10 minutes.
+
+A **leftover** is a program agent-room started that is still alive after a crash or a Restart.
+Each program is written, when it starts, to `~/.local/state/agent-room/programs/<pid>.json` (PID,
+start time, provider, agent name, room folder), and removed when its process group ends. At startup
+and every minute the server looks for entries whose program isn't one of its rooms' running
+programs and whose process group is still alive (with, while the leader is alive, the recorded
+start time; another start means the number was reused, and the entry is dropped). Its tooltip gives
+the PID, agent, room folder, start time and the command to stop it, `kill -TERM -<pid>`; there is no
+Stop button. A group still alive after its leader ended is shown as **unverified** (its number may
+have been reused), with `ps -g <pid>` to look at it instead. A leftover shows in its own room's
+panel, or in every room's panel when its room isn't open on this server; a provider with a leftover
+shows even when no agent of the room uses it. Known limits: a crash between starting a program and
+recording it leaves that program unseen, and the programs of another agent-room server running on
+this computer at the same time count as leftovers too.
 The version is the commit
 of agent-room's checkout when the server started and its start time, such as `4cb41bd · started
 12:28`, with `+` when the checkout had uncommitted changes (outside `discussions/`). After a
@@ -369,10 +393,10 @@ and what was sent; a relay whose result is lost pauses the run. Resume, Start fr
 and Quit room end it (a resumed discussion comes back without its run); in the terminal, New
 discussion and New brainstorm do too (on the screen they leave the discussion and its run open). Auto dev is for discussions only, not brainstorms.
 
-**Usage**, or `/usage`, reports session token totals for discussion agents and the worker.
+`/usage` reports session token totals for discussion agents and the worker.
 Claude's reported dollar value is an API-price equivalent, not your subscription bill.
 Header gauges show **percent used**, for each provider's five-hour and weekly windows, plus
-reset times, and when the meter last measured them (hover for when the room last asked). Yellow means under 30% remains; red means under 10% remains.
+reset times, and when the meter last measured them, as `on HH:MM` (hover for when the room last asked). Yellow means under 30% remains; red means under 10% remains.
 
 Quotas come from the optional local meter at `http://127.0.0.1:9899` (override with
 `AGENT_ROOM_METER`). They refresh every minute and after turns. If the meter is unavailable,
@@ -483,7 +507,7 @@ background; unreachable peers retry with a delay capped at five minutes, includi
 
 Received-only discussions appear under **Received from peers · read-only** in **Explorer**, with the peer name and **View**. Mixed discussions keep one local row: expand it for **Local ·** files and **Received ·** versions with **View**. **View** opens that peer's conversation and files read-only,
 without starting or stopping agents. **Back to <node>'s line** returns to the local conversation when that discussion has a local line.
-The header keeps Usage, and Restart and Quit room in its menus; ⓘ on each row shows node details on hover or keyboard focus, and Peers… is in the room's **agent-room ▾** menu.
+The header keeps Restart and Quit room in its menus; ⓘ on each row shows node details on hover or keyboard focus, and Peers… is in the room's **agent-room ▾** menu.
 New received rounds do not change an open View. Each browser pins its selected snapshot;
 Back releases it, and closing/reloading the page releases it after two minutes without renewal.
 Keep the page connected while reading: a suspended or disconnected page must select View again
@@ -587,14 +611,14 @@ agent-room's source.
 | Source | Responsibility |
 |---|---|
 | `src/cli.mjs` | Arguments, the server's rooms, each room's context and input queue, Reload, Restart, Quit room and Shutdown. |
-| `src/agents.mjs` | CLI processes, session resumption, model arguments, title generation and usage parsing. |
+| `src/agents.mjs` | CLI processes, the record of programs and its leftovers, session resumption, model arguments, title generation and usage parsing. |
 | `src/room.mjs` | Discussion turns, unseen messages, passes and summary agreement. |
 | `src/ui.mjs` | Room setup, persistent defaults, commands, discussions, worker queue, logging and launch integration. |
 | `src/docs.mjs` | Local HTTP server handlers, document rendering, browser UI and live events. |
 | `src/host-shell.mjs` | The Terminal pane's shell: token endpoint, WebSocket, host-only checks and shell lifetime. |
 | `src/notes.mjs` | The Notes pane's storage and endpoints: list, read, create, save and remove, with the Terminal's host-only checks. |
 | `src/replicate.mjs` | Separate discussion Git storage, pairing, background transfer and immutable received snapshots. |
-| `src/usage.mjs` | Token accounting and optional quota-meter data. |
+| `src/usage.mjs` | Token accounting, optional quota-meter data and the providers' login status. |
 
 Run `npm test`. Tests exercise provider arguments with fake runners, round logic, HTTP endpoints,
 settings persistence across CLI restarts, and screen/terminal coordination; they do not establish

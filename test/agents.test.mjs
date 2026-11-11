@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { claudeTitle, createClaudeAgent, createCodexAgent, parseCodexEvents } from '../src/agents.mjs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { claudeTitle, createClaudeAgent, createCodexAgent, findLeftovers, parseCodexEvents, probeProcess, recordProgram, run } from '../src/agents.mjs';
 
 // A fake runner that records each call and returns scripted stdout.
 function fakeRunner(outputs) {
@@ -180,4 +183,59 @@ test('a working directory given as a function is read at each turn (the worker\'
   const fixed = createClaudeAgent({ name: 'A', runner, cwd: '/room' });
   await fixed.turn('d');
   assert.equal(seen.at(-1), '/room');
+});
+
+// The record of programs, for leftovers after a crash or a Restart.
+test('a recorded program: written at spawn with its start, removed when its process group ends', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'programs-'));
+  const procs = new Set();
+  const turn = run('sh', ['-c', 'sleep 0.3; echo done'], { procs, record: { agent: 'A', room: '/room', dir } });
+  const [proc] = procs;
+  const entry = JSON.parse(readFileSync(join(dir, `${proc.pid}.json`), 'utf8'));
+  assert.deepEqual({ ...entry, started: typeof entry.started }, { pid: proc.pid, started: 'string', provider: 'sh', agent: 'A', room: '/room' });
+  assert.ok(Math.abs(Date.parse(entry.started) - Date.now()) < 5000);
+  assert.equal(await turn, 'done\n');
+  assert.deepEqual(readdirSync(dir), []);
+  // Without `record` nothing is written.
+  await run('true', [], { record: undefined });
+});
+
+test('leftovers: not in this server\'s procs and group alive, with the same start; reused PIDs and gone groups dropped', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'programs-'));
+  const now = Date.now();
+  const at = (ms) => new Date(ms).toISOString();
+  const entry = (pid, started) => recordProgram({ pid, started: at(started), provider: 'claude', agent: 'A', room: '/r' }, dir);
+  entry(101, now); entry(102, now); entry(103, now - 3600_000); entry(104, now); entry(105, now); entry(106, now);
+  writeFileSync(join(dir, '107.json'), '{"pid": 1'); // cut short by a crash
+  const probes = {
+    101: { group: true, leader: true, startedAt: now - 1000 }, // ours, left over
+    102: { group: true, leader: true, startedAt: now }, // ours, still running in this server
+    103: { group: true, leader: true, startedAt: now - 60_000 }, // the number was reused by another program
+    104: { group: true, leader: false, startedAt: null }, // leader gone, group alive: unverified
+    105: { group: false, leader: false, startedAt: null }, // gone
+    106: { group: false, leader: true, startedAt: now }, // a lone process with that number, not our group
+  };
+  const found = await findLeftovers(new Set([102]), { dir, probe: async (pid) => probes[pid] });
+  assert.deepEqual(found.map((f) => [f.pid, f.unverified]), [[101, false], [104, true]]);
+  assert.deepEqual(readdirSync(dir).sort(), ['101.json', '102.json', '104.json']);
+});
+
+test('leftovers with real processes: a live group is found until it ends; a reused PID (other start) is not', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'programs-'));
+  const procs = new Set();
+  const turn = run('sleep', ['30'], { procs, record: { agent: 'W', room: '/r', dir }, timeoutMs: 60_000 });
+  const [proc] = procs;
+  const p = await probeProcess(proc.pid);
+  assert.equal(p.group, true); assert.equal(p.leader, true);
+  assert.ok(Math.abs(p.startedAt - Date.now()) < 5000);
+  assert.deepEqual(await findLeftovers(new Set([proc.pid]), { dir }), []); // in procs: not a leftover
+  assert.deepEqual((await findLeftovers(new Set(), { dir })).map((f) => [f.pid, f.agent, f.unverified]), [[proc.pid, 'W', false]]);
+  // The same number recorded with an hour-older start: another program now has it.
+  const file = join(dir, `${proc.pid}.json`);
+  const entry = JSON.parse(readFileSync(file, 'utf8'));
+  writeFileSync(file, JSON.stringify({ ...entry, started: new Date(Date.now() - 3600_000).toISOString() }));
+  assert.deepEqual(await findLeftovers(new Set(), { dir }), []);
+  assert.equal(existsSync(file), false);
+  proc.stopGroup('SIGTERM');
+  await assert.rejects(turn, /stopped/);
 });

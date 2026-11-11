@@ -6,8 +6,11 @@
 // no shell; codex runs with no sandbox. Keeping to the active discussion's folder is left to their instructions.
 // Access settings apply on every turn. The worker (ui.mjs) can use either provider;
 // a Claude worker is created with `shell: true` to add pre-approved Bash.
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 // Claude: the file, web and sub-agent built-ins (no Bash), plus the
 // look-and-click subset of Claude in Chrome (no JavaScript, forms, uploads or batches). The
@@ -27,14 +30,19 @@ const at = (cwd) => (typeof cwd === 'function' ? cwd() : cwd);
 
 // Run a command with `input` on stdin; resolve with stdout, reject on non-zero exit or timeout.
 // `procs` (a Set, optional) holds the process while it runs, so its room can stop it (Quit room).
-export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOUT_MS, procs } = {}) {
+// `record` ({ agent, room, dir? }, optional) writes the program in the record of programs (below)
+// until its process group ends.
+export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOUT_MS, procs, record } = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, { cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    proc.provider = command;
+    if (record && proc.pid) recordProgram({ pid: proc.pid, started: new Date().toISOString(), provider: command, agent: record.agent, room: record.room }, record.dir);
+    const forget = () => { if (record && proc.pid) forgetProgram(proc.pid, record.dir); };
     procs?.add(proc);
     // Keep the group tracked even if the provider exits before its commands.
     proc.stopGroup = (signal) => { try { process.kill(-proc.pid, signal); } catch (e) { if (e.code !== 'ESRCH') throw e; } };
     proc.groupAlive = () => { try { process.kill(-proc.pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
-    proc.on('close', () => { if (!proc.groupAlive()) procs?.delete(proc); });
+    proc.on('close', () => { if (!proc.groupAlive()) { procs?.delete(proc); forget(); } });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
@@ -43,7 +51,7 @@ export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOU
     }, timeoutMs);
     proc.stdout.on('data', (d) => { stdout += d; });
     proc.stderr.on('data', (d) => { stderr += d; });
-    proc.on('error', (err) => { clearTimeout(timer); procs?.delete(proc); reject(err); });
+    proc.on('error', (err) => { clearTimeout(timer); procs?.delete(proc); forget(); reject(err); });
     proc.on('close', (code, signal) => {
       clearTimeout(timer);
       if (code === 0) resolve(stdout);
@@ -52,6 +60,51 @@ export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOU
     });
     proc.stdin.end(input);
   });
+}
+
+// The record of agent-room's programs on this computer, so that those still alive after a crash or a
+// Restart (leftovers) can be found: one small file per program, <pid>.json, so that several servers
+// never write the same file. Known limit: a crash between the spawn and the write leaves that
+// program unrecorded, so unseen.
+export const programsDirectory = () => join(homedir(), '.local', 'state', 'agent-room', 'programs');
+export function recordProgram(entry, dir = programsDirectory()) {
+  try { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, `${entry.pid}.json`), JSON.stringify(entry) + '\n'); } catch {}
+}
+export function forgetProgram(pid, dir = programsDirectory()) {
+  try { unlinkSync(join(dir, `${pid}.json`)); } catch {}
+}
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
+// A process's group and leader, and when the leader started (ms, from ps; null if unknown).
+export async function probeProcess(pid) {
+  const group = alive(-pid), leader = alive(pid);
+  const startedAt = !leader ? null : await new Promise((done) => execFile('ps', ['-o', 'lstart=', '-p', String(pid)],
+    { env: { ...process.env, LC_ALL: 'C' }, timeout: 5000 }, (err, out) => done(err ? null : Date.parse(out.trim()) || null)));
+  return { group, leader, startedAt };
+}
+// ps gives the start to the second; the record is written just after the spawn.
+const SAME_START_MS = 5000;
+// The recorded programs left over: not in `tracked` (the pids in this server's rooms' procs) and
+// their process group still alive. While the leader is alive it must have the recorded start time
+// (otherwise its number was reused and the entry is dropped); a group alive after its leader ended
+// is a possible leftover, `unverified`. Entries whose group is gone are dropped.
+export async function findLeftovers(tracked, { dir = programsDirectory(), probe = probeProcess } = {}) {
+  let names = [];
+  try { names = readdirSync(dir).filter((n) => /^\d+\.json$/.test(n)); } catch {}
+  const found = [];
+  for (const name of names) {
+    let entry;
+    try { entry = JSON.parse(readFileSync(join(dir, name), 'utf8')); } catch { entry = null; }
+    const pid = Number(name.slice(0, -5));
+    if (entry?.pid !== pid) { forgetProgram(pid, dir); continue; } // unreadable
+    const p = await probe(pid);
+    if (!p.group) { forgetProgram(pid, dir); continue; }
+    if (tracked.has(pid)) continue;
+    if (p.leader && p.startedAt !== null) {
+      if (Math.abs(p.startedAt - Date.parse(entry.started)) > SAME_START_MS) { forgetProgram(pid, dir); continue; }
+      found.push({ ...entry, unverified: false });
+    } else found.push({ ...entry, unverified: true });
+  }
+  return found;
 }
 
 export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, shell = false, runner = run, session = {} }) {
@@ -72,7 +125,7 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, s
       args.push('--chrome', '--strict-mcp-config', '--allowedTools', ...CLAUDE_ALLOWED, ...bash);
       // --tools is variadic, so it must come last: the prompt goes on stdin.
       args.push('--tools', ...CLAUDE_TOOLS, ...bash);
-      const out = await runner('claude', args, { input: prompt, cwd: at(cwd), timeoutMs });
+      const out = await runner('claude', args, { input: prompt, cwd: at(cwd), timeoutMs, agent: name });
       const result = JSON.parse(out);
       if (result.is_error) throw new Error(`claude: ${result.result || 'turn failed'}`);
       session.started = true;
@@ -91,7 +144,7 @@ export async function claudeTitle(message, { runner = run, cwd, timeoutMs = TITL
     'Reply with the title only, with no quotes and no full stop.', '', 'Message:', message,
   ].join('\n');
   const args = ['-p', '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config', '--tools', ''];
-  const result = JSON.parse(await runner('claude', args, { input: prompt, cwd, timeoutMs }));
+  const result = JSON.parse(await runner('claude', args, { input: prompt, cwd, timeoutMs, agent: 'title' }));
   if (result.is_error) throw new Error(`claude: ${result.result || 'title failed'}`);
   const title = String(result.result ?? '').split('\n')[0].replace(/^["'*\s]+|["'*.\s]+$/g, '').slice(0, 80);
   if (!title) throw new Error('claude gave an empty title');
@@ -126,7 +179,7 @@ export function createCodexAgent({ name, model, cwd, timeoutMs, instructions, ru
       if (instructions) args.push('-c', `developer_instructions=${JSON.stringify(instructions)}`);
       if (session.threadId) args.push(session.threadId);
       args.push('-');
-      const out = await runner('codex', args, { input: prompt, cwd: at(cwd), timeoutMs });
+      const out = await runner('codex', args, { input: prompt, cwd: at(cwd), timeoutMs, agent: name });
       const { threadId: id, text, usage } = parseCodexEvents(out);
       if (id) session.threadId = id;
       agent.lastUsage = usage;

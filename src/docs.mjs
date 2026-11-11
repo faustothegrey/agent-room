@@ -114,6 +114,8 @@ setInterval(async () => {
 //   working: the worker's name while it works, else null,
 //   quota: the header's gauges ([{ provider, label, used,
 //   resets }], null if the meter can't be read, undefined until first read),
+//   monitor: the header's warnings per provider ({ login, running, leftovers, inRoom }, see
+//   monitorView in ui.mjs),
 //   say: (line) => void, work: (text) => void and newRoom: () => Promise,
 //   set only when the page is the input (UI mode) }.
 
@@ -197,16 +199,16 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #peer-warning { border: 0; background: none; padding: 0 .2rem; margin-left: -.2rem; font-size: .8rem; line-height: 1.1; color: light-dark(#92600a, #d6a84c); }
 #peer-warning[hidden] { display: none; }
 #server-details { flex-direction: column; }
-/* The gauges' own children join this grid, so "updated" sits above Usage, as in the drawing. */
+/* The gauges' own children join this grid, so "on HH:MM" sits in the first row, as in the drawing. */
 #monitor { display: grid; grid-template-rows: auto auto; align-items: center; gap: .1rem .5rem; flex: none; font-size: .65rem; color: var(--dim); }
 #gauges .quota { grid-row: 1 / span 2; }
 #gauges .updated { grid-row: 1; align-self: end; }
-#usage { grid-row: 2; justify-self: start; }
-#gauges .quota + .updated, #monitor:has(.quota) #usage { grid-column: 2; }
-#gauges .quota + .quota + .updated, #monitor:has(.quota + .quota) #usage { grid-column: 3; }
-/* Without gauges (meter not reachable), the message, its time and Usage share one line. */
-#monitor:not(:has(.quota)) { display: flex; align-items: center; gap: .3rem .8rem; white-space: nowrap; }
-#monitor:not(:has(.quota)) .updated { align-self: center; }
+#gauges .quota + .updated { grid-column: 2; }
+#gauges .quota + .quota + .updated { grid-column: 3; }
+#gauges .quota + .quota + .quota + .updated { grid-column: 4; }
+/* Without gauges (meter not reachable), the message, its time and any provider with a warning share one line. */
+#monitor:not(:has(.gauge)) { display: flex; align-items: center; gap: .3rem .8rem; white-space: nowrap; }
+#monitor:not(:has(.gauge)) .updated { align-self: center; }
 #ask { max-width: min(32rem, 90vw); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.2rem; }
 #ask::backdrop, #peers::backdrop { background: #0006; }
 #peers { width: min(40rem, 90vw); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.2rem; }
@@ -242,6 +244,15 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .gauge.high { color: #ef4444; font-weight: 600; } .gauge.high .bar i { background: #ef4444; }
 .quota b { color: CanvasText; font-weight: 600; grid-column: 1; grid-row: 1 / span 2; text-transform: capitalize; font-size: .7rem; }
 .quota .gauge { grid-column: 2; }
+/* A provider's name: hover or focus shows its state; a ⚠ right of it on a problem. */
+.quota b { position: relative; cursor: default; }
+.quota b .alert { margin-left: .25rem; font-weight: 700; color: light-dark(#b45309, #d6a84c); }
+.quota b .alert.red { color: #ef4444; }
+.quota b .hover-detail { left: auto; right: 0; text-transform: none; font-weight: 400; white-space: normal; }
+.quota b:is(:hover, :focus-visible) > .hover-detail { display: flex; }
+.hover-detail .problem { font-weight: 600; color: light-dark(#b45309, #d6a84c); }
+.hover-detail .problem.red { color: #ef4444; }
+.hover-detail code { font-family: ui-monospace, monospace; user-select: all; }
 .gauge .resets { opacity: .8; white-space: nowrap; }
 @media (max-width: 1150px) {
   #header { grid-template-columns: fit-content(20rem) minmax(0, 1fr); gap: .4rem .8rem; }
@@ -396,7 +407,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b>agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><span id="folder" title="The room's root folder"></span><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
 <div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. The worker carries on.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, kept only in memory: no folder, transcript or notes. It ends this session; Restart or Quit room loses it, and a new one replaces it.">New brainstorm</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Explorer.">Close discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div></div>
-<div id="server-zone" class="zone" aria-label="Server and monitoring"><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span><button id="usage">Usage</button></div></div>
+<div id="server-zone" class="zone" aria-label="Server and monitoring"><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 </header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
@@ -1429,22 +1440,83 @@ function quotaUpdated(at) {
   // The meter reports local time as "YYYY-MM-DD HH:MM:SS"; a day other than today is shown too.
   const m = /^(\\d{4}-\\d{2}-\\d{2})[ T](\\d{2}:\\d{2})/.exec(at?.measured ?? '');
   const today = new Date().toLocaleDateString('sv'); // YYYY-MM-DD
-  el.textContent = m ? 'updated ' + (m[1] === today ? '' : m[1] + ' ') + m[2] : checked ? 'checked ' + hhmm(checked) : '';
+  el.textContent = m ? 'on ' + (m[1] === today ? '' : m[1] + ' ') + m[2] : checked ? 'checked ' + hhmm(checked) : '';
   el.title = (at?.measured ? 'Measured by the quota meter at ' + at.measured + '. ' : '') +
     (checked ? 'The room last asked the meter at ' + hhmm(checked) + ' (every minute, and after each turn).' : '');
   return el;
 }
+// The monitor's warnings per provider (monitorView in ui.mjs): a ⚠ right of the provider's name,
+// amber or red, only on a problem; hovering or focusing the name shows the problems, then the state.
+let monitor = {}, lastQuota = [undefined, null];
+const longDate = (iso) => { const d = new Date(iso); return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) + ' ' + hhmm(d); };
+const startTime = (iso) => { const d = new Date(iso); return (d.toDateString() === new Date().toDateString() ? '' : d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ') + hhmm(d); };
+function providerHealth(provider) {
+  const m = monitor[provider];
+  if (!m) return null;
+  const name = provider === 'claude' ? 'Claude' : provider === 'codex' ? 'Codex' : provider;
+  const problems = [], state = []; // lines: [text, red?] or a list of { text, code }
+  let level = null;
+  const problem = (text, red) => { problems.push([text, red]); level = red || level === 'red' ? 'red' : 'amber'; };
+  const l = m.login, ends = l?.expiresAt ? longDate(l.expiresAt) : null;
+  if (!l) state.push('login not checked yet');
+  else if (l.state === 'out') { problem('logged out', true); state.push('logged out'); }
+  else if (l.state === 'expired') { problem('login expired on ' + ends, true); state.push(name + ' reports login ended ' + ends); }
+  else if (l.state === 'unknown') { problem('login status unknown: ' + l.error); state.push('login status unknown'); }
+  else {
+    if (l.state === 'ending') problem('login ends ' + ends + ', in 2 days or less');
+    state.push(ends ? name + ' reports login ends ' + ends : 'logged in, no expiry given');
+  }
+  if (m.leftovers.length) {
+    const n = m.leftovers.length;
+    problem(n + ' program' + (n === 1 ? '' : 's') + ' left over (alive after a crash or Restart)');
+    for (const o of m.leftovers) {
+      problems.push([{ text: 'PID ' + o.pid + ' · ' + o.agent + ' · room ' + o.room + ' · started ' + startTime(o.started) }]);
+      problems.push(o.unverified
+        ? [{ text: 'unverified: its leader is gone or its start time cannot be read, so the number may have been reused. Look at it: ', code: 'ps -g ' + o.pid }]
+        : [{ text: 'stop it: ', code: 'kill -TERM -' + o.pid }]);
+    }
+  }
+  state.push(m.running + ' running now in this room');
+  const box = document.createElement('span'); box.className = 'hover-detail'; box.setAttribute('role', 'tooltip');
+  const line = (content, cls) => {
+    const el = document.createElement('span'); if (cls) el.className = cls;
+    if (typeof content === 'string') el.textContent = content;
+    else { el.append(content.text); if (content.code) { const c = document.createElement('code'); c.textContent = content.code; el.append(c); } }
+    box.append(el);
+  };
+  for (const [p, red] of problems) line(typeof p === 'string' ? 'Problem: ' + p : p, typeof p === 'string' ? 'problem' + (red ? ' red' : '') : '');
+  state.forEach((t, i) => line((i ? '' : 'State: ') + t));
+  return { level, box };
+}
+// A provider's name, with its ⚠ and its details.
+function providerName(provider) {
+  const b = document.createElement('b'); b.textContent = provider;
+  const h = providerHealth(provider);
+  if (!h) return b;
+  b.tabIndex = 0;
+  if (h.level) { const a = document.createElement('span'); a.className = 'alert' + (h.level === 'red' ? ' red' : ''); a.textContent = '⚠'; b.append(a); }
+  b.append(h.box);
+  return b;
+}
+function showMonitor(view) { monitor = view ?? {}; showQuota(...lastQuota); }
 function showQuota(gauges, at) {
+  lastQuota = [gauges, at];
   const box = $('gauges');
   box.textContent = '';
-  if (gauges === undefined) return; // not read yet
-  if (gauges === null || !gauges.length) { box.textContent = 'quota meter not reachable'; box.append(' · ', quotaUpdated({ checked: at?.checked })); return; }
+  // Providers with no gauges (meter not reachable, or used by no agent here but with a leftover).
+  const bare = (shown) => Object.keys(monitor).filter((p) => !shown.has(p)).forEach((p) => {
+    const h = providerHealth(p);
+    if (!h?.level) return;
+    const group = document.createElement('span'); group.className = 'quota'; group.append(providerName(p)); box.append(group);
+  });
+  if (gauges === undefined) return bare(new Set()); // not read yet
+  if (gauges === null || !gauges.length) { box.textContent = 'quota meter not reachable'; box.append(' · ', quotaUpdated({ checked: at?.checked })); return bare(new Set()); }
   let provider = null, group = null;
   for (const g of gauges) {
     if (g.provider !== provider) {
       provider = g.provider;
       group = document.createElement('span'); group.className = 'quota';
-      group.innerHTML = '<b></b>'; group.firstChild.textContent = provider;
+      group.append(providerName(provider));
       box.append(group);
     }
     const el = document.createElement('span');
@@ -1460,6 +1532,7 @@ function showQuota(gauges, at) {
     if (g.resets) el.children[3].textContent = 'at ' + g.resets.split(' (')[0];
     group.append(el);
   }
+  bare(new Set(gauges.map((g) => g.provider)));
   box.append(quotaUpdated(at));
 }
 // The ▾ menus (the header's and Explorer's discussion rows): one open at a time; a click outside or
@@ -1478,7 +1551,6 @@ confirmed($('newdisc'), () => send('/new'), null, () => (room?.multi ? brainstor
 confirmed($('newbrainstorm'), () => send('/brainstorm'), null, () => (room?.multi ? brainstormOpen() : room?.started));
 confirmed($('closedisc'), () => send('/close'), 'Click again: this discussion closes (its agents stop)', () => !!room?.started);
 $('summary').onclick = () => send('/summary');
-$('usage').onclick = () => send('/usage');
 $('reload').onclick = () => send('/reload');
 // Two clicks to quit or shut down, so a stray click doesn't end anything.
 $('quit').onclick = (e) => {
@@ -1555,6 +1627,7 @@ events.onmessage = (e) => {
     setWorking(ev.working);
     if (!ev.workInput) { $('wcomposer').hidden = true; }
     setWorkerInfo(ev.workerInfo);
+    monitor = ev.monitor ?? {};
     showQuota(ev.quota, ev.quotaAt);
     if (ev.room) setRoom(ev.room);
     $('newroom').hidden = !ev.newRoom;
@@ -1565,6 +1638,7 @@ events.onmessage = (e) => {
   if (ev.type === 'room') { setRoom(ev.room); if (listed !== null) openFiles(listed); } // its buttons and "in use" follow
   if (ev.type === 'work') workMessage(ev.message, true);
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
+  if (ev.type === 'monitor') showMonitor(ev.monitor);
   if (ev.type === 'working') setWorking(ev.name);
   if (ev.type === 'workerinfo') setWorkerInfo(ev.info);
   if (ev.type === 'message') message(ev.message);
@@ -1937,7 +2011,7 @@ export function resetEvent(screen) {
   return { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc,
     thinking: screen.thinking, status: screen.status, input: !!screen.say,
     room: screen.room ?? null, worker: screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
-    quota: screen.quota, quotaAt: screen.quotaAt ?? null, newRoom: !!screen.newRoom, page: PAGE,
+    quota: screen.quota, quotaAt: screen.quotaAt ?? null, monitor: screen.monitor ?? null, newRoom: !!screen.newRoom, page: PAGE,
     replica: screen.replica ?? null, replicaOff: screen.replicaOff ?? null, viewing: screen.viewing ?? null };
 }
 

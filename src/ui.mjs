@@ -173,7 +173,7 @@ export async function load(ctx, v) {
   }
   const instructions = readFileSync(new URL('../README-for-brainstorming-agents.md', import.meta.url), 'utf8');
   const workerInstructions = readFileSync(new URL('../README-for-worker-agents.md', import.meta.url), 'utf8');
-  const { createAgent, claudeTitle, run } = await import(`./agents.mjs${v}`);
+  const { createAgent, claudeTitle, run, findLeftovers } = await import(`./agents.mjs${v}`);
   const { createRoom } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
   const usage = await import(`./usage.mjs${v}`);
@@ -185,9 +185,15 @@ export async function load(ctx, v) {
   // Every agent program this room starts is tracked, so Quit room can stop it; once the room is
   // stopping, none starts (shared by reference, so copies of ctx and reloads see the same).
   const programs = ctx.programs ??= { running: new Set(), stopping: false };
-  const runner = (command, args, options) => (programs.stopping
-    ? Promise.reject(new Error('not started: the room is quitting'))
-    : run(command, args, { ...options, procs: programs.running }));
+  // Each is in the record of programs too (agents.mjs), so a leftover is found after a crash; the
+  // header's count of programs running follows each start and end.
+  const runner = (command, args, options) => {
+    if (programs.stopping) return Promise.reject(new Error('not started: the room is quitting'));
+    const turn = run(command, args, { ...options, procs: programs.running, record: { agent: options?.agent ?? command, room: ctx.cwd } });
+    ctx.showMonitor?.();
+    turn.then(() => ctx.showMonitor?.(), () => ctx.showMonitor?.());
+    return turn;
+  };
   const agents = ctx.agentSpecs.split(',').map((spec) => {
     const { provider, name, model } = parseSpec(spec);
     if (!ctx.sessions.has(name)) ctx.sessions.set(name, {});
@@ -207,7 +213,7 @@ export async function load(ctx, v) {
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
   // ctx so they survive a reload.
   const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: shop?.log ?? [], working: shop?.running ? shop.running.origin.worker.name : null };
-  return { room: createRoom(agents, ctx.state), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen,
+  return { room: createRoom(agents, ctx.state), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: shop ?? newShop(workerDir, screen.worker),
     suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }) };
 }
@@ -1460,6 +1466,65 @@ async function refreshQuota(ctx, quota) {
   return quota;
 }
 
+// The monitor panel's warnings (see README, "The header"), checked once per server: each provider's
+// login at startup and every 10 minutes, the record of programs for leftovers at startup and every
+// minute. Each room's panel shows its own part (monitorView). The timers call through the hub, so
+// after a reload they run the new code.
+const LOGIN_EVERY_MS = 10 * 60_000, LEFTOVERS_EVERY_MS = 60_000;
+const loadedRooms = (hub) => [...hub.rooms.values()].filter((r) => r.room && r.usage);
+const providersOf = (ctx) => [...new Set([...ctx.room.agents, ctx.worker].map((a) => a.provider))];
+function watchMonitor(ctx) {
+  const hub = hubOf(ctx);
+  hub.monitor ??= { login: {}, leftovers: [] };
+  hub.checkLogins = (all) => checkLogins(hub, all).catch(() => {});
+  hub.checkLeftovers = () => checkLeftovers(hub).catch(() => {});
+  ctx.showMonitor = () => showMonitor(ctx);
+  if (!hub.monitorTimers) {
+    hub.monitorTimers = [setInterval(() => hub.checkLogins(true), LOGIN_EVERY_MS).unref(),
+      setInterval(() => hub.checkLeftovers(), LEFTOVERS_EVERY_MS).unref()];
+    hub.checkLeftovers();
+  }
+  hub.checkLogins(false); // this room's providers not checked yet
+}
+// Every provider in use on the server (all), or only those not checked yet. null: being checked.
+async function checkLogins(hub, all) {
+  const rooms = loadedRooms(hub);
+  const providers = [...new Set(rooms.flatMap(providersOf))].filter((p) => all || !(p in hub.monitor.login));
+  if (!providers.length) return;
+  for (const p of providers) if (!(p in hub.monitor.login)) hub.monitor.login[p] = null;
+  await Promise.all(providers.map(async (p) => {
+    hub.monitor.login[p] = { ...await rooms[0].usage.checkLogin(p), checked: new Date().toISOString() };
+  }));
+  for (const r of loadedRooms(hub)) showMonitor(r);
+}
+async function checkLeftovers(hub) {
+  const rooms = loadedRooms(hub);
+  if (!rooms.length) return;
+  const tracked = new Set(rooms.flatMap((r) => [...(r.programs?.running ?? [])].map((p) => p.pid)));
+  hub.monitor.leftovers = await rooms[0].findLeftovers(tracked);
+  for (const r of loadedRooms(hub)) showMonitor(r);
+}
+// What this room's panel shows, per provider: its login, how many of this room's programs are in its
+// procs, and the leftovers of this room, or of a room not open on this server. A provider with a
+// leftover is shown even when no agent of this room uses it.
+export function monitorView(ctx) {
+  const hub = hubOf(ctx);
+  const open = new Set(loadedRooms(hub).map((r) => r.cwd));
+  const leftovers = (hub.monitor?.leftovers ?? []).filter((l) => l.room === ctx.cwd || !open.has(l.room));
+  const running = [...(ctx.programs?.running ?? [])];
+  const view = {};
+  for (const p of new Set([...providersOf(ctx), ...leftovers.map((l) => l.provider)])) {
+    view[p] = { login: hub.monitor?.login[p] ?? null, running: running.filter((r) => r.provider === p).length,
+      leftovers: leftovers.filter((l) => l.provider === p), inRoom: providersOf(ctx).includes(p) };
+  }
+  return view;
+}
+function showMonitor(ctx) {
+  if (!ctx.screen || !ctx.room) return;
+  ctx.screen.monitor = monitorView(ctx);
+  toScreen(ctx, { type: 'monitor', monitor: ctx.screen.monitor });
+}
+
 export const promptText = () => (tty ? '\x1b[1;36mYou ›\x1b[0m ' : 'You › ');
 
 // Once per session: print the banner. Nothing is written in the root yet: the transcript waits in
@@ -1482,6 +1547,7 @@ export async function start(ctx) {
   ctx.quotaTimer ??= setInterval(() => ctx.refreshQuota?.(), 60_000).unref();
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   ctx.refreshQuota();
+  watchMonitor(ctx);
   ctx.code = { ...await codeInfo(), startedAt: ctx.screen.startedAt };
   if (ctx.replica) { ctx.project = await codeInfo(ctx.cwd); await pushReplica(ctx); }
   showHeader(ctx);
@@ -1517,6 +1583,7 @@ export async function reloaded(ctx) {
   wire(ctx);
   if (ctx.hub) { ctx.hub.route = route; ctx.hub.upgrade = upgrade; } // the server's routing runs the new code too
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
+  watchMonitor(ctx);
   log(ctx, '_(code reloaded)_\n\n');
   // A relay whose worker result can't come back any more: pause visibly rather than send again.
   const run = ctx.autoDev;

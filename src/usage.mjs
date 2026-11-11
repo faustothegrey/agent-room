@@ -3,6 +3,8 @@
 // Missing quota data does not prevent the room from running.
 // Loaded by ui.mjs, so /reload swaps it too.
 
+import { execFile } from 'node:child_process';
+
 export const METER_URL = process.env.AGENT_ROOM_METER ?? 'http://127.0.0.1:9899';
 
 // Adds one turn's usage ({ input, cached, output, cost? }) to a running total.
@@ -108,4 +110,42 @@ export function usageReport({ totals, agents, quota, url = METER_URL }) {
     lines.push(`  ${p.padEnd(10)} ${w.length ? w.map(([label, x]) => `${label} ${x.used_percent}% used${x.resets ? ` (at ${resetTime(x.resets, quota.last_update)})` : ''}`).join(' · ') : 'unavailable'}`);
   }
   return lines.join('\n');
+}
+
+// Login, as each provider's own status command reports it: { state, expiresAt?, error? }, state
+// 'ok', 'ending' (in 2 days or less), 'expired', 'out' (logged out) or 'unknown' (the command failed
+// or its output can't be read: never a guess).
+const ENDING_MS = 2 * 24 * 3600 * 1000;
+export function parseClaudeAuth(stdout, now = Date.now()) {
+  let s;
+  try { s = JSON.parse(stdout); } catch { return { state: 'unknown', error: `claude auth status: unreadable output: ${String(stdout).trim().slice(0, 200) || '(none)'}` }; }
+  if (s?.loggedIn === false) return { state: 'out' };
+  if (s?.loggedIn !== true) return { state: 'unknown', error: 'claude auth status: no loggedIn field' };
+  if (s.loginExpiresAt == null) return { state: 'ok', expiresAt: null };
+  const at = Date.parse(s.loginExpiresAt);
+  if (Number.isNaN(at)) return { state: 'unknown', error: `claude auth status: unreadable loginExpiresAt: ${s.loginExpiresAt}` };
+  const expiresAt = new Date(at).toISOString();
+  return { state: at <= now ? 'expired' : at - now <= ENDING_MS ? 'ending' : 'ok', expiresAt };
+}
+// `codex login status` prints one line (on stderr, measured), with no expiry.
+export function parseCodexLogin(text) {
+  const t = String(text).trim();
+  if (/^not logged in\b/im.test(t)) return { state: 'out' };
+  if (/^logged in\b/im.test(t)) return { state: 'ok', expiresAt: null };
+  return { state: 'unknown', error: `codex login status: unreadable output: ${t.slice(0, 200) || '(none)'}` };
+}
+const LOGIN_COMMANDS = { claude: ['claude', ['auth', 'status', '--json'], (out) => parseClaudeAuth(out)],
+  codex: ['codex', ['login', 'status'], (out, err) => parseCodexLogin(`${out}\n${err}`)] };
+// Runs the provider's status command. Its exit code isn't trusted alone (logged out may exit
+// non-zero with a readable answer); a failure to run, or unreadable output, is 'unknown'.
+export function checkLogin(provider, exec = execFile) {
+  const known = LOGIN_COMMANDS[provider];
+  if (!known) return Promise.resolve({ state: 'unknown', error: `no login check for ${provider}` });
+  const [command, args, parse] = known;
+  return new Promise((done) => exec(command, args, { timeout: 20_000 }, (err, stdout = '', stderr = '') => {
+    if (err && (typeof err.code !== 'number' || err.killed)) return done({ state: 'unknown', error: `${command} ${args.join(' ')}: ${err.message}` });
+    const login = parse(String(stdout), String(stderr));
+    if (err && login.state === 'unknown') login.error += ` (exit ${err.code}: ${String(stderr).trim().slice(-200)})`;
+    done(login);
+  }));
 }
