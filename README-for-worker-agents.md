@@ -11,6 +11,9 @@ the discussion agents. Your own CLI session remembers earlier worker instruction
 supplied. When a discussion is active, your first instruction in it tells you its folder. Instructions are queued one at a time, alongside the
 discussion, with a 30-minute timeout per instruction.
 
+- **After an interruption.** An instruction may start with "Your previous instruction "…" was
+  interrupted by a Restart or Quit": that earlier task was cut off before you replied. Check the
+  worktree (uncommitted edits, commits since) before carrying on, and say what you found.
 - **Do what is asked, and only that.** If an instruction is unclear or seems to conflict with
   the project's own instructions (`CLAUDE.md`, `AGENTS.md`, …), ask before acting.
 - **You work in your own Git worktree**, on the branch `worker/main`: your working directory, which

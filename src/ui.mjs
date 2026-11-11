@@ -4,7 +4,7 @@
 // of a local module here would stay cached and never reload.)
 // What must survive a reload lives in `ctx`, owned by cli.mjs: the conversation state, the CLI
 // sessions, the transcript path and the viewer server.
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
@@ -564,12 +564,14 @@ function readCheckpoint(ctx, name) {
   if (!existsSync(file)) return null;
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return { invalid: true }; }
 }
+const logSize = (ctx) => { try { return statSync(ctx.logPath).size; } catch { return undefined; } };
 // A started discussion, with its agents' and worker's specs (a room built by hand, without them,
 // couldn't be resumed).
 const saveable = (ctx) => !!ctx.discussion && !!ctx.logPath && !ctx.state.brainstorm && !!ctx.agentSpecs && !!ctx.workerSpec;
 // At the end of a round, and of /summary: the discussion part, copied, then saved.
 function captureRound(ctx) {
   if (!saveable(ctx)) return;
+  ctx.logBytes = logSize(ctx);
   const agents = new Set(ctx.room.agents.map((a) => a.name));
   ctx.lastRound = JSON.parse(JSON.stringify({
     sessions: [...ctx.sessions].filter(([key]) => agents.has(key)),
@@ -583,6 +585,8 @@ function saveCheckpoint(ctx) {
   const d = ctx.discussion, r = ctx.lastRound;
   if (!r || !saveable(ctx)) return;
   const worker = `worker:${parseSpec(ctx.workerSpec, true).name}`;
+  // The transcript's size goes with the chat: not while a round is writing lines the chat lacks.
+  if (!ctx.busy || ctx.logBytes === undefined) ctx.logBytes = logSize(ctx);
   try {
     writeCheckpoint(ctx, d.name, {
       version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
@@ -592,6 +596,7 @@ function saveCheckpoint(ctx) {
       worker: shopOf(ctx).log.filter((m) => m.origin === originLabel(ctx)),
       workerBriefed: ctx.workerBriefed ?? null, workerTree: ctx.workerTree ?? null,
       workerLabel: ctx.workerLabel ?? null, workerHandoff: !!ctx.workerHandoff,
+      logBytes: ctx.logBytes, work: workOf(shopOf(ctx), d.name),
     });
     ctx.checkpointError = null;
   } catch (err) {
@@ -599,6 +604,80 @@ function saveCheckpoint(ctx) {
     ctx.checkpointError = err.message;
   }
 }
+// ── Work in flight (part of each checkpoint) ──
+// The worker tasks a discussion queued, the one running, and those a stop or crash cut off, by
+// discussion name, in the folder's workshop (shop.work), so a task keeps its own discussion's
+// record even if its context moves on. Saved in that discussion's checkpoint at each change.
+// A task is recorded when queued, and as running in runWork's first step, before anything else.
+// Resume and Restart report what was interrupted or never started (reportWork).
+const workOf = (shop, name) => {
+  shop.work ??= new Map();
+  if (!shop.work.has(name)) shop.work.set(name, { queued: [], running: null, interrupted: [], notStarted: [] });
+  return shop.work.get(name);
+};
+function cleanWork(w) {
+  const list = (x) => (Array.isArray(x) ? x.filter((r) => r && typeof r.task === 'string') : []);
+  return { queued: list(w?.queued), running: w?.running && typeof w.running.task === 'string' ? w.running : null,
+    interrupted: list(w?.interrupted), notStarted: list(w?.notStarted) };
+}
+// Saves a discussion's work record: through its open context when it has a round to save with,
+// otherwise into its checkpoint file as it is (a closed or not yet started discussion).
+function persistWork(ctx, name) {
+  const shop = shopOf(ctx), w = workOf(shop, name);
+  const owner = siblings(ctx).find((c) => c.discussion?.name === name && c.lastRound && saveable(c));
+  if (owner) return saveCheckpoint(owner);
+  try {
+    const saved = readCheckpoint(ctx, name);
+    if (saved && !saved.invalid && saved.version === 1 && saved.root === realpathSync(ctx.cwd)) writeCheckpoint(ctx, name, { ...saved, work: w });
+  } catch (err) { note(ctx, `✗ Couldn't save the worker task record of ${name}: ${err.message}`, true); }
+}
+// On Resume or Restart: a running task with no live run was interrupted; a queued one that is no
+// longer queued was never started.
+function restoreWork(ctx, name, saved) {
+  const shop = shopOf(ctx);
+  shop.work ??= new Map();
+  if (!shop.work.has(name)) shop.work.set(name, cleanWork(saved));
+  const w = shop.work.get(name);
+  if (w.running && shop.running?.record?.id !== w.running.id) { w.interrupted.push(w.running); w.running = null; }
+  const live = (r) => shop.tasks.some((t) => t.record?.id === r.id);
+  w.notStarted.push(...w.queued.filter((r) => !live(r)));
+  w.queued = w.queued.filter(live);
+  return w;
+}
+const clock = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? 'at an unknown time' : `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const firstLine = (text) => { const l = String(text).trim().split('\n')[0]; return l.length > 120 ? l.slice(0, 117) + '…' : l; };
+// Each interrupted task, with what the worktree shows now; each task that never started. Shown in
+// the Worker tab, and as one agent-room message in the discussion's chat (so its agents learn it).
+async function reportWork(ctx, name, saved) {
+  const w = restoreWork(ctx, name, saved);
+  const lines = [];
+  for (const r of w.interrupted.filter((x) => !x.reported)) {
+    const what = `[${name}] "${firstLine(r.task)}" (started ${clock(r.at)})`;
+    let place = null, s = null;
+    try { place = await sharedWorktree(ctx, await workerPlace(ctx.cwd)); if (!place.disabled) s = await worktreeStatus(place); } catch {}
+    const found = !s ? 'it could not be inspected' : !s.exists ? 'it does not exist' : s.treeDirty ? 'it has uncommitted edits' : 'it is clean';
+    let commits = null;
+    if (r.before && s?.exists && !s.treeDirty) {
+      try { commits = (await labelledCommits(place.path, `${r.before}..HEAD`)).filter((c) => c.origin === name); } catch { commits = null; }
+    }
+    if (!r.before) lines.push(`Result unknown: ${what} was interrupted before its starting point was recorded. Check the worktree (${found}).`);
+    else if (!s?.exists || (!s.treeDirty && !commits)) lines.push(`Result unknown: ${what} was interrupted by Restart, Quit or a crash. Check the worktree (${found}).`);
+    else if (s.treeDirty) lines.push(`Interrupted by Restart, Quit or a crash: ${what} left uncommitted edits in the worktree. Ask the worker to finish and commit them, or to abandon them.`);
+    else if (commits.length) lines.push(`Interrupted after committing: ${what}: ${commits.map((c) => `${c.id.slice(0, 7)} (${c.files.join(', ') || 'no files changed'})`).join(' · ')}. Its reply was lost. Ask the worker to check whether the task is complete.`);
+    else lines.push(`Interrupted: ${what} left no commits or edits in the worktree. It may still have written notes elsewhere, such as the discussion's folder. Send it again if still wanted.`);
+    r.reported = true;
+  }
+  for (const r of w.notStarted) lines.push(`Not started: [${name}] "${firstLine(r.task)}" was still queued when the room stopped. Nothing was re-sent; send it again if still wanted.`);
+  w.notStarted = [];
+  if (!lines.length) return;
+  for (const line of lines) workNote(ctx, `✗ ${line}`, true);
+  const m = { speaker: 'agent-room', text: lines.join('\n\n') };
+  ctx.state.transcript.push(m);
+  log(ctx, `**${m.speaker}**\n\n${m.text}\n\n`);
+  toScreen(ctx, { type: 'message', message: ctx.docs.messageView(m) });
+  persistWork(ctx, name);
+}
+
 // The summary a Start fresh briefs with: the checkpoint's latest one, or none.
 function checkpointSummary(saved) {
   if (!saved || saved.invalid) return null;
@@ -624,12 +703,16 @@ async function loadCheckpoint(ctx, saved, name) {
       || (spec.provider === 'claude' && !session.id)
       || (spec.provider === 'codex' && !spec.worker && seen.get(spec.name) > 0 && !session.threadId))
       throw new Error(`The saved provider session for ${spec.name} is missing. The checkpoint was kept; Start fresh starts the discussion from its handoff instead.`);
+    // A Claude session whose first turn never completed may exist under its ID already: a new one.
+    if (spec.provider === 'claude' && !session.started) session.id = randomUUID();
   }
   // Its folder as it is now (it may have moved while open elsewhere), and the transcript in it.
   const dir = join(ctx.cwd, 'discussions', name), was = saved.discussion.dir;
   const logPath = typeof was === 'string' && saved.logPath.startsWith(was + sep) ? dir + saved.logPath.slice(was.length) : saved.logPath;
   if (!existsSync(logPath)) throw new Error(`The transcript of ${name}'s checkpoint is missing (${logPath}). The checkpoint was kept.`);
-  const state = { ...saved.state, seen };
+  // Every agent's next prompt says it was restored (room.mjs): its own session may remember more.
+  const state = { ...saved.state, seen, restored: { text: `agent-room restored this discussion from its checkpoint of ${when(new Date(saved.at))}. If you remember turns after that, they are not in the room's record.`,
+    pending: saved.agentSpecs.split(',').map((spec) => parseSpec(spec).name) } };
   const next = { ...ctx, agentSpecs: saved.agentSpecs, workerSpec: saved.workerSpec, sessions, state };
   const loaded = await load(next, `?resume=${Date.now()}`);
   return () => {
@@ -646,6 +729,15 @@ async function loadCheckpoint(ctx, saved, name) {
     // Its own part of the Worker tab, unless the tab (shared by the folder's discussions) still has it.
     const own = Array.isArray(saved.worker) ? saved.worker.filter((m) => m?.origin === label) : [];
     if (own.length && !shop.log.some((m) => m.origin === label)) shop.log.push(...own);
+    // What can be detected of a round cut off after the checkpoint: the transcript grew since.
+    const size = logSize(ctx);
+    if (typeof saved.logBytes === 'number' && size > saved.logBytes) {
+      let line = 1;
+      try { line += readFileSync(logPath).subarray(0, saved.logBytes).toString('utf8').split('\n').length - 1; } catch {}
+      log(ctx, `_(restored from the checkpoint of ${when(new Date(saved.at))}; the transcript had grown after it)_\n\n`);
+      ctx.grown = `The transcript grew after the checkpoint of ${when(new Date(saved.at))}. What was written after it is not in the restored chat; it is in the transcript file (from line ${line}). The agents may remember some of it. Send your last message again if needed.`;
+    }
+    ctx.logBytes = logSize(ctx);
   };
 }
 
@@ -692,6 +784,8 @@ async function resumeDiscussion(ctx, ref) {
     showHeader(ctx);
     toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
     note(ctx, `Resumed the discussion ${name}: the same agent and worker sessions continue, with its chat.`);
+    if (ctx.grown) { note(ctx, `✗ ${ctx.grown}`, true); ctx.grown = null; }
+    await reportWork(ctx, name, saved.work);
     refreshWorker(ctx).catch(() => {});
     return;
   }
@@ -701,6 +795,7 @@ async function resumeDiscussion(ctx, ref) {
   switchTo(ctx, { name, dir: join(parent, name), title: name, continued: true });
   ctx.freshSummary = checkpointSummary(saved);
   note(ctx, `Resumed the discussion ${name}: it has no saved session, so your next message starts a fresh one there, from its handoff and notes${ctx.freshSummary ? ' and the summary chosen at Start fresh' : ''}.`);
+  await reportWork(ctx, name, saved?.work);
 }
 
 // /fresh <name> (Start fresh): new agent and worker sessions, from the discussion's handoff and
@@ -720,7 +815,7 @@ async function startFresh(ctx, ref) {
   await leaveSession(ctx, `starting the discussion ${name} afresh`); // saves its checkpoint first
   const summary = checkpointSummary(readCheckpoint(ctx, name));
   writeCheckpoint(ctx, name, { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
-    discussion: { name, title: name }, fresh: true, summary });
+    discussion: { name, title: name }, fresh: true, summary, work: workOf(shopOf(ctx), name) });
   switchTo(ctx, { name, dir: join(parent, name), title: name, continued: true });
   ctx.freshSummary = summary;
   note(ctx, `Started ${name} afresh: your next message starts a new session there, from its handoff and notes${summary ? `, with its latest summary${summary.outcome === 'agreed' ? '' : ' (not agreed)'}` : ''}. Its saved sessions and chat were discarded.`);
@@ -740,10 +835,10 @@ async function besideWith(ctx, run) {
 // discussion agents get fresh CLI sessions. The worker is left alone here: Resume and Start fresh
 // reset it themselves (leaveSession), New discussion doesn't.
 function endSession(ctx, why) {
+  log(ctx, `_(session ended: ${why})_\n\n`);
   saveCheckpoint(ctx); // the latest checkpoint stays: Resume continues from it
   ctx.lastRound = null;
   ctx.freshSummary = null;
-  log(ctx, `_(session ended: ${why})_\n\n`);
   for (const a of ctx.room.agents) a.reset?.();
   const { state, screen } = ctx;
   state.transcript.length = 0; // emptied in place: the room and the screen hold this array
@@ -1055,7 +1150,7 @@ async function pump(shop) {
       t.origin.workPending--;
       shop.running = t;
       const recovery = shop.blockedBy?.origin === t.origin ? shop.blockedBy : null;
-      try { t.before = await runWork(t.origin, t.text, t.run, t.cycle, recovery, t.rollback); }
+      try { t.before = await runWork(t.origin, t.text, t.run, t.cycle, recovery, t.rollback, t); }
       catch (err) { note(t.origin, `✗ ${err.stack}\n`, true); }
       finally { shop.running = null; }
       // After it: edits left uncommitted hold the queue; a recovery keeps the first task's details.
@@ -1079,6 +1174,12 @@ function watchShop(shop) {
 function dropTask(shop, t) {
   shop.tasks.splice(shop.tasks.indexOf(t), 1);
   if (t.rollback) { t.rollback.status = 'needs review'; t.rollback.report = 'The rollback task was not started.'; showHeader(t.origin); }
+  if (t.record) { // reported as not started when the discussion is resumed
+    const w = workOf(shop, t.workName);
+    w.queued = w.queued.filter((r) => r.id !== t.record.id);
+    w.notStarted.push(t.record);
+    persistWork(t.origin, t.workName);
+  }
   t.origin.workPending--;
   t.origin.workSkipped = (t.origin.workSkipped ?? 0) + 1;
   t.done();
@@ -1862,7 +1963,11 @@ export function queueWork(ctx, text, run = null, rollback = null) {
   const shop = shopOf(ctx);
   let done;
   const finished = new Promise((r) => { done = r; });
-  shop.tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done, rollback });
+  // Recorded in its discussion's checkpoint (see "Work in flight"); a brainstorm keeps no record.
+  const workName = ctx.discussion && !ctx.state.brainstorm ? ctx.discussion.name : null;
+  const record = workName ? { id: randomBytes(6).toString('hex'), task: text, at: new Date().toISOString() } : null;
+  shop.tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done, rollback, record, workName });
+  if (record) { workOf(shop, workName).queued.push(record); persistWork(ctx, workName); }
   ctx.workPending = (ctx.workPending ?? 0) + 1;
   ctx.workQueue = Promise.all([ctx.workQueue, finished]).then(() => {});
   // A bug here must not jam the queue: report it, and the next instruction still runs.
@@ -1871,9 +1976,18 @@ export function queueWork(ctx, text, run = null, rollback = null) {
 
 // One task, for its origin `ctx`. `recovery`: the edits this origin left uncommitted, which this
 // task is to resolve. Resolves to worker/main's commit before the task (or null).
-async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollback = null) {
+async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollback = null, t = null) {
   const { worker } = ctx;
   const shop = shopOf(ctx), screen = ctx.screen, label = originLabel(ctx);
+  // First of all: its discussion's checkpoint records it as running (see "Work in flight").
+  const record = t?.record, work = record ? workOf(shop, t.workName) : null;
+  if (record) {
+    work.queued = work.queued.filter((r) => r.id !== record.id);
+    work.running = { ...record, at: new Date().toISOString(), before: null };
+    persistWork(ctx, t.workName);
+  }
+  // Tasks of this discussion interrupted earlier: the worker is told once, with this one.
+  const told = work ? [...work.interrupted] : [];
   if (!rollback && recovery && shop.rollbacks?.get(label)?.task === recovery.task) rollback = shop.rollbacks.get(label);
   if (rollback) { rollback.status = 'running'; showHeader(ctx); }
   let before = null, mainAtStart = null;
@@ -1915,6 +2029,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       const place = await refreshWorker(ctx, { prepare: true, fastForward: !rollback });
       if (place.disabled) throw new Error(place.disabled);
       before = await git(place.path, 'rev-parse', 'HEAD');
+      if (record && work.running?.id === record.id) { work.running.before = before; persistWork(ctx, t.workName); }
       mainAtStart = await git(place.path, 'rev-parse', 'main').catch(() => null);
       if (!recovery) {
         const file = await ownerFile(place);
@@ -1948,7 +2063,9 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       const merge = mainBehind ? (rollback
         ? 'Main has commits worker/main lacks. Follow the rollback preflight below before merging or changing files.\n\n'
         : `Before the instruction below, first merge main into worker/main with a normal merge (git merge main). Label any merge commit "[${label}] catch up with main". If it clashes, do not force it or do the requested task: leave the state intact and report the conflict; this origin must resolve it before other worker tasks can run. Never merge into main or push.\n\n`) : '';
-      entry = { speaker: worker.name, text: (await worker.turn(brief + tree + commit + leftover + merge + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
+      const interrupted = told.map((r) => `Your previous instruction "${firstLine(r.task)}" was interrupted by a Restart or Quit: check the worktree before continuing.\n\n`).join('');
+      if (told.length) work.interrupted = work.interrupted.filter((r) => !told.includes(r));
+      entry = { speaker: worker.name, text: (await worker.turn(interrupted + brief + tree + commit + leftover + merge + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
       if (ctx.worker === worker) {
         if (brief) ctx.workerBriefed = d?.dir ?? (ctx.state.brainstorm ? 'brainstorm' : null);
         ctx.workerTree = place.cwd;
@@ -1971,6 +2088,12 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       const subjects = (await git(workerDir(ctx), 'log', '--format=%h %s', `${before}..HEAD`, ...(mainAtStart ? ['--not', mainAtStart] : [])).catch(() => '')).split('\n').filter(Boolean);
       const unlabelled = subjects.filter((l) => !l.slice(l.indexOf(' ') + 1).startsWith(`[${label}]`));
       if (unlabelled.length) workNote(ctx, `✗ Commits without the [${label}] label: ${unlabelled.join(' · ')}.`, true);
+    }
+    if (record && work.running?.id === record.id) {
+      // Stopped by Quit or Restart: kept as interrupted, to report on Resume.
+      if (ctx.stopped && entry.error) work.interrupted.push(work.running);
+      work.running = null;
+      persistWork(ctx, t.workName);
     }
     if (rollback) await rollbackReport(ctx, rollback, entry);
     if (run) reportBack(ctx, run, entry);

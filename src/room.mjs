@@ -77,6 +77,8 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
     const parts = [];
     // state.briefing (set by ui.mjs once the discussion folder exists): where to write, and so on.
     if (seen.get(agent.name) === 0) parts.push(introduction(agent, agents), ...(state.briefing ? [state.briefing] : []));
+    // After a Resume or Restart (ui.mjs): one sentence, in each agent's next prompt only.
+    if (state.restored?.pending?.includes(agent.name)) parts.push(state.restored.text);
     parts.push('New messages since your last turn:', formatMessages(unseenFor(agent)));
     if (task) parts.push(task);
     parts.push(`Your reply as ${agent.name}:`);
@@ -93,6 +95,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
       if (agent.lastUsage) entry.usage = agent.lastUsage;
       // Advance only on success: a failed agent gets these messages again next time.
       seen.set(agent.name, transcript.length + 1);
+      if (state.restored?.pending) state.restored.pending = state.restored.pending.filter((n) => n !== agent.name);
     } catch (err) {
       entry = { speaker: agent.name, text: err.message, error: true };
     }

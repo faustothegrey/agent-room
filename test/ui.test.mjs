@@ -1912,3 +1912,160 @@ test('failed worktree inspection blocks even the holding origin recovery, preser
   assert.equal(shop.inspectionError, null); assert.equal(shop.blockedBy, null);
   assert.equal(existsSync(record), false);
 });
+
+// ── Recovery on Resume (continue by default, part b) ──
+// Waits (at most 10 seconds) until `ready()` is true.
+async function eventually(ready) {
+  for (const t0 = Date.now(); !ready();) { if (Date.now() - t0 > 10000) throw new Error('timed out'); await new Promise((r) => setTimeout(r, 10)); }
+}
+const savedWork = async (cwd, name) => { const { readFileSync } = await import('node:fs'); return JSON.parse(readFileSync(await checkpointPath(cwd, name), 'utf8')).work; };
+
+test('a worker task cut off with a clean worktree: Resume reports it and the task never started; the worker is told once; "Result unknown" without a starting commit', async () => {
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const { queueWork } = await import('../src/ui.mjs');
+  const cwd = await tmp('work-crash-');
+  await gitRoom(cwd);
+  const ctx = await savedRoom(cwd, 'work-1');
+  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-thread' }); // a real Codex turn sets it
+  await handleLine('plan it', ctx);
+  const name = ctx.discussion.name, file = await checkpointPath(cwd, name);
+  ctx.worker.turn = () => new Promise(() => {}); // the process "crashes" during this turn
+  queueWork(ctx, 'first task\nwith details');
+  queueWork(ctx, 'second task');
+  let work;
+  await eventually(() => { work = JSON.parse(readFileSync(file, 'utf8')).work; return !!work?.running?.before; });
+  assert.deepEqual([work.running.task, work.queued.map((r) => r.task)], ['first task\nwith details', ['second task']]);
+  const crashed = readFileSync(file, 'utf8');
+
+  // A new process: Resume reports both, in the Worker tab and in the chat.
+  const after = await savedRoom(cwd, 'work-2');
+  const prompts = [];
+  await handleLine('/resume ' + name, after);
+  after.worker.turn = async (p) => { prompts.push(p); return 'ok'; };
+  const notes = after.screen.worker.filter((m) => m.note).map((m) => m.note);
+  assert.match(notes[0], new RegExp(`^✗ Interrupted: \\[${name}\\] "first task" \\(started \\d\\d:\\d\\d\\) left no commits or edits in the worktree\\. It may still have written notes elsewhere`));
+  assert.match(notes[1], new RegExp(`^✗ Not started: \\[${name}\\] "second task" was still queued when the room stopped\\. Nothing was re-sent`));
+  const chat = after.state.transcript.at(-1);
+  assert.equal(chat.speaker, 'agent-room');
+  assert.match(chat.text, /Interrupted: [\s\S]*Not started: /);
+  assert.deepEqual(await savedWork(cwd, name), { queued: [], running: null, interrupted: [{ ...work.running, at: work.running.at, reported: true }], notStarted: [] });
+  // The next instruction from this discussion carries the notice, once.
+  queueWork(after, 'next task');
+  await after.workQueue;
+  assert.match(prompts[0], /^Your previous instruction "first task" was interrupted by a Restart or Quit: check the worktree before continuing\./);
+  queueWork(after, 'another task');
+  await after.workQueue;
+  assert.doesNotMatch(prompts[1], /was interrupted/);
+  assert.deepEqual((await savedWork(cwd, name)).interrupted, []);
+
+  // Cut off before its starting commit was recorded: the result is unknown.
+  const early = JSON.parse(crashed);
+  early.work.running.before = null;
+  writeFileSync(file, JSON.stringify(early));
+  const third = await savedRoom(cwd, 'work-3');
+  await handleLine('/resume ' + name, third);
+  assert.match(third.screen.worker.find((m) => m.note).note,
+    new RegExp(`^✗ Result unknown: \\[${name}\\] "first task" \\(started \\d\\d:\\d\\d\\) was interrupted before its starting point was recorded\\. Check the worktree \\(it is clean\\)\\.$`));
+});
+
+test('a worker task cut off after an edit: Resume reports the uncommitted edits, and the queue holds for that discussion', async () => {
+  const { readFileSync, writeFileSync, existsSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { queueWork, recoverWorkerOwner } = await import('../src/ui.mjs');
+  const cwd = await tmp('work-edit-');
+  await gitRoom(cwd);
+  const ctx = await savedRoom(cwd, 'edit-1');
+  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-thread' }); // a real Codex turn sets it
+  await handleLine('plan it', ctx);
+  const name = ctx.discussion.name, file = await checkpointPath(cwd, name);
+  let edited = null;
+  ctx.worker.turn = () => { edited = join(ctx.shop.workerDir.path, 'half.txt'); writeFileSync(edited, 'half done'); return new Promise(() => {}); };
+  queueWork(ctx, 'edit things');
+  await eventually(() => edited && existsSync(edited) && !!JSON.parse(readFileSync(file, 'utf8')).work?.running?.before);
+
+  const after = await savedRoom(cwd, 'edit-2');
+  await handleLine('/resume ' + name, after);
+  assert.match(after.screen.worker.find((m) => m.note).note,
+    new RegExp(`^✗ Interrupted by Restart, Quit or a crash: \\[${name}\\] "edit things" \\(started \\d\\d:\\d\\d\\) left uncommitted edits in the worktree\\. Ask the worker to finish and commit them, or to abandon them\\.$`));
+  await recoverWorkerOwner(after);
+  assert.deepEqual([after.shop.blockedBy?.origin, after.shop.blockedBy?.label, after.shop.blockedBy?.task], [after, name, 'edit things']);
+});
+
+test('an interrupted round: Resume says the transcript grew after the checkpoint; every restore tells the agents once; an unstarted Claude session gets a new ID', async () => {
+  const { readFileSync } = await import('node:fs');
+  const cwd = await tmp('round-crash-');
+  const ctx = await savedRoom(cwd, 'round-1');
+  Object.assign(ctx.sessions.get('A'), { id: 'never-started', started: false });
+  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-thread' });
+  Object.assign(ctx.sessions.get('worker:W'), { id: 'worker-session', started: true });
+  await handleLine('first', ctx);
+  const name = ctx.discussion.name, transcript = ctx.logPath;
+  ctx.room.agents[0].turn = () => new Promise(() => {});
+  handleLine('cut off', ctx); // the process "crashes" during this round
+  await eventually(() => readFileSync(transcript, 'utf8').includes('cut off'));
+
+  const said = [];
+  const console_log = console.log;
+  console.log = (...a) => { said.push(a.join(' ')); };
+  let after;
+  try {
+    after = await savedRoom(cwd, 'round-2');
+    await handleLine('/resume ' + name, after);
+  } finally { console.log = console_log; }
+  assert.ok(said.some((l) => /✗ The transcript grew after the checkpoint of .*\. What was written after it is not in the restored chat; it is in the transcript file \(from line \d+\)\. The agents may remember some of it\./.test(l)));
+  assert.match(readFileSync(transcript, 'utf8'), /_\(restored from the checkpoint of .*; the transcript had grown after it\)_/);
+  assert.doesNotMatch(after.state.transcript.map((m) => m.text).join('\n'), /cut off/);
+  assert.notEqual(after.sessions.get('A').id, 'never-started');
+  assert.deepEqual([after.sessions.get('B').threadId, after.sessions.get('worker:W').id], ['codex-thread', 'worker-session']);
+  const prompts = [];
+  for (const a of after.room.agents) a.turn = async (p) => { prompts.push([a.name, p]); return 'PASS'; };
+  await handleLine('again', after);
+  const restored = /^agent-room restored this discussion from its checkpoint of .*\. If you remember turns after that, they are not in the room's record\.$/m;
+  assert.deepEqual(prompts.filter(([, p]) => restored.test(p)).map(([n]) => n), ['A', 'B']); // each agent's next prompt
+  prompts.length = 0;
+  await handleLine('later', after);
+  assert.ok(prompts.length && !prompts.some(([, p]) => restored.test(p))); // only that one
+
+  // No growth: no notice, but the agents are still told.
+  await handleLine('/close', after);
+  const lines = [];
+  console.log = (...a) => { lines.push(a.join(' ')); };
+  let third;
+  try {
+    third = await savedRoom(cwd, 'round-3');
+    await handleLine('/resume ' + name, third);
+  } finally { console.log = console_log; }
+  assert.ok(!lines.some((l) => /transcript grew/.test(l)));
+  const more = [];
+  for (const a of third.room.agents) a.turn = async (p) => { more.push(p); return 'PASS'; };
+  await handleLine('once more', third);
+  assert.match(more[0], restored);
+});
+
+test('Quit room during a worker task: the stopped task is kept as interrupted, the queued one as not started, and Resume reports both', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { queueWork, stopRoom } = await import('../src/ui.mjs');
+  const cwd = await tmp('work-quit-');
+  await gitRoom(cwd);
+  const ctx = await savedRoom(cwd, 'quit-1');
+  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-thread' }); // a real Codex turn sets it
+  await handleLine('plan it', ctx);
+  const name = ctx.discussion.name, file = await checkpointPath(cwd, name);
+  let stop;
+  ctx.worker.turn = () => new Promise((_, fail) => { stop = fail; });
+  queueWork(ctx, 'long task');
+  queueWork(ctx, 'waiting task');
+  await eventually(() => !!stop && !!JSON.parse(readFileSync(file, 'utf8')).work?.running?.before);
+  const quitting = stopRoom(ctx); // as Quit room does; the worker's program is stopped
+  stop(new Error('claude was stopped (SIGTERM)'));
+  await quitting;
+  const work = JSON.parse(readFileSync(file, 'utf8')).work;
+  assert.deepEqual([work.running, work.queued, work.interrupted.map((r) => r.task), work.notStarted.map((r) => r.task)],
+    [null, [], ['long task'], ['waiting task']]);
+
+  const after = await savedRoom(cwd, 'quit-2');
+  await handleLine('/resume ' + name, after);
+  const notes = after.screen.worker.filter((m) => m.note).map((m) => m.note);
+  assert.match(notes[0], new RegExp(`^✗ Interrupted: \\[${name}\\] "long task" `));
+  assert.match(notes[1], new RegExp(`^✗ Not started: \\[${name}\\] "waiting task" `));
+});

@@ -214,8 +214,26 @@ or a provider session missing) is kept, the room stays as it was, and the error 
 fresh: Resume never starts fresh by itself. Continuing needs the providers' original local session
 storage; if a provider cannot resume its session, its turn fails without a silent fresh start.
 This is native session continuation, subject to provider context compaction and changes to files,
-models or rulebooks. A round cut off by Quit, Restart or a crash is not in the restored chat (it is
-in the transcript file), though the agents' sessions may remember it.
+models or rulebooks.
+
+**What a Resume or Restart reports.** Quit room and Restart let the round in progress end first (or
+fail, after 30 seconds), so it is in the checkpoint. After a crash, a round may have been cut off:
+when the transcript file grew after the checkpoint, Resume says so, with the line where the part
+missing from the restored chat starts, and marks the transcript. An unchanged transcript doesn't
+prove nothing was lost (a provider may have recorded part of a turn that was never logged), so every
+restore also tells each agent, in its next prompt only, that it was restored from the checkpoint of
+that time and that any turns it remembers after that are not in the room's record. A Claude session
+whose first turn never completed gets a new ID.
+
+The checkpoint also records each worker task: when it is queued, and as soon as it starts (then
+with worker/main's commit at that moment). After Quit, Restart or a crash, Resume reports in the
+Worker tab and, as one agent-room message, in the chat, each task that was interrupted, with what
+the worktree shows now: uncommitted edits (the queue holds as usual), commits made before the reply
+was lost, nothing left in the worktree, or "Result unknown: … Check the worktree" when it stopped
+before its starting commit was recorded. A task still queued is reported as not started; nothing is
+re-sent. The next instruction from that discussion tells the worker, once, that its previous
+instruction was interrupted. Tasks sent before a discussion's first message (or from a brainstorm)
+aren't recorded until there is a checkpoint to hold them.
 
 **Start fresh** (in a row's **Actions ▾**, or on the discussion's page; two clicks; `/fresh
 <folder-name>`) discards the saved sessions and chat: new agent and worker sessions start from the
