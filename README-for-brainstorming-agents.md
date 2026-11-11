@@ -79,6 +79,9 @@ room can be of any kind.
 - Mark claims as **documented** (official source, with link), **tested** (actually tried),
   or **assumed / from memory**. Costs stay "unmeasured" until measured.
 - Don't ask the User to choose technical mechanisms before showing their practical consequences.
+- When the User corrects a document or drawing, change it in place. Don't create a new version
+  or keep earlier versions in the notes; the transcripts and Git keep the history. Show
+  alternatives side by side only when the User asks to compare them.
 
 ## Project constraint (from agent-room's `AGENT.md`)
 When a discussion concerns agent-room itself: its goal is the one above, and it stays small
