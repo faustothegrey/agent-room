@@ -321,8 +321,9 @@ independently of the selected discussion and worker models.
 eight points under Agreed and Not agreed. **Next step** holds exactly one action for you: `Answer:`
 a question, `Send to the Worker: "…"` with the instruction word for word, or `Do:` an action of your
 own; **Later** lists the remaining actions in order. An instruction for the worker is kept until
-you say it was sent, replaced or withdrawn: under Later it is referred to by name, with its full
-text in the discussion's `pending-instructions.md`. The format and what the code reads from it are
+you say it was sent, replaced or withdrawn. In a discussion, under Later it is referred to by
+name, with its full text in the discussion's `pending-instructions.md`; a brainstorm has no folder,
+so this applies to discussions only (see below). The format and what the code reads from it are
 in [the summary contract](docs/architecture.md#summary-contract). The drafter rotates between summaries. Writing
 or revising counts as accepting that version; every other agent must pass on it for agreement.
 Each agent gets at most three turns. Without agreement, the last revision is shown as

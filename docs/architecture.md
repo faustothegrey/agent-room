@@ -67,7 +67,7 @@ enough to use the `PASS` protocol. Usage data is optional.
 
 **After a round** (`runRound()` in `src/ui.mjs`):
 
-1. If an agent spoke and no turn failed (or auto dev is deciding), the room runs an **automatic
+1. If no turn failed, and an agent spoke or auto dev is deciding, the room runs an **automatic
    summary** (`summary()` in `src/room.mjs`; see [Summary contract](#summary-contract)).
 2. The round is committed to the replication store, when replication is on.
 3. The discussion's checkpoint is saved (discussions only, not brainstorms), so Resume and
