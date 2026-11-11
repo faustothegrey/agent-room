@@ -15,6 +15,7 @@ const summaryFormat = (brainstorm) => [
   '**Agreed**', '- …', '**Not agreed**', '- the point: each side\'s view, by name',
   '**Next step**', '- Answer: a question / Send to the Worker: "the instruction, word for word" / Do: an action of the User\'s own',
   'Next step contains exactly one action for the User, labelled Answer, Send to the Worker or Do as appropriate.',
+  'A long instruction may instead follow "- Send to the Worker:" alone on its line, as a block quote with every line starting with >.',
   '**Later**', '- the remaining actions in order, one short line each, each saying what it waits for',
   'Keep each instruction for the worker until the User confirms it was sent, replaced or withdrawn.',
   ...(brainstorm ? ['Quote its latest version word for word when it is the Next step.'] : [

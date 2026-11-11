@@ -319,8 +319,9 @@ independently of the selected discussion and worker models.
 **Summarize**, or `/summary`, asks the discussion agents to agree a summary by points under
 **Agreed**, **Not agreed**, **Next step** and **Later**, leaving out empty sections, with at most
 eight points under Agreed and Not agreed. **Next step** holds exactly one action for you: `Answer:`
-a question, `Send to the Worker: "…"` with the instruction word for word, or `Do:` an action of your
-own; **Later** lists the remaining actions in order. An instruction for the worker is kept until
+a question, `Send to the Worker: "…"` with the instruction word for word (or, for a long one,
+`Send to the Worker:` alone on its line followed by the instruction as a `>` block quote), or
+`Do:` an action of your own; **Later** lists the remaining actions in order. An instruction for the worker is kept until
 you say it was sent, replaced or withdrawn. In a discussion, under Later it is referred to by
 name, with its full text in the discussion's `pending-instructions.md`; a brainstorm has no folder,
 so this applies to discussions only (see below). The format and what the code reads from it are

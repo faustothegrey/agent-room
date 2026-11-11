@@ -177,16 +177,17 @@ While auto dev runs, `autoDevTask` in `src/ui.mjs` adds a last line: `Outcome: S
 **What the code parses.** It checks form, not content:
 
 - `PASS` (`isPass()` in `src/room.mjs`) for acceptance;
-- the instruction in `Send to the Worker: "…"` under the **Next step** heading
-  (`summaryInstruction()` in `src/ui.mjs`);
+- the instruction under the **Next step** heading, either in `Send to the Worker: "…"` or as
+  one contiguous `>` block quote after a line holding only `Send to the Worker:`, its `>`
+  prefixes removed (`summaryInstruction()` in `src/ui.mjs`);
 - the summary's last line, `Outcome: …` (`summaryOutcome()` in `src/ui.mjs`).
 
 **What happens on failure.**
 
 - No agreement within the turns: the last version is shown, marked **not agreed**; auto dev
   pauses.
-- An instruction that can't be read reliably (outside Next step, more than one, unquoted, no
-  closing quotation mark, empty): it is never sent, and the reason is shown.
+- An instruction that can't be read reliably (outside Next step, more than one, neither quoted
+  nor block-quoted, no closing quotation mark, a block quote broken by unquoted lines, empty): it is never sent, and the reason is shown.
 - A missing or unknown `Outcome:` line while auto dev runs: the run pauses, with the reason.
 - A failed summary turn: the summary stops; auto dev pauses.
 

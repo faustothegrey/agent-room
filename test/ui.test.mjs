@@ -1045,6 +1045,16 @@ test('auto dev: reading the instruction only from Next step, and the Outcome lin
   assert.match(summaryInstruction('**Next step**\n- Send to the Worker: "a" and Send to the Worker: "b"').error, /more than one/);
   assert.match(summaryInstruction('**Next step**\n- Send to the Worker: "unclosed\n\n**Later**\n- "quoted later"').error, /no closing quotation mark/);
   assert.match(summaryInstruction('**Next step**\n- Send to the Worker the fix').error, /no quoted instruction/);
+  // The quotation-mark form, unchanged; and the block-quote form.
+  assert.deepEqual(summaryInstruction('**Next step**\n- Send to the Worker: "Run > the tests."'), { text: 'Run > the tests.' });
+  const block = '**Next step**\n- Send to the Worker:\n\n  > Fix the "parser".\n  >\n  > Then run `npm test`.\n  >   indented line';
+  assert.deepEqual(summaryInstruction(block), { text: 'Fix the "parser".\n\nThen run `npm test`.\n  indented line' });
+  assert.deepEqual(summaryInstruction(`${block}\n\n**Later**\n- review it\n> a later note\n\nOutcome: SEND`), { text: 'Fix the "parser".\n\nThen run `npm test`.\n  indented line' });
+  assert.match(summaryInstruction('**Next step**\nSend to the Worker:\n>\n> \n\n**Later**\n- x').error, /block-quoted instruction is empty/);
+  assert.match(summaryInstruction('**Next step**\n- Send to the Worker:\n> a\n- Send to the Worker:\n> b').error, /more than one/);
+  assert.match(summaryInstruction('**Next step**\n- Send to the Worker:\n> a\n- and Send to the Worker: "b"').error, /more than one/);
+  assert.match(summaryInstruction('**Next step**\n- Send to the Worker:\n> a\n\n> b').error, /broken by lines/);
+  assert.match(summaryInstruction('**Next step**\n- Send to the Worker:\n\nthe fix').error, /no quoted instruction/);
   assert.equal(summaryOutcome(summaryWith('x', 'SEND')), 'SEND');
   assert.equal(summaryOutcome('…\n**Outcome: WAIT FOR USER**'), 'WAIT FOR USER');
   assert.equal(summaryOutcome('Outcome: FINISH\nmore'), null);
