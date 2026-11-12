@@ -245,7 +245,8 @@ nor a discussion's into a brainstorm. In the terminal one room still runs one wo
 time, so a task you send after switching starts when the earlier discussion's task has ended.
 After Start fresh, a task still running from the earlier session reports to that session's
 transcript (in the same folder) and the Worker tab, not to the fresh session; it doesn't replace
-the fresh session's worker in the checkpoint.
+the fresh session's worker in the checkpoint. Its token usage isn't counted in any discussion's
+totals.
 
 **New brainstorm** (in the header's **Actions ▾** menu, or `/brainstorm`) starts a conversation with
 the same agents, turns and `PASS` rules, but agent-room keeps no record of it: no title, folder,
