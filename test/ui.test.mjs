@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handleLine, load, restartArgs } from '../src/ui.mjs';
+import { handleLine, load, restartArgs, workerLane } from '../src/ui.mjs';
 
 const freshCtx = () => ({ cwd: '/tmp', agentSpecs: 'claude:A,codex:B', state: { transcript: [], seen: new Map() }, sessions: new Map() });
 
@@ -615,8 +615,8 @@ test('after a restart the worktree is reused; an existing worker/main without a 
   // Its owner is unknown to the new process: the queue holds, and the edits are left as they are.
   const { queueWork } = await import('../src/ui.mjs');
   queueWork(again, 'more');
-  await until(() => again.shop.blockedBy);
-  assert.equal(again.shop.blockedBy.origin, null);
+  await until(() => workerLane(again).blockedBy);
+  assert.equal(workerLane(again).blockedBy.origin, null);
   await new Promise((r) => setTimeout(r, 300));
   assert.deepEqual(got, []);
   assert.equal(git('-C', path, 'status', '--porcelain'), '?? wip.txt'); // kept
@@ -665,7 +665,7 @@ test('worker/main catches up with the room only when strictly behind with a clea
   // Uncommitted edits: the queue holds, with the edits intact and worker/main where it was.
   const { queueWork, refreshWorker } = await import('../src/ui.mjs');
   queueWork(ctx, 'dirty');
-  await until(() => ctx.shop.blockedBy);
+  await until(() => workerLane(ctx).blockedBy);
   await new Promise((r) => setTimeout(r, 300));
   assert.ok(!got.some((p) => p.endsWith('dirty')));
   assert.equal(git('-C', path, 'status', '--porcelain'), '?? wip.txt');
@@ -1461,10 +1461,10 @@ test('on the screen, New discussion keeps the discussion open with its sessions;
   assert.equal(hub.rooms.size, 4);
 });
 
-test('one shared worker queue: tasks labelled by origin, one worker session and lane each, reports back there; Close discussion; Quit room closes them all', async () => {
+test('one workshop per folder: tasks labelled by origin, one worker session, lane and queue each, reports back there; Close discussion; Quit room closes them all', async () => {
   const { readFileSync, realpathSync } = await import('node:fs');
   const { queueWork, reloaded } = await import('../src/ui.mjs');
-  const commit = (msg) => (ctx) => { const g = (...a) => require('node:child_process').execFileSync('git', ['-C', ctx.shop.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]); g('commit', '-q', '--allow-empty', '-m', msg); return 'committed'; };
+  const commit = (msg) => (ctx) => { const g = (...a) => require('node:child_process').execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]); g('commit', '-q', '--allow-empty', '-m', msg); return 'committed'; };
   const { createRequire } = await import('node:module');
   const require = createRequire(import.meta.url);
   const { first, gotoOf, pageOf, contexts } = await multiRoom({ worker: (ctx, p) => commit(ctx === contexts()[0] ? `[${ctx.discussion.name}] done` : 'no label')(ctx) });
@@ -1475,7 +1475,8 @@ test('one shared worker queue: tasks labelled by origin, one worker session and 
   queueWork(first, 'task for a');
   queueWork(second, 'task for b');
   await Promise.all([first.workQueue, second.workQueue]);
-  assert.equal(first.shop, second.shop); // one queue, one Worker tab
+  assert.equal(first.shop, second.shop); // one workshop, one Worker tab
+  assert.notEqual(workerLane(first), workerLane(second)); // a queue each
   assert.match(first.prompts[0], new RegExp(`These instructions come from \\[${first.discussion.name}\\]\\. When a task is complete, commit it on worker/${first.discussion.name} with a message starting "\\[${first.discussion.name}\\]" and give the commit ID in your reply`));
   assert.match(second.prompts[0], new RegExp(`come from \\[${second.discussion.name}\\]`));
   assert.match(first.prompts[0], new RegExp(`The active discussion's folder is ${first.discussion.dir}:`)); // its own folder, its own session
@@ -1487,7 +1488,8 @@ test('one shared worker queue: tasks labelled by origin, one worker session and 
   assert.ok(first.shop.log.some((m) => m.note && new RegExp(`Commits without the \\[${second.discussion.name}\\] label: [0-9a-f]+ no label`).test(m.note)));
   assert.ok(!first.shop.log.some((m) => m.note?.includes(`[${first.discussion.name}] label`)));
   // Each discussion's task ran in its own lane, and committed on its own branch.
-  assert.equal(realpathSync(first.shop.workerDir.path), `${realpathSync(first.cwd)}.workers/${second.discussion.name}`); // the last task's
+  assert.deepEqual([realpathSync(first.workerDir.path), realpathSync(second.workerDir.path)],
+    [`${realpathSync(first.cwd)}.workers/${first.discussion.name}`, `${realpathSync(first.cwd)}.workers/${second.discussion.name}`]);
   const subject = (branch) => require('node:child_process').execFileSync('git', ['-C', first.cwd, 'log', '-1', '--format=%s', branch]).toString().trim();
   assert.deepEqual([subject(`worker/${first.discussion.name}`), subject(`worker/${second.discussion.name}`)], [`[${first.discussion.name}] done`, 'no label']);
 
@@ -1500,13 +1502,85 @@ test('one shared worker queue: tasks labelled by origin, one worker session and 
   assert.deepEqual([first.queued.at(-1), second.queued.at(-1)], ['/quit', '/quit']); // every open discussion
 });
 
-test('leftover edits hold the shared queue for their origin, which can recover them; they block Close, Archive and Defer; unknown leftovers hold everything', async () => {
+test('lanes run at the same time: two discussions\' tasks overlap with separate queues, holds, worker sessions and worktrees; a hold in one doesn\'t stop the other; a third waits for a free place', async () => {
+  const { queueWork, PARALLEL_WORKERS } = await import('../src/ui.mjs');
+  const { writeFileSync, realpathSync } = await import('node:fs');
+  assert.equal(PARALLEL_WORKERS, 2);
+  const gates = new Map(); // each running task's release, by its text
+  const started = []; // [text, worktree, worker], as each turn starts
+  const { first, contexts } = await multiRoom({ worker: (c, p) => {
+    const text = p.split('\n').at(-1);
+    started.push([text, realpathSync(c.workerDir.path), c.worker]);
+    if (text === 'a: leave edits') writeFileSync(`${c.workerDir.path}/wip.txt`, 'half done\n');
+    return new Promise((done) => gates.set(text, done));
+  } });
+  await handleLine('topic-a', first); await handleLine('/new', first);
+  const second = contexts()[1]; await handleLine('topic-b', second); await handleLine('/new', second);
+  const third = contexts()[2]; await handleLine('topic-c', third);
+  const root = realpathSync(first.cwd), [la, lb, lc] = [first, second, third].map((c) => workerLane(c));
+  queueWork(first, 'a: leave edits'); queueWork(second, 'b: one'); queueWork(second, 'b: two');
+  await until(() => gates.has('a: leave edits') && gates.has('b: one')); // both running at once
+
+  // While both run: a queue, a worktree and a worker session each; each window shows its own worker working.
+  assert.deepEqual([la.running?.text, lb.running?.text, la.tasks.length, lb.tasks.map((t) => t.text)], ['a: leave edits', 'b: one', 0, ['b: two']]);
+  assert.deepEqual(started.map(([t, dir]) => [t, dir]), [['a: leave edits', `${root}.workers/${first.discussion.name}`], ['b: one', `${root}.workers/${second.discussion.name}`]]);
+  assert.notEqual(started[0][2], started[1][2]); // two worker agents, each with its own session
+  assert.deepEqual([first, second, third].map((c) => c.screen.working ?? null), [first.worker.name, second.worker.name, null]);
+  assert.deepEqual([la.blockedBy, lb.blockedBy], [null, null]);
+
+  // A third discussion's task waits for a free place, and says so in the Worker tab.
+  queueWork(third, 'c: waits');
+  await until(() => first.shop.log.some((m) => m.note === `[${third.discussion.name}] "c: waits" waits for a free place: 2 worker tasks running, at most 2 at once.`));
+  assert.deepEqual([gates.has('c: waits'), lc.tasks.map((t) => t.text)], [false, ['c: waits']]);
+
+  // a's task ends with edits left: its lane holds; the free place goes to c; b's lane goes on.
+  gates.get('a: leave edits')('left edits behind');
+  await until(() => la.blockedBy && gates.has('c: waits'));
+  assert.deepEqual([la.blockedBy.origin, lb.blockedBy, lc.blockedBy], [first, null, null]);
+  gates.get('b: one')('ok');
+  await until(() => gates.has('b: two')); // b's next task, in order, while a's lane holds
+  gates.get('b: two')('ok'); gates.get('c: waits')('ok');
+  await Promise.all([second.workQueue, third.workQueue]);
+  assert.deepEqual(started.map(([t]) => t), ['a: leave edits', 'b: one', 'c: waits', 'b: two']);
+  assert.equal(la.blockedBy.origin, first); // still held, and it stopped no one else
+  assert.deepEqual([second.prompts.length, third.prompts.length], [2, 1]);
+});
+
+test('switching discussion while one waits for its worker task: the message typed in the other and the worker\'s later report each reach their own discussion', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const { readFileSync } = await import('node:fs');
+  let finish;
+  const { first, contexts, gotoOf, pageOf } = await multiRoom({ worker: () => new Promise((done) => { finish = done; }) });
+  await handleLine('topic-a', first); await handleLine('/new', first);
+  const second = contexts()[1]; await handleLine('topic-b', second);
+  await handleLine(`/resume ${first.discussion.name}`, second); // the window shows a again
+  assert.equal(gotoOf(second), pageOf(first));
+  queueWork(first, 'a long task');
+  await until(() => finish);
+  assert.deepEqual([first, second].map((c) => c.screen.working ?? null), [first.worker.name, null]);
+  await handleLine(`/resume ${second.discussion.name}`, first); // switch to b while a's task runs: nothing blocks it
+  assert.equal(gotoOf(first), pageOf(second));
+  await handleLine('a message in b', second); // typed in the window, which now shows b
+  assert.ok(second.state.transcript.some((m) => m.text === 'a message in b'));
+  assert.ok(!first.state.transcript.some((m) => m.text === 'a message in b'));
+  finish('the long task\'s report');
+  await first.workQueue;
+  const a = readFileSync(first.logPath, 'utf8'), b = readFileSync(second.logPath, 'utf8');
+  assert.match(a, /a long task[\s\S]*the long task's report/);
+  assert.doesNotMatch(a, /a message in b/);
+  assert.match(b, /a message in b/);
+  assert.doesNotMatch(b, /a long task|the long task's report/);
+  assert.deepEqual(first.shop.log.filter((m) => m.speaker).map((m) => [m.origin, m.speaker]), [[first.discussion.name, 'User'], [first.discussion.name, first.worker.name]]);
+  assert.deepEqual([first, second].map((c) => c.screen.working ?? null), [null, null]);
+});
+
+test('leftover edits hold their own lane for their origin, which can recover them; other lanes go on; they block Close, Archive and Defer; unknown leftovers hold their lane', async () => {
   const { writeFileSync, existsSync } = await import('node:fs');
   const { queueWork, start } = await import('../src/ui.mjs');
   const { execFileSync } = await import('node:child_process');
-  const inTree = (ctx, ...a) => execFileSync('git', ['-C', ctx.shop.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]);
+  const inTree = (ctx, ...a) => execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]);
   const { first, git, contexts } = await multiRoom({ worker: (ctx, p) => {
-    if (p.endsWith('make wip')) writeFileSync(`${ctx.shop.workerDir.path}/wip.txt`, 'half done\n');
+    if (p.endsWith('make wip')) writeFileSync(`${ctx.workerDir.path}/wip.txt`, 'half done\n');
     if (p.endsWith('finish it')) { inTree(ctx, 'add', 'wip.txt'); inTree(ctx, 'commit', '-q', '-m', `[${ctx.discussion.name}] finished`); }
     return 'ok';
   } });
@@ -1516,13 +1590,11 @@ test('leftover edits hold the shared queue for their origin, which can recover t
   await handleLine('topic-b', second);
   queueWork(first, 'make wip');
   await first.workQueue;
-  assert.equal(first.shop.blockedBy.origin, first);
-  assert.match(first.notes.at(-1), /The worker left uncommitted edits from "make wip": other discussions' worker tasks wait/);
-  let otherRan = false;
-  queueWork(second, 'other work');
-  second.workQueue.then(() => { otherRan = true; });
-  await new Promise((r) => setTimeout(r, 300));
-  assert.deepEqual([otherRan, second.prompts.length], [false, 0]); // held
+  assert.equal(workerLane(first).blockedBy.origin, first);
+  assert.match(first.notes.at(-1), /The worker left uncommitted edits from "make wip": this discussion's worker lane holds them until they are resolved \(other discussions' tasks go on\)/);
+  queueWork(second, 'other work'); // another lane: not held
+  await second.workQueue;
+  assert.deepEqual([second.prompts.length, workerLane(second).blockedBy, workerLane(first).blockedBy.origin], [1, null, first]);
 
   await handleLine('/close', first);
   assert.match(first.notes.at(-1), /can't be closed yet: its worker edits from "make wip" are unresolved/);
@@ -1535,35 +1607,36 @@ test('leftover edits hold the shared queue for their origin, which can recover t
   await first.workQueue;
   assert.match(first.prompts[1], new RegExp(`Uncommitted edits are left in your worktree from the earlier task from \\[${first.discussion.name}\\] "make wip" \\(worker/${first.discussion.name} was at [0-9a-f]{7} when it started\\)`));
   assert.match(first.prompts[1], /first list exactly the edits you would remove and wait for the User's explicit approval/);
-  await second.workQueue;
-  assert.equal(otherRan, true);
-  assert.equal(first.shop.blockedBy, null);
-  assert.ok(first.shop.log.some((m) => m.note === 'The worker\'s folder is clean again: the queue resumes.'));
+  assert.equal(workerLane(first).blockedBy, null);
+  assert.ok(first.shop.log.some((m) => m.note === `The worker's folder ${first.workerDir.path} is clean again: its queue resumes.`));
 
-  // Edits of unknown origin (here, made by hand) hold every task, the origin's too, until the folder is clean.
-  writeFileSync(`${first.shop.workerDir.path}/stray.txt`, 'x\n');
+  // Edits of unknown origin (here, made by hand) hold their lane, the origin's tasks too, until it is clean; other lanes go on.
+  writeFileSync(`${first.workerDir.path}/stray.txt`, 'x\n');
   let ran = false;
   queueWork(first, 'next');
   first.workQueue.then(() => { ran = true; });
-  await until(() => first.shop.blockedBy);
-  assert.deepEqual([ran, first.shop.blockedBy?.origin], [false, null]);
-  assert.match(first.shop.log.filter((m) => m.note).at(-1).note, /uncommitted edits from an unknown origin: the queue holds until the folder is clean/);
+  await until(() => workerLane(first).blockedBy);
+  assert.deepEqual([ran, workerLane(first).blockedBy?.origin], [false, null]);
+  assert.match(first.shop.log.filter((m) => m.note).at(-1).note, /uncommitted edits from an unknown origin: its queue holds until the folder is clean \(commit or remove those edits yourself\); other lanes go on/);
+  queueWork(second, 'meanwhile'); await second.workQueue;
+  assert.equal(second.prompts.at(-1).split('\n').at(-1), 'meanwhile');
+  assert.equal(ran, false);
   inTree(first, 'add', 'stray.txt'); inTree(first, 'commit', '-q', '-m', 'by hand');
   queueWork(first, 'after');
   await first.workQueue;
   assert.deepEqual(first.prompts.slice(-2).map((p) => p.split('\n').at(-1)), ['next', 'after']);
 
-  // At start (after a Restart, say), leftovers in the worktree belong to no known task.
-  writeFileSync(`${first.shop.workerDir.path}/left.txt`, 'x\n');
+  // At start (after a Restart, say), leftovers in a lane belong to no known task: that lane holds,
+  // and a task of another lane (here worker/main's, with no discussion yet) still runs.
+  writeFileSync(`${first.workerDir.path}/left.txt`, 'x\n');
   const restarted = await workerRoom();
   Object.assign(restarted.ctx, { cwd: first.cwd, noScreen: true, refreshQuota: () => {} });
   await start(restarted.ctx);
-  assert.equal(restarted.ctx.shop.blockedBy.origin, null);
-  let started = false;
+  assert.equal(workerLane(restarted.ctx, first.discussion.name).blockedBy.origin, null);
   queueWork(restarted.ctx, 'do it');
-  restarted.ctx.workQueue.then(() => { started = true; });
-  await new Promise((r) => setTimeout(r, 300));
-  assert.deepEqual([started, restarted.got.length], [false, 0]);
+  await restarted.ctx.workQueue;
+  assert.equal(restarted.got.length, 1);
+  assert.equal(workerLane(restarted.ctx, first.discussion.name).blockedBy.origin, null); // still held
   void git;
 });
 
@@ -1689,7 +1762,7 @@ test('Stage 2: completed work is reported once before a round, including Worker 
   const { writeFileSync, readFileSync } = await import('node:fs');
   const commits = [];
   const { first, contexts, settle } = await multiRoom({ worker: (c) => {
-    const tree = c.shop.workerDir.path;
+    const tree = c.workerDir.path;
     const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
     writeFileSync(`${tree}/changed.txt`, String(commits.length));
     g('add', 'changed.txt'); g('commit', '-qm', `[${c.discussion.name}] completed`);
@@ -1729,7 +1802,7 @@ test('Stage 2: Defer refuses labelled commits absent from main and permits them 
   const { execFileSync } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
   const { first, contexts, git } = await multiRoom({ worker: (c) => {
-    execFileSync('git', ['-C', c.shop.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', `[${c.discussion.name}] done`]); return 'done';
+    execFileSync('git', ['-C', c.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', `[${c.discussion.name}] done`]); return 'done';
   } });
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
@@ -1749,7 +1822,7 @@ test('Stage 2: private owner records survive restart and recovery, invalid recor
   const { readFileSync, writeFileSync, existsSync, unlinkSync, readdirSync } = await import('node:fs');
   let record, original, tree;
   const { first, contexts, settle } = await multiRoom({ worker: (c, p) => {
-    tree = c.shop.workerDir.path;
+    tree = c.workerDir.path;
     const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
     record = `${g('rev-parse', '--absolute-git-dir')}/agent-room-task.json`;
     assert.ok(existsSync(record)); // on disk before the provider starts
@@ -1768,19 +1841,20 @@ test('Stage 2: private owner records survive restart and recovery, invalid recor
   const second = contexts()[1]; await handleLine('topic-b', second);
   queueWork(first, 'leave edits'); await first.workQueue;
   assert.equal(JSON.parse(original).label, first.discussion.name);
-  const resetShop = () => { for (const c of contexts()) { clearTimeout(c.shop?.recheck); delete c.shop; } };
+  const resetShop = () => { for (const c of contexts()) { for (const l of c.shop?.lanes?.values() ?? []) clearTimeout(l.recheck); delete c.shop; } };
+  const heldA = () => workerLane(second, first.discussion.name).blockedBy; // first's lane, seen from second
   resetShop(); await recoverWorkerOwner(second);
-  assert.equal(second.shop.blockedBy.origin, first);
+  assert.equal(heldA().origin, first);
   assert.match(first.notes.at(-1), /worker left uncommitted edits/);
   for (const bad of [null, '{broken', JSON.stringify({ ...JSON.parse(original), before: 'invalid' }), JSON.stringify({ ...JSON.parse(original), label: '2026-11-09-missing' })]) {
     if (bad === null) unlinkSync(record); else writeFileSync(record, bad);
     resetShop(); await recoverWorkerOwner(second);
-    assert.equal(second.shop.blockedBy.origin, null);
+    assert.equal(heldA().origin, null);
   }
   writeFileSync(record, original); resetShop(); await recoverWorkerOwner(second);
   queueWork(first, 'recover'); await first.workQueue;
   assert.equal(existsSync(record), false);
-  assert.equal(first.shop.blockedBy, null);
+  assert.equal(workerLane(first).blockedBy, null);
   assert.ok(!execFileSync('git', ['-C', tree, 'ls-files']).toString().includes('agent-room-task'));
   // A brainstorm's label resolves from live memory, never by manufacturing a discussion folder.
   await handleLine('/brainstorm', second); await settle();
@@ -1788,12 +1862,13 @@ test('Stage 2: private owner records survive restart and recovery, invalid recor
   const folders = readdirSync(`${first.cwd}/discussions`);
   queueWork(brain, 'leave edits'); await brain.workQueue;
   assert.equal(JSON.parse(original).label, 'brainstorm');
+  const heldMain = () => workerLane(first, null).blockedBy; // worker/main's lane, the brainstorm's
   resetShop(); await recoverWorkerOwner(first);
-  assert.equal(first.shop.blockedBy.origin, brain);
+  assert.equal(heldMain().origin, brain);
   const id = brain.state.brainstormId;
   brain.state.brainstormId = 'different-brainstorm-after-restart';
   resetShop(); await recoverWorkerOwner(first);
-  assert.equal(first.shop.blockedBy.origin, null);
+  assert.equal(heldMain().origin, null);
   brain.state.brainstormId = id;
   resetShop(); await recoverWorkerOwner(first);
   queueWork(brain, 'recover'); await brain.workQueue;
@@ -1806,15 +1881,15 @@ test('Stage 2: cleaning held edits by hand clears the private record and hold wi
   const { queueWork } = await import('../src/ui.mjs');
   const { writeFileSync, existsSync } = await import('node:fs');
   const { execFileSync } = await import('node:child_process');
-  const { first } = await multiRoom({ worker: (c) => { writeFileSync(`${c.shop.workerDir.path}/wip`, 'unfinished'); return 'stopped'; } });
+  const { first } = await multiRoom({ worker: (c) => { writeFileSync(`${c.workerDir.path}/wip`, 'unfinished'); return 'stopped'; } });
   await handleLine('topic-a', first);
   queueWork(first, 'start'); await first.workQueue;
-  const tree = first.shop.workerDir.path;
+  const tree = first.workerDir.path;
   const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
   const record = `${g('rev-parse', '--absolute-git-dir')}/agent-room-task.json`;
   g('add', 'wip'); g('commit', '-qm', `[${first.discussion.name}] completed by hand`);
-  for (let n = 0; n < 100 && first.shop.blockedBy; n++) await new Promise((r) => setTimeout(r, 50));
-  assert.equal(first.shop.blockedBy, null);
+  for (let n = 0; n < 100 && workerLane(first).blockedBy; n++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(workerLane(first).blockedBy, null);
   assert.equal(existsSync(record), false);
   assert.equal(first.prompts.length, 1);
   assert.equal(first.shop.completed[0].id, g('rev-parse', 'HEAD'));
@@ -1829,13 +1904,13 @@ test('Stage 3: a diverged clean worker is instructed to merge main normally befo
       assert.match(p, new RegExp(`first merge main into worker/${c.discussion.name} with a normal merge`));
       assert.match(p, /If it clashes, do not force it or do the requested task/);
       assert.match(p, new RegExp(`After a successful merge, run the project's tests \\(npm test, if it has them\\) and report their real output, then end your reply with the line "Tested: <full commit ID of worker/${c.discussion.name}> with main <full commit ID of main>: tests passed"`));
-      execFileSync('git', ['-C', c.shop.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', 'main', '-m', `[${c.discussion.name}] catch up with main`]);
+      execFileSync('git', ['-C', c.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', 'main', '-m', `[${c.discussion.name}] catch up with main`]);
     }
     return 'done';
   } });
   await handleLine('topic-a', first);
   queueWork(first, 'prepare'); await first.workQueue;
-  const tree = first.shop.workerDir.path;
+  const tree = first.workerDir.path;
   git('-C', tree, 'commit', '--allow-empty', '-qm', `[${first.discussion.name}] own work`);
   writeFileSync(`${first.cwd}/main-file`, 'new on main'); git('add', 'main-file'); git('commit', '-qm', 'main advances');
   const main = git('rev-parse', 'main');
@@ -1843,16 +1918,16 @@ test('Stage 3: a diverged clean worker is instructed to merge main normally befo
   assert.equal(git('rev-parse', 'main'), main); // app and worker leave the User's branch untouched
   assert.equal(git('-C', tree, 'rev-parse', 'HEAD^2'), main);
   assert.ok(!first.shop.log.some((m) => m.note?.includes('Commits without'))); // imported main history isn't newly authored worker work
-  assert.equal(first.shop.blockedBy, null);
+  assert.equal(workerLane(first).blockedBy, null);
 });
 
-test('Stage 3: a worker merge conflict holds other origins and recovery keeps the original ownership', async () => {
+test('Stage 3: a worker merge conflict holds its own lane, not other discussions\', and recovery keeps the original ownership', async () => {
   const { queueWork } = await import('../src/ui.mjs');
   const { execFileSync } = await import('node:child_process');
   const { writeFileSync, readFileSync, existsSync } = await import('node:fs');
   let record, saved, otherRan = false;
   const { first, contexts, git } = await multiRoom({ worker: (c, p) => {
-    const tree = c.shop.workerDir.path;
+    const tree = c.workerDir.path;
     const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'pipe' }).toString().trim();
     record = `${g('rev-parse', '--absolute-git-dir')}/agent-room-task.json`;
     if (p.endsWith('conflicting task')) {
@@ -1873,28 +1948,27 @@ test('Stage 3: a worker merge conflict holds other origins and recovery keeps th
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
   queueWork(first, 'prepare'); await first.workQueue;
-  const tree = first.shop.workerDir.path;
+  const tree = first.workerDir.path;
   writeFileSync(`${tree}/shared.txt`, 'worker\n'); git('-C', tree, 'add', 'shared.txt'); git('-C', tree, 'commit', '-qm', `[${first.discussion.name}] own change`);
   writeFileSync(`${first.cwd}/shared.txt`, 'main\n'); git('add', 'shared.txt'); git('commit', '-qm', 'main change');
   queueWork(first, 'conflicting task'); await first.workQueue;
-  assert.equal(first.shop.blockedBy.origin, first);
+  assert.equal(workerLane(first).blockedBy.origin, first);
   assert.ok(existsSync(`${git('-C', tree, 'rev-parse', '--absolute-git-dir')}/MERGE_HEAD`));
-  queueWork(second, 'other task');
-  await new Promise((r) => setTimeout(r, 100));
-  assert.equal(otherRan, false);
-  queueWork(first, 'recover conflict'); await first.workQueue; await second.workQueue;
-  assert.equal(otherRan, true); assert.equal(first.shop.blockedBy, null);
+  queueWork(second, 'other task'); await second.workQueue; // another lane goes on
+  assert.equal(otherRan, true); assert.equal(workerLane(first).blockedBy.origin, first);
+  queueWork(first, 'recover conflict'); await first.workQueue;
+  assert.equal(workerLane(first).blockedBy, null);
   assert.equal(existsSync(record), false);
 });
 
-test('Stage 3: clean merge, revert and sequencer states hold dispatch and survive ownership restoration', async () => {
+test('Stage 3: clean merge, revert and sequencer states hold their lane\'s dispatch and survive ownership restoration', async () => {
   const { queueWork, recoverWorkerOwner, worktreeStatus, workerPlace } = await import('../src/ui.mjs');
   const { execFileSync } = await import('node:child_process');
   const { writeFileSync, unlinkSync, mkdirSync, rmdirSync } = await import('node:fs');
   for (const marker of ['MERGE_HEAD', 'REVERT_HEAD', 'sequencer']) {
     let privateDir;
     const { first, contexts, git } = await multiRoom({ worker: (c, p) => {
-      const tree = c.shop.workerDir.path;
+      const tree = c.workerDir.path;
       privateDir = execFileSync('git', ['-C', tree, 'rev-parse', '--absolute-git-dir']).toString().trim();
       if (p.endsWith('leave operation')) {
         if (marker === 'sequencer') mkdirSync(`${privateDir}/${marker}`);
@@ -1908,16 +1982,16 @@ test('Stage 3: clean merge, revert and sequencer states hold dispatch and surviv
     await handleLine('topic-a', first); await handleLine('/new', first);
     const second = contexts()[1]; await handleLine('topic-b', second);
     queueWork(first, 'leave operation'); await first.workQueue;
-    const tree = first.shop.workerDir.path;
+    const tree = first.workerDir.path;
     assert.equal(git('-C', tree, 'status', '--porcelain'), ''); // operation alone must hold
     assert.equal((await worktreeStatus(await workerPlace(first.cwd, first.discussion.name))).treeDirty, true); // its own lane
-    for (const c of contexts()) { clearTimeout(c.shop?.recheck); delete c.shop; }
+    for (const c of contexts()) { for (const l of c.shop?.lanes?.values() ?? []) clearTimeout(l.recheck); delete c.shop; }
     await recoverWorkerOwner(second);
-    assert.equal(second.shop.blockedBy.origin, first);
-    queueWork(second, 'later'); await new Promise((r) => setTimeout(r, 100));
-    assert.equal(second.prompts.length, 0);
-    queueWork(first, 'resolve operation'); await first.workQueue; await second.workQueue;
-    assert.equal(first.shop.blockedBy, null);
+    assert.equal(workerLane(second, first.discussion.name).blockedBy.origin, first); // first's lane, seen from second
+    queueWork(second, 'later'); await second.workQueue; // another lane goes on
+    assert.equal(second.prompts.length, 1);
+    queueWork(first, 'resolve operation'); await first.workQueue;
+    assert.equal(workerLane(first).blockedBy, null);
   }
 });
 
@@ -1927,7 +2001,7 @@ test('Stage 3: rollback includes merged implementation, never restores prior rol
   const { writeFileSync, existsSync, readFileSync } = await import('node:fs');
   let implementation, attempts = 0;
   const { first, contexts, git } = await multiRoom({ worker: (c, p) => {
-    const tree = c.shop.workerDir.path;
+    const tree = c.workerDir.path;
     const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'pipe' }).toString().trim();
     if (p.endsWith('implement')) {
       writeFileSync(`${tree}/feature.txt`, 'feature\n'); g('add', 'feature.txt'); g('commit', '-qm', `[${c.discussion.name}] implement`);
@@ -1970,7 +2044,7 @@ test('Stage 3: rollback includes merged implementation, never restores prior rol
   assert.match(readFileSync(first.logPath, 'utf8'), /Worker rollback report/);
   assert.equal(existsSync(`${first.cwd}/discussions/${name}`), true); // report alone archives nothing
   assert.equal(existsSync(`${first.cwd}/feature.txt`), true); // main untouched
-  assert.equal(existsSync(`${first.shop.workerDir.path}/feature.txt`), false);
+  assert.equal(existsSync(`${first.workerDir.path}/feature.txt`), false);
   await handleLine(`/move ${name} archive`, second);
   assert.match(second.notes.at(-1), /explicit archive confirmation/);
   await handleLine(`/archive-rollback ${name}`, second);
@@ -1980,10 +2054,10 @@ test('Stage 3: rollback includes merged implementation, never restores prior rol
   await handleLine(`/move archive/${name} active`, second);
   await handleLine(`/rollback ${name}`, second); await first.workQueue;
   assert.equal(attempts, 2);
-  assert.equal(existsSync(`${first.shop.workerDir.path}/feature.txt`), false);
+  assert.equal(existsSync(`${first.workerDir.path}/feature.txt`), false);
   assert.equal(first.shop.rollbacks.get(name).status, 'ready');
   // A later change invalidates the reviewed snapshot, even if its worktree is clean.
-  git('-C', first.shop.workerDir.path, 'commit', '--allow-empty', '-qm', '[another-origin] subsequent work');
+  git('-C', first.workerDir.path, 'commit', '--allow-empty', '-qm', '[another-origin] subsequent work');
   await handleLine(`/archive-rollback ${name}`, second);
   assert.match(second.notes.at(-1), /state changed since the rollback report/);
   assert.equal(existsSync(`${first.cwd}/discussions/${name}`), true);
@@ -2024,13 +2098,13 @@ test('Stage 3: Explorer queues rollback separately from two-click archive confir
   assert.equal(current.children[1].disabled, true); // unchanged Archive guard for the one in use
 });
 
-test('failed worktree inspection blocks even the holding origin recovery, preserves ownership and retries', async () => {
+test('failed worktree inspection blocks even the holding origin recovery in its lane, preserves ownership and retries; other lanes go on', async () => {
   const { queueWork } = await import('../src/ui.mjs');
   const { execFileSync } = await import('node:child_process');
   const { readFileSync, writeFileSync, existsSync } = await import('node:fs');
   let recovered = false, otherRan = false;
   const { first, contexts, git } = await multiRoom({ worker: (c, p) => {
-    const tree = c.shop.workerDir.path;
+    const tree = c.workerDir.path;
     if (p.endsWith('leave edits')) writeFileSync(`${tree}/wip`, 'unfinished');
     if (p.endsWith('repair')) {
       recovered = true;
@@ -2042,31 +2116,32 @@ test('failed worktree inspection blocks even the holding origin recovery, preser
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
   queueWork(first, 'leave edits'); await first.workQueue;
-  const shop = first.shop, hold = shop.blockedBy;
-  const privateDir = git('-C', shop.workerDir.path, 'rev-parse', '--absolute-git-dir');
+  const shop = first.shop, lane = workerLane(first), hold = lane.blockedBy;
+  const privateDir = git('-C', first.workerDir.path, 'rev-parse', '--absolute-git-dir');
   const record = `${privateDir}/agent-room-task.json`, index = `${privateDir}/index`;
   const savedRecord = readFileSync(record), savedIndex = readFileSync(index);
   try {
     // A damaged fixture index makes git status throw, without damaging the owner record.
     writeFileSync(index, 'bad');
-    assert.throws(() => execFileSync('git', ['-C', shop.workerDir.path, 'status', '--porcelain'], { stdio: 'pipe' }));
+    assert.throws(() => execFileSync('git', ['-C', first.workerDir.path, 'status', '--porcelain'], { stdio: 'pipe' }));
     queueWork(first, 'repair'); queueWork(second, 'other work');
-    await until(() => shop.inspectionError);
+    await until(() => lane.inspectionError);
+    await second.workQueue; // another lane goes on
     await new Promise((r) => setTimeout(r, 150));
-    assert.equal(recovered, false); assert.equal(otherRan, false);
+    assert.equal(recovered, false); assert.equal(otherRan, true);
     assert.equal(first.prompts.length, 1);
-    assert.deepEqual(shop.tasks.map((t) => t.text), ['repair', 'other work']);
-    assert.equal(shop.blockedBy, hold); // same ownership object, not unknown/reassigned/released
+    assert.deepEqual(lane.tasks.map((t) => t.text), ['repair']);
+    assert.equal(lane.blockedBy, hold); // same ownership object, not unknown/reassigned/released
     assert.deepEqual(readFileSync(record), savedRecord);
     assert.match(first.notes.at(-1), /inspection failed:[\s\S]*index[\s\S]*including recovery/);
     assert.ok(shop.log.some((m) => m.error && /inspection failed:[\s\S]*index/.test(m.note)));
-    assert.ok(shop.recheck); // failure keeps the existing two-second retry alive
+    assert.ok(lane.recheck); // failure keeps the existing two-second retry alive
   } finally { writeFileSync(index, savedIndex); }
   // No new instruction: the re-check alone must resume the held recovery.
-  for (let n = 0; n < 120 && !otherRan; n++) await new Promise((r) => setTimeout(r, 50));
-  assert.equal(recovered, true); assert.equal(otherRan, true);
-  await first.workQueue; await second.workQueue;
-  assert.equal(shop.inspectionError, null); assert.equal(shop.blockedBy, null);
+  for (let n = 0; n < 120 && !recovered; n++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(recovered, true);
+  await first.workQueue;
+  assert.equal(lane.inspectionError, null); assert.equal(lane.blockedBy, null);
   assert.equal(existsSync(record), false);
 });
 
@@ -2136,7 +2211,7 @@ test('a worker task cut off after an edit: Resume reports the uncommitted edits,
   await handleLine('plan it', ctx);
   const name = ctx.discussion.name, file = await checkpointPath(cwd, name);
   let edited = null;
-  ctx.worker.turn = () => { edited = join(ctx.shop.workerDir.path, 'half.txt'); writeFileSync(edited, 'half done'); return new Promise(() => {}); };
+  ctx.worker.turn = () => { edited = join(ctx.workerDir.path, 'half.txt'); writeFileSync(edited, 'half done'); return new Promise(() => {}); };
   queueWork(ctx, 'edit things');
   await eventually(() => edited && existsSync(edited) && !!JSON.parse(readFileSync(file, 'utf8')).work?.running?.before);
 
@@ -2145,7 +2220,7 @@ test('a worker task cut off after an edit: Resume reports the uncommitted edits,
   assert.match(after.screen.worker.find((m) => m.note).note,
     new RegExp(`^✗ Interrupted by Restart, Quit or a crash: \\[${name}\\] "edit things" \\(started \\d\\d:\\d\\d\\) left uncommitted edits in the worktree\\. Ask the worker to finish and commit them, or to abandon them\\.$`));
   await recoverWorkerOwner(after);
-  assert.deepEqual([after.shop.blockedBy?.origin, after.shop.blockedBy?.label, after.shop.blockedBy?.task], [after, name, 'edit things']);
+  assert.deepEqual([workerLane(after).blockedBy?.origin, workerLane(after).blockedBy?.label, workerLane(after).blockedBy?.task], [after, name, 'edit things']);
 });
 
 test('an interrupted round: Resume says the transcript grew after the checkpoint; every restore tells the agents once; an unstarted Claude session gets a new ID', async () => {

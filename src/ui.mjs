@@ -206,15 +206,16 @@ export async function load(ctx, v) {
   // The folder's workshop (see "Several open discussions"): the worker's queue, worktree and tab,
   // shared by every discussion open in this folder, and by reference so it survives reloads.
   const shop = ctx.shop ?? siblings(ctx).find((r) => r !== ctx && r.shop)?.shop ?? null;
-  // Its worktree (see refreshWorker), shared by reference so it survives reloads and settings copies.
-  const workerDir = ctx.workerDir = shop?.workerDir ?? ctx.workerDir ?? { path: null };
+  // The worktree its worker's task runs in (see refreshWorker): its own, as tasks of different
+  // discussions run at the same time; by reference, so it survives reloads and settings copies.
+  const workerDir = ctx.workerDir ??= { path: null };
   const worker = createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions, shell: true,
     timeoutMs: WORKER_TIMEOUT_MS, runner, session: ctx.sessions.get(`worker:${wName}`) });
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
   // ctx so they survive a reload.
-  const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: shop?.log ?? [], working: shop?.running ? shop.running.origin.worker.name : null };
+  const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: shop?.log ?? [], working: shop && runningTasks(shop).some((t) => t.origin === ctx) ? wName : null };
   return { room: createRoom(agents, ctx.state), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
-    shop: shop ?? newShop(workerDir, screen.worker),
+    shop: shop ?? newShop(screen.worker),
     suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }) };
 }
 
@@ -344,11 +345,11 @@ async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) 
       } catch (err) { return note(ctx, `✗ Can't check unmerged commits: ${err.message}`, true), null; }
     }
   }
-  if (shop.workingIn === from) return note(ctx, `✗ A worker task is still writing to ${d.name}; try again when it finishes.`, true), null;
+  if (shop.writing?.has(from)) return note(ctx, `✗ A worker task is still writing to ${d.name}; try again when it finishes.`, true), null;
   // Open in another context of this folder: it can move between its rounds, unless it holds worker edits.
   const open = siblings(ctx).find((c) => c !== ctx && c.discussion?.dir === from);
   if (open && workerHold(open)) return note(ctx, `✗ ${d.name} can't move: ${workerHold(open)}.`, true), null;
-  if (!open && shop.blockedBy?.label === d.name) return note(ctx, `✗ ${d.name} can't move: its worker edits are unresolved.`, true), null;
+  if (!open && lanesOf(shop).some((l) => l.blockedBy?.label === d.name)) return note(ctx, `✗ ${d.name} can't move: its worker edits are unresolved.`, true), null;
   if (open?.busy) return note(ctx, `✗ ${d.name} is in the middle of a round; try again when it ends.`, true), null;
   const dest = join(parent, target ?? '', d.name);
   if (existsSync(dest)) return note(ctx, `✗ There is already a discussion ${d.name} in ${target ?? 'discussions'}/.`, true), null;
@@ -414,8 +415,9 @@ async function confirmRollbackArchive(ctx, ref) {
   const d = discussionRef(join(ctx.cwd, 'discussions'), ref);
   const rollback = d && shop.rollbacks?.get(d.name);
   if (!rollback || rollback.status !== 'ready') return note(ctx, '✗ No successful rollback report awaiting archive confirmation.', true);
-  if (shop.running || shop.tasks.length || shop.pumping || shop.confirming)
-    return note(ctx, '✗ Wait for the worker queue to be idle before confirming archive.', true);
+  const lane = laneState(shop, d.name); // its own lane, where its rollback ran
+  if (lane.running || lane.tasks.length || lane.pumping || shop.confirming)
+    return note(ctx, '✗ Wait for this discussion\'s worker queue to be idle before confirming archive.', true);
   shop.confirming = true;
   try {
     const place = await lanePlace(ctx, d.name); // the discussion's own lane, where its rollback ran
@@ -661,8 +663,8 @@ function restoreWork(ctx, name, saved) {
   shop.work ??= new Map();
   if (!shop.work.has(name)) shop.work.set(name, cleanWork(saved));
   const w = shop.work.get(name);
-  if (w.running && shop.running?.record?.id !== w.running.id) { w.interrupted.push(w.running); w.running = null; }
-  const live = (r) => shop.tasks.some((t) => t.record?.id === r.id);
+  if (w.running && !runningTasks(shop).some((t) => t.record?.id === w.running.id)) { w.interrupted.push(w.running); w.running = null; }
+  const live = (r) => queuedTasks(shop).some((t) => t.record?.id === r.id);
   w.notStarted.push(...w.queued.filter((r) => !live(r)));
   w.queued = w.queued.filter(live);
   return w;
@@ -949,21 +951,35 @@ function openList(ctx) {
     title: c.discussion?.title ?? (c.state.brainstorm ? 'Brainstorm' : 'New discussion (not started)'),
     active: c.discussion ? `discussions/${c.discussion.name}` : null, brainstorm: !!c.state.brainstorm, started: !!c.logPath }));
 }
-function newShop(workerDir, log) {
-  return { tasks: [], running: null, blockedBy: null, workingIn: null, contexts: 0, workerDir, log };
+// The folder's workshop: its lanes (each with its own queue and hold), the discussions' directories
+// a running task writes to, and the Worker tab's log.
+function newShop(log) {
+  return { lanes: new Map(), writing: new Set(), contexts: 0, log };
 }
 function shopOf(ctx) {
   if (ctx.shop) return ctx.shop;
   const other = siblings(ctx).find((c) => c !== ctx && c.shop);
-  ctx.shop = other?.shop ?? newShop(ctx.workerDir ??= { path: null }, ctx.screen.worker);
-  ctx.workerDir = ctx.shop.workerDir;
+  ctx.shop = other?.shop ?? newShop(ctx.screen.worker);
   ctx.screen.worker = ctx.shop.log;
   return ctx.shop;
 }
+// A lane's queue and hold (see "The worker queues"), by its discussion's name (null: worker/main's).
+function laneState(shop, name) {
+  const key = name ?? '';
+  shop.lanes ??= new Map(); // a workshop made before lanes (kept across a Reload) gets them here
+  shop.writing ??= new Set();
+  if (!shop.lanes.has(key)) shop.lanes.set(key, { name: name ?? null, tasks: [], running: null, blockedBy: null, holdContext: null, inspectionError: null, pumping: false, recheck: null });
+  return shop.lanes.get(key);
+}
+// Exported for the tests: the lane of `ctx`'s discussion (or of `name`).
+export const workerLane = (ctx, name = laneOf(ctx)) => laneState(shopOf(ctx), name);
+const lanesOf = (shop) => [...(shop.lanes?.values() ?? [])];
+const runningTasks = (shop) => lanesOf(shop).map((l) => l.running).filter(Boolean);
+const queuedTasks = (shop) => lanesOf(shop).flatMap((l) => l.tasks);
 // Worker events go to every open discussion's pages.
 const toShop = (ctx, event) => { for (const c of siblings(ctx)) if (c.screen) toScreen(c, event); };
-function workNote(ctx, text, error = false) {
-  const view = { note: text, error };
+function workNote(ctx, text, error = false, origin = null) {
+  const view = { note: text, error, ...(origin && { origin }) };
   shopOf(ctx).log.push(view);
   toShop(ctx, { type: 'work', message: view });
   out(ctx, error ? red(text) : text);
@@ -981,8 +997,9 @@ async function openBeside(ctx) {
 // Why `c` can't be closed (or its folder moved): it holds unresolved worker edits, or its task runs.
 function workerHold(c) {
   const shop = shopOf(c);
-  if (shop.blockedBy && (shop.blockedBy.origin === c || shop.blockedBy.label === originLabel(c))) return `its worker edits from "${shop.blockedBy.task}" are unresolved: ask the worker to finish and commit them, or to abandon them`;
-  if (shop.running?.origin === c) return 'a worker task from it is running';
+  const held = lanesOf(shop).map((l) => l.blockedBy).find((b) => b && (b.origin === c || b.label === originLabel(c)));
+  if (held) return `its worker edits from "${held.task}" are unresolved: ask the worker to finish and commit them, or to abandon them`;
+  if (runningTasks(shop).some((t) => t.origin === c)) return 'a worker task from it is running';
   return null;
 }
 // Ends context `c` (its agents stop; its queued worker tasks are dropped and reported by stopRoom).
@@ -1036,13 +1053,15 @@ function closeDiscussion(ctx) {
   closeContext(ctx, others[0]);
 }
 
-// ── The shared worker queue ───────────────────────────────────────────
-// Tasks run one at a time in the order sent, from any open discussion, each in its own lane (see
-// "The worker's worktrees"). agent-room checks the lanes after each task and again before the next:
-// uncommitted edits in any lane hold the queue (shop.blockedBy, with that lane's place) until their
-// origin resolves them; that origin's own tasks still go through, in that lane (to finish or abandon
-// them), and keep the original task's details. Edits whose origin is unknown (without a valid saved
-// owner) hold every task until that lane is clean.
+// ── The worker queues ─────────────────────────────────────────────────
+// Each lane (see "The worker's worktrees") has its own queue: its tasks run one at a time, in the
+// order sent. Different lanes run at the same time, at most PARALLEL_WORKERS tasks in the folder,
+// and never two of one worker session (one discussion's context) at once. agent-room checks a lane's
+// worktree after each of its tasks and again before the next: uncommitted edits hold that lane
+// (lane.blockedBy) until their origin resolves them; that origin's own tasks still go through (to
+// finish or abandon them), and keep the original task's details. Edits whose origin is unknown
+// (without a valid saved owner) hold that lane until it is clean. Other lanes go on.
+export const PARALLEL_WORKERS = 2; // decided by the User, 2026-11-12
 // The private, per-worktree Git directory is outside both working copies and their indexes.
 async function ownerFile(place) {
   return join(await git(place.path, 'rev-parse', '--absolute-git-dir'), 'agent-room-task.json');
@@ -1050,21 +1069,21 @@ async function ownerFile(place) {
 async function leftovers(ctx, place) {
   if (place.disabled) return false;
   let s;
-  const shop = shopOf(ctx);
+  const shop = shopOf(ctx), lane = laneState(shop, place.lane);
   try { s = await worktreeStatus(place); }
   catch (err) {
     // Unknown is neither clean nor dirty: even the holding origin's recovery must wait.
-    const origin = shop.blockedBy?.origin ?? shop.running?.origin ?? ctx;
-    if (shop.inspectionError?.message !== err.message || shop.inspectionError?.origin !== origin) {
-      const text = `✗ Worker worktree inspection failed: ${err.message}. All worker dispatch, including recovery, waits until inspection succeeds.`;
+    const origin = lane.blockedBy?.origin ?? lane.running?.origin ?? ctx;
+    if (lane.inspectionError?.message !== err.message || lane.inspectionError?.origin !== origin) {
+      const text = `✗ Worker worktree inspection failed: ${err.message} (${place.branch}). This lane's dispatch, including recovery, waits until inspection succeeds; other lanes go on.`;
       workNote(ctx, text, true);
       note(origin, text, true);
     }
-    shop.inspectionError = { message: err.message, origin };
-    if (!shop.pumping) watchShop(shop);
+    lane.inspectionError = { message: err.message, origin, place };
+    if (!lane.pumping) watchLane(shop, lane);
     return null;
   }
-  shop.inspectionError = null;
+  lane.inspectionError = null;
   if (!s.exists) return false;
   if (!s.treeDirty) {
     const file = await ownerFile(place);
@@ -1091,28 +1110,31 @@ async function recordedOwner(ctx, place) {
   } catch { return { origin: null }; }
 }
 // Restart creates each context before reopening its discussion; try again after that restoration.
-// The held lane first; then every lane, the first with leftovers holds. False: a lane couldn't be read.
-export async function recoverWorkerOwner(ctx) {
-  const shop = shopOf(ctx);
-  if (shop.running) return true;
-  if (shop.blockedBy) {
-    const place = shop.blockedBy.place;
-    const dirty = await leftovers(ctx, place);
-    if (dirty === null) return false;
-    if (dirty) {
-      if (shop.blockedBy.origin) return true;
-      const owner = await recordedOwner(ctx, place);
-      if (owner.origin) hold(ctx, { ...owner, place });
-      return true;
-    }
-    release(ctx);
-  }
-  for (const place of await existingLanes(ctx)) {
-    const dirty = await leftovers(ctx, place);
-    if (dirty === null) return false;
-    if (dirty) { hold(ctx, { ...await recordedOwner(ctx, place), place }); return true; }
-  }
+// One lane's worktree (`place`): its hold is set, kept or released. False: it couldn't be read.
+async function recoverLane(ctx, lane, place) {
+  if (lane.running) return true;
+  const dirty = await leftovers(ctx, place);
+  if (dirty === null) return false;
+  if (dirty) {
+    if (lane.blockedBy?.origin) return true;
+    const owner = await recordedOwner(ctx, place);
+    if (!lane.blockedBy || owner.origin) hold(ctx, { ...owner, place });
+  } else if (lane.blockedBy) release(ctx, lane);
   return true;
+}
+// Every lane (at start, before a move), or only lane `name`. False: a worktree couldn't be read.
+export async function recoverWorkerOwner(ctx, name) {
+  const shop = shopOf(ctx);
+  const places = name !== undefined ? [await lanePlace(ctx, name)]
+    : [...await existingLanes(ctx), ...lanesOf(shop).filter((l) => l.blockedBy).map((l) => l.blockedBy.place)];
+  let ok = true;
+  const done = new Set();
+  for (const place of places) {
+    if (place.disabled || done.has(place.path)) continue;
+    done.add(place.path);
+    if (!await recoverLane(ctx, laneState(shop, place.lane), place)) ok = false;
+  }
+  return ok;
 }
 async function labelledCommits(dir, range) {
   const lines = (await git(dir, 'log', '--reverse', '--format=%H %s', range)).split('\n');
@@ -1146,65 +1168,90 @@ function workNotice(ctx) {
 }
 
 function hold(ctx, blockedBy) {
-  const shop = shopOf(ctx);
-  shop.blockedBy = blockedBy;
-  shop.holdContext = ctx;
+  const shop = shopOf(ctx), lane = laneState(shop, blockedBy.place.lane);
+  lane.blockedBy = blockedBy;
+  lane.holdContext = ctx;
   const where = blockedBy.label ? `[${blockedBy.label}]` : 'an unknown origin';
-  workNote(ctx, `✗ The worker's folder ${blockedBy.place.path} (${blockedBy.place.branch}) has uncommitted edits from ${where}${blockedBy.task ? ` ("${blockedBy.task}")` : ''}: the queue holds${blockedBy.label ? ` until [${blockedBy.label}] resolves them (its own instructions still go through)` : ' until the folder is clean (commit or remove those edits yourself)'}.`, true);
-  if (blockedBy.origin) note(blockedBy.origin, `✗ The worker left uncommitted edits from "${blockedBy.task}": other discussions' worker tasks wait. Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).`, true);
+  workNote(ctx, `✗ The worker's folder ${blockedBy.place.path} (${blockedBy.place.branch}) has uncommitted edits from ${where}${blockedBy.task ? ` ("${blockedBy.task}")` : ''}: its queue holds${blockedBy.label ? ` until [${blockedBy.label}] resolves them (its own instructions still go through)` : ' until the folder is clean (commit or remove those edits yourself)'}; other lanes go on.`, true);
+  if (blockedBy.origin) note(blockedBy.origin, `✗ The worker left uncommitted edits from "${blockedBy.task}": this discussion's worker lane holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).`, true);
   showHeader(ctx);
-  if (!shop.pumping) watchShop(shop);
+  if (!lane.pumping) watchLane(shop, lane);
 }
-function release(ctx) {
-  const shop = shopOf(ctx), was = shop.blockedBy;
-  shop.blockedBy = null;
-  workNote(ctx, 'The worker\'s folder is clean again: the queue resumes.');
-  if (was?.origin) note(was.origin, 'The worker\'s folder is clean again: other worker tasks resume.');
+function release(ctx, lane) {
+  const was = lane.blockedBy;
+  lane.blockedBy = null;
+  workNote(ctx, `The worker's folder ${was.place.path} is clean again: its queue resumes.`);
+  if (was?.origin) note(was.origin, 'The worker\'s folder is clean again: this discussion\'s worker tasks resume.');
   showHeader(ctx);
 }
+// Starts every lane that has work and may run. A lane that can't start for lack of a free place
+// says so once per task, in the Worker tab; it starts as soon as another task ends.
 async function pump(shop) {
-  if (shop.pumping || shop.confirming) return;
-  shop.pumping = true;
+  if (shop.confirming) return;
+  await Promise.all(lanesOf(shop).map((lane) => pumpLane(shop, lane).catch((err) => {
+    const c = lane.tasks[0]?.origin ?? lane.holdContext;
+    if (c) note(c, `✗ ${err.stack}\n`, true);
+  })));
+}
+async function pumpLane(shop, lane) {
+  if (lane.pumping || shop.confirming) return;
+  lane.pumping = true;
   try {
-    if ((shop.blockedBy || shop.inspectionError) && !shop.running &&
-        !await recoverWorkerOwner(shop.holdContext ?? shop.inspectionError.origin)) return;
-    while (!shop.running && shop.tasks.length) {
-      for (const t of shop.tasks.filter((x) => x.origin.stopped)) dropTask(shop, t);
-      const any = shop.tasks[0]?.origin;
+    // A hold (or an unreadable worktree) is rechecked even without queued tasks.
+    const holder = lane.holdContext ?? lane.inspectionError?.origin;
+    if ((lane.blockedBy || lane.inspectionError) && !lane.running && holder &&
+        !await recoverLane(holder, lane, lane.blockedBy?.place ?? lane.inspectionError.place)) return;
+    while (!lane.running && lane.tasks.length) {
+      for (const t of lane.tasks.filter((x) => x.origin.stopped)) dropTask(shop, t);
+      const any = lane.tasks[0]?.origin;
       if (!any) break;
-      // Before the next task: are the lanes clean (the held one first)?
-      if (!await recoverWorkerOwner(any)) break;
-      const t = !shop.blockedBy ? shop.tasks[0] : shop.blockedBy.origin && shop.tasks.find((x) => x.origin === shop.blockedBy.origin);
+      // Before the next task: is the lane's worktree clean?
+      const place = await lanePlace(any, lane.name);
+      if (!place.disabled && !await recoverLane(any, lane, place)) break;
+      const t = !lane.blockedBy ? lane.tasks[0] : lane.blockedBy.origin && lane.tasks.find((x) => x.origin === lane.blockedBy.origin);
       if (!t) break; // held
-      shop.tasks.splice(shop.tasks.indexOf(t), 1);
+      // A free place in the folder, and its worker session neither busy in another lane nor owing an
+      // earlier task there (no await between this check and taking the place, so two lanes can't
+      // both take the last one).
+      const running = runningTasks(shop);
+      const earlier = queuedTasks(shop).some((x) => x.origin === t.origin && x.sent < t.sent);
+      if (running.length >= PARALLEL_WORKERS || running.some((r) => r.origin === t.origin) || earlier) {
+        if (!t.waitNoted && running.length >= PARALLEL_WORKERS) {
+          t.waitNoted = true;
+          workNote(t.origin, `[${originLabel(t.origin)}] "${firstLine(t.text)}" waits for a free place: ${plural(running.length, 'worker task')} running, at most ${PARALLEL_WORKERS} at once.`, false, originLabel(t.origin));
+        }
+        break;
+      }
+      lane.tasks.splice(lane.tasks.indexOf(t), 1);
       t.origin.workPending--;
-      shop.running = t;
-      const recovery = shop.blockedBy?.origin === t.origin ? shop.blockedBy : null;
-      // A recovery works where the edits are; any other task in the lane it was queued for.
-      let place = null;
-      try { place = recovery ? recovery.place : await lanePlace(t.origin, t.lane); t.before = await runWork(t.origin, t.text, t.run, t.cycle, recovery, t.rollback, t, place); }
+      lane.running = t;
+      const recovery = lane.blockedBy?.origin === t.origin ? lane.blockedBy : null;
+      try { t.before = await runWork(t.origin, t.text, t.run, t.cycle, recovery, t.rollback, t, recovery ? recovery.place : place); }
       catch (err) { note(t.origin, `✗ ${err.stack}\n`, true); }
-      finally { shop.running = null; }
-      // After it: edits left uncommitted hold the queue; a recovery keeps the first task's details.
+      finally { lane.running = null; }
+      // After it: edits left uncommitted hold the lane; a recovery keeps the first task's details.
       try {
-        const dirty = place ? await leftovers(t.origin, place) : false;
-        if (dirty === true) { if (!shop.blockedBy) hold(t.origin, { origin: t.origin, label: originLabel(t.origin), task: t.text, before: t.before, place }); }
-        else if (dirty === false && shop.blockedBy?.place.path === place?.path) release(t.origin);
+        const dirty = place.disabled ? false : await leftovers(t.origin, place);
+        if (dirty === true) { if (!lane.blockedBy) hold(t.origin, { origin: t.origin, label: originLabel(t.origin), task: t.text, before: t.before, place }); }
+        else if (dirty === false && lane.blockedBy) release(t.origin, lane);
       } catch (err) { note(t.origin, `✗ ${err.message}`, true); }
       t.done();
+      // A place is free: the lanes waiting for one can start.
+      for (const other of lanesOf(shop)) if (other !== lane && other.tasks.length && !other.running) pumpLane(shop, other).catch(() => {});
     }
-  } finally { shop.pumping = false; watchShop(shop); }
+  } finally { lane.pumping = false; watchLane(shop, lane); }
 }
 // Recheck holds even without queued tasks, so cleaning up by hand removes the record and hold.
-function watchShop(shop) {
-  if ((shop.tasks.length || shop.blockedBy || shop.inspectionError) && !shop.running && !shop.recheck) {
-    shop.recheck = setTimeout(() => { shop.recheck = null; pump(shop).catch(() => {}); }, 2000);
-    shop.recheck.unref?.();
+function watchLane(shop, lane) {
+  if ((lane.tasks.length || lane.blockedBy || lane.inspectionError) && !lane.running && !lane.recheck) {
+    lane.recheck = setTimeout(() => { lane.recheck = null; pumpLane(shop, lane).catch(() => {}); }, 2000);
+    lane.recheck.unref?.();
   }
 }
 
 function dropTask(shop, t) {
-  shop.tasks.splice(shop.tasks.indexOf(t), 1);
+  const lane = laneState(shop, t.lane);
+  lane.tasks.splice(lane.tasks.indexOf(t), 1);
   if (t.rollback) { t.rollback.status = 'needs review'; t.rollback.report = 'The rollback task was not started.'; showHeader(t.origin); }
   if (t.record) { // reported as not started when the discussion is resumed
     const w = workOf(shop, t.workName);
@@ -1605,7 +1652,7 @@ export async function reloaded(ctx) {
   log(ctx, '_(code reloaded)_\n\n');
   // A relay whose worker result can't come back any more: pause visibly rather than send again.
   const run = ctx.autoDev;
-  if (run?.status === 'running' && run.waiting && shopOf(ctx).running?.origin !== ctx && !ctx.workPending) pauseAutoDev(ctx, 'the worker\'s result was lost in the Reload');
+  if (run?.status === 'running' && run.waiting && !runningTasks(shopOf(ctx)).some((t) => t.origin === ctx) && !ctx.workPending) pauseAutoDev(ctx, 'the worker\'s result was lost in the Reload');
   note(ctx, 'Reloaded the code and the agents\' rulebook; the conversation continues.\n');
   toScreen(ctx, { type: 'reloaded', page: ctx.docs.PAGE }); // pages refresh if their code changed
   // The header's version: the checkout as it is at this Reload (the start's snapshot is kept).
@@ -1678,7 +1725,7 @@ export async function stopRoom(ctx) {
   await ctx.quitStop;
   const report = await stopPrograms(ctx);
   const shop = ctx.shop;
-  if (shop) for (const t of shop.tasks.filter((x) => x.origin === ctx)) dropTask(shop, t); // its own, in the shared queue
+  if (shop) for (const t of queuedTasks(shop).filter((x) => x.origin === ctx)) dropTask(shop, t); // its own, in each lane's queue
   const queued = (ctx.workPending ?? 0) + (ctx.workSkipped ?? 0);
   if (queued) report.push(`${plural(queued, 'queued worker instruction')} ${queued === 1 ? 'was' : 'were'} not started.`);
   ctx.workSkipped = 0;
@@ -2110,7 +2157,7 @@ export async function refreshWorker(ctx, { prepare = false, fastForward = true, 
   const seen = new Map(); // each lane's lines, computed once for all the open discussions
   for (const c of siblings(ctx)) {
     if (!c.screen) continue;
-    const info = await workerInfo(c, seen);
+    const info = await workerInfo(c, seen, c === ctx && !prepare ? place : null);
     c.screen.workerInfo = info;
     toScreen(c, { type: 'workerinfo', info });
   }
@@ -2118,8 +2165,8 @@ export async function refreshWorker(ctx, { prepare = false, fastForward = true, 
 }
 // A context's lane: its discussion's, or worker/main's for a brainstorm or before the first message.
 const laneOf = (ctx) => (ctx.discussion && !ctx.state?.brainstorm ? ctx.discussion.name : null);
-async function workerInfo(ctx, seen = new Map()) {
-  const own = await lanePlace(ctx, laneOf(ctx));
+async function workerInfo(ctx, seen = new Map(), own = null) {
+  own ??= await lanePlace(ctx, laneOf(ctx));
   if (own.disabled) return { lines: [own.disabled], disabled: true };
   // A lane's lines, and whether it has something to review: { lines, review }.
   const of = (place) => {
@@ -2225,7 +2272,8 @@ export function queueWork(ctx, text, run = null, rollback = null) {
   // Recorded in its discussion's checkpoint (see "Work in flight"); a brainstorm keeps no record.
   const workName = ctx.discussion && !ctx.state.brainstorm ? ctx.discussion.name : null;
   const record = workName ? { id: randomBytes(6).toString('hex'), task: text, at: new Date().toISOString() } : null;
-  shop.tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done, rollback, record, workName, lane: workName });
+  shop.sent = (shop.sent ?? 0) + 1; // the order sent, across lanes: one worker session's tasks keep it
+  laneState(shop, workName).tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done, rollback, record, workName, lane: workName, sent: shop.sent });
   if (record) { workOf(shop, workName).queued.push(record); persistWork(ctx, workName); }
   ctx.workPending = (ctx.workPending ?? 0) + 1;
   ctx.workQueue = Promise.all([ctx.workQueue, finished]).then(() => {});
@@ -2268,10 +2316,12 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     shop.log.push(view);
     toShop(ctx, { type: 'work', message: view });
   };
-  const working = (name) => { for (const c of siblings(ctx)) if (c.screen) c.screen.working = name; toShop(ctx, { type: 'working', name }); };
+  // Its own discussion's window shows its worker working: other discussions' tasks run alongside.
+  const working = (name) => { ctx.screen.working = name; toScreen(ctx, { type: 'working', name }); };
   // The discussion this task writes to (transcript, notes): /move refuses it until the task ends.
-  shop.workingIn = ctx.workingIn = task.discussion?.dir ?? null;
-  for (const c of siblings(ctx)) if (c.screen) c.screen.working = worker.name;
+  ctx.workingIn = task.discussion?.dir ?? null;
+  if (ctx.workingIn) shop.writing.add(ctx.workingIn);
+  ctx.screen.working = worker.name;
   try {
     const from = run ? 'Relayed from discussion' : 'User';
     workLog(`**${from} → ${worker.name}** (worker${run ? `, auto dev cycle ${cycle} of ${AUTO_DEV_CYCLES}` : ''})\n\n${text}\n\n`);
@@ -2320,7 +2370,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       // task also gets the first task's details.
       const commit = ctx.workerLabel === label ? '' : `These instructions come from [${label}]. When a task is complete, commit it on ${place.branch} with a message starting "[${label}]" and give the commit ID in your reply.\n\n`;
       const leftover = recovery
-        ? `Uncommitted edits are left in your worktree from the earlier task from [${label}] "${recovery.task}"${recovery.before ? ` (${place.branch} was at ${recovery.before.slice(0, 7)} when it started)` : ''}: other discussions' tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those. Inspect and resolve any merge or revert already in progress before further work; never force it or start a fresh operation over it.\n\n`
+        ? `Uncommitted edits are left in your worktree from the earlier task from [${label}] "${recovery.task}"${recovery.before ? ` (${place.branch} was at ${recovery.before.slice(0, 7)} when it started)` : ''}: this discussion's next worker tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those. Inspect and resolve any merge or revert already in progress before further work; never force it or start a fresh operation over it.\n\n`
         : '';
       const mainBehind = owedMain || !recovery && await gitOk(place.path, 'rev-parse', '--verify', 'main^{commit}') &&
         Number(await git(place.path, 'rev-list', '--count', 'HEAD..main')) > 0;
@@ -2363,7 +2413,8 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     if (rollback) await rollbackReport(ctx, rollback, entry);
     if (run) reportBack(ctx, run, entry);
   } finally {
-    shop.workingIn = ctx.workingIn = null;
+    if (ctx.workingIn) shop.writing.delete(ctx.workingIn);
+    ctx.workingIn = null;
     working(null);
   }
   saveCheckpoint(ctx); // its worker session and briefing, with the discussion's latest round

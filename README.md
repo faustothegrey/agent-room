@@ -100,8 +100,9 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   Discussion chat. Supply the relevant file paths and decisions yourself. Once a discussion is
   active, its first instruction there also tells it the discussion's folder, where it writes its
   implementation notes and plans; the work itself goes in its own worktree (see
-  [The worker's worktree](#the-workers-worktree)). Instructions run
-  one at a time alongside the discussion, with a 30-minute timeout per instruction.
+  [The worker's worktrees](#the-workers-worktrees)). A discussion's instructions run one at a time,
+  in the order sent, alongside the discussion and alongside other discussions' (at most two
+  worker tasks at once in a folder), with a 30-minute timeout per instruction.
 - **Explorer** and **Document** (right pane, two tabs): in **Explorer**, browse discussions (the one
   in use first), then choose a Markdown document, SVG drawing, transcript or other supported file:
   it opens in **Document**, which shows its path and the file. Each tab keeps its place when you
@@ -210,8 +211,10 @@ and uncommitted work apart, not files: every agent and worker can still read the
 message, Start fresh, or Resume without a checkpoint) begins a new one.
 
 **Several open discussions** (on the screen). A folder can have
-several discussions open at once, each with its own agents' sessions, chat and auto dev, sharing
-one worker queue (each has its own worker session and worktree, below). One window shows one of them; Explorer marks the others "open". **Resume** shows an open one as
+several discussions open at once, each with its own agents' sessions, chat and auto dev, and its
+own worker session, worktree and queue (below): their worker tasks run at the same time, at most
+two at once. You can switch discussion while one waits for its worker task: the window shows one
+discussion, the one what you type goes to, and the task's report still goes back to its own. One window shows one of them; Explorer marks the others "open". **Resume** shows an open one as
 it is: its agents carry on, nothing is restarted. An open brainstorm, or an open discussion that
 hasn't started (no message yet), has **Go to** instead, which only shows it. **New discussion** opens
 the new one beside the discussion in use, which stays open, and ends an open brainstorm. Resume
@@ -260,8 +263,9 @@ any discussion not on screen, works between rounds:
   discussions.
 
 The button's tooltip says which case applies. On the screen it opens beside the open discussions;
-in the terminal the session in use ends first (its checkpoint is saved; the chat clears, and the
-discussion agents and the worker get fresh CLI sessions). A checkpoint that can't be used (invalid,
+in the terminal the session in use ends first, after its worker tasks still running or queued have
+finished (its checkpoint is saved; the chat clears, and the discussion agents and the worker get
+fresh CLI sessions). A checkpoint that can't be used (invalid,
 or a provider session missing) is kept, the room stays as it was, and the error suggests Start
 fresh: Resume never starts fresh by itself. Continuing needs the providers' original local session
 storage; if a provider cannot resume its session, its turn fails without a silent fresh start.
@@ -539,8 +543,11 @@ one per discussion: `<repo>.workers/<folder-name>/` on the branch `worker/<folde
 agent-room: `/Users/fausto/Software/agent-room.workers/<folder-name>/`). A brainstorm, and a task
 sent before a discussion's first message (when it has no name yet), use `<repo>.worker/` on
 `worker/main`, the one worktree every discussion shared before. Its notes still go in the room's
-discussion folder. The folder's discussions still share one queue: one task runs at a time, in the
-order sent. You review and merge each discussion's branch yourself (`git merge
+discussion folder. Each worktree has its own queue: a discussion's tasks run one at a time, in the
+order sent, while other discussions' tasks run in theirs. At most `PARALLEL_WORKERS` = 2 tasks run
+at once in a folder (each costs a provider session's tokens, and its tests load the machine); a task
+that has to wait for a free place says so in the Worker tab, and starts as soon as one ends. Each
+discussion's window shows its own worker working, not the others'. You review and merge each discussion's branch yourself (`git merge
 worker/<folder-name>` in the room); nothing is merged automatically.
 
 - A worktree is created at its first instruction, from the room's `HEAD`, and reused after Reload
@@ -580,8 +587,8 @@ worker/<folder-name>` in the room); nothing is merged automatically.
 - When a clean branch still lacks commits from `main` (including diverged history), the task tells
   the worker to merge main normally before doing its work, then to run the project's tests (`npm
   test`, if it has them), report their real output and end with its `Tested:` line. A clash is
-  not forced: the worker reports it and the queue holds for that origin's recovery. An unfinished
-  merge or revert holds dispatch even if `git status` otherwise shows no edits. The existing
+  not forced: the worker reports it and that discussion's queue holds for its recovery. An
+  unfinished merge or revert holds that queue even if `git status` otherwise shows no edits. The existing
   strictly-behind fast-forward remains; agent-room does not perform a normal merge or revert itself.
 - **Merging a branch into main** (you do it, in the room):
   - First check that the discussion has no worker task running or queued, that the room's `git
@@ -626,12 +633,12 @@ worker/<folder-name>` in the room); nothing is merged automatically.
 - Defer refuses a discussion whose branch `worker/<name>` has commits absent from `main`'s
   history, or with `[origin]` commits on `worker/main` absent from it; a normal merge into main
   clears that guard (squash merges are outside this feature).
-- **Leftover edits:** agent-room checks the worktrees after each task and again before the next. If
-  a task leaves uncommitted edits in any of them, the folder's one queue holds and its origin is
-  told; only that origin's own
+- **Leftover edits:** agent-room checks a worktree after each of its tasks and again before the
+  next. If a task leaves uncommitted edits, that worktree's queue holds (other discussions' go on)
+  and its origin is told; only that origin's own
   instructions go through (to finish and commit them, or to abandon them), with the first task's
   details. That discussion can't be closed, archived or deferred meanwhile. Uncommitted edits of
-  unknown origin hold every task until that worktree is clean (commit or remove them yourself); they
+  unknown origin hold that worktree's queue until it is clean (commit or remove them yourself); they
   are never given to a new task. Before starting work, agent-room saves the origin, full task text
   and starting commit in the worktree's private Git directory (never committed). Recovery keeps
   that original record until the folder is clean. After Restart it holds for that origin if it
