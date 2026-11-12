@@ -1545,7 +1545,7 @@ test('leftover edits hold the shared queue for their origin, which can recover t
   let ran = false;
   queueWork(first, 'next');
   first.workQueue.then(() => { ran = true; });
-  await new Promise((r) => setTimeout(r, 300));
+  await until(() => first.shop.blockedBy);
   assert.deepEqual([ran, first.shop.blockedBy?.origin], [false, null]);
   assert.match(first.shop.log.filter((m) => m.note).at(-1).note, /uncommitted edits from an unknown origin: the queue holds until the folder is clean/);
   inTree(first, 'add', 'stray.txt'); inTree(first, 'commit', '-q', '-m', 'by hand');

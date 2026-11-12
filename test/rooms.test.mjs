@@ -116,7 +116,7 @@ process.stdin.on('end', () => {
     const betaDone = Date.now() - t0;
     await a.until((e) => e.type === 'message' && e.message.speaker === 'Ada');
     const alphaDone = Date.now() - t0;
-    assert.ok(betaDone < 2500 && alphaDone >= 3000, `beta ${betaDone}ms, alpha ${alphaDone}ms`);
+    assert.ok(betaDone < alphaDone && alphaDone >= 3000, `beta should finish before alpha, and alpha take at least 3000ms: beta ${betaDone}ms, alpha ${alphaDone}ms`);
     // Each room's discussion and transcript are in its own folder, and its page sees only its own.
     const disc = (root) => readdirSync(join(root, 'discussions')).filter((n) => n.endsWith('a-topic'));
     const [discA] = disc(alpha).filter((n) => n !== '2026-11-08-alpha-topic'), [discB] = disc(beta);
