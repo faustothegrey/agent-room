@@ -180,9 +180,12 @@ test('/resume, after the session started, of a discussion without a checkpoint: 
   const [name] = readdirSync(`${ctx.cwd}/discussions`);
   mkdirSync(`${ctx.cwd}/discussions/2026-11-01-old`);
 
+  const worker = ctx.worker;
   await handleLine('/resume 2026-11-01-old', ctx);
   assert.equal(ctx.discussion.name, '2026-11-01-old');
-  assert.deepEqual(resets, ['A', 'B', 'W']); // fresh CLI sessions for the agents and the worker
+  assert.deepEqual(resets, ['A', 'B']); // fresh CLI sessions for the agents
+  assert.notEqual(ctx.worker, worker); // and a new worker, on a fresh session: the old one stays with its discussion
+  assert.equal(worker.seat.discussion.name, name);
   assert.equal(ctx.logPath, null);
   assert.deepEqual(ctx.state.transcript, []); // the chat starts over (the same array, emptied)
   assert.equal(ctx.screen.transcript, ctx.state.transcript);
@@ -439,7 +442,7 @@ test('/new after a round: the session ends as with Resume; the next message star
   assert.equal(ctx.screen.room.back.title, 'Second topic');
 });
 
-test('/new leaves the worker alone: a running task keeps its transcript, its log stays, the next instruction learns the new folder', async () => {
+test('/new in the terminal doesn\'t wait: a running task finishes in the old discussion\'s worker session and transcript, its log stays, and the new discussion\'s worker starts fresh', async () => {
   const { queueWork } = await import('../src/ui.mjs');
   const { readFileSync } = await import('node:fs');
   const titles = ['First topic', 'Second topic'];
@@ -458,19 +461,22 @@ test('/new leaves the worker alone: a running task keeps its transcript, its log
   queueWork(ctx, 'long task');
   await until(() => finish);
 
+  const old = ctx.worker;
   await handleLine('/new', ctx); // returns while the worker is still busy: it doesn't wait for it
-  assert.equal(resetWorker, false);
-  assert.ok(ctx.screen.worker.some((m) => m.note?.includes('is no longer the active one')));
+  assert.equal(resetWorker, false); // its session isn't touched: it goes with its discussion
+  assert.notEqual(ctx.worker, old);
+  assert.equal(old.seat.logPath, first);
+  assert.ok(ctx.screen.worker.some((m) => m.note?.includes('keeps its worker session; its tasks still running or queued finish there and report to it')));
   finish('long done');
   await ctx.workQueue;
   assert.match(readFileSync(first, 'utf8'), /long task[\s\S]*session ended[\s\S]*long done/); // in the old transcript
   assert.equal(ctx.screen.worker.filter((m) => m.speaker === 'W').length, 2); // the log stays
 
-  queueWork(ctx, 'before the folder exists');
+  queueWork(ctx, 'before the folder exists'); // the new, fresh session: told where it works, no discussion yet
   await ctx.workQueue;
-  assert.match(got[2], /^No discussion is active now: .* is no longer the active discussion's folder/);
+  assert.match(got[2], /^Your working directory is /);
   assert.ok(!got[2].includes('create, read and write'));
-  assert.ok(got[2].includes(firstDir));
+  assert.ok(!got[2].includes(firstDir));
 
   await handleLine('second', ctx);
   queueWork(ctx, 'after');
@@ -711,7 +717,9 @@ test('each discussion works in its own lane, <repo>.workers/<name>/ on worker/<n
   await handleLine('/brainstorm', ctx);
   await work(ctx, 'brainstorm task');
   assert.equal(ctx.workerDir.path, `${root}.worker`);
-  assert.ok(got[3].includes(`until now you worked in ${root}.workers/${name}; from now on you work in ${root}.worker, on the branch worker/main.`));
+  // The brainstorm has its own, fresh worker session (slice 1c): told where it works, not that it moved.
+  assert.match(got[3], new RegExp(`^These instructions come from a brainstorm[\\s\\S]*Your working directory is ${root}\\.worker, your own Git worktree of the project, on the branch worker/main\\.`));
+  assert.ok(!got[3].includes('Your worktree has changed'));
 });
 
 test('a task queued before the discussion\'s first message stays on worker/main, even if it runs after the message created the discussion', async () => {
@@ -1130,6 +1138,118 @@ async function savedRoom(cwd, tag) {
   for (const agent of ctx.room.agents) agent.turn = async () => 'PASS';
   return ctx;
 }
+
+// ── A worker session per discussion, in the terminal too (slice 1c) ──
+test('terminal: /new while a worker task runs, a task in the new discussion, then Resume of the first: each report reaches its own discussion, and each continues its own worker session', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { queueWork } = await import('../src/ui.mjs');
+  const cwd = await tmp('own-session-');
+  await gitRoom(cwd);
+  const ctx = await savedRoom(cwd, 'own-session');
+  const titles = ['Topic A', 'Topic B'];
+  ctx.suggestTitle = async () => ({ title: titles.shift() });
+  const key = 'worker:W', calls = [];
+  let release = null;
+  // The worker agent in use answers as `tag`; with `wait`, only once released.
+  const stub = (tag, wait = false) => { ctx.worker.turn = async () => { calls.push(tag); return wait ? new Promise((r) => { release = () => r(`${tag} report`); }) : `${tag} report`; }; };
+  const saved = (d) => checkpointPath(cwd, d.name).then((f) => JSON.parse(readFileSync(f, 'utf8')));
+  const codex = (id) => Object.assign(ctx.sessions.get('B'), { threadId: id }); // a real Codex turn sets it
+  codex('codex-a');
+  await handleLine('first topic', ctx);
+  const a = ctx.discussion, aLog = ctx.logPath;
+  Object.assign(ctx.sessions.get(key), { id: 'worker-a', started: true });
+  stub('A', true);
+  queueWork(ctx, 'task in A');
+  await until(() => release);
+
+  await handleLine('/new', ctx); // returns at once: A's task goes on in A's session
+  assert.equal(ctx.discussion, null);
+  assert.notEqual(ctx.sessions.get(key).id, 'worker-a');
+  stub('B');
+  codex('codex-b');
+  await handleLine('second topic', ctx);
+  const b = ctx.discussion, bLog = ctx.logPath;
+  Object.assign(ctx.sessions.get(key), { id: 'worker-b', started: true });
+  queueWork(ctx, 'task in B'); // waits behind A's: one context's worker tasks run one at a time
+  release();
+  await ctx.workQueue;
+  assert.deepEqual(calls, ['A', 'B']);
+  const A = readFileSync(aLog, 'utf8'), B = readFileSync(bLog, 'utf8');
+  assert.match(A, /task in A[\s\S]*session ended[\s\S]*A report/);
+  assert.doesNotMatch(A, /task in B|B report/);
+  assert.match(B, /task in B[\s\S]*B report/);
+  assert.doesNotMatch(B, /task in A|A report/);
+  // A's checkpoint has A's worker session and A's report; B's in-memory session is untouched.
+  assert.equal(new Map((await saved(a)).sessions).get(key).id, 'worker-a');
+  assert.ok((await saved(a)).worker.some((m) => m.speaker === 'W' && /A report/.test(m.html)));
+  assert.equal(ctx.sessions.get(key).id, 'worker-b');
+
+  await handleLine(`/resume ${a.name}`, ctx); // back to A: its own worker session
+  assert.equal(ctx.sessions.get(key).id, 'worker-a');
+  assert.equal(new Map((await saved(b)).sessions).get(key).id, 'worker-b'); // B keeps its own
+  stub('A again');
+  queueWork(ctx, 'more in A'); await ctx.workQueue;
+  assert.match(readFileSync(aLog, 'utf8'), /more in A[\s\S]*A again report/);
+  await handleLine(`/resume ${b.name}`, ctx); // and B continues its own
+  assert.equal(ctx.sessions.get(key).id, 'worker-b');
+});
+
+test('terminal: a brainstorm\'s worker session is never carried into a discussion, by New discussion or Resume', async () => {
+  const { mkdirSync } = await import('node:fs');
+  const ctx = await freshSession([], async () => ({ title: 'Topic' }));
+  ctx.noScreen = true;
+  await handleLine('/brainstorm', ctx);
+  const brainstorm = ctx.worker;
+  await handleLine('/new', ctx);
+  assert.notEqual(ctx.worker, brainstorm);
+  assert.equal(brainstorm.seat.brainstorm, true);
+  await handleLine('/brainstorm', ctx);
+  const again = ctx.worker;
+  mkdirSync(`${ctx.cwd}/discussions/2026-11-01-old`, { recursive: true });
+  await handleLine('/resume 2026-11-01-old', ctx); // no checkpoint: a fresh session from its handoff
+  assert.notEqual(ctx.worker, again);
+  assert.equal(again.seat.brainstorm, true);
+});
+
+test('terminal: Start fresh while the discussion\'s old worker task still runs: its report goes to the old session\'s transcript, and neither its report nor its checkpoint update replaces the new worker session', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { queueWork } = await import('../src/ui.mjs');
+  const cwd = await tmp('fresh-session-');
+  await gitRoom(cwd);
+  const ctx = await savedRoom(cwd, 'fresh-session');
+  const key = 'worker:W';
+  let release = null;
+  const stub = (tag, wait = false) => { ctx.worker.turn = async () => (wait ? new Promise((r) => { release = () => r(`${tag} report`); }) : `${tag} report`); };
+  const saved = () => checkpointPath(cwd, name).then((f) => JSON.parse(readFileSync(f, 'utf8')));
+  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-old' }); // a real Codex turn sets it
+  await handleLine('the topic', ctx);
+  const name = ctx.discussion.name, oldLog = ctx.logPath;
+  Object.assign(ctx.sessions.get(key), { id: 'worker-old', started: true });
+  stub('old', true);
+  queueWork(ctx, 'old task');
+  await until(() => release);
+
+  await handleLine(`/fresh ${name}`, ctx); // returns at once
+  assert.notEqual(ctx.sessions.get(key).id, 'worker-old');
+  stub('new');
+  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-new' });
+  await handleLine('start again', ctx); // the fresh session's first round: a full checkpoint, with the new session
+  Object.assign(ctx.sessions.get(key), { id: 'worker-new', started: true });
+  queueWork(ctx, 'new task'); // waits behind the old one (one context, one task at a time)
+  release();
+  await ctx.workQueue;
+  const newLog = ctx.logPath;
+  assert.notEqual(newLog, oldLog);
+  assert.match(readFileSync(oldLog, 'utf8'), /old task[\s\S]*session ended[\s\S]*old report/); // the old session's transcript
+  assert.doesNotMatch(readFileSync(newLog, 'utf8'), /old task|old report/);
+  assert.match(readFileSync(newLog, 'utf8'), /new task[\s\S]*new report/);
+  assert.equal(ctx.sessions.get(key).id, 'worker-new');
+  assert.equal(new Map((await saved()).sessions).get(key).id, 'worker-new');
+  // Leaving and resuming continues the new session, not the old one.
+  await handleLine('/new', ctx);
+  await handleLine(`/resume ${name}`, ctx);
+  assert.equal(ctx.sessions.get(key).id, 'worker-new');
+});
 
 test('every round saves a checkpoint; Close keeps it; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions', async () => {
   const { readFileSync, writeFileSync, existsSync } = await import('node:fs');

@@ -231,11 +231,21 @@ all open discussions; each keeps its own worker session. In the terminal one dis
 a time, as described next: its one input can't switch between discussions.
 
 **New discussion** in the terminal (`/new`) works between rounds. It ends this
-room's session the way Resume does (below; its checkpoint is kept), except for the worker: its
-running task, log and CLI session carry on, and its log gets a marker line. (So a discussion
-resumed later continues that same worker session, which has had the new discussion's turns.) Nothing is created yet: your next message gets
-a title and creates the new discussion's folder, as in a fresh room. The worker's next instruction
-then gets the new folder; until it exists, the worker is told no discussion is active.
+room's session the way Resume does (below; its checkpoint is kept). Nothing is created yet: your
+next message gets a title and creates the new discussion's folder, as in a fresh room.
+
+**Each discussion keeps its own worker session**, in the terminal too. When a discussion's session
+ends here (New discussion, Resume, Start fresh, New brainstorm, Close), nothing waits for its worker:
+its tasks still running or queued finish in that discussion's own worktree and worker session, their
+reports go to its transcript, Worker-tab entries and checkpoint, and the Worker tab gets a marker
+line. The discussion you switch to gets its own worker session: the one its checkpoint saved
+(Resume; the very same one if its tasks are still running), or a fresh one (New discussion, Start
+fresh, a Resume from the handoff). A brainstorm's worker session is never carried into a discussion,
+nor a discussion's into a brainstorm. In the terminal one room still runs one worker task at a
+time, so a task you send after switching starts when the earlier discussion's task has ended.
+After Start fresh, a task still running from the earlier session reports to that session's
+transcript (in the same folder) and the Worker tab, not to the fresh session; it doesn't replace
+the fresh session's worker in the checkpoint.
 
 **New brainstorm** (in the header's **Actions ▾** menu, or `/brainstorm`) starts a conversation with
 the same agents, turns and `PASS` rules, but agent-room keeps no record of it: no title, folder,
@@ -244,8 +254,8 @@ the worker for are real). Its chat lives only in the server's memory: it survive
 Reload, and is lost on Restart or Quit room. A room has one brainstorm at a time: New brainstorm
 discards the current one, and New discussion or Resume ends it. Like New discussion, it ends the
 session of the discussion in use, which keeps its folder and transcripts. The agents are told it is
-a brainstorm, write no files and may read the project; the worker carries on as with no active
-discussion. Typing in a room with no discussion still starts a discussion. A brainstorm has no
+a brainstorm, write no files and may read the project; the worker, with a session of its own,
+works as with no active discussion. Typing in a room with no discussion still starts a discussion. A brainstorm has no
 checkpoint.
 
 **Every discussion saves itself.** After every round (with or without its summary), every
@@ -266,9 +276,9 @@ any discussion not on screen, works between rounds:
   discussions.
 
 The button's tooltip says which case applies. On the screen it opens beside the open discussions;
-in the terminal the session in use ends first, after its worker tasks still running or queued have
-finished (its checkpoint is saved; the chat clears, and the discussion agents and the worker get
-fresh CLI sessions). A checkpoint that can't be used (invalid,
+in the terminal the session in use ends first, without waiting for its worker tasks (see above; its
+checkpoint is saved; the chat clears, and the discussion agents get fresh CLI sessions; the worker
+continues the resumed discussion's own session). A checkpoint that can't be used (invalid,
 or a provider session missing) is kept, the room stays as it was, and the error suggests Start
 fresh: Resume never starts fresh by itself. Continuing needs the providers' original local session
 storage; if a provider cannot resume its session, its turn fails without a silent fresh start.
@@ -446,7 +456,7 @@ node src/cli.mjs --help
 | `/docs` | Browse documents; in terminal mode, ↑/↓ selects, Enter opens, Esc leaves the picker. |
 | `/resume <folder-name>` | Resume a discussion not on screen: show it if it is open, else continue from its checkpoint (same sessions and chat), or from its handoff without one. `archive/…` or `deferred/…` is made active first. |
 | `/fresh <folder-name>` | Start fresh: new sessions there, from its handoff and notes and its checkpoint's latest summary; the saved sessions and chat are discarded. |
-| `/new` | On the screen, open a new discussion beside this one (which stays open); an open brainstorm ends. In the terminal, end this session; your next message starts a new discussion. The worker carries on. |
+| `/new` | On the screen, open a new discussion beside this one (which stays open); an open brainstorm ends. In the terminal, end this session; your next message starts a new discussion. Its worker tasks finish in its own worker session; the new discussion's worker starts fresh. |
 | `/close` | Close discussion: close the one shown, keeping the others open (not while it holds unresolved worker edits). |
 | `/brainstorm` | End this session (or brainstorm) and start a brainstorm: nothing saved, lost on Restart or Quit. |
 | `/rollback <folder-name>` | Queue Archive with rollback as a worker task; review its report before archiving. |

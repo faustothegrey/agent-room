@@ -221,6 +221,9 @@ export async function load(ctx, v) {
   const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: shop?.log ?? [], working: shop && runningTasks(shop).some((t) => t.origin === ctx) ? wName : null };
   return { room: createRoom(agents, ctx.state), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: shop ?? newShop(screen.worker),
+    // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
+    makeWorker: (session) => createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions, shell: true,
+      timeoutMs: WORKER_TIMEOUT_MS, runner, session }),
     suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }) };
 }
 
@@ -619,7 +622,7 @@ function saveCheckpoint(ctx) {
       state: r.state, logPath: ctx.logPath, totals: r.totals, doc: r.doc,
       worker: shopOf(ctx).log.filter((m) => m.origin === originLabel(ctx)),
       workerBriefed: ctx.workerBriefed ?? null, workerTree: ctx.workerTree ?? null,
-      workerLabel: ctx.workerLabel ?? null, workerHandoff: !!ctx.workerHandoff,
+      workerLabel: ctx.workerLabel ?? null, workerHandoff: !!ctx.workerHandoff, workerSeat: ctx.workerSeat ??= randomBytes(6).toString('hex'),
       logBytes: ctx.logBytes, work: workOf(shopOf(ctx), d.name),
     });
     ctx.checkpointError = null;
@@ -753,10 +756,12 @@ async function loadCheckpoint(ctx, saved, name) {
       discussion: { ...saved.discussion, dir }, agentSpecs: saved.agentSpecs, workerSpec: saved.workerSpec,
       sessions, state, logPath, pendingLog: '', totals: saved.totals ?? {},
       workerBriefed: saved.workerBriefed ?? null, workerTree: saved.workerTree ?? null,
-      workerLabel: saved.workerLabel ?? null, workerHandoff: !!saved.workerHandoff,
+      workerLabel: saved.workerLabel ?? null, workerHandoff: !!saved.workerHandoff, workerSeat: saved.workerSeat ?? randomBytes(6).toString('hex'),
       agentsStarted: true, autoDev: null, autoDevSent: [], freshSummary: null,
       lastRound: { sessions: saved.sessions.filter(([key]) => !String(key).startsWith('worker:')), state: saved.state, totals: saved.totals ?? {}, doc: saved.doc ?? null },
     });
+    const busy = leftWorker(ctx, saved.workerSeat); // its worker, still at work since it was left
+    if (busy) reattachWorker(ctx, busy);
     Object.assign(ctx.screen, { transcript: state.transcript, doc: saved.doc ?? null, thinking: null, status: null });
     // Its own part of the Worker tab, unless the tab (shared by the folder's discussions) still has it.
     const own = Array.isArray(saved.worker) ? saved.worker.filter((m) => m?.origin === label) : [];
@@ -777,14 +782,66 @@ async function loadCheckpoint(ctx, saved, name) {
 // agents and the worker get fresh CLI sessions.
 async function leaveSession(ctx, why) {
   if (ctx.logPath) {
-    await ctx.workQueue; // let a running worker instruction finish in this session
+    // No wait: its worker tasks still running or queued finish in its own session (detachWorker).
     endSession(ctx, why);
-    ctx.worker.reset?.();
     if (siblings(ctx).length === 1) ctx.screen.worker.length = 0; // the Worker tab is shared otherwise
-    ctx.workerBriefed = null;
-    ctx.workerTree = ctx.workerLabel = null; // its fresh session is told about its worktree again
   }
   if (ctx.state.brainstorm) endSession(ctx, 'ending the brainstorm');
+}
+
+// ── A worker session per discussion ──
+// The worker session belongs to its discussion (or brainstorm). When that session ends in a
+// context (New discussion, Resume, Start fresh, New brainstorm, Close), the agent, its session and
+// its briefing go with it as its seat: the tasks already sent to it finish there, their reports go
+// to that discussion's transcript and checkpoint (saveLeftWorker), and nothing waits. The context
+// gets a new agent on a fresh session; Resume then puts the discussion's own back (reattachWorker).
+// The old session object is never changed (reset would change it under a running task).
+function detachWorker(ctx) {
+  const old = ctx.worker;
+  if (!old) return;
+  const key = `worker:${parseSpec(ctx.workerSpec ?? 'claude:Worker', true).name}`;
+  old.seat = { id: ctx.workerSeat ?? null, key, session: ctx.sessions?.get(key) ?? null, origin: originLabel(ctx),
+    discussion: ctx.discussion ?? null, logPath: ctx.logPath ?? null, brainstorm: !!ctx.state.brainstorm,
+    briefed: ctx.workerBriefed ?? null, tree: ctx.workerTree ?? null, label: ctx.workerLabel ?? null, handoff: !!ctx.workerHandoff };
+  const session = {};
+  ctx.sessions?.set(key, session);
+  ctx.worker = ctx.makeWorker ? ctx.makeWorker(session) : { ...old, seat: undefined };
+  ctx.workerBriefed = ctx.workerTree = ctx.workerLabel = null;
+  ctx.workerHandoff = false;
+  ctx.workerSeat = randomBytes(6).toString('hex');
+}
+// A left discussion's worker, still busy with its tasks, whose checkpoint names its seat.
+function leftWorker(ctx, id) {
+  if (!id) return null;
+  const shop = shopOf(ctx);
+  return [...runningTasks(shop), ...queuedTasks(shop)].map((t) => t.worker).find((w) => w?.seat?.id === id) ?? null;
+}
+// Resume of a discussion whose worker is still busy there: the same agent and session come back
+// (and the briefing it has since), rather than a copy of the session from the checkpoint.
+function reattachWorker(ctx, worker) {
+  const s = worker.seat;
+  delete worker.seat;
+  ctx.worker = worker;
+  ctx.sessions?.set(s.key, s.session ?? {});
+  Object.assign(ctx, { workerBriefed: s.briefed, workerTree: s.tree, workerLabel: s.label, workerHandoff: s.handoff, workerSeat: s.id });
+}
+// A task of a discussion left meanwhile has ended: its worker session, briefing, Worker-tab entries
+// and task records go into that discussion's checkpoint, only if it is still the checkpoint of that
+// session (not one Start fresh replaced, nor a later session's).
+function saveLeftWorker(ctx, worker) {
+  const s = worker.seat, d = s.discussion;
+  if (!d || s.brainstorm || !s.id) return;
+  const saved = readCheckpoint(ctx, d.name);
+  if (!saved || saved.invalid || saved.fresh || saved.workerSeat !== s.id) return;
+  const shop = shopOf(ctx), kept = Array.isArray(saved.worker) ? saved.worker : [];
+  const known = new Set(kept.map((m) => JSON.stringify(m)));
+  try {
+    writeCheckpoint(ctx, d.name, { ...saved,
+      sessions: [...(saved.sessions ?? []).filter(([k]) => k !== s.key), [s.key, s.session ?? {}]],
+      workerBriefed: s.briefed, workerTree: s.tree, workerLabel: s.label, workerHandoff: s.handoff,
+      worker: [...kept, ...shop.log.filter((m) => m.origin === s.origin && !known.has(JSON.stringify(m)))],
+      work: workOf(shop, d.name) });
+  } catch (err) { note(ctx, `✗ Couldn't save ${d.name}'s worker session in its checkpoint: ${err.message}`, true); }
 }
 
 // /resume <name> (Resume): a discussion that isn't on screen. Open in another context of this folder,
@@ -864,11 +921,12 @@ async function besideWith(ctx, run) {
 
 // Ends this room's discussion session (Resume, Start fresh, New discussion, Close): its checkpoint
 // is saved, a last line goes in its transcript, which is then closed; the chat clears and the
-// discussion agents get fresh CLI sessions. The worker is left alone here: Resume and Start fresh
-// reset it themselves (leaveSession), New discussion doesn't.
+// discussion agents get fresh CLI sessions. The worker session goes with the session that ends
+// (detachWorker): the context's next worker task starts a fresh one, or Resume's own.
 function endSession(ctx, why) {
   log(ctx, `_(session ended: ${why})_\n\n`);
   saveCheckpoint(ctx); // the latest checkpoint stays: Resume continues from it
+  detachWorker(ctx); // its worker session goes with it; this context's worker starts a fresh one
   ctx.lastRound = null;
   ctx.freshSummary = null;
   for (const a of ctx.room.agents) a.reset?.();
@@ -906,7 +964,7 @@ function newDiscussion(ctx) {
   if (!was && !ctx.logPath && !ctx.state.brainstorm) return note(ctx, 'No discussion started yet: your next message starts a new one.');
   if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a new discussion');
   if (was && ctx.screen.worker.length) {
-    const view = { note: `New discussion: ${was.name} is no longer the active one. The next instruction gets the new discussion's folder once your first message creates it.` };
+    const view = { note: `New discussion: ${was.name} keeps its worker session; its tasks still running or queued finish there and report to it. The new discussion's worker starts a fresh session.` };
     ctx.screen.worker.push(view);
     toScreen(ctx, { type: 'work', message: view });
   }
@@ -2278,7 +2336,7 @@ export function queueWork(ctx, text, run = null, rollback = null) {
   const workName = ctx.discussion && !ctx.state.brainstorm ? ctx.discussion.name : null;
   const record = workName ? { id: randomBytes(6).toString('hex'), task: text, at: new Date().toISOString() } : null;
   shop.sent = (shop.sent ?? 0) + 1; // the order sent, across lanes: one worker session's tasks keep it
-  laneState(shop, workName).tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done, rollback, record, workName, lane: workName, sent: shop.sent });
+  laneState(shop, workName).tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done, rollback, record, workName, lane: workName, sent: shop.sent, worker: ctx.worker });
   if (record) { workOf(shop, workName).queued.push(record); persistWork(ctx, workName); }
   ctx.workPending = (ctx.workPending ?? 0) + 1;
   ctx.workQueue = Promise.all([ctx.workQueue, finished]).then(() => {});
@@ -2289,8 +2347,12 @@ export function queueWork(ctx, text, run = null, rollback = null) {
 // One task, for its origin `ctx`. `recovery`: the edits this origin left uncommitted, which this
 // task is to resolve; `lane`: the place it runs in. Resolves to its branch's commit before the task (or null).
 async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollback = null, t = null, lane = null) {
-  const { worker } = ctx;
-  const shop = shopOf(ctx), screen = ctx.screen, label = originLabel(ctx);
+  // The worker it was sent to. One its discussion left meanwhile (/new, Resume, Start fresh in the
+  // terminal) keeps that discussion's session and briefing in its seat (see detachWorker).
+  const worker = t?.worker?.seat ? t.worker : ctx.worker;
+  const seat = worker !== ctx.worker ? worker.seat : null;
+  const own = seat ?? { briefed: ctx.workerBriefed, tree: ctx.workerTree, label: ctx.workerLabel, handoff: ctx.workerHandoff, brainstorm: !!ctx.state.brainstorm };
+  const shop = shopOf(ctx), screen = ctx.screen, label = seat ? seat.origin : originLabel(ctx);
   // First of all: its discussion's checkpoint records it as running (see "Work in flight").
   const record = t?.record, work = record ? workOf(shop, t.workName) : null;
   if (record) {
@@ -2303,17 +2365,18 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   if (!rollback && recovery && shop.rollbacks?.get(label)?.task === recovery.task) rollback = shop.rollbacks.get(label);
   if (rollback) { rollback.status = 'running'; showHeader(ctx); }
   let before = null, mainAtStart = null;
-  const history = ctx.workerHandoff ? screen.worker.filter((m) => m.speaker).map((m) =>
+  const history = own.handoff ? screen.worker.filter((m) => m.speaker).map((m) =>
     `${m.speaker}${m.error ? ' (failed)' : ''}:\n${m.html}`).join('\n\n') : '';
   // The task's context, read once, here, before anything awaits: its discussion (for the briefing
   // and the /move lock) and its transcript. If New discussion or Resume changes the room's
   // meanwhile, the task keeps its own; the reply still goes into its transcript.
-  const task = { discussion: ctx.discussion ?? null, logPath: ctx.logPath ?? null };
+  const task = seat ? { discussion: seat.discussion, logPath: seat.logPath } : { discussion: ctx.discussion ?? null, logPath: ctx.logPath ?? null };
   const started = task.logPath;
   // A transcript that can't be written to doesn't lose the reply: it is still shown, with the error.
+  // A left brainstorm's task has no transcript: its reply stays in the Worker tab only.
   let saveError = null;
   const workLog = (t) => {
-    try { if (started && started !== ctx.logPath) appendFileSync(started, t); else log(ctx, t); }
+    try { if (started && started !== ctx.logPath) appendFileSync(started, t); else if (!seat) log(ctx, t); }
     catch (err) { saveError ??= err; }
   };
   const show = (entry, meta) => {
@@ -2356,24 +2419,24 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       // After New discussion, until the next one exists, it learns only that the old one is closed.
       const d = task.discussion;
       // A brainstorm has no folder: it is told so once.
-      const brief = d && ctx.workerBriefed !== d.dir
+      const brief = d && own.briefed !== d.dir
         ? `The active discussion's folder is ${d.dir}: create, read and write this discussion's documents there, including your implementation notes and plans. The work itself goes in your worktree, ${place.cwd}.\n\n`
-        : !d && ctx.state.brainstorm && ctx.workerBriefed !== 'brainstorm'
+        : !d && own.brainstorm && own.briefed !== 'brainstorm'
           ? 'These instructions come from a brainstorm, which has no folder: keep your notes in your scratch folder only.\n\n'
-        : !d && ctx.workerBriefed && ctx.workerBriefed !== 'brainstorm'
-          ? `No discussion is active now: ${ctx.workerBriefed} is no longer the active discussion's folder. You will be told the next one's folder once it exists.\n\n`
+        : !d && own.briefed && own.briefed !== 'brainstorm'
+          ? `No discussion is active now: ${own.briefed} is no longer the active discussion's folder. You will be told the next one's folder once it exists.\n\n`
           : '';
       // And where it works, with its first instruction (again if that changes: a saved session that
       // worked in the shared worktree before lanes, or a context moving between lanes, is told so).
-      const moved = ctx.workerTree && ctx.workerTree !== place.cwd
-        ? `Your worktree has changed: until now you worked in ${ctx.workerTree}; from now on you work in ${place.cwd}, on the branch ${place.branch}. Leave ${ctx.workerTree} alone from now on: it is another lane's. `
+      const moved = own.tree && own.tree !== place.cwd
+        ? `Your worktree has changed: until now you worked in ${own.tree}; from now on you work in ${place.cwd}, on the branch ${place.branch}. Leave ${own.tree} alone from now on: it is another lane's. `
         : '';
-      const tree = ctx.workerTree !== place.cwd
+      const tree = own.tree !== place.cwd
         ? `${moved}Your working directory is ${place.cwd}, your own Git worktree of the project, on the branch ${place.branch}. Make your changes there, never in the room's root, ${ctx.cwd}: that is the User's working copy (only the discussion folder there is yours, for notes). Commit every completed task on ${place.branch}, labelled as each instruction says, and give the commit ID in your reply; the User reviews and merges it into main. Your scratch notes go in ${join(place.path, NOTES)}/<task>/, one folder per task: Git ignores them, never commit them, and delete them only when the User says "stage accepted". Plans and notes for the User's review still go in the discussion's folder.\n\n`
         : '';
       // Its origin's label for the commit, once per worker session (again if it changes); a recovery
       // task also gets the first task's details.
-      const commit = ctx.workerLabel === label ? '' : `These instructions come from [${label}]. When a task is complete, commit it on ${place.branch} with a message starting "[${label}]" and give the commit ID in your reply.\n\n`;
+      const commit = own.label === label ? '' : `These instructions come from [${label}]. When a task is complete, commit it on ${place.branch} with a message starting "[${label}]" and give the commit ID in your reply.\n\n`;
       const leftover = recovery
         ? `Uncommitted edits are left in your worktree from the earlier task from [${label}] "${recovery.task}"${recovery.before ? ` (${place.branch} was at ${recovery.before.slice(0, 7)} when it started)` : ''}: this discussion's next worker tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those. Inspect and resolve any merge or revert already in progress before further work; never force it or start a fresh operation over it.\n\n`
         : '';
@@ -2385,13 +2448,17 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       const interrupted = told.map((r) => `Your previous instruction "${firstLine(r.task)}" was interrupted by a Restart, Quit or a crash: check the worktree before continuing.\n\n`).join('');
       if (told.length) work.interrupted = work.interrupted.filter((r) => !told.includes(r));
       entry = { speaker: worker.name, text: (await worker.turn(interrupted + brief + tree + commit + leftover + merge + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
-      if (ctx.worker === worker) {
+      // Its briefing is now known to the session: the context's, or the seat of a discussion left
+      // meanwhile (even if it was left while this turn ran).
+      const now = worker === ctx.worker ? null : worker.seat;
+      if (now) Object.assign(now, { ...(brief && { briefed: d?.dir ?? (own.brainstorm ? 'brainstorm' : null) }), tree: place.cwd, label, handoff: false });
+      else if (worker === ctx.worker) {
         if (brief) ctx.workerBriefed = d?.dir ?? (ctx.state.brainstorm ? 'brainstorm' : null);
         ctx.workerTree = place.cwd;
         ctx.workerLabel = label;
         ctx.workerHandoff = false;
       }
-      if (worker.lastUsage) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
+      if (worker.lastUsage && worker === ctx.worker) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
       await recordTested(ctx, place, entry.text); // its "Tested:" line, if Git agrees
     } catch (err) {
       entry = { speaker: worker.name, text: err.message, error: true };
@@ -2422,7 +2489,9 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     ctx.workingIn = null;
     working(null);
   }
-  saveCheckpoint(ctx); // its worker session and briefing, with the discussion's latest round
+  // Its worker session and briefing, in its own discussion's checkpoint: the one in use, or the one
+  // left meanwhile (saveLeftWorker).
+  if (worker === ctx.worker) saveCheckpoint(ctx); else if (worker.seat) saveLeftWorker(ctx, worker);
   await refreshWorker(ctx).catch(() => {}); // the tab's checks are current when the task counts as done
   refreshQuota(ctx).catch(() => {});
   return before;
