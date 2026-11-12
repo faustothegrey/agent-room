@@ -1918,6 +1918,35 @@ test('lanes run at the same time: two discussions\' tasks overlap with separate 
   assert.deepEqual([second.prompts.length, third.prompts.length], [2, 1]);
 });
 
+test('a queued task starting after its context switches does not mark the new discussion working', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const gates = new Map();
+  const { first, hub } = await multiRoom({ worker: (_ctx, prompt) => new Promise((done) => gates.set(prompt.split('\n').at(-1), done)) });
+  first.noScreen = true; // switch this context in place while its queued task remains with A
+  await handleLine('topic-a', first);
+  const observer = (await hub.addRoom(first.cwd, { context: 'observer' })).ctx;
+  await handleLine('observer', observer);
+  queueWork(first, 'first in A');
+  await until(() => gates.has('first in A'));
+  queueWork(first, 'queued in A');
+  await handleLine('/new', first);
+  await handleLine('topic-b', first);
+  const pathB = `discussions/${first.discussion.name}`;
+  assert.equal(first.screen.working, null);
+  gates.get('first in A')('done');
+  await until(() => gates.has('queued in A'));
+  const atStart = observer.events.filter((e) => e.type === 'room').at(-1).room.open.find((o) => o.active === pathB);
+  assert.equal(first.screen.working, null);
+  assert.equal(atStart.working, false);
+  const count = observer.events.length;
+  gates.get('queued in A')('done');
+  await first.workQueue;
+  const after = observer.events.slice(count).filter((e) => e.type === 'room');
+  assert.ok(after.length, 'the other page receives the finish update');
+  assert.equal(first.screen.working, null);
+  assert.equal(after.at(-1).room.open.find((o) => o.active === pathB).working, false);
+});
+
 test('switching discussion while one waits for its worker task: the message typed in the other and the worker\'s later report each reach their own discussion', async () => {
   const { queueWork } = await import('../src/ui.mjs');
   const { readFileSync } = await import('node:fs');

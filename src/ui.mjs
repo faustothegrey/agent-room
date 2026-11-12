@@ -2407,7 +2407,6 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   // The discussion this task writes to (transcript, notes): /move refuses it until the task ends.
   ctx.workingIn = task.discussion?.dir ?? null;
   if (ctx.workingIn) shop.writing.add(ctx.workingIn);
-  ctx.screen.working = worker.name;
   try {
     const from = run ? 'Relayed from discussion' : 'User';
     workLog(`**${from} → ${worker.name}** (worker${run ? `, auto dev cycle ${cycle} of ${AUTO_DEV_CYCLES}` : ''})\n\n${text}\n\n`);
