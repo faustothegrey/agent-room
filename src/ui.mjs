@@ -440,7 +440,7 @@ async function confirmRollbackArchive(ctx, ref) {
   } finally { shop.confirming = false; pump(shop).catch((err) => note(ctx, `✗ ${err.message}`, true)); }
 }
 
-async function rollbackReport(ctx, rollback, entry) {
+async function rollbackReport(ctx, rollback, entry, left = null) {
   rollback.report = entry.text;
   rollback.status = 'needs review';
   rollback.commit = null;
@@ -456,10 +456,14 @@ async function rollbackReport(ctx, rollback, entry) {
     }
   }
   // It is a report, not a new round: the User decides whether to archive.
+  // In its own discussion: the one in use, or, left meanwhile, that session's transcript.
   const m = { speaker: 'Worker rollback report', text: entry.text };
-  ctx.state.transcript.push(m);
-  log(ctx, `**${m.speaker}**\n\n${m.text}\n\n`);
-  toScreen(ctx, { type: 'message', message: ctx.docs.messageView(m) });
+  if (left) { if (left.logPath) try { appendFileSync(left.logPath, `**${m.speaker}**\n\n${m.text}\n\n`); } catch {} }
+  else {
+    ctx.state.transcript.push(m);
+    log(ctx, `**${m.speaker}**\n\n${m.text}\n\n`);
+    toScreen(ctx, { type: 'message', message: ctx.docs.messageView(m) });
+  }
   note(ctx, rollback.status === 'ready'
     ? `Review the rollback report for [${rollback.name}]; then confirm archive in Explorer (switch away from it first), or /archive-rollback ${rollback.name}. Main is still yours to merge.`
     : `Rollback for [${rollback.name}] needs review: no verified successful report yet; archiving was not done.`);
@@ -828,7 +832,7 @@ function reattachWorker(ctx, worker) {
 // A task of a discussion left meanwhile has ended: its worker session, briefing, Worker-tab entries
 // and task records go into that discussion's checkpoint, only if it is still the checkpoint of that
 // session (not one Start fresh replaced, nor a later session's).
-function saveLeftWorker(ctx, worker) {
+function saveLeftWorker(ctx, worker, usage = null) {
   const s = worker.seat, d = s.discussion;
   if (!d || s.brainstorm || !s.id) return;
   const saved = readCheckpoint(ctx, d.name);
@@ -839,6 +843,7 @@ function saveLeftWorker(ctx, worker) {
     writeCheckpoint(ctx, d.name, { ...saved,
       sessions: [...(saved.sessions ?? []).filter(([k]) => k !== s.key), [s.key, s.session ?? {}]],
       workerBriefed: s.briefed, workerTree: s.tree, workerLabel: s.label, workerHandoff: s.handoff,
+      ...(usage && { totals: { ...(saved.totals ?? {}), [worker.name]: ctx.usage.addUsage(saved.totals?.[worker.name], usage) } }),
       worker: [...kept, ...shop.log.filter((m) => m.origin === s.origin && !known.has(JSON.stringify(m)))],
       work: workOf(shop, d.name) });
   } catch (err) { note(ctx, `✗ Couldn't save ${d.name}'s worker session in its checkpoint: ${err.message}`, true); }
@@ -1006,6 +1011,11 @@ export function siblings(ctx) {
 const multi = (ctx) => !ctx.noScreen;
 // A context with nothing in it yet: New discussion, Resume, Start fresh and New brainstorm use it in place.
 const fresh = (ctx) => !ctx.discussion && !ctx.logPath && !ctx.state.brainstorm && !ctx.state.transcript.length;
+// Which discussion a context works for now, as an identity for worker holds: its folder name, the
+// brainstorm's own ID, or (no discussion yet) its worker session. Not the context, which a terminal
+// switches between discussions, nor the label, which every brainstorm shares.
+const ownerOf = (ctx) => (ctx.discussion && !ctx.state?.brainstorm ? ctx.discussion.name
+  : ctx.state?.brainstorm ? `brainstorm:${ctx.state.brainstormId}` : `no discussion:${ctx.workerSeat ??= randomBytes(6).toString('hex')}`);
 // The task label: the discussion's folder name, or the brainstorm.
 const originLabel = (ctx) => ctx.discussion?.name ?? (ctx.state.brainstorm ? 'brainstorm' : 'no discussion');
 const pageOf = (ctx) => `${roomPath(ctx)}__room`;
@@ -1058,11 +1068,11 @@ async function openBeside(ctx) {
   return next;
 }
 // Why `c` can't be closed (or its folder moved): it holds unresolved worker edits, or its task runs.
-function workerHold(c) {
+export function workerHold(c) {
   const shop = shopOf(c);
-  const held = lanesOf(shop).map((l) => l.blockedBy).find((b) => b && (b.origin === c || b.label === originLabel(c)));
+  const held = lanesOf(shop).map((l) => l.blockedBy).find((b) => b && (b.owner ? b.owner === ownerOf(c) : b.label === originLabel(c)));
   if (held) return `its worker edits from "${held.task}" are unresolved: ask the worker to finish and commit them, or to abandon them`;
-  if (runningTasks(shop).some((t) => t.origin === c)) return 'a worker task from it is running';
+  if (runningTasks(shop).some((t) => (t.owner ?? ownerOf(t.origin)) === ownerOf(c))) return 'a worker task from it is running';
   return null;
 }
 // Ends context `c` (its agents stop; its queued worker tasks are dropped and reported by stopRoom).
@@ -1169,7 +1179,8 @@ async function recordedOwner(ctx, place) {
       ? c.state.brainstorm && typeof r.brainstormId === 'string' && c.state.brainstormId === r.brainstormId : c.discussion?.name === r.label && existsSync(c.discussion.dir)));
     const exists = r.label !== 'brainstorm' && [r.label, `archive/${r.label}`, `deferred/${r.label}`]
       .some((ref) => discussionRef(join(ctx.cwd, 'discussions'), ref));
-    return origin || exists ? { origin: origin ?? null, label: r.label, task: r.task, before: r.before } : { origin: null };
+    const owner = r.label === 'brainstorm' ? (typeof r.brainstormId === 'string' ? `brainstorm:${r.brainstormId}` : null) : r.label;
+    return origin || exists ? { origin: origin ?? null, owner, label: r.label, task: r.task, before: r.before } : { origin: null };
   } catch { return { origin: null }; }
 }
 // Restart creates each context before reopening its discussion; try again after that restoration.
@@ -1236,7 +1247,7 @@ function hold(ctx, blockedBy) {
   lane.holdContext = ctx;
   const where = blockedBy.label ? `[${blockedBy.label}]` : 'an unknown origin';
   workNote(ctx, `✗ The worker's folder ${blockedBy.place.path} (${blockedBy.place.branch}) has uncommitted edits from ${where}${blockedBy.task ? ` ("${blockedBy.task}")` : ''}: its queue holds${blockedBy.label ? ` until [${blockedBy.label}] resolves them (its own instructions still go through)` : ' until the folder is clean (commit or remove those edits yourself)'}; other lanes go on.`, true);
-  if (blockedBy.origin) note(blockedBy.origin, `✗ The worker left uncommitted edits from "${blockedBy.task}": this discussion's worker lane holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).`, true);
+  if (blockedBy.origin) note(blockedBy.origin, `✗ The worker left uncommitted edits from "${blockedBy.task}": the worker lane of [${blockedBy.label}] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).`, true);
   showHeader(ctx);
   if (!lane.pumping) watchLane(shop, lane);
 }
@@ -1271,7 +1282,7 @@ async function pumpLane(shop, lane) {
       // Before the next task: is the lane's worktree clean?
       const place = await lanePlace(any, lane.name);
       if (!place.disabled && !await recoverLane(any, lane, place)) break;
-      const t = !lane.blockedBy ? lane.tasks[0] : lane.blockedBy.origin && lane.tasks.find((x) => x.origin === lane.blockedBy.origin);
+      const t = !lane.blockedBy ? lane.tasks[0] : lane.blockedBy.owner && lane.tasks.find((x) => x.owner === lane.blockedBy.owner);
       if (!t) break; // held
       // A free place in the folder, and its worker session neither busy in another lane nor owing an
       // earlier task there (no await between this check and taking the place, so two lanes can't
@@ -1288,14 +1299,15 @@ async function pumpLane(shop, lane) {
       lane.tasks.splice(lane.tasks.indexOf(t), 1);
       t.origin.workPending--;
       lane.running = t;
-      const recovery = lane.blockedBy?.origin === t.origin ? lane.blockedBy : null;
+      const recovery = lane.blockedBy?.owner && lane.blockedBy.owner === t.owner ? lane.blockedBy : null;
       try { t.before = await runWork(t.origin, t.text, t.run, t.cycle, recovery, t.rollback, t, recovery ? recovery.place : place); }
       catch (err) { note(t.origin, `✗ ${err.stack}\n`, true); }
       finally { lane.running = null; }
       // After it: edits left uncommitted hold the lane; a recovery keeps the first task's details.
       try {
         const dirty = place.disabled ? false : await leftovers(t.origin, place);
-        if (dirty === true) { if (!lane.blockedBy) hold(t.origin, { origin: t.origin, label: originLabel(t.origin), task: t.text, before: t.before, place }); }
+        // Its own discussion's: the task's owner and label, not the discussion the context shows now.
+        if (dirty === true) { if (!lane.blockedBy) hold(t.origin, { origin: t.origin, owner: t.owner, label: t.label, task: t.text, before: t.before, place }); }
         else if (dirty === false && lane.blockedBy) release(t.origin, lane);
       } catch (err) { note(t.origin, `✗ ${err.message}`, true); }
       t.done();
@@ -2336,7 +2348,7 @@ export function queueWork(ctx, text, run = null, rollback = null) {
   const workName = ctx.discussion && !ctx.state.brainstorm ? ctx.discussion.name : null;
   const record = workName ? { id: randomBytes(6).toString('hex'), task: text, at: new Date().toISOString() } : null;
   shop.sent = (shop.sent ?? 0) + 1; // the order sent, across lanes: one worker session's tasks keep it
-  laneState(shop, workName).tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done, rollback, record, workName, lane: workName, sent: shop.sent, worker: ctx.worker });
+  laneState(shop, workName).tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done, rollback, record, workName, lane: workName, sent: shop.sent, worker: ctx.worker, owner: ownerOf(ctx), label: originLabel(ctx) });
   if (record) { workOf(shop, workName).queued.push(record); persistWork(ctx, workName); }
   ctx.workPending = (ctx.workPending ?? 0) + 1;
   ctx.workQueue = Promise.all([ctx.workQueue, finished]).then(() => {});
@@ -2364,7 +2376,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   const told = work ? [...work.interrupted] : [];
   if (!rollback && recovery && shop.rollbacks?.get(label)?.task === recovery.task) rollback = shop.rollbacks.get(label);
   if (rollback) { rollback.status = 'running'; showHeader(ctx); }
-  let before = null, mainAtStart = null;
+  let before = null, mainAtStart = null, leftUsage = null;
   const history = own.handoff ? screen.worker.filter((m) => m.speaker).map((m) =>
     `${m.speaker}${m.error ? ' (failed)' : ''}:\n${m.html}`).join('\n\n') : '';
   // The task's context, read once, here, before anything awaits: its discussion (for the briefing
@@ -2458,7 +2470,9 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
         ctx.workerLabel = label;
         ctx.workerHandoff = false;
       }
+      // Its usage counts for its own discussion: the one in use, or the one left meanwhile (saveLeftWorker).
       if (worker.lastUsage && worker === ctx.worker) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
+      else if (worker.lastUsage) leftUsage = worker.lastUsage;
       await recordTested(ctx, place, entry.text); // its "Tested:" line, if Git agrees
     } catch (err) {
       entry = { speaker: worker.name, text: err.message, error: true };
@@ -2482,7 +2496,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       work.running = null;
       persistWork(ctx, t.workName);
     }
-    if (rollback) await rollbackReport(ctx, rollback, entry);
+    if (rollback) await rollbackReport(ctx, rollback, entry, worker === ctx.worker ? null : worker.seat);
     if (run) reportBack(ctx, run, entry);
   } finally {
     if (ctx.workingIn) shop.writing.delete(ctx.workingIn);
@@ -2491,7 +2505,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   }
   // Its worker session and briefing, in its own discussion's checkpoint: the one in use, or the one
   // left meanwhile (saveLeftWorker).
-  if (worker === ctx.worker) saveCheckpoint(ctx); else if (worker.seat) saveLeftWorker(ctx, worker);
+  if (worker === ctx.worker) saveCheckpoint(ctx); else if (worker.seat) saveLeftWorker(ctx, worker, leftUsage);
   await refreshWorker(ctx).catch(() => {}); // the tab's checks are current when the task counts as done
   refreshQuota(ctx).catch(() => {});
   return before;

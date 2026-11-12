@@ -1194,6 +1194,94 @@ test('terminal: /new while a worker task runs, a task in the new discussion, the
   assert.equal(ctx.sessions.get(key).id, 'worker-b');
 });
 
+test('terminal: a task that leaves edits after the room switched holds its own discussion\'s worktree, named for it; only that discussion\'s instructions resolve it; and its usage counts for it', async () => {
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const { queueWork, workerHold } = await import('../src/ui.mjs');
+  const cwd = await tmp('own-hold-');
+  const git = await gitRoom(cwd);
+  const ctx = await savedRoom(cwd, 'own-hold');
+  const titles = ['Topic A', 'Topic B'];
+  ctx.suggestTitle = async () => ({ title: titles.shift() });
+  const prompts = [];
+  let release = null, tree = null;
+  // The worker in use answers as `tag`; A's first task leaves edits and reports its usage.
+  const stub = (tag, wait = false) => {
+    const w = ctx.worker;
+    w.turn = async (p) => {
+      prompts.push([tag, p]);
+      if (!wait) return `${tag} report`;
+      tree = ctx.workerDir.path;
+      writeFileSync(`${tree}/wip.txt`, 'half done\n');
+      return new Promise((r) => { release = () => { w.lastUsage = { input: 100, cached: 0, output: 7 }; r(`${tag} report`); }; });
+    };
+  };
+  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-a' });
+  await handleLine('first topic', ctx);
+  const a = ctx.discussion.name;
+  stub('A', true);
+  queueWork(ctx, 'edit things in A');
+  await until(() => release);
+  await handleLine('/new', ctx);
+  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-b' });
+  stub('B');
+  await handleLine('second topic', ctx);
+  const b = ctx.discussion.name;
+  ctx.totals.W = { input: 1, cached: 0, output: 1 }; // B's own
+  queueWork(ctx, 'task in B'); // queued behind A's (one context, one task at a time)
+  release();
+  await ctx.workQueue;
+
+  // The hold names A and A's worktree, though B is the discussion in use.
+  const held = workerLane(ctx, a).blockedBy;
+  assert.deepEqual([held.label, held.owner, held.task, held.place.lane, git('-C', tree, 'status', '--porcelain')], [a, a, 'edit things in A', a, '?? wip.txt']);
+  assert.equal(workerLane(ctx, b).blockedBy, null); // B's queue isn't held
+  const [, bPrompt] = prompts.find(([tag]) => tag === 'B');
+  assert.ok(!bPrompt.includes('Uncommitted edits are left'));
+  assert.ok(!bPrompt.includes(tree));
+  assert.equal(workerHold(ctx), null); // B can be closed: the edits are A's
+  // A's usage went to A's checkpoint, not to B's totals.
+  const saved = JSON.parse(readFileSync(await checkpointPath(cwd, a), 'utf8'));
+  assert.deepEqual([saved.totals.W?.input, saved.totals.W?.output], [100, 7]);
+  assert.deepEqual(ctx.totals.W, { input: 1, cached: 0, output: 1 });
+
+  // Back in A: its own instruction resolves the edits, told of A's task.
+  await handleLine(`/resume ${a}`, ctx);
+  assert.deepEqual([ctx.totals.W?.input, ctx.totals.W?.output], [100, 7]);
+  ctx.worker.turn = async (p) => { prompts.push(['A again', p]); git('-C', tree, 'add', 'wip.txt'); git('-C', tree, 'commit', '-q', '-m', `[${a}] finished`); return 'resolved'; };
+  queueWork(ctx, 'finish it'); await ctx.workQueue;
+  assert.match(prompts.at(-1)[1], new RegExp(`Uncommitted edits are left in your worktree from the earlier task from \\[${a}\\] "edit things in A"`));
+  assert.equal(workerLane(ctx, a).blockedBy, null);
+});
+
+test('one terminal context, two brainstorms in turn: the first one\'s leftover edits in worker/main hold the second\'s task, which is never sent as their recovery', async () => {
+  const { writeFileSync, realpathSync } = await import('node:fs');
+  const { queueWork } = await import('../src/ui.mjs');
+  const { ctx, got } = await workerRoom();
+  ctx.noScreen = true;
+  const git = await gitRoom(ctx.cwd);
+  const tree = `${realpathSync(ctx.cwd)}.worker`;
+  let release = null;
+  await handleLine('/brainstorm', ctx);
+  const first = ctx.state.brainstormId;
+  ctx.worker.turn = async (p) => { got.push(p); writeFileSync(`${tree}/wip.txt`, 'x\n'); return new Promise((r) => { release = () => r('left edits'); }); };
+  queueWork(ctx, 'brainstorm edits');
+  await until(() => release);
+  await handleLine('/brainstorm', ctx); // a new brainstorm: same context, same worktree, another owner
+  ctx.worker.turn = async (p) => { got.push(p); return 'ok'; };
+  let ran = false;
+  queueWork(ctx, 'second brainstorm task');
+  ctx.workQueue.then(() => { ran = true; });
+  release();
+  await until(() => workerLane(ctx, null).blockedBy);
+  await new Promise((r) => setTimeout(r, 300));
+  const held = workerLane(ctx, null).blockedBy;
+  assert.deepEqual([held.owner, held.label, ran, got.length], [`brainstorm:${first}`, 'brainstorm', false, 1]);
+  git('-C', tree, 'add', 'wip.txt'); git('-C', tree, 'commit', '-q', '-m', '[brainstorm] kept by hand');
+  await ctx.workQueue; // clean again: it runs as an ordinary task
+  assert.ok(!got.at(-1).includes('Uncommitted edits are left'));
+  assert.equal(got.at(-1).split('\n').at(-1), 'second brainstorm task');
+});
+
 test('terminal: a brainstorm\'s worker session is never carried into a discussion, by New discussion or Resume', async () => {
   const { mkdirSync } = await import('node:fs');
   const ctx = await freshSession([], async () => ({ title: 'Topic' }));
@@ -1875,7 +1963,7 @@ test('leftover edits hold their own lane for their origin, which can recover the
   queueWork(first, 'make wip');
   await first.workQueue;
   assert.equal(workerLane(first).blockedBy.origin, first);
-  assert.match(first.notes.at(-1), /The worker left uncommitted edits from "make wip": this discussion's worker lane holds them until they are resolved \(other discussions' tasks go on\)/);
+  assert.match(first.notes.at(-1), new RegExp(`The worker left uncommitted edits from "make wip": the worker lane of \\[${first.discussion.name}\\] holds them until they are resolved \\(other discussions' tasks go on\\)`));
   queueWork(second, 'other work'); // another lane: not held
   await second.workQueue;
   assert.deepEqual([second.prompts.length, workerLane(second).blockedBy, workerLane(first).blockedBy.origin], [1, null, first]);
