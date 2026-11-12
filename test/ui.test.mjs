@@ -1610,8 +1610,9 @@ test('Quit room during a round: after the grace period the agent mid-turn is sto
   const { quitRequested, QUIT_GRACE_MS } = await import('../src/ui.mjs');
   const home = mkdtempSync(join(tmpdir(), 'quit-round-')), bin = join(home, 'bin'), pidFile = join(home, 'pid');
   mkdirSync(bin);
-  // A claude whose turn never ends by itself (a minute, far past this test).
-  writeFileSync(join(bin, 'claude'), `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetTimeout(() => console.log('{"result":"late"}'), 60000);\n`, { mode: 0o755 });
+  // A claude whose turn never ends by itself (a minute, far past this test). Its PID is written whole:
+  // a temporary file renamed into place, so a reader never sees an empty or partial ID.
+  writeFileSync(join(bin, 'claude'), `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(pidFile + '.tmp')}, String(process.pid));\nrequire('node:fs').renameSync(${JSON.stringify(pidFile + '.tmp')}, ${JSON.stringify(pidFile)});\nsetTimeout(() => console.log('{"result":"late"}'), 60000);\n`, { mode: 0o755 });
   const path = process.env.PATH;
   process.env.PATH = bin + ':' + path;
   try {
@@ -1621,7 +1622,10 @@ test('Quit room during a round: after the grace period the agent mid-turn is sto
     ctx.usage = { ...ctx.usage, fetchQuota: async () => null };
     const round = handleLine('a turn that never ends', ctx);
     for (let i = 0; i < 100 && !existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(existsSync(pidFile), 'the fake claude never wrote its PID');
     const pid = Number(readFileSync(pidFile, 'utf8'));
+    // 0 would make the check below pass or fail by accident: process.kill(0, 0) signals this test's own group.
+    assert.ok(pid > 0, `the fake claude's PID should be positive: read ${pid}`);
     const t0 = Date.now();
     quitRequested(ctx, 300);
     await round; // the round ends because its agent was stopped
