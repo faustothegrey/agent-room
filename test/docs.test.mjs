@@ -216,6 +216,19 @@ test('the Worker tab: instructions reach the worker only from the page, and a ne
   }
 });
 
+test('showing the Worker tab asks the room to recheck its branches, only from the room page', async () => {
+  let asked = 0;
+  const s = await serve(fixture(), { clients: new Set(), transcript: [], refreshWorker: () => { asked++; } });
+  try {
+    assert.equal((await postFrom(s, '/__workerinfo', {})).status, 204);
+    assert.equal((await postFrom(s, '/__workerinfo', {}, { origin: 'https://evil.example' })).status, 403);
+    assert.equal(asked, 1);
+  } finally { s.close(); }
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const showTab = source.slice(source.indexOf('function showTab('), source.indexOf("$('tab-talk').onclick"));
+  assert.match(showTab, /if \(name === 'work'\) \{[^}]*post\('__workerinfo', \{\}\)/);
+});
+
 test('without a worker input (terminal mode), /__work is refused', async () => {
   const s = await serve(fixture(), { clients: new Set(), transcript: [] });
   assert.equal((await postFrom(s, '/__work', { text: 'hi' })).status, 409);

@@ -685,6 +685,145 @@ test('worker/main catches up with the room only when strictly behind with a clea
   assert.ok(ctx.screen.workerInfo.lines.some((l) => /behind the room and has commits of its own: it is left as it is/.test(l)));
 });
 
+// ── Lanes: a worktree and branch per discussion ──
+test('each discussion works in its own lane, <repo>.workers/<name>/ on worker/<name>; before the first message and in a brainstorm, worker/main; a saved session is told its worktree changed', async () => {
+  const { realpathSync } = await import('node:fs');
+  const { ctx, got } = await workerRoom();
+  ctx.noScreen = true; // terminal mode: one discussion at a time
+  const git = await gitRoom(ctx.cwd);
+  const root = realpathSync(ctx.cwd);
+  await work(ctx, 'before the first message');
+  assert.equal(ctx.workerDir.path, `${root}.worker`);
+  let resets = 0;
+  ctx.worker.reset = () => { resets++; };
+  await handleLine('hello', ctx);
+  const name = ctx.discussion.name;
+  await work(ctx, 'in the discussion');
+  assert.equal(ctx.workerDir.path, `${root}.workers/${name}`);
+  assert.equal(git('-C', ctx.workerDir.path, 'rev-parse', '--abbrev-ref', 'HEAD'), `worker/${name}`);
+  assert.equal(git('rev-parse', `worker/${name}`), git('rev-parse', 'HEAD')); // from the room's HEAD
+  assert.ok(got[1].includes(`Your worktree has changed: until now you worked in ${root}.worker; from now on you work in ${root}.workers/${name}, on the branch worker/${name}. Leave ${root}.worker alone from now on`));
+  assert.ok(got[1].includes(`commit it on worker/${name} with a message starting "[${name}]"`));
+  assert.equal(resets, 0); // the same session continues
+  await work(ctx, 'again');
+  assert.equal(got[2], 'again'); // told once
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main'); // the room's branch is unchanged
+  await handleLine('/brainstorm', ctx);
+  await work(ctx, 'brainstorm task');
+  assert.equal(ctx.workerDir.path, `${root}.worker`);
+  assert.ok(got[3].includes(`until now you worked in ${root}.workers/${name}; from now on you work in ${root}.worker, on the branch worker/main.`));
+});
+
+test('a task queued before the discussion\'s first message stays on worker/main, even if it runs after the message created the discussion', async () => {
+  const { realpathSync } = await import('node:fs');
+  const { queueWork } = await import('../src/ui.mjs');
+  const { ctx, got } = await workerRoom();
+  ctx.noScreen = true;
+  await gitRoom(ctx.cwd);
+  const root = realpathSync(ctx.cwd);
+  let finish;
+  const dirs = [];
+  ctx.worker.turn = (p) => { got.push(p); dirs.push(ctx.workerDir.path); return got.length === 1 ? new Promise((r) => { finish = r; }) : 'ok'; };
+  queueWork(ctx, 'first');
+  await until(() => finish);
+  queueWork(ctx, 'queued before the message');
+  await handleLine('hello', ctx); // creates the discussion while both wait
+  queueWork(ctx, 'after the message');
+  finish('done');
+  await ctx.workQueue;
+  assert.deepEqual(dirs, [`${root}.worker`, `${root}.worker`, `${root}.workers/${ctx.discussion.name}`]);
+});
+
+test('migration: a discussion\'s lane waits while worker/main has uncommitted edits or that discussion\'s commits not in main, which are left where they are; Defer counts those commits too', async () => {
+  const { writeFileSync, existsSync, mkdirSync, realpathSync } = await import('node:fs');
+  const { ensureWorktree, workerPlace } = await import('../src/ui.mjs');
+  const { ctx } = await workerRoom();
+  const git = await gitRoom(ctx.cwd);
+  await work(ctx, 'before lanes'); // no discussion: worker/main, in <repo>.worker/
+  const shared = `${realpathSync(ctx.cwd)}.worker`;
+  const name = '2026-11-12-old-topic';
+  mkdirSync(`${ctx.cwd}/discussions/${name}`, { recursive: true });
+  git('-C', shared, 'commit', '-q', '--allow-empty', '-m', `[${name}] earlier work`);
+  const kept = git('rev-parse', 'worker/main');
+  const lane = await workerPlace(ctx.cwd, name);
+  await assert.rejects(ensureWorktree(lane), new RegExp(`worker/main has commits of \\[${name}\\] not in main: ${kept.slice(0, 7)}\\. Merge worker/main into main first`));
+  await handleLine(`/move ${name} deferred`, ctx);
+  assert.match(ctx.notes.at(-1), new RegExp(`${name} can't be deferred: commits on worker/main are not merged into main: ${kept}`));
+  writeFileSync(`${shared}/wip.txt`, 'x\n');
+  await assert.rejects(ensureWorktree(lane), /\.worker \(worker\/main\) has uncommitted edits: this discussion's own worktree is not created until they are committed or resolved there/);
+  assert.equal(existsSync(lane.path), false);
+  assert.equal(git('branch', '--list', `worker/${name}`), '');
+  assert.equal(git('rev-parse', 'worker/main'), kept); // never moved, dropped or rewritten
+  assert.equal(git('-C', shared, 'status', '--porcelain'), '?? wip.txt');
+  git('-C', shared, 'add', 'wip.txt'); git('-C', shared, 'commit', '-q', '-m', 'brainstorm work');
+  git('merge', '-q', '--no-ff', 'worker/main', '-m', 'User merges worker/main');
+  await ensureWorktree(lane);
+  assert.equal(git('-C', lane.path, 'rev-parse', '--abbrev-ref', 'HEAD'), `worker/${name}`);
+  assert.equal(git('rev-parse', `worker/${name}`), git('rev-parse', 'main'));
+  const bad = await workerPlace(ctx.cwd, '2026-11-12-has space');
+  assert.match(bad.disabled, /can't be a Git branch name/);
+});
+
+test('the Worker tab checks each branch with work not in main: whether it contains main, the commits its worker last reported testing, and an advisory merge preview that changes no branch, worktree or index', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { refreshWorker } = await import('../src/ui.mjs');
+  const { ctx, got } = await workerRoom();
+  ctx.noScreen = true;
+  const git = await gitRoom(ctx.cwd);
+  writeFileSync(`${ctx.cwd}/shared.txt`, 'base\n'); git('add', 'shared.txt'); git('commit', '-q', '-m', 'base');
+  const [major, minor] = execFileSync('git', ['version']).toString().match(/(\d+)\.(\d+)/).slice(1).map(Number);
+  const preview = major > 2 || (major === 2 && minor >= 38); // merge-tree --write-tree
+  await handleLine('hello', ctx);
+  const name = ctx.discussion.name, branch = `worker/${name}`;
+  const lines = () => ctx.screen.workerInfo.lines;
+  let reply;
+  ctx.worker.turn = async (p) => { got.push(p); return typeof reply === 'function' ? reply() : reply; };
+  reply = () => { const tree = ctx.workerDir.path; writeFileSync(`${tree}/shared.txt`, 'worker\n'); git('-C', tree, 'commit', '-q', '-am', `[${name}] change`); return 'committed'; };
+  await work(ctx, 'change it');
+  const main1 = git('rev-parse', 'main');
+  assert.ok(lines().includes(`${branch} contains current main (${main1.slice(0, 7)}).`));
+  assert.ok(lines().includes(`${branch}: no test report on top of main from its worker yet.`));
+  const advice = `Merge preview of ${branch} into main (advice only: it can go stale, and a clean merge doesn't prove the combined code works)`;
+  if (preview) assert.ok(lines().includes(`${advice}: clean.`));
+  else assert.ok(!lines().some((l) => l.startsWith('Merge preview'))); // not shown with an older Git
+
+  // Main moves on with a clashing change: the checks say so, and the preview touches nothing.
+  writeFileSync(`${ctx.cwd}/shared.txt`, 'main\n'); git('commit', '-q', '-am', 'main change');
+  const main2 = git('rev-parse', 'main');
+  const state = () => [git('for-each-ref'), git('status', '--porcelain'), git('-C', ctx.workerDir.path, 'status', '--porcelain'), git('diff', '--cached'), git('-C', ctx.workerDir.path, 'diff', '--cached')];
+  const before = state();
+  await refreshWorker(ctx);
+  assert.deepEqual(state(), before);
+  assert.ok(lines().includes(`${branch} lacks 1 commit of current main (${main2.slice(0, 7)}): its worker merges main in with its next instruction. Merge it into main after that, once its tests pass on top of main.`));
+  if (preview) assert.ok(lines().includes(`${advice}: would conflict in shared.txt.`));
+
+  // The next task merges main, resolves, tests, and names the commits it tested.
+  reply = () => {
+    const tree = ctx.workerDir.path;
+    try { git('-C', tree, 'merge', 'main', '--no-edit'); } catch {} // the conflict
+    writeFileSync(`${tree}/shared.txt`, 'both\n'); git('-C', tree, 'commit', '-q', '-am', `[${name}] catch up with main`);
+    return `npm test: 3 passed\nTested: ${git('-C', tree, 'rev-parse', 'HEAD')} with main ${main2}: tests passed`;
+  };
+  await work(ctx, 'next');
+  assert.match(got.at(-1), /After a successful merge, run the project's tests \(npm test, if it has them\) and report their real output/);
+  const tip = git('rev-parse', branch);
+  assert.ok(lines().includes(`${branch} contains current main (${main2.slice(0, 7)}).`));
+  assert.ok(lines().some((l) => l.startsWith(`Last tested (the worker's report): ${branch} ${tip.slice(0, 7)} with main ${main2.slice(0, 7)}, tests passed, `) && l.endsWith('Still current.')));
+  if (preview) assert.ok(lines().includes(`${advice}: clean.`));
+
+  // Rechecked when shown again: main has moved, so the report is out of date.
+  git('commit', '-q', '--allow-empty', '-m', 'main moves on');
+  const main3 = git('rev-parse', 'main');
+  await refreshWorker(ctx);
+  assert.ok(lines().some((l) => l.startsWith('Last tested') && l.endsWith(`Out of date: main is now at ${main3.slice(0, 7)}.`)));
+  // A "Tested:" line Git doesn't agree with is reported, not recorded.
+  reply = `Tested: ${main3} with main ${main2}: tests passed`; // main's commit, not one on the branch
+  await work(ctx, 'claim');
+  assert.ok(ctx.screen.worker.some((m) => m.note === `✗ The worker's "Tested:" line was not recorded: ${main3.slice(0, 7)} is not on ${branch}.`));
+  assert.ok(lines().some((l) => l.startsWith(`Last tested (the worker's report): ${branch} ${tip.slice(0, 7)}`)));
+});
+
 test('the header\'s version: the checkout\'s commit and uncommitted changes, outside discussions/, as a snapshot', async () => {
   const { mkdtempSync, mkdirSync, writeFileSync, realpathSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
@@ -1093,7 +1232,7 @@ test('auto dev: Start relays the instruction; the report starts a round; one SEN
   const draft = prompts.filter((p) => /asked for a summary of the discussion/.test(p)).at(-1);
   assert.match(draft, /Passing on a version accepts its quoted instruction for the worker exactly as it stands/);
   assert.match(draft, /End the summary with one last line: Outcome: SEND, Outcome: FINISH or Outcome: WAIT FOR USER/);
-  assert.match(ctx.notes.at(-1), /Auto dev finished\. Review and merge worker\/main yourself/);
+  assert.equal(ctx.notes.at(-1), `Auto dev finished. Review and merge worker/${ctx.discussion.name} yourself.`); // its own lane's branch
 });
 
 test('auto dev: at most 5 worker cycles per start; the 5th report is still reviewed; Restart grants 5 more', async () => {
@@ -1184,7 +1323,7 @@ test('auto dev: while paused, any agreed summary ending in Outcome: FINISH finis
   await handleLine('is it done?', ctx);
   await settle();
   assert.deepEqual([ctx.autoDev.status, ctx.autoDev.reason, ctx.autoDev.cycle, got.length], ['finished', null, 1, 1]);
-  assert.match(ctx.notes.at(-1), /^Auto dev finished\. Review and merge worker\/main yourself\.$/);
+  assert.equal(ctx.notes.at(-1), `Auto dev finished. Review and merge worker/${ctx.discussion.name} yourself.`); // its own lane's branch
   assert.match(readFileSync(ctx.logPath, 'utf8'), /_\(auto dev finished\)_/);
   assert.equal(ctx.screen.room.autoDev.status, 'finished');
   // With the run finished, summaries are as before.
@@ -1322,7 +1461,7 @@ test('on the screen, New discussion keeps the discussion open with its sessions;
   assert.equal(hub.rooms.size, 4);
 });
 
-test('one shared worker queue: tasks labelled by origin, one worker session each, reports back there; Close discussion; Quit room closes them all', async () => {
+test('one shared worker queue: tasks labelled by origin, one worker session and lane each, reports back there; Close discussion; Quit room closes them all', async () => {
   const { readFileSync, realpathSync } = await import('node:fs');
   const { queueWork, reloaded } = await import('../src/ui.mjs');
   const commit = (msg) => (ctx) => { const g = (...a) => require('node:child_process').execFileSync('git', ['-C', ctx.shop.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]); g('commit', '-q', '--allow-empty', '-m', msg); return 'committed'; };
@@ -1337,7 +1476,7 @@ test('one shared worker queue: tasks labelled by origin, one worker session each
   queueWork(second, 'task for b');
   await Promise.all([first.workQueue, second.workQueue]);
   assert.equal(first.shop, second.shop); // one queue, one Worker tab
-  assert.match(first.prompts[0], new RegExp(`These instructions come from \\[${first.discussion.name}\\]\\. When a task is complete, commit it on worker/main with a message starting "\\[${first.discussion.name}\\]" and give the commit ID in your reply`));
+  assert.match(first.prompts[0], new RegExp(`These instructions come from \\[${first.discussion.name}\\]\\. When a task is complete, commit it on worker/${first.discussion.name} with a message starting "\\[${first.discussion.name}\\]" and give the commit ID in your reply`));
   assert.match(second.prompts[0], new RegExp(`come from \\[${second.discussion.name}\\]`));
   assert.match(first.prompts[0], new RegExp(`The active discussion's folder is ${first.discussion.dir}:`)); // its own folder, its own session
   assert.match(second.prompts[0], new RegExp(`The active discussion's folder is ${second.discussion.dir}:`));
@@ -1347,7 +1486,10 @@ test('one shared worker queue: tasks labelled by origin, one worker session each
   assert.match(readFileSync(second.logPath, 'utf8'), /task for b/);
   assert.ok(first.shop.log.some((m) => m.note && new RegExp(`Commits without the \\[${second.discussion.name}\\] label: [0-9a-f]+ no label`).test(m.note)));
   assert.ok(!first.shop.log.some((m) => m.note?.includes(`[${first.discussion.name}] label`)));
-  assert.equal(realpathSync(first.shop.workerDir.path), `${realpathSync(first.cwd)}.worker`);
+  // Each discussion's task ran in its own lane, and committed on its own branch.
+  assert.equal(realpathSync(first.shop.workerDir.path), `${realpathSync(first.cwd)}.workers/${second.discussion.name}`); // the last task's
+  const subject = (branch) => require('node:child_process').execFileSync('git', ['-C', first.cwd, 'log', '-1', '--format=%s', branch]).toString().trim();
+  assert.deepEqual([subject(`worker/${first.discussion.name}`), subject(`worker/${second.discussion.name}`)], [`[${first.discussion.name}] done`, 'no label']);
 
   await handleLine('/close', second); // the others stay open
   assert.deepEqual(second.queued, ['/quit']);
@@ -1391,7 +1533,7 @@ test('leftover edits hold the shared queue for their origin, which can recover t
 
   queueWork(first, 'finish it'); // its origin's recovery goes through, with the first task's details
   await first.workQueue;
-  assert.match(first.prompts[1], new RegExp(`Uncommitted edits are left in your worktree from the earlier task from \\[${first.discussion.name}\\] "make wip" \\(worker/main was at [0-9a-f]{7} when it started\\)`));
+  assert.match(first.prompts[1], new RegExp(`Uncommitted edits are left in your worktree from the earlier task from \\[${first.discussion.name}\\] "make wip" \\(worker/${first.discussion.name} was at [0-9a-f]{7} when it started\\)`));
   assert.match(first.prompts[1], /first list exactly the edits you would remove and wait for the User's explicit approval/);
   await second.workQueue;
   assert.equal(otherRan, true);
@@ -1590,9 +1732,9 @@ test('Stage 2: Defer refuses labelled commits absent from main and permits them 
   queueWork(first, 'work'); await first.workQueue;
   const name = first.discussion.name;
   await handleLine(`/move ${name} deferred`, second);
-  assert.match(second.notes.at(-1), /can't be deferred: commits on worker\/main are not merged into main: [0-9a-f]+/);
+  assert.match(second.notes.at(-1), new RegExp(`can't be deferred: commits on worker/${name} are not merged into main: [0-9a-f]+`)); // its own lane's branch
   assert.ok(existsSync(`${first.cwd}/discussions/${name}`));
-  git('merge', '--no-ff', 'worker/main', '-m', 'merge worker');
+  git('merge', '--no-ff', `worker/${name}`, '-m', 'merge worker');
   await handleLine(`/move ${name} deferred`, second);
   assert.ok(existsSync(`${first.cwd}/discussions/deferred/${name}`));
 });
@@ -1680,8 +1822,9 @@ test('Stage 3: a diverged clean worker is instructed to merge main normally befo
   const { writeFileSync } = await import('node:fs');
   const { first, git } = await multiRoom({ worker: (c, p) => {
     if (p.endsWith('catch up task')) {
-      assert.match(p, /first merge main into worker\/main with a normal merge/);
+      assert.match(p, new RegExp(`first merge main into worker/${c.discussion.name} with a normal merge`));
       assert.match(p, /If it clashes, do not force it or do the requested task/);
+      assert.match(p, new RegExp(`After a successful merge, run the project's tests \\(npm test, if it has them\\) and report their real output, then end your reply with the line "Tested: <full commit ID of worker/${c.discussion.name}> with main <full commit ID of main>: tests passed"`));
       execFileSync('git', ['-C', c.shop.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', 'main', '-m', `[${c.discussion.name}] catch up with main`]);
     }
     return 'done';
@@ -1763,7 +1906,7 @@ test('Stage 3: clean merge, revert and sequencer states hold dispatch and surviv
     queueWork(first, 'leave operation'); await first.workQueue;
     const tree = first.shop.workerDir.path;
     assert.equal(git('-C', tree, 'status', '--porcelain'), ''); // operation alone must hold
-    assert.equal((await worktreeStatus(await workerPlace(first.cwd))).treeDirty, true);
+    assert.equal((await worktreeStatus(await workerPlace(first.cwd, first.discussion.name))).treeDirty, true); // its own lane
     for (const c of contexts()) { clearTimeout(c.shop?.recheck); delete c.shop; }
     await recoverWorkerOwner(second);
     assert.equal(second.shop.blockedBy.origin, first);
@@ -1813,7 +1956,7 @@ test('Stage 3: rollback includes merged implementation, never restores prior rol
   const second = contexts()[1]; await handleLine('topic-b', second);
   const name = first.discussion.name;
   queueWork(first, 'implement'); await first.workQueue;
-  git('merge', '--no-ff', 'worker/main', '-m', 'User merges implementation');
+  git('merge', '--no-ff', `worker/${name}`, '-m', 'User merges implementation'); // its own lane's branch
   assert.equal(existsSync(`${first.cwd}/feature.txt`), true);
   git('commit', '--allow-empty', '-qm', 'main advances again');
   await handleLine(`/rollback ${name}`, second); await first.workQueue;
@@ -1828,7 +1971,7 @@ test('Stage 3: rollback includes merged implementation, never restores prior rol
   assert.match(second.notes.at(-1), /explicit archive confirmation/);
   await handleLine(`/archive-rollback ${name}`, second);
   assert.equal(existsSync(`${first.cwd}/discussions/archive/${name}`), true);
-  git('merge', '--no-ff', 'worker/main', '-m', 'User merges rollback');
+  git('merge', '--no-ff', `worker/${name}`, '-m', 'User merges rollback');
   assert.equal(existsSync(`${first.cwd}/feature.txt`), false);
   await handleLine(`/move archive/${name} active`, second);
   await handleLine(`/rollback ${name}`, second); await first.workQueue;
@@ -1843,7 +1986,7 @@ test('Stage 3: rollback includes merged implementation, never restores prior rol
 });
 
 test('Stage 3: an ambiguous or failed rollback report cannot authorize archiving', async () => {
-  const { first, contexts, git } = await multiRoom({ worker: (c) => `Ambiguous earlier revert: no files changed.\nRollback ready: ${git('rev-parse', 'worker/main')}` });
+  const { first, contexts, git } = await multiRoom({ worker: (c) => `Ambiguous earlier revert: no files changed.\nRollback ready: ${git('rev-parse', `worker/${c.discussion.name}`)}` }); // its own lane's branch
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
   const name = first.discussion.name;
@@ -1851,7 +1994,7 @@ test('Stage 3: an ambiguous or failed rollback report cannot authorize archiving
   assert.equal(first.shop.rollbacks.get(name).status, 'needs review'); // marker alone isn't sufficient
   await handleLine(`/archive-rollback ${name}`, second);
   assert.match(second.notes.at(-1), /No successful rollback report/);
-  assert.equal(git('rev-parse', 'worker/main'), git('rev-parse', 'main'));
+  assert.equal(git('rev-parse', `worker/${name}`), git('rev-parse', 'main'));
 });
 
 test('Stage 3: Explorer queues rollback separately from two-click archive confirmation after a report', async () => {

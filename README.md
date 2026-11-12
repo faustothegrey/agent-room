@@ -197,7 +197,7 @@ taken in `archive/` and `deferred/`.
 
 **Several open discussions** (on the screen). A folder can have
 several discussions open at once, each with its own agents' sessions, chat and auto dev, sharing
-one worker. One window shows one of them; Explorer marks the others "open". **Resume** shows an open one as
+one worker queue (each has its own worker session and worktree, below). One window shows one of them; Explorer marks the others "open". **Resume** shows an open one as
 it is: its agents carry on, nothing is restarted. An open brainstorm, or an open discussion that
 hasn't started (no message yet), has **Go to** instead, which only shows it. **New discussion** opens
 the new one beside the discussion in use, which stays open, and ends an open brainstorm. Resume
@@ -264,7 +264,7 @@ that time and that any turns it remembers after that are not in the room's recor
 whose first turn never completed gets a new ID.
 
 The checkpoint also records each worker task: when it is queued, and as soon as it starts (then
-with worker/main's commit at that moment). After Quit, Restart or a crash, Resume reports in the
+with its branch's commit at that moment). After Quit, Restart or a crash, Resume reports in the
 Worker tab and, as one agent-room message, in the chat, each task that was interrupted, with what
 the worktree shows now: uncommitted edits (the queue holds as usual), commits made before the reply
 was lost, nothing left in the worktree, or "Result unknown: … Check the worktree" when it stopped
@@ -314,7 +314,7 @@ says it is already open in another window, and no window opens. If it has none, 
 **Cancel** creates nothing. The new room uses saved agent defaults if present, otherwise the current
 room's choices. Create room can only create the room for the folder the server's own chooser just
 returned (a one-time token), so a page can't name a folder. Two rooms in the same Git repository would
-share one worker worktree: the room opened later there gets no worker, and its Worker tab says why.
+share the worker's worktrees: the room opened later there gets no worker, and its Worker tab says why.
 Cancelling the chooser leaves everything as it was.
 
 ## Choose providers and models
@@ -389,7 +389,7 @@ worker still reports, but nothing more is sent), or after 5 worker cycles (faile
 the 5th report is still reviewed). When paused, the next agreed instruction is shown with **Restart
 auto dev**, which grants another 5 cycles. While paused, any summary asks for `Outcome: FINISH`
 or `WAIT FOR USER` instead, and sends nothing. An agreed `FINISH`, running or paused, ends the run:
-review and merge `worker/main` yourself, as ever. An instruction that can't be read reliably from Next step (two of them, no
+review and merge the discussion's branch (`worker/<name>`) yourself, as ever. An instruction that can't be read reliably from Next step (two of them, no
 closing quotation mark…) is never sent, and the page says why. Reload keeps a run, its cycle count
 and what was sent; a relay whose result is lost pauses the run. Resume, Start fresh, Close discussion, Restart
 and Quit room end it (a resumed discussion comes back without its run); in the terminal, New
@@ -518,34 +518,81 @@ folders are deleted while their commits remain in Git. There is no Continue here
 or Fork. Replication has been tested locally; LAN and Raspberry Pi validation
 remain separate deployment checks.
 
-## The worker's worktree
+## The worker's worktrees
 
-The worker never edits the room's own files. It works in its own Git worktree of the room's
-repository, in the sibling folder `<repo>.worker/` (for agent-room:
-`/Users/fausto/Software/agent-room.worker/`), on the branch `worker/main`. Its notes still go in
-the room's discussion folder. The Worker tab shows the worktree, its branch and the commit it is
-based on, and says when the room has uncommitted changes the worker can't see, or when
-`worker/main` has commits that aren't in the room. You review and merge them yourself
-(`git merge worker/main` in the room); nothing is merged automatically.
+The worker never edits the room's own files. It works in a Git worktree of the room's repository,
+one per discussion: `<repo>.workers/<folder-name>/` on the branch `worker/<folder-name>` (for
+agent-room: `/Users/fausto/Software/agent-room.workers/<folder-name>/`). A brainstorm, and a task
+sent before a discussion's first message (when it has no name yet), use `<repo>.worker/` on
+`worker/main`, the one worktree every discussion shared before. Its notes still go in the room's
+discussion folder. The folder's discussions still share one queue: one task runs at a time, in the
+order sent. You review and merge each discussion's branch yourself (`git merge
+worker/<folder-name>` in the room); nothing is merged automatically.
 
-- The worktree is created at the worker's first instruction, from the room's `HEAD`, and reused
-  after Reload or Restart. An existing `worker/main` is reattached. If something else is already at
-  that folder, the worker refuses to run and changes nothing.
-- Before each instruction, `worker/main` catches up with the room's `HEAD`, by fast-forward only,
-  when it is strictly behind it and its worktree is clean. Otherwise it is left as it is, and the
-  tab says why. agent-room's own code never resets, merges, rebases or deletes the worktree or its
-  branch, and never touches the room's own index, branch or files. The worker itself may do such Git
-  actions in its worktree when you explicitly ask (a rollback's reverts, merging main into
-  `worker/main` to catch up or for rollback, or abandoning an attempt after listing the edits and
-  getting your approval).
-- When clean `worker/main` still lacks commits from `main` (including diverged history), the
-  task tells the worker to merge main normally before doing its work. A clash is not forced:
-  the worker reports it and the queue holds for that origin's recovery. An unfinished merge or
-  revert holds dispatch even if `git status` otherwise shows no edits. The existing strictly-behind
-  fast-forward remains; agent-room does not perform a normal merge or revert itself.
+- A worktree is created at its first instruction, from the room's `HEAD`, and reused after Reload
+  or Restart. An existing branch is reattached. If something else is already at that folder, the
+  worker refuses to run and changes nothing. A discussion folder whose name can't be a branch name
+  (a space, say) has no worktree; its Worker tab says so.
+- **From one shared worktree to one per discussion.** Commits already on `worker/main` stay there:
+  nothing moves, drops or rewrites them. A discussion's own worktree is not created while
+  `<repo>.worker/` has uncommitted edits, nor while `worker/main` has that discussion's labelled
+  commits that aren't in main: its first task then fails with the reason, and you merge
+  `worker/main` (or have its edits committed) first. A discussion's saved worker session continues,
+  and its first instruction in the new worktree tells it its working directory has changed.
+- **The Worker tab** shows the worktree of the discussion shown, then every other branch with
+  commits not in main or uncommitted edits: the folder, branch and base commit, uncommitted edits,
+  commits on each side. For a branch with commits not in main it also says:
+  - whether it contains main's current commit, naming it, or how many of main's commits it lacks;
+  - the commits its worker last reported testing together, from its reply's last
+    `Tested: <branch commit> with main <main commit>: tests passed|failed` line (recorded only
+    if Git agrees: the branch commit is on the branch, it contains the main commit, which is
+    main's), and whether either branch has moved since. This is the worker's report: agent-room
+    doesn't run the tests itself;
+  - with Git 2.38 or newer, a merge preview: "clean", or the files that would conflict
+    (`git merge-tree --write-tree`). It is advice only: it can go stale as soon as either branch
+    moves, and a clean merge doesn't prove the combined code works. It changes no branch,
+    worktree or index, but it writes Git objects that nothing refers to (the merged tree); Git's
+    own cleanup (`git gc`, which also runs by itself from time to time) removes them. With an
+    older Git there is no preview.
+
+  These checks are made again after each task and whenever the Worker tab is shown.
+- Before each instruction, the discussion's branch catches up with the room's `HEAD`, by
+  fast-forward only, when it is strictly behind it and its worktree is clean. Otherwise it is left
+  as it is, and the tab says why. agent-room's own code never resets, merges, rebases or deletes a
+  worktree or its branch, and never touches the room's own index, branch or files. The worker
+  itself may do such Git actions in its worktree when you explicitly ask (a rollback's reverts,
+  merging main into its branch to catch up or for rollback, or abandoning an attempt after listing
+  the edits and getting your approval).
+- When a clean branch still lacks commits from `main` (including diverged history), the task tells
+  the worker to merge main normally before doing its work, then to run the project's tests (`npm
+  test`, if it has them), report their real output and end with its `Tested:` line. A clash is
+  not forced: the worker reports it and the queue holds for that origin's recovery. An unfinished
+  merge or revert holds dispatch even if `git status` otherwise shows no edits. The existing
+  strictly-behind fast-forward remains; agent-room does not perform a normal merge or revert itself.
+- **Merging a branch into main** (you do it, in the room):
+  - First check that the discussion has no worker task running or queued, that the room's `git
+    status` shows no tracked edits outside `discussions/`, and that the Worker tab says the branch
+    contains current main with a test report that is "Still current". If main has moved since,
+    ask that discussion's worker to catch up with main first: then `git merge worker/<name>`
+    can't conflict.
+  - If you merge anyway and it clashes, Git prints `CONFLICT (content): Merge conflict in <file>`
+    and `Automatic merge failed`, exits with 1, and `git status` marks the files `UU`; nothing is
+    committed. `git merge --abort` puts the room back as it was. Then ask the discussion's worker
+    to catch up with main, and merge again.
+  - If `git merge --abort` itself fails (for example `fatal: There is no merge to abort
+    (MERGE_HEAD missing)`), look at `git status` and `git diff` before anything else. In one case
+    we tested (2026-11-12, a disposable repository), `git reset --merge` then put the conflicted
+    file back and kept unrelated uncommitted edits, but that was one case, not a guarantee: for
+    instance, it discards whatever you changed in the conflicted files after the merge started. Don't use `git reset --hard` while you have
+    uncommitted work of your own in the room.
+  - A merge without conflicts can still break the combined code (one side renames a function the
+    other calls). The worker's tests on top of current main are the main defence; to check a merge
+    yourself, `git merge --no-ff --no-commit worker/<name>`, run the tests, then `git commit` or
+    `git merge --abort`.
 - **Archive with rollback** (`/rollback <folder-name>`) queues one ordinary worker task for that
-  discussion. It inspects all labelled implementation commits, including those already merged into
-  main, and earlier rollback/revert history; ambiguous sets or unsafe dependencies are reported
+  discussion, in its own worktree and branch. It inspects all labelled implementation commits,
+  including those already merged into main and older ones on `worker/main`, and earlier
+  rollback/revert history, and looks for dependent work in main and in other discussions' branches; ambiguous sets or unsafe dependencies are reported
   before editing. The worker brings in main when needed, reverts the intended commits newest first,
   runs `npm test`, commits with the discussion label and rollback trailers, and reports its commit,
   real test output, dependencies on other origins and unchecked limits. It never reverts an earlier
@@ -554,7 +601,7 @@ based on, and says when the room has uncommitted changes the worker can't see, o
   Nothing is archived automatically; existing Archive guards apply. Changed worker state requires
   a fresh report. Reload keeps the report; Restart loses this in-memory confirmation, so request a
   fresh report. The User keeps the final merge into main; no automatic conflict-free rollback is promised.
-- The worker commits every completed task on `worker/main`, with a message starting with its origin
+- The worker commits every completed task on its branch, with a message starting with its origin
   in brackets (`[<discussion folder name>]`, or `[brainstorm]`) and the commit ID in its reply.
   agent-room reports commits without that label. Each instruction in the Worker tab shows its
   origin, and its reply goes back to that discussion's transcript.
@@ -562,13 +609,15 @@ based on, and says when the room has uncommitted changes the worker can't see, o
   transcript notice lists other origins' completed labelled commits and changed files not yet
   reported to that discussion. Switching to it starts no agents and adds no notice. The record
   of notices survives Reload; Restart starts a fresh in-memory record.
-- Defer refuses a discussion with `[origin]` commits on `worker/main` absent from `main`'s history;
-  a normal merge into main clears that guard (squash merges are outside this feature).
-- **Leftover edits:** agent-room checks the worktree after each task and again before the next. If
-  a task leaves uncommitted edits, the queue holds and its origin is told; only that origin's own
+- Defer refuses a discussion whose branch `worker/<name>` has commits absent from `main`'s
+  history, or with `[origin]` commits on `worker/main` absent from it; a normal merge into main
+  clears that guard (squash merges are outside this feature).
+- **Leftover edits:** agent-room checks the worktrees after each task and again before the next. If
+  a task leaves uncommitted edits in any of them, the folder's one queue holds and its origin is
+  told; only that origin's own
   instructions go through (to finish and commit them, or to abandon them), with the first task's
   details. That discussion can't be closed, archived or deferred meanwhile. Uncommitted edits of
-  unknown origin hold every task until the folder is clean (commit or remove them yourself); they
+  unknown origin hold every task until that worktree is clean (commit or remove them yourself); they
   are never given to a new task. Before starting work, agent-room saves the origin, full task text
   and starting commit in the worktree's private Git directory (never committed). Recovery keeps
   that original record until the folder is clean. After Restart it holds for that origin if it
@@ -601,7 +650,7 @@ pane's requests get the same loopback, Host and Origin checks (without a token),
 must be JSON. There is no remote stop,
 automatic recovery after a crash (Resume each discussion from its checkpoint), streaming reply
 display, or live app preview. Discussion-to-worker relay exists only as auto dev
-(above), started from the screen; merging `worker/main` stays manual.
+(above), started from the screen; merging the worker's branches stays manual.
 
 ## Working on the project
 

@@ -518,7 +518,7 @@ function showTab(name) {
   tab = name;
   $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work';
   $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work');
-  if (name === 'work') $('tab-work').classList.remove('news');
+  if (name === 'work') { $('tab-work').classList.remove('news'); post('__workerinfo', {}).catch(() => {}); } // its branches' checks, again
   updateReplicaView();
   (name === 'work' ? wbox : box).focus();
 }
@@ -610,7 +610,7 @@ function renderAutoDev() {
     } else if (a.offer?.error) para(span("The latest agreed instruction can’t be sent: " + a.offer.error + '.', 'why'));
     return;
   }
-  if (a.status === 'finished') { el.hidden = false; para(span('Auto dev finished. Review and merge worker/main yourself.')); }
+  if (a.status === 'finished') { el.hidden = false; para(span('Auto dev finished. Review and merge its worker branch yourself (the Worker tab names it).')); }
   if (!a.offer) return;
   const summaries = [...$('chat').querySelectorAll('.msg.summary:not(.not-agreed)')];
   const target = summaries.at(-1);
@@ -938,7 +938,7 @@ function rollbackButtons(row, details, name, ref, inUse) {
   if (r?.status === 'ready') {
     const confirm = document.createElement('button'); confirm.className = 'reopen'; confirm.textContent = 'Confirm archive after rollback';
     confirm.disabled = !!inUse;
-    confirm.title = inUse ? 'Switch to another discussion before confirming archive' : 'Review the rollback report first. Archive the discussion; merging worker/main into main stays manual.';
+    confirm.title = inUse ? 'Switch to another discussion before confirming archive' : 'Review the rollback report first. Archive the discussion; merging its worker branch into main stays manual.';
     confirmed(confirm, () => send('/archive-rollback ' + ref), 'Click again: I reviewed the rollback report; archive', () => true);
     row.append(confirm);
   }
@@ -1946,7 +1946,7 @@ function handleScreen(req, res, url, dir, screen) {
       (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
-  if (['/__say', '/__show', '/__work', '/__newroom'].includes(url.pathname)) {
+  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom'].includes(url.pathname)) {
     if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain; charset=utf-8', 'Refused: only the room page can send input.'); return true; }
     readJson(req, url.pathname === '/__say' ? ATTACH_TOTAL * 1.4 : undefined).then((body) => {
       if (url.pathname === '/__newroom') {
@@ -1960,6 +1960,10 @@ function handleScreen(req, res, url, dir, screen) {
         if (!file) return send(404, 'text/plain; charset=utf-8', 'No such document.');
         screen.doc = file;
         broadcast(screen, { type: 'doc', file });
+        return send(204, 'text/plain', '');
+      }
+      if (url.pathname === '/__workerinfo') { // the Worker tab is shown: recheck its branches (sent as a workerinfo event)
+        screen.refreshWorker?.();
         return send(204, 'text/plain', '');
       }
       if (url.pathname === '/__work') {

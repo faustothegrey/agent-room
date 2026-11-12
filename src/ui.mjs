@@ -25,8 +25,8 @@ after that they set defaults for future rooms.
 The worker (the screen's Worker tab) is one more agent, outside the discussion: it carries out the
 instructions sent from that tab, sees only those (and the active discussion's folder, for its
 notes), and can edit files and run commands. It works in its own Git worktree of the room's
-repository (<repo>.worker/, branch worker/main), created at its first instruction; you review and
-merge its work. Without a Git repository the worker is disabled.
+repository, one per discussion (<repo>.workers/<name>/, branch worker/<name>; a brainstorm's is
+<repo>.worker/, branch worker/main), created at its first instruction; you review and merge its work. Without a Git repository the worker is disabled.
 By default (npm start) the room is used from the discussion screen in the browser; the terminal
 only shows a log. --no-screen (or npm run terminal): the room is used from the terminal instead,
 and /docs opens each file alone in the browser.
@@ -248,6 +248,7 @@ function wire(ctx) {
   // With --node only the launch room replicates: its Peers panel works, the others' says why.
   ctx.screen.replicaOff = ctx.hub?.node && !ctx.node ? replicaOff(ctx) : null;
   if (ctx.replica) wireReplica(ctx); // its peer endpoint works in terminal mode too
+  ctx.screen.refreshWorker = () => refreshWorker(ctx).catch(() => {}); // when the Worker tab is shown
   if (ctx.noScreen) return;
   // What the User types pauses a running auto dev (as it arrives, not when its turn comes).
   ctx.screen.work = (text) => { autoDevInput(ctx, 'you sent the Worker an instruction'); return queueWork(ctx, text); };
@@ -327,12 +328,19 @@ async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) 
   if (target === 'archive' && shop.rollbacks?.has(d.name) && !rollbackConfirmed)
     return note(ctx, '✗ Review the rollback report and use its explicit archive confirmation; the discussion has not been archived.', true), null;
   if (target === 'deferred') {
-    const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
-    if (!place.disabled && await gitOk(place.top, 'rev-parse', '--verify', WORKER_BRANCH)) {
+    // Its own branch: any commit not in main. worker/main (shared before lanes): its labelled ones.
+    const place = await lanePlace(ctx, null);
+    if (!place.disabled) {
       try {
-        const commits = await labelledCommits(place.top, `main..${WORKER_BRANCH}`);
-        const pending = commits.filter((c) => c.origin === d.name);
-        if (pending.length) return note(ctx, `✗ ${d.name} can't be deferred: commits on worker/main are not merged into main: ${pending.map((c) => c.id).join(', ')}.`, true), null;
+        const own = await workerPlace(ctx.cwd, d.name);
+        if (!own.disabled && await gitOk(place.top, 'rev-parse', '--verify', '-q', `refs/heads/${own.branch}`)) {
+          const pending = (await git(place.top, 'rev-list', '--reverse', `main..${own.branch}`)).split('\n').filter(Boolean);
+          if (pending.length) return note(ctx, `✗ ${d.name} can't be deferred: commits on ${own.branch} are not merged into main: ${pending.join(', ')}.`, true), null;
+        }
+        if (await gitOk(place.top, 'rev-parse', '--verify', '-q', `refs/heads/${WORKER_BRANCH}`)) {
+          const pending = (await labelledCommits(place.top, `main..${WORKER_BRANCH}`)).filter((c) => c.origin === d.name);
+          if (pending.length) return note(ctx, `✗ ${d.name} can't be deferred: commits on worker/main are not merged into main: ${pending.map((c) => c.id).join(', ')}.`, true), null;
+        }
       } catch (err) { return note(ctx, `✗ Can't check unmerged commits: ${err.message}`, true), null; }
     }
   }
@@ -371,12 +379,12 @@ async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) 
 // Rollback is an ordinary, origin-labelled worker task. Git reasoning and changes stay with
 // the worker; only the User's later, explicit command may move the discussion into archive/.
 function rollbackTask(name) {
-  return `Archive with rollback for [${name}]. Work only on worker/main; never merge into main or push, reset, rebase or clean the worktree.
-Before changing any file (including a preliminary merge), inspect the complete history of worker/main and main, commit messages, parents and diffs. Find this discussion's [${name}]-labelled implementation commits, INCLUDING those already merged into main (do not restrict the search to main..worker/main).
+  return `Archive with rollback for [${name}]. Work only on worker/${name}, this discussion's own branch; never merge into main or push, reset, rebase or clean the worktree.
+Before changing any file (including a preliminary merge), inspect the complete history of worker/${name}, main and worker/main (the branch every discussion shared before each had its own: older [${name}] commits may be there), commit messages, parents and diffs. Find this discussion's [${name}]-labelled implementation commits, INCLUDING those already merged into main (do not restrict the search to main..worker/${name}).
 Distinguish implementation commits from catch-up merges and earlier rollback/revert commits. Inspect Agent-Room-Rollback-Origin and Agent-Room-Reverted trailers, standard "This reverts commit" records, and any later reverts of those reverts. Exclude catch-up merges, earlier rollback commits, and implementation changes already undone: never revert a rollback and restore changes already removed. Do not infer the set from labels alone. If the intended set or an earlier rollback's coverage is unclear, stop and report the ambiguity BEFORE changing any file. Do not guess a merge mainline.
-Identify later work by other origins that may depend on the changes, using history, overlapping files and affected symbols/callers; report the origins, commit IDs and dependency evidence. A clean revert or passing tests do not prove there are no semantic dependencies. If dependencies make a safe rollback unclear, stop and report before changing files.
-Once the set is clear, if main has commits worker/main lacks and the worktree has no unresolved edits or Git operation, first merge main into worker/main with a normal merge. Label any merge commit [${name}] catch up with main. If it clashes, do not force it or continue the rollback: leave the state intact and report the conflict for recovery by this origin. Recheck the intended set after the merge; report any new ambiguity before reverting.
-Revert the intended implementation commits newest first. If a revert conflicts, stop and report it; do not force or silently abandon changes. Run npm test and read its real output. Commit the rollback on worker/main with a message starting "[${name}] rollback" and the trailer "Agent-Room-Rollback-Origin: ${name}", plus one "Agent-Room-Reverted: <full implementation commit ID>" trailer per commit undone. If everything was already undone, do not restore it: explain that and make a labelled empty rollback commit with the origin trailer and no reverted IDs.
+Identify later work by other origins that may depend on the changes, in main and in other discussions' unmerged branches (git branch --list 'worker/*'), using history, overlapping files and affected symbols/callers; report the origins, commit IDs and dependency evidence. A clean revert or passing tests do not prove there are no semantic dependencies. If dependencies make a safe rollback unclear, stop and report before changing files.
+Once the set is clear, if main has commits worker/${name} lacks and the worktree has no unresolved edits or Git operation, first merge main into worker/${name} with a normal merge. Label any merge commit [${name}] catch up with main. If it clashes, do not force it or continue the rollback: leave the state intact and report the conflict for recovery by this origin. Recheck the intended set after the merge; report any new ambiguity before reverting.
+Revert the intended implementation commits newest first. If a revert conflicts, stop and report it; do not force or silently abandon changes. Run npm test and read its real output. Commit the rollback on worker/${name} with a message starting "[${name}] rollback" and the trailer "Agent-Room-Rollback-Origin: ${name}", plus one "Agent-Room-Reverted: <full implementation commit ID>" trailer per commit undone. If everything was already undone, do not restore it: explain that and make a labelled empty rollback commit with the origin trailer and no reverted IDs.
 Report the commit ID, the exact set undone or already undone, npm test's real output, dependencies found on other origins' work and what you could not check. Only if rollback and tests succeeded and the worktree is clean with no Git operation in progress, end the report with "Rollback ready: <full rollback commit ID>". Otherwise omit that line. Do not archive the discussion: the User must review this report and explicitly confirm archiving; the User retains the final merge into main.`;
 }
 async function requestRollback(ctx, ref) {
@@ -410,8 +418,8 @@ async function confirmRollbackArchive(ctx, ref) {
     return note(ctx, '✗ Wait for the worker queue to be idle before confirming archive.', true);
   shop.confirming = true;
   try {
-    const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
-    if (place.disabled || await leftovers(ctx) !== false || await git(place.path, 'rev-parse', 'HEAD') !== rollback.commit)
+    const place = await lanePlace(ctx, d.name); // the discussion's own lane, where its rollback ran
+    if (place.disabled || await leftovers(ctx, place) !== false || await git(place.path, 'rev-parse', 'HEAD') !== rollback.commit)
       return note(ctx, '✗ The worker state changed since the rollback report. Resolve it and request a fresh rollback report before archiving.', true);
     if (await moveDiscussion(ctx, ref, 'archive', { rollbackConfirmed: true })) {
       shop.rollbacks.delete(d.name);
@@ -425,8 +433,9 @@ async function rollbackReport(ctx, rollback, entry) {
   rollback.status = 'needs review';
   rollback.commit = null;
   const match = /^Rollback ready: ([0-9a-f]{40,64})$/.exec(entry.text.trim().split('\n').at(-1));
-  if (!entry.error && match && await leftovers(ctx) === false) {
-    const dir = workerDir(ctx), id = match[1];
+  const place = await lanePlace(ctx, rollback.name);
+  if (!entry.error && match && await leftovers(ctx, place) === false) {
+    const dir = place.path, id = match[1];
     const body = await git(dir, 'show', '-s', '--format=%B', id).catch(() => '');
     if (await git(dir, 'rev-parse', 'HEAD') === id && body.startsWith(`[${rollback.name}] rollback`) &&
         body.split('\n').includes(`Agent-Room-Rollback-Origin: ${rollback.name}`)) {
@@ -668,7 +677,7 @@ async function reportWork(ctx, name, saved) {
   for (const r of w.interrupted.filter((x) => !x.reported)) {
     const what = `[${name}] "${firstLine(r.task)}" (started ${clock(r.at)})`;
     let place = null, s = null;
-    try { place = await sharedWorktree(ctx, await workerPlace(ctx.cwd)); if (!place.disabled) s = await worktreeStatus(place); } catch {}
+    try { place = await lanePlace(ctx, r.lane ?? null); if (!place.disabled) s = await worktreeStatus(place); } catch {}
     const found = !s ? 'it could not be inspected' : !s.exists ? 'it does not exist' : s.treeDirty ? 'it has uncommitted edits' : 'it is clean';
     let commits = null;
     if (r.before && s?.exists && !s.treeDirty) {
@@ -1028,17 +1037,17 @@ function closeDiscussion(ctx) {
 }
 
 // ── The shared worker queue ───────────────────────────────────────────
-// Tasks run one at a time in the order sent, from any open discussion. agent-room checks the
-// worktree after each task and again before the next: uncommitted edits hold the queue
-// (shop.blockedBy) until their origin resolves them; that origin's own tasks still go through (to
-// finish or abandon them), and keep the original task's details. Edits whose origin is unknown
-// (without a valid saved owner) hold every task until the folder is clean.
+// Tasks run one at a time in the order sent, from any open discussion, each in its own lane (see
+// "The worker's worktrees"). agent-room checks the lanes after each task and again before the next:
+// uncommitted edits in any lane hold the queue (shop.blockedBy, with that lane's place) until their
+// origin resolves them; that origin's own tasks still go through, in that lane (to finish or abandon
+// them), and keep the original task's details. Edits whose origin is unknown (without a valid saved
+// owner) hold every task until that lane is clean.
 // The private, per-worktree Git directory is outside both working copies and their indexes.
 async function ownerFile(place) {
   return join(await git(place.path, 'rev-parse', '--absolute-git-dir'), 'agent-room-task.json');
 }
-async function leftovers(ctx) {
-  const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
+async function leftovers(ctx, place) {
   if (place.disabled) return false;
   let s;
   const shop = shopOf(ctx);
@@ -1060,16 +1069,15 @@ async function leftovers(ctx) {
   if (!s.treeDirty) {
     const file = await ownerFile(place);
     if (existsSync(file)) {
-      const owner = await recordedOwner(ctx);
+      const owner = await recordedOwner(ctx, place);
       if (owner.before) rememberCommits(shopOf(ctx), await labelledCommits(place.path, `${owner.before}..HEAD`));
     }
     try { unlinkSync(file); } catch (err) { if (err.code !== 'ENOENT') throw err; }
   }
   return !!s.treeDirty;
 }
-async function recordedOwner(ctx) {
+async function recordedOwner(ctx, place) {
   try {
-    const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
     if (place.disabled) return { origin: null };
     const r = JSON.parse(readFileSync(await ownerFile(place), 'utf8'));
     if (r.version !== 1 || r.root !== real(ctx.cwd) || typeof r.label !== 'string' ||
@@ -1083,16 +1091,27 @@ async function recordedOwner(ctx) {
   } catch { return { origin: null }; }
 }
 // Restart creates each context before reopening its discussion; try again after that restoration.
+// The held lane first; then every lane, the first with leftovers holds. False: a lane couldn't be read.
 export async function recoverWorkerOwner(ctx) {
   const shop = shopOf(ctx);
   if (shop.running) return true;
-  const dirty = await leftovers(ctx);
-  if (dirty === null) return false;
-  if (dirty) {
-    if (shop.blockedBy?.origin) return true;
-    const owner = await recordedOwner(ctx);
-    if (!shop.blockedBy || owner.origin) hold(ctx, owner);
-  } else if (shop.blockedBy) release(ctx);
+  if (shop.blockedBy) {
+    const place = shop.blockedBy.place;
+    const dirty = await leftovers(ctx, place);
+    if (dirty === null) return false;
+    if (dirty) {
+      if (shop.blockedBy.origin) return true;
+      const owner = await recordedOwner(ctx, place);
+      if (owner.origin) hold(ctx, { ...owner, place });
+      return true;
+    }
+    release(ctx);
+  }
+  for (const place of await existingLanes(ctx)) {
+    const dirty = await leftovers(ctx, place);
+    if (dirty === null) return false;
+    if (dirty) { hold(ctx, { ...await recordedOwner(ctx, place), place }); return true; }
+  }
   return true;
 }
 async function labelledCommits(dir, range) {
@@ -1131,7 +1150,7 @@ function hold(ctx, blockedBy) {
   shop.blockedBy = blockedBy;
   shop.holdContext = ctx;
   const where = blockedBy.label ? `[${blockedBy.label}]` : 'an unknown origin';
-  workNote(ctx, `✗ The worker's folder has uncommitted edits from ${where}${blockedBy.task ? ` ("${blockedBy.task}")` : ''}: the queue holds${blockedBy.label ? ` until [${blockedBy.label}] resolves them (its own instructions still go through)` : ' until the folder is clean (commit or remove those edits yourself)'}.`, true);
+  workNote(ctx, `✗ The worker's folder ${blockedBy.place.path} (${blockedBy.place.branch}) has uncommitted edits from ${where}${blockedBy.task ? ` ("${blockedBy.task}")` : ''}: the queue holds${blockedBy.label ? ` until [${blockedBy.label}] resolves them (its own instructions still go through)` : ' until the folder is clean (commit or remove those edits yourself)'}.`, true);
   if (blockedBy.origin) note(blockedBy.origin, `✗ The worker left uncommitted edits from "${blockedBy.task}": other discussions' worker tasks wait. Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).`, true);
   showHeader(ctx);
   if (!shop.pumping) watchShop(shop);
@@ -1153,25 +1172,24 @@ async function pump(shop) {
       for (const t of shop.tasks.filter((x) => x.origin.stopped)) dropTask(shop, t);
       const any = shop.tasks[0]?.origin;
       if (!any) break;
-      // Before the next task: is the folder clean?
-      const dirty = await leftovers(any);
-      if (dirty === null) break;
-      if (dirty && !shop.blockedBy?.origin && !await recoverWorkerOwner(any)) break;
-      else if (!dirty && shop.blockedBy) release(any);
+      // Before the next task: are the lanes clean (the held one first)?
+      if (!await recoverWorkerOwner(any)) break;
       const t = !shop.blockedBy ? shop.tasks[0] : shop.blockedBy.origin && shop.tasks.find((x) => x.origin === shop.blockedBy.origin);
       if (!t) break; // held
       shop.tasks.splice(shop.tasks.indexOf(t), 1);
       t.origin.workPending--;
       shop.running = t;
       const recovery = shop.blockedBy?.origin === t.origin ? shop.blockedBy : null;
-      try { t.before = await runWork(t.origin, t.text, t.run, t.cycle, recovery, t.rollback, t); }
+      // A recovery works where the edits are; any other task in the lane it was queued for.
+      let place = null;
+      try { place = recovery ? recovery.place : await lanePlace(t.origin, t.lane); t.before = await runWork(t.origin, t.text, t.run, t.cycle, recovery, t.rollback, t, place); }
       catch (err) { note(t.origin, `✗ ${err.stack}\n`, true); }
       finally { shop.running = null; }
       // After it: edits left uncommitted hold the queue; a recovery keeps the first task's details.
       try {
-        const dirty = await leftovers(t.origin);
-        if (dirty === true) { if (!shop.blockedBy) hold(t.origin, { origin: t.origin, label: originLabel(t.origin), task: t.text, before: t.before }); }
-        else if (dirty === false && shop.blockedBy) release(t.origin);
+        const dirty = place ? await leftovers(t.origin, place) : false;
+        if (dirty === true) { if (!shop.blockedBy) hold(t.origin, { origin: t.origin, label: originLabel(t.origin), task: t.text, before: t.before, place }); }
+        else if (dirty === false && shop.blockedBy?.place.path === place?.path) release(t.origin);
       } catch (err) { note(t.origin, `✗ ${err.message}`, true); }
       t.done();
     }
@@ -1353,7 +1371,7 @@ async function autoDevReport(ctx) {
 function finishAutoDev(ctx, run) {
   Object.assign(run, { status: 'finished', reason: null });
   log(ctx, '_(auto dev finished)_\n\n');
-  note(ctx, 'Auto dev finished. Review and merge worker/main yourself.');
+  note(ctx, `Auto dev finished. Review and merge ${laneOf(ctx) ? `worker/${laneOf(ctx)}` : WORKER_BRANCH} yourself.`);
   showHeader(ctx);
 }
 // After a report's round and its summary: send the next instruction, or stop.
@@ -1898,13 +1916,16 @@ async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
   }
 }
 
-// ── The worker's worktree ─────────────────────────────────────────────
-// The worker works in its own Git worktree of the room's repository, on the branch worker/main, in
-// the sibling folder <repo>.worker/: never in the room's own files (its notes still go in the room's
-// discussion folder). The worktree is created at the first instruction and reused after Restart or
-// Reload reads it back from Git. Task ownership is saved in the private Git directory.
+// ── The worker's worktrees ────────────────────────────────────────────
+// The worker works in a Git worktree of the room's repository, never in the room's own files (its
+// notes still go in the room's discussion folder). Each discussion has its own lane: the worktree
+// <repo>.workers/<name>/ on the branch worker/<name>. A brainstorm, and a task sent before a
+// discussion's first message, use <repo>.worker/ on worker/main (the one worktree all discussions
+// shared before lanes; its commits stay there). The folder still has one queue, one task at a time
+// (see "The shared worker queue"). A worktree is created at its first instruction and reused after
+// Restart or Reload reads it back from Git. Task ownership is saved in its private Git directory.
 // The only branch/worktree writes are `worktree add` and
-// a fast-forward of worker/main when it has nothing of its own: never a reset, merge, rebase or
+// a fast-forward of a lane's branch when it has nothing of its own: never a reset, merge, rebase or
 // deletion, and never anything in the room's own working copy. Decided by the User, 2026-11-07.
 // That is agent-room's own code: the worker itself may do such Git actions in its worktree when the
 // task asks (catching up with main, a rollback, or abandoning listed edits after approval). Decided 2026-11-09.
@@ -1915,17 +1936,42 @@ const git = (dir, ...args) => new Promise((done, fail) => execFile('git', ['-C',
 const gitOk = (dir, ...args) => git(dir, ...args).then(() => true, () => false);
 const real = (p) => (existsSync(p) ? realpathSync(p) : p);
 
-// Where the room's worker works: { root, top, path, cwd } (cwd: the room's subfolder inside the
+// A discussion's folder name as the end of a branch name (worker/<name>), or null if Git refuses it.
+const branchSafe = (name) => /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) && !name.includes('..') && !/(\.lock|\.)$/.test(name);
+// Where the room's worker works for `lane` (a discussion's folder name; null: a brainstorm, or no
+// discussion yet): { root, top, path, cwd, branch, lane } (cwd: the room's subfolder inside the
 // worktree, when the room isn't the repository's top), or { disabled: why }.
-export async function workerPlace(roomRoot) {
+// A room's repository, once found usable, stays so: its top folder is asked once (lanes ask often).
+const usableTops = new Map();
+export async function workerPlace(roomRoot, lane = null) {
   const root = real(roomRoot);
-  let top;
-  try { top = await git(root, 'rev-parse', '--show-toplevel'); } catch { return { disabled: NO_GIT }; }
-  if (!(await gitOk(top, 'rev-parse', '--verify', '-q', 'HEAD^{commit}'))) return { disabled: `${NO_GIT} This one has no commit yet.` };
-  const [own, common] = await Promise.all([git(top, 'rev-parse', '--absolute-git-dir'), git(top, 'rev-parse', '--path-format=absolute', '--git-common-dir')]);
-  if (real(own) !== real(common)) return { disabled: `${top} is itself a linked Git worktree (such as a worker's): open the room in the main checkout instead.` };
-  const path = join(dirname(top), `${basename(top)}.worker`);
-  return { root, top, path, cwd: join(path, relative(top, root)) };
+  let top = usableTops.get(root);
+  if (!top) {
+    try { top = await git(root, 'rev-parse', '--show-toplevel'); } catch { return { disabled: NO_GIT }; }
+    if (!(await gitOk(top, 'rev-parse', '--verify', '-q', 'HEAD^{commit}'))) return { disabled: `${NO_GIT} This one has no commit yet.` };
+    const [own, common] = await Promise.all([git(top, 'rev-parse', '--absolute-git-dir'), git(top, 'rev-parse', '--path-format=absolute', '--git-common-dir')]);
+    if (real(own) !== real(common)) return { disabled: `${top} is itself a linked Git worktree (such as a worker's): open the room in the main checkout instead.` };
+    usableTops.set(root, top);
+  }
+  if (lane && !branchSafe(lane)) return { disabled: `The discussion's folder name "${lane}" can't be a Git branch name (worker/${lane}), so its worker has no worktree. Rename the folder (letters, digits, ".", "_" and "-").` };
+  const path = lane ? join(dirname(top), `${basename(top)}.workers`, lane) : join(dirname(top), `${basename(top)}.worker`);
+  return { root, top, path, cwd: join(path, relative(top, root)), branch: lane ? `worker/${lane}` : WORKER_BRANCH, lane };
+}
+// The lane of a task: its discussion's when it was queued, else worker/main.
+const lanePlace = async (ctx, lane) => sharedWorktree(ctx, await workerPlace(ctx.cwd, lane ?? null));
+// The lanes that exist: worker/main's worktree and each <repo>.workers/<name>/ on worker/<name>.
+async function existingLanes(ctx) {
+  const base = await lanePlace(ctx, null);
+  if (base.disabled) return [];
+  const found = [];
+  for (const w of await worktrees(base.top)) {
+    if (w.path === real(base.path) && w.branch === WORKER_BRANCH) found.push(base);
+    else if (dirname(w.path) === real(join(dirname(base.top), `${basename(base.top)}.workers`)) && w.branch === `worker/${basename(w.path)}`) {
+      const place = await workerPlace(base.root, basename(w.path));
+      if (!place.disabled) found.push(place);
+    }
+  }
+  return found;
 }
 
 // Rooms on one server in the same Git repository would share one worktree: the first room opened
@@ -1951,16 +1997,34 @@ async function worktrees(top) {
 // Creates the worktree, reattaches the branch, or reuses both; refuses (changing nothing) otherwise.
 export async function ensureWorktree(place) {
   const list = await worktrees(place.top);
-  const here = list.find((w) => w.path === place.path);
-  if (here && here.branch !== WORKER_BRANCH) throw new Error(`${place.path} is a worktree on ${here.branch ?? 'a detached HEAD'}, not ${WORKER_BRANCH}: nothing was changed.`);
+  const here = list.find((w) => w.path === real(place.path));
+  if (here && here.branch !== place.branch) throw new Error(`${place.path} is a worktree on ${here.branch ?? 'a detached HEAD'}, not ${place.branch}: nothing was changed.`);
   if (here && !existsSync(place.path)) throw new Error(`Git still lists ${place.path} as a worktree, but the folder is gone: run git worktree prune in ${place.top}, then try again.`);
   if (here) return;
   if (existsSync(place.path)) throw new Error(`${place.path} already exists and isn't the worker's worktree: nothing was changed.`);
-  const elsewhere = list.find((w) => w.branch === WORKER_BRANCH);
-  if (elsewhere) throw new Error(`${WORKER_BRANCH} is already checked out in ${elsewhere.path}: nothing was changed.`);
-  if (await gitOk(place.top, 'rev-parse', '--verify', '-q', `refs/heads/${WORKER_BRANCH}`)) await git(place.top, 'worktree', 'add', place.path, WORKER_BRANCH);
-  else await git(place.top, 'worktree', 'add', '-b', WORKER_BRANCH, place.path, 'HEAD');
+  const elsewhere = list.find((w) => w.branch === place.branch);
+  if (elsewhere) throw new Error(`${place.branch} is already checked out in ${elsewhere.path}: nothing was changed.`);
+  const exists = await gitOk(place.top, 'rev-parse', '--verify', '-q', `refs/heads/${place.branch}`);
+  if (place.lane && !exists) await migrationCheck(place, list);
+  if (exists) await git(place.top, 'worktree', 'add', place.path, place.branch);
+  else await git(place.top, 'worktree', 'add', '-b', place.branch, place.path, 'HEAD');
 }
+// Before a discussion's first lane is made: worker/main (shared by every discussion before lanes)
+// must have no uncommitted edits, and none of this discussion's commits missing from main. Its
+// commits are never moved, dropped or rewritten: they stay on worker/main until the User merges them.
+async function migrationCheck(place, list) {
+  const base = await workerPlace(place.root);
+  const shared = list.find((w) => w.path === real(base.path) && w.branch === WORKER_BRANCH);
+  if (shared && existsSync(base.path) && (await worktreeStatus(base)).treeDirty)
+    throw new Error(`${base.path} (${WORKER_BRANCH}) has uncommitted edits: this discussion's own worktree is not created until they are committed or resolved there. Nothing was changed.`);
+  if (await gitOk(place.top, 'rev-parse', '--verify', '-q', `refs/heads/${WORKER_BRANCH}`)) {
+    const main = await mainRef(place.top);
+    const mine = (await labelledCommits(place.top, `${main}..${WORKER_BRANCH}`)).filter((c) => c.origin === place.lane);
+    if (mine.length) throw new Error(`${WORKER_BRANCH} has commits of [${place.lane}] not in ${main}: ${mine.map((c) => c.id.slice(0, 7)).join(', ')}. Merge ${WORKER_BRANCH} into ${main} first (git merge ${WORKER_BRANCH} in the room), so that ${place.branch} starts with them; they were left where they are. Nothing was changed.`);
+  }
+}
+// The branch the lanes catch up with: main, or the room's HEAD in a repository without one.
+const mainRef = async (top) => (await gitOk(top, 'rev-parse', '--verify', '-q', 'refs/heads/main') ? 'main' : 'HEAD');
 
 // The worker's scratch notes, <worktree>/.worker-notes/<task>/, are ignored by Git in any project:
 // listed in the repository's own info/exclude (local, never committed), once.
@@ -1978,11 +2042,11 @@ async function ignoreNotes(place) {
 export async function worktreeStatus(place) {
   const head = await git(place.top, 'rev-parse', 'HEAD');
   const roomDirty = (await git(place.root, 'status', '--porcelain', '--', '.', ':(exclude)discussions', ':(exclude).agent-room')) !== '';
-  const exists = existsSync(place.path) && (await worktrees(place.top)).some((w) => w.path === place.path && w.branch === WORKER_BRANCH);
+  const exists = existsSync(place.path) && (await worktrees(place.top)).some((w) => w.path === real(place.path) && w.branch === place.branch);
   if (!exists) return { exists, head, roomDirty };
   const count = async (range) => Number(await git(place.top, 'rev-list', '--count', range));
-  const [ahead, behind, base, dirty] = await Promise.all([count(`HEAD..${WORKER_BRANCH}`), count(`${WORKER_BRANCH}..HEAD`),
-    git(place.top, 'merge-base', 'HEAD', WORKER_BRANCH).then((sha) => sha.slice(0, 7), () => 'no common commit'),
+  const [ahead, behind, base, dirty] = await Promise.all([count(`HEAD..${place.branch}`), count(`${place.branch}..HEAD`),
+    git(place.top, 'merge-base', 'HEAD', place.branch).then((sha) => sha.slice(0, 7), () => 'no common commit'),
     git(place.path, 'status', '--porcelain').then((out) => out !== '')]);
   const privateDir = await git(place.path, 'rev-parse', '--absolute-git-dir');
   const operation = existsSync(join(privateDir, 'MERGE_HEAD')) ? 'merge' :
@@ -1990,7 +2054,7 @@ export async function worktreeStatus(place) {
   return { exists, head, roomDirty, ahead, behind, base, treeDirty: dirty || !!operation, operation };
 }
 
-// Before each instruction: worker/main moves forward to the room's HEAD only when it is strictly
+// Before each instruction: the lane's branch moves forward to the room's HEAD only when it is strictly
 // behind it, with a clean worktree. Returns the new status.
 export async function catchUp(place, s) {
   if (!s.exists || !s.behind || s.ahead || s.treeDirty) return s;
@@ -2000,13 +2064,13 @@ export async function catchUp(place, s) {
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 function worktreeLines(place, s) {
-  if (!s.exists) return [`The worker's worktree will be created at ${place.path}, on ${WORKER_BRANCH}, from ${s.head.slice(0, 7)}, with its first instruction.`];
-  const lines = [`Worktree ${place.path} · branch ${WORKER_BRANCH} · based on ${s.base}`];
+  if (!s.exists) return [`The worker's worktree will be created at ${place.path}, on ${place.branch}, from ${s.head.slice(0, 7)}, with its first instruction.`];
+  const lines = [`Worktree ${place.path} · branch ${place.branch} · based on ${s.base}`];
   if (s.operation) lines.push(`A ${s.operation} is in progress in the worker's worktree: dispatch holds for recovery by its origin.`);
   if (s.roomDirty) lines.push('The room has uncommitted changes: the worker doesn\'t see them.');
-  if (s.ahead) lines.push(`${WORKER_BRANCH} has ${plural(s.ahead, 'commit')} not in the room: review and merge them when ready.`);
+  if (s.ahead) lines.push(`${place.branch} has ${plural(s.ahead, 'commit')} not in the room: review and merge them when ready.`);
   if (s.behind) {
-    lines.push(`${WORKER_BRANCH} is ${plural(s.behind, 'commit')} behind the room${s.ahead ? ' and has commits of its own: it is left as it is.'
+    lines.push(`${place.branch} is ${plural(s.behind, 'commit')} behind the room${s.ahead ? ' and has commits of its own: it is left as it is.'
       : s.treeDirty ? ': its worktree has uncommitted changes, so it is left as it is.' : ': it catches up with the next instruction.'}`);
   }
   return lines;
@@ -2026,25 +2090,123 @@ export async function codeInfo(dir = dirname(dirname(fileURLToPath(import.meta.u
 
 // Reads the worktree's state for the Worker tab; with `prepare` (before each instruction), creates
 // or reattaches the worktree and catches up first. Returns the place (disabled or not).
-export async function refreshWorker(ctx, { prepare = false, fastForward = true } = {}) {
-  const place = await sharedWorktree(ctx, await workerPlace(ctx.cwd));
-  let info;
-  try {
-    if (place.disabled) info = { lines: [place.disabled], disabled: true };
-    else {
-      if (prepare) { await ensureWorktree(place); await ignoreNotes(place); }
+// `place`: the lane to prepare (a task's); by default the lane of the discussion in use. The Worker
+// tab of each open discussion shows its own lane first, then every other lane with something to
+// review, each with its checks (laneChecks), recomputed here: after each task, and when the tab is shown.
+export async function refreshWorker(ctx, { prepare = false, fastForward = true, place = null } = {}) {
+  place ??= await lanePlace(ctx, laneOf(ctx));
+  if (prepare && !place.disabled) {
+    try {
+      await ensureWorktree(place); await ignoreNotes(place);
       let s = await worktreeStatus(place);
-      if (prepare && fastForward) s = await catchUp(place, s);
+      if (fastForward) s = await catchUp(place, s);
       (ctx.workerDir ??= { path: null }).path = s.exists ? place.cwd : null;
-      info = { lines: worktreeLines(place, s) };
+    } catch (err) {
+      const info = { lines: [`✗ ${err.message}`], error: true };
+      for (const c of siblings(ctx)) if (c.screen) { c.screen.workerInfo = info; toScreen(c, { type: 'workerinfo', info }); }
+      throw err;
     }
-  } catch (err) {
-    info = { lines: [`✗ ${err.message}`], error: true };
-    if (prepare) throw err;
-  } finally {
-    if (info) { for (const c of siblings(ctx)) if (c.screen) c.screen.workerInfo = info; toShop(ctx, { type: 'workerinfo', info }); }
+  }
+  const seen = new Map(); // each lane's lines, computed once for all the open discussions
+  for (const c of siblings(ctx)) {
+    if (!c.screen) continue;
+    const info = await workerInfo(c, seen);
+    c.screen.workerInfo = info;
+    toScreen(c, { type: 'workerinfo', info });
   }
   return place;
+}
+// A context's lane: its discussion's, or worker/main's for a brainstorm or before the first message.
+const laneOf = (ctx) => (ctx.discussion && !ctx.state?.brainstorm ? ctx.discussion.name : null);
+async function workerInfo(ctx, seen = new Map()) {
+  const own = await lanePlace(ctx, laneOf(ctx));
+  if (own.disabled) return { lines: [own.disabled], disabled: true };
+  // A lane's lines, and whether it has something to review: { lines, review }.
+  const of = (place) => {
+    if (!seen.has(place.path)) seen.set(place.path, (async () => {
+      const s = await worktreeStatus(place);
+      return { lines: [...worktreeLines(place, s), ...(s.exists ? await laneChecks(place) : [])], review: !!(s.ahead || s.treeDirty) };
+    })());
+    return seen.get(place.path);
+  };
+  try {
+    const lines = [...(await of(own)).lines];
+    if (!seen.has('lanes')) seen.set('lanes', existingLanes(ctx));
+    for (const other of await seen.get('lanes')) {
+      if (other.path === own.path) continue;
+      const o = await of(other);
+      if (o.review) lines.push(...o.lines);
+    }
+    return { lines };
+  } catch (err) { return { lines: [`✗ ${err.message}`], error: true }; }
+}
+
+// ── Guardrails for merging a lane into main ──
+// For a branch with commits not in main: whether it contains main's current commit; the commits its
+// worker last reported testing together (its "Tested:" line, checked against Git and kept in the
+// worktree's private Git directory); and, with Git 2.38 or newer, a merge preview. All read-only,
+// and only advice: the User merges.
+async function laneChecks(place) {
+  const main = await mainRef(place.top);
+  const [mainId, tip] = await Promise.all([git(place.top, 'rev-parse', main), git(place.top, 'rev-parse', place.branch)]);
+  if (!Number(await git(place.top, 'rev-list', '--count', `${main}..${place.branch}`))) return [];
+  const lines = [];
+  if (await gitOk(place.top, 'merge-base', '--is-ancestor', mainId, tip)) lines.push(`${place.branch} contains current ${main} (${mainId.slice(0, 7)}).`);
+  else {
+    const missing = Number(await git(place.top, 'rev-list', '--count', `${place.branch}..${main}`));
+    lines.push(`${place.branch} lacks ${plural(missing, 'commit')} of current ${main} (${mainId.slice(0, 7)}): its worker merges ${main} in with its next instruction. Merge it into ${main} after that, once its tests pass on top of ${main}.`);
+  }
+  const t = await readTested(place);
+  if (!t) lines.push(`${place.branch}: no test report on top of ${main} from its worker yet.`);
+  else {
+    const moved = [t.branch !== tip && `${place.branch} is now at ${tip.slice(0, 7)}`, t.main !== mainId && `${main} is now at ${mainId.slice(0, 7)}`].filter(Boolean);
+    lines.push(`Last tested (the worker's report): ${place.branch} ${t.branch.slice(0, 7)} with ${main} ${t.main.slice(0, 7)}, tests ${t.result}, ${clock(t.at)}. ${moved.length ? `Out of date: ${moved.join(' and ')}.` : 'Still current.'}`);
+  }
+  const preview = await mergePreview(place, main);
+  if (preview) lines.push(preview);
+  return lines;
+}
+const testedFile = async (place) => join(await git(place.path, 'rev-parse', '--absolute-git-dir'), 'agent-room-tested.json');
+async function readTested(place) {
+  try {
+    const r = JSON.parse(readFileSync(await testedFile(place), 'utf8'));
+    return r.version === 1 && /^[0-9a-f]{40,64}$/.test(r.branch) && /^[0-9a-f]{40,64}$/.test(r.main) && ['passed', 'failed'].includes(r.result) ? r : null;
+  } catch { return null; }
+}
+// The worker's last "Tested: <branch commit> with main <main commit>: tests passed|failed" line, if
+// Git agrees: the branch commit is on its branch, it contains the main commit, which is main's.
+async function recordTested(ctx, place, text) {
+  const m = [...String(text).matchAll(/^Tested: ([0-9a-f]{7,64}) with main ([0-9a-f]{7,64}): tests (passed|failed)\.?$/gm)].at(-1);
+  if (!m) return;
+  try {
+    const main = await mainRef(place.top);
+    const id = (ref) => git(place.path, 'rev-parse', '--verify', '-q', `${ref}^{commit}`).catch(() => { throw new Error(`${ref} is not a commit here`); });
+    const [branch, mainId] = [await id(m[1]), await id(m[2])];
+    if (!await gitOk(place.path, 'merge-base', '--is-ancestor', branch, 'HEAD')) throw new Error(`${m[1].slice(0, 7)} is not on ${place.branch}`);
+    if (!await gitOk(place.path, 'merge-base', '--is-ancestor', mainId, branch)) throw new Error(`${m[1].slice(0, 7)} doesn't contain ${m[2].slice(0, 7)}`);
+    if (!await gitOk(place.path, 'merge-base', '--is-ancestor', mainId, main)) throw new Error(`${m[2].slice(0, 7)} is not a commit of ${main}`);
+    const file = await testedFile(place);
+    writeFileSync(`${file}.tmp`, JSON.stringify({ version: 1, branch, main: mainId, result: m[3], at: new Date().toISOString() }) + '\n', { mode: 0o600 });
+    renameSync(`${file}.tmp`, file);
+  } catch (err) { workNote(ctx, `✗ The worker's "Tested:" line was not recorded: ${err.message}.`, true); }
+}
+// Git's exit status as well as its output (git merge-tree exits 1 for a conflict).
+const gitStatus = (dir, ...args) => new Promise((done) => execFile('git', ['-C', dir, ...args], { maxBuffer: 1 << 22 },
+  (err, out, errOut) => done({ code: err ? (typeof err.code === 'number' ? err.code : -1) : 0, out: out.trim(), err: String(errOut ?? '').trim() })));
+let mergeTreeGit = null; // whether this Git has `merge-tree --write-tree` (2.38 or newer), asked once
+const hasMergeTree = () => (mergeTreeGit ??= git(tmpdir(), 'version').then((v) => {
+  const [, major, minor] = /(\d+)\.(\d+)/.exec(v) ?? [];
+  return Number(major) > 2 || (Number(major) === 2 && Number(minor) >= 38);
+}, () => false));
+// The preview changes no branch, worktree or index; it does write unreferenced Git objects (the
+// merged tree), which Git's own cleanup (gc) removes in time. Not shown with an older Git.
+async function mergePreview(place, main) {
+  if (!await hasMergeTree()) return null;
+  const advice = `Merge preview of ${place.branch} into ${main} (advice only: it can go stale, and a clean merge doesn't prove the combined code works)`;
+  const r = await gitStatus(place.top, 'merge-tree', '--write-tree', '--name-only', '--no-messages', main, place.branch);
+  if (r.code === 0) return `${advice}: clean.`;
+  if (r.code === 1) return `${advice}: would conflict in ${[...new Set(r.out.split('\n').slice(1).filter(Boolean))].join(', ') || 'files Git did not name'}.`;
+  return `${advice}: it could not be computed (${r.err || `git exited with ${r.code}`}).`;
 }
 
 // The worker: instructions from the Worker tab run one at a time, in the order sent, alongside the
@@ -2063,7 +2225,7 @@ export function queueWork(ctx, text, run = null, rollback = null) {
   // Recorded in its discussion's checkpoint (see "Work in flight"); a brainstorm keeps no record.
   const workName = ctx.discussion && !ctx.state.brainstorm ? ctx.discussion.name : null;
   const record = workName ? { id: randomBytes(6).toString('hex'), task: text, at: new Date().toISOString() } : null;
-  shop.tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done, rollback, record, workName });
+  shop.tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done, rollback, record, workName, lane: workName });
   if (record) { workOf(shop, workName).queued.push(record); persistWork(ctx, workName); }
   ctx.workPending = (ctx.workPending ?? 0) + 1;
   ctx.workQueue = Promise.all([ctx.workQueue, finished]).then(() => {});
@@ -2072,15 +2234,15 @@ export function queueWork(ctx, text, run = null, rollback = null) {
 }
 
 // One task, for its origin `ctx`. `recovery`: the edits this origin left uncommitted, which this
-// task is to resolve. Resolves to worker/main's commit before the task (or null).
-async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollback = null, t = null) {
+// task is to resolve; `lane`: the place it runs in. Resolves to its branch's commit before the task (or null).
+async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollback = null, t = null, lane = null) {
   const { worker } = ctx;
   const shop = shopOf(ctx), screen = ctx.screen, label = originLabel(ctx);
   // First of all: its discussion's checkpoint records it as running (see "Work in flight").
   const record = t?.record, work = record ? workOf(shop, t.workName) : null;
   if (record) {
     work.queued = work.queued.filter((r) => r.id !== record.id);
-    work.running = { ...record, at: new Date().toISOString(), before: null };
+    work.running = { ...record, at: new Date().toISOString(), before: null, lane: lane?.lane ?? null };
     persistWork(ctx, t.workName);
   }
   // Tasks of this discussion interrupted earlier: the worker is told once, with this one.
@@ -2122,8 +2284,9 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       // Its own worktree first (created, reattached or caught up); without one it doesn't run.
       // Preserve the existing safe fast-forward contract for ordinary tasks, while still telling
       // the worker about main's advance. Rollback must inspect ambiguity before any file changes.
-      const owedMain = !recovery && Number(await git(ctx.cwd, 'rev-list', '--count', `${WORKER_BRANCH}..main`).catch(() => '0')) > 0;
-      const place = await refreshWorker(ctx, { prepare: true, fastForward: !rollback });
+      lane ??= await lanePlace(ctx, t?.lane ?? null);
+      const owedMain = !recovery && Number(await git(ctx.cwd, 'rev-list', '--count', `${lane.branch}..main`).catch(() => '0')) > 0;
+      const place = await refreshWorker(ctx, { prepare: true, fastForward: !rollback, place: lane });
       if (place.disabled) throw new Error(place.disabled);
       before = await git(place.path, 'rev-parse', 'HEAD');
       if (record && work.running?.id === record.id) { work.running.before = before; persistWork(ctx, t.workName); }
@@ -2145,21 +2308,25 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
         : !d && ctx.workerBriefed && ctx.workerBriefed !== 'brainstorm'
           ? `No discussion is active now: ${ctx.workerBriefed} is no longer the active discussion's folder. You will be told the next one's folder once it exists.\n\n`
           : '';
-      // And where it works, with its first instruction (again if that changes).
+      // And where it works, with its first instruction (again if that changes: a saved session that
+      // worked in the shared worktree before lanes, or a context moving between lanes, is told so).
+      const moved = ctx.workerTree && ctx.workerTree !== place.cwd
+        ? `Your worktree has changed: until now you worked in ${ctx.workerTree}; from now on you work in ${place.cwd}, on the branch ${place.branch}. Leave ${ctx.workerTree} alone from now on: it is another lane's. `
+        : '';
       const tree = ctx.workerTree !== place.cwd
-        ? `Your working directory is ${place.cwd}, your own Git worktree of the project, on the branch ${WORKER_BRANCH}. Make your changes there, never in the room's root, ${ctx.cwd}: that is the User's working copy (only the discussion folder there is yours, for notes). Commit every completed task on ${WORKER_BRANCH}, labelled as each instruction says, and give the commit ID in your reply; the User reviews and merges it into main. Your scratch notes go in ${join(place.path, NOTES)}/<task>/, one folder per task: Git ignores them, never commit them, and delete them only when the User says "stage accepted". Plans and notes for the User's review still go in the discussion's folder.\n\n`
+        ? `${moved}Your working directory is ${place.cwd}, your own Git worktree of the project, on the branch ${place.branch}. Make your changes there, never in the room's root, ${ctx.cwd}: that is the User's working copy (only the discussion folder there is yours, for notes). Commit every completed task on ${place.branch}, labelled as each instruction says, and give the commit ID in your reply; the User reviews and merges it into main. Your scratch notes go in ${join(place.path, NOTES)}/<task>/, one folder per task: Git ignores them, never commit them, and delete them only when the User says "stage accepted". Plans and notes for the User's review still go in the discussion's folder.\n\n`
         : '';
       // Its origin's label for the commit, once per worker session (again if it changes); a recovery
       // task also gets the first task's details.
-      const commit = ctx.workerLabel === label ? '' : `These instructions come from [${label}]. When a task is complete, commit it on ${WORKER_BRANCH} with a message starting "[${label}]" and give the commit ID in your reply.\n\n`;
+      const commit = ctx.workerLabel === label ? '' : `These instructions come from [${label}]. When a task is complete, commit it on ${place.branch} with a message starting "[${label}]" and give the commit ID in your reply.\n\n`;
       const leftover = recovery
-        ? `Uncommitted edits are left in your worktree from the earlier task from [${label}] "${recovery.task}"${recovery.before ? ` (${WORKER_BRANCH} was at ${recovery.before.slice(0, 7)} when it started)` : ''}: other discussions' tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those. Inspect and resolve any merge or revert already in progress before further work; never force it or start a fresh operation over it.\n\n`
+        ? `Uncommitted edits are left in your worktree from the earlier task from [${label}] "${recovery.task}"${recovery.before ? ` (${place.branch} was at ${recovery.before.slice(0, 7)} when it started)` : ''}: other discussions' tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those. Inspect and resolve any merge or revert already in progress before further work; never force it or start a fresh operation over it.\n\n`
         : '';
       const mainBehind = owedMain || !recovery && await gitOk(place.path, 'rev-parse', '--verify', 'main^{commit}') &&
         Number(await git(place.path, 'rev-list', '--count', 'HEAD..main')) > 0;
       const merge = mainBehind ? (rollback
-        ? 'Main has commits worker/main lacks. Follow the rollback preflight below before merging or changing files.\n\n'
-        : `Before the instruction below, first merge main into worker/main with a normal merge (git merge main). Label any merge commit "[${label}] catch up with main". If it clashes, do not force it or do the requested task: leave the state intact and report the conflict; this origin must resolve it before other worker tasks can run. Never merge into main or push.\n\n`) : '';
+        ? `Main has commits ${place.branch} lacks. Follow the rollback preflight below before merging or changing files.\n\n`
+        : `Before the instruction below, first merge main into ${place.branch} with a normal merge (git merge main). Label any merge commit "[${label}] catch up with main". If it clashes, do not force it or do the requested task: leave the state intact and report the conflict; this origin must resolve it before other worker tasks can run. After a successful merge, run the project's tests (npm test, if it has them) and report their real output, then end your reply with the line "Tested: <full commit ID of ${place.branch}> with main <full commit ID of main>: tests passed" (or "tests failed"), naming the commits you tested. Never merge into main or push.\n\n`) : '';
       const interrupted = told.map((r) => `Your previous instruction "${firstLine(r.task)}" was interrupted by a Restart, Quit or a crash: check the worktree before continuing.\n\n`).join('');
       if (told.length) work.interrupted = work.interrupted.filter((r) => !told.includes(r));
       entry = { speaker: worker.name, text: (await worker.turn(interrupted + brief + tree + commit + leftover + merge + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
@@ -2170,6 +2337,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
         ctx.workerHandoff = false;
       }
       if (worker.lastUsage) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
+      await recordTested(ctx, place, entry.text); // its "Tested:" line, if Git agrees
     } catch (err) {
       entry = { speaker: worker.name, text: err.message, error: true };
     }
@@ -2180,9 +2348,9 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     if (saveError) workNote(ctx, `✗ ${worker.name}: couldn't save to the transcript: ${saveError.message}`, true);
     // Its commits must carry its label: one without it is reported, not trusted.
     if (before) {
-      const finished = await labelledCommits(workerDir(ctx), `${before}..HEAD`);
+      const finished = await labelledCommits(lane.path, `${before}..HEAD`);
       rememberCommits(shop, finished);
-      const subjects = (await git(workerDir(ctx), 'log', '--format=%h %s', `${before}..HEAD`, ...(mainAtStart ? ['--not', mainAtStart] : [])).catch(() => '')).split('\n').filter(Boolean);
+      const subjects = (await git(lane.path, 'log', '--format=%h %s', `${before}..HEAD`, ...(mainAtStart ? ['--not', mainAtStart] : [])).catch(() => '')).split('\n').filter(Boolean);
       const unlabelled = subjects.filter((l) => !l.slice(l.indexOf(' ') + 1).startsWith(`[${label}]`));
       if (unlabelled.length) workNote(ctx, `✗ Commits without the [${label}] label: ${unlabelled.join(' · ')}.`, true);
     }
@@ -2199,11 +2367,10 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     working(null);
   }
   saveCheckpoint(ctx); // its worker session and briefing, with the discussion's latest round
-  refreshWorker(ctx).catch(() => {});
+  await refreshWorker(ctx).catch(() => {}); // the tab's checks are current when the task counts as done
   refreshQuota(ctx).catch(() => {});
   return before;
 }
-const workerDir = (ctx) => shopOf(ctx).workerDir.path ?? ctx.cwd;
 
 // The server's state for a room started without cli.mjs's hub (some tests): just that room, served
 // at its own address like any other.
