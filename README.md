@@ -195,6 +195,20 @@ first needed, and always listed at the bottom of **Explorer**, after the active 
 Archive and Defer are disabled for the discussion in use, with the reason in a tooltip. New discussion names also skip names already
 taken in `archive/` and `deferred/`.
 
+**Sessions.** The word has two meanings here. A **provider session** is one continuous
+conversation with an agent's or the worker's CLI (Claude Code, Codex): what was said, read and
+replied in it, as the provider keeps it (it may compact older turns). The provider stores it on
+this machine (Claude Code under `~/.claude/projects/`, Codex in its own folder); agent-room keeps
+only its ID, in the discussion's checkpoint (below). Resume hands the same IDs back, so the
+conversation continues with its memory; Start fresh drops them, so new, empty conversations
+begin, briefed from the handoff, notes and summary. Each discussion has its own agent sessions
+and its own worker session, which works in that discussion's own worktree (see
+[The worker's worktrees](#the-workers-worktrees)). Separate sessions and worktrees keep memories
+and uncommitted work apart, not files: every agent and worker can still read the whole root. A
+**discussion session** is the stretch of a discussion recorded in one transcript
+(`transcripts/session-<date>-<time>.md`): Resume and Restart continue it; a fresh start (the first
+message, Start fresh, or Resume without a checkpoint) begins a new one.
+
 **Several open discussions** (on the screen). A folder can have
 several discussions open at once, each with its own agents' sessions, chat and auto dev, sharing
 one worker queue (each has its own worker session and worktree, below). One window shows one of them; Explorer marks the others "open". **Resume** shows an open one as
