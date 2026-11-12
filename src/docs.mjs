@@ -507,7 +507,7 @@ function bubble(m) {
   el.className = 'msg' + (m.speaker === 'User' || m.speaker === 'Relayed from discussion' ? ' user' : '') + (m.speaker === 'Worker report' ? ' report' : '') + (m.error ? ' error' : '')
     + (m.outcome ? ' summary' + (m.outcome === 'agreed' ? '' : ' not-agreed') : '');
   el.innerHTML = '<div class="who"></div>' + m.html;
-  el.firstChild.textContent = m.speaker + (m.origin ? ' · [' + m.origin + ']' : '') + (m.error ? ' — failed' : '');
+  el.firstChild.textContent = m.speaker + (m.error ? ' — failed' : '');
   if (m.meta) { const meta = document.createElement('span'); meta.className = 'meta'; meta.textContent = ' · ' + m.meta; el.firstChild.append(meta); }
   return el;
 }
@@ -766,7 +766,6 @@ function talkStatus() {
 function roomActivity() {
   const parts = [];
   if (localThinking) parts.push(['on', localThinking + ' is thinking']);
-  if (localWorking) parts.push(['on worker', 'Worker is working']);
   return parts.length ? parts : [['idle', 'Idle']];
 }
 function updateReplicaView() {
@@ -1044,8 +1043,9 @@ async function openFiles(group) {
     details.ontoggle = () => { if (details.open) expandedLines.add(path); else expandedLines.delete(path); };
     // Open in another context of this folder (the screen keeps several open): Resume shows it, or
     // Go to before its first message (it has nothing to resume yet).
-    const openHere = room?.open?.find((o) => !o.current && o.active === path);
-    details.append(el('summary', '', name + (path === room?.active ? ' · in use' : openHere ? ' · open' : '')));
+    const openEntry = room?.open?.find((o) => o.active === path);
+    const openHere = openEntry?.current ? null : openEntry;
+    details.append(el('summary', '', name + (path === room?.active ? ' · in use' : openHere ? ' · open' : '') + (openEntry?.working ? ' · worker working' : '')));
     const row = el('div', 'row discussion-row' + (path === room?.active ? ' in-use' : '')); row.append(details);
     const label = (replica?.node || 'Local') + ' (this node) · ' + (own ? 'round ' + own.round : 'no saved round') +
       (own ? Object.entries(own.sent).map(([n, sent]) => ' · ' + (sent ? 'sent to ' + n + ' ✓' : n + ' pending')).join('') : '');
@@ -1144,12 +1144,13 @@ async function openFiles(group) {
   const discussions = discussionsIn('discussions').sort((a, b) => (b === active) - (a === active));
   // The folder's other open contexts that have no discussion row: the brainstorm, a new one.
   for (const o of (room?.open ?? []).filter((x) => !x.current && !x.active)) {
-    const r = el('div', 'row'); r.append(el('span', '', o.title + ' · open'));
+    const r = el('div', 'row'); r.append(el('span', '', o.title + ' · open' + (o.working ? ' · worker working' : '')));
     const b = el('button', 'reopen', 'Go to'); b.onclick = () => { location.href = o.url; }; r.append(b); list.append(r);
   }
-  if (room?.brainstorm && canAct) list.append(el('span', 'hint', room.multi ? 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Close discussion ends it.' : 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Resume ends it.'));
-  else if (!discussions.length && !replica?.received.some((l) => !l.local)) list.append(el('span', 'hint', room?.started ? '' : 'No active discussions: your first message starts one.'));
-  else if (room && !room.started && canAct) list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Resume on its row.'));
+  const currentWorker = room?.open?.find((o) => o.current)?.working ? ' · worker working' : '';
+  if (room?.brainstorm && canAct) list.append(el('span', 'hint', room.multi ? 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Close discussion ends it.' : 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Resume ends it.') + currentWorker);
+  else if (!discussions.length && !replica?.received.some((l) => !l.local)) list.append(el('span', 'hint', room?.started ? '' : 'No active discussions: your first message starts one.' + currentWorker));
+  else if (room && !room.started && canAct) list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Resume on its row.' + currentWorker));
   heading('Discussions');
   for (const d of discussions) {
     const path = 'discussions/' + d;
@@ -2014,7 +2015,7 @@ function handleScreen(req, res, url, dir, screen) {
 export function resetEvent(screen) {
   return { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc,
     thinking: screen.thinking, status: screen.status, input: !!screen.say,
-    room: screen.room ?? null, worker: screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
+    room: screen.room ?? null, worker: screen.workerForPage?.() ?? screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
     quota: screen.quota, quotaAt: screen.quotaAt ?? null, monitor: screen.monitor ?? null, newRoom: !!screen.newRoom, page: PAGE,
     replica: screen.replica ?? null, replicaOff: screen.replicaOff ?? null, viewing: screen.viewing ?? null };
 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handleLine, load, restartArgs, workerLane } from '../src/ui.mjs';
+import { handleLine, load, restartArgs, workerLane, workNote } from '../src/ui.mjs';
 
 const freshCtx = () => ({ cwd: '/tmp', agentSpecs: 'claude:A,codex:B', state: { transcript: [], seen: new Map() }, sessions: new Map() });
 
@@ -2698,4 +2698,32 @@ test('a worker task from a discussion with no full checkpoint yet is recorded to
   assert.match(after.screen.worker.find((m) => m.note).note,
     /^✗ Interrupted: \[2026-11-01-old\] "early task" \(started \d\d:\d\d\) left no commits or edits in the worktree\./);
   assert.match(after.state.transcript.at(-1)?.text ?? '', /Interrupted: \[2026-11-01-old\] "early task"/);
+});
+
+
+test('worker notes follow their captured owner, including brainstorms and room-wide events', async () => {
+  const docs = await import('../src/docs.mjs');
+  const eventsA = [], eventsB = [];
+  const screen = (events) => ({ transcript: [], worker: [], clients: new Set([{ write: (s) => events.push(JSON.parse(s.slice(6))) }]) });
+  const a = { cwd: '/tmp/routing', id: 'a', state: { transcript: [] }, discussion: { name: 'alpha' }, screen: screen(eventsA), docs };
+  const b = { cwd: a.cwd, id: 'b', state: { transcript: [] }, discussion: { name: 'beta' }, screen: screen(eventsB), docs };
+  const hub = { rooms: new Map([['a', a], ['b', b]]) }; a.hub = b.hub = hub;
+  workNote(a, 'alpha note');
+  workNote(b, 'beta note');
+  assert.deepEqual(eventsA.map((e) => e.message.note), ['alpha note']);
+  assert.deepEqual(eventsB.map((e) => e.message.note), ['beta note']);
+  assert.deepEqual(docs.resetEvent(a.screen).worker.map((m) => m.note), ['alpha note']);
+  assert.deepEqual(docs.resetEvent(b.screen).worker.map((m) => m.note), ['beta note']);
+  a.discussion = { name: 'gamma' };
+  workNote(a, 'late note', true, null, 'alpha');
+  assert.deepEqual(docs.resetEvent(a.screen).worker, []);
+  a.discussion = { name: 'alpha' };
+  assert.equal(docs.resetEvent(a.screen).worker.at(-1).note, 'late note');
+  workNote(a, 'all workers', true, null, 'alpha', true);
+  assert.equal(eventsA.at(-1).message.note, 'all workers');
+  assert.equal(eventsB.at(-1).message.note, 'all workers');
+  a.discussion = null; a.state.brainstorm = true; a.state.brainstormId = 'one';
+  workNote(a, 'first brainstorm');
+  a.state.brainstormId = 'two';
+  assert.deepEqual(docs.resetEvent(a.screen).worker, []);
 });

@@ -769,7 +769,7 @@ async function loadCheckpoint(ctx, saved, name) {
     Object.assign(ctx.screen, { transcript: state.transcript, doc: saved.doc ?? null, thinking: null, status: null });
     // Its own part of the Worker tab, unless the tab (shared by the folder's discussions) still has it.
     const own = Array.isArray(saved.worker) ? saved.worker.filter((m) => m?.origin === label) : [];
-    if (own.length && !shop.log.some((m) => m.origin === label)) shop.log.push(...own);
+    if (own.length && !shop.log.some((m) => m.origin === label)) shop.log.push(...own.map((m) => ({ ...m, owner: label })));
     // What can be detected of a round cut off after the checkpoint: the transcript grew since.
     const size = logSize(ctx);
     if (typeof saved.logBytes === 'number' && size > saved.logBytes) {
@@ -956,6 +956,7 @@ function switchTo(ctx, next) {
   if (was && was.dir !== next?.dir) ctx.previous = { name: was.name, title: was.title };
   if (next && ctx.previous?.name === next.name) ctx.previous = null; // went back to it
   ctx.discussion = next;
+  ctx.screen.working = runningTasks(shopOf(ctx)).find((t) => t.owner === ownerOf(ctx))?.worker.name ?? null;
   showHeader(ctx);
   toScreen(ctx, ctx.docs.resetEvent(ctx.screen)); // open pages start over with the empty chat
 }
@@ -969,7 +970,7 @@ function newDiscussion(ctx) {
   if (!was && !ctx.logPath && !ctx.state.brainstorm) return note(ctx, 'No discussion started yet: your next message starts a new one.');
   if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a new discussion');
   if (was && ctx.screen.worker.length) {
-    const view = { note: `New discussion: ${was.name} keeps its worker session; its tasks still running or queued finish there and report to it. The new discussion's worker starts a fresh session.` };
+    const view = { owner: ownerOf(ctx), note: `New discussion: ${was.name} keeps its worker session; its tasks still running or queued finish there and report to it. The new discussion's worker starts a fresh session.` };
     ctx.screen.worker.push(view);
     toScreen(ctx, { type: 'work', message: view });
   }
@@ -1024,7 +1025,7 @@ const pageOf = (ctx) => `${roomPath(ctx)}__room`;
 function openList(ctx) {
   return siblings(ctx).filter((c) => c.state && c.id).map((c) => ({ url: pageOf(c), current: c === ctx,
     title: c.discussion?.title ?? (c.state.brainstorm ? 'Brainstorm' : 'New discussion (not started)'),
-    active: c.discussion ? `discussions/${c.discussion.name}` : null, brainstorm: !!c.state.brainstorm, started: !!c.logPath }));
+    active: c.discussion ? `discussions/${c.discussion.name}` : null, brainstorm: !!c.state.brainstorm, started: !!c.logPath, working: !!c.screen.working }));
 }
 // The folder's workshop: its lanes (each with its own queue and hold), the discussions' directories
 // a running task writes to, and the Worker tab's log.
@@ -1032,10 +1033,14 @@ function newShop(log) {
   return { lanes: new Map(), writing: new Set(), contexts: 0, log };
 }
 function shopOf(ctx) {
-  if (ctx.shop) return ctx.shop;
+  if (ctx.shop) {
+    ctx.screen.workerForPage = () => ctx.shop.log.filter((m) => visibleWorker(ctx, m));
+    return ctx.shop;
+  }
   const other = siblings(ctx).find((c) => c !== ctx && c.shop);
   ctx.shop = other?.shop ?? newShop(ctx.screen.worker);
   ctx.screen.worker = ctx.shop.log;
+  ctx.screen.workerForPage = () => ctx.shop.log.filter((m) => visibleWorker(ctx, m));
   return ctx.shop;
 }
 // A lane's queue and hold (see "The worker queues"), by its discussion's name (null: worker/main's).
@@ -1049,10 +1054,11 @@ export const workerLane = (ctx, name = laneOf(ctx)) => laneState(shopOf(ctx), na
 const lanesOf = (shop) => [...(shop.lanes?.values() ?? [])];
 const runningTasks = (shop) => lanesOf(shop).map((l) => l.running).filter(Boolean);
 const queuedTasks = (shop) => lanesOf(shop).flatMap((l) => l.tasks);
-// Worker events go to every open discussion's pages.
-const toShop = (ctx, event) => { for (const c of siblings(ctx)) if (c.screen) toScreen(c, event); };
-function workNote(ctx, text, error = false, origin = null) {
-  const view = { note: text, error, ...(origin && { origin }) };
+// Room-wide messages are retained only for contexts open when they were emitted.
+const visibleWorker = (ctx, m) => m.owner === ownerOf(ctx) || (m.room && m.recipients?.includes(ownerOf(ctx)));
+const toShop = (ctx, event) => { for (const c of siblings(ctx)) if (c.screen && visibleWorker(c, event.message)) toScreen(c, event); };
+export function workNote(ctx, text, error = false, origin = null, owner = ownerOf(ctx), room = false) {
+  const view = { note: text, error, ...(origin && { origin }), ...(room ? { room: true, recipients: siblings(ctx).map(ownerOf) } : { owner }) };
   shopOf(ctx).log.push(view);
   toShop(ctx, { type: 'work', message: view });
   out(ctx, error ? red(text) : text);
@@ -1149,7 +1155,7 @@ async function leftovers(ctx, place) {
     const origin = lane.blockedBy?.origin ?? lane.running?.origin ?? ctx;
     if (lane.inspectionError?.message !== err.message || lane.inspectionError?.origin !== origin) {
       const text = `✗ Worker worktree inspection failed: ${err.message} (${place.branch}). This lane's dispatch, including recovery, waits until inspection succeeds; other lanes go on.`;
-      workNote(ctx, text, true);
+      workNote(ctx, text, true, null, lane.blockedBy?.owner ?? lane.running?.owner ?? ownerOf(origin));
       note(origin, text, true);
     }
     lane.inspectionError = { message: err.message, origin, place };
@@ -1246,7 +1252,7 @@ function hold(ctx, blockedBy) {
   lane.blockedBy = blockedBy;
   lane.holdContext = ctx;
   const where = blockedBy.label ? `[${blockedBy.label}]` : 'an unknown origin';
-  workNote(ctx, `✗ The worker's folder ${blockedBy.place.path} (${blockedBy.place.branch}) has uncommitted edits from ${where}${blockedBy.task ? ` ("${blockedBy.task}")` : ''}: its queue holds${blockedBy.label ? ` until [${blockedBy.label}] resolves them (its own instructions still go through)` : ' until the folder is clean (commit or remove those edits yourself)'}; other lanes go on.`, true);
+  workNote(ctx, `✗ The worker's folder ${blockedBy.place.path} (${blockedBy.place.branch}) has uncommitted edits from ${where}${blockedBy.task ? ` ("${blockedBy.task}")` : ''}: its queue holds${blockedBy.label ? ` until [${blockedBy.label}] resolves them (its own instructions still go through)` : ' until the folder is clean (commit or remove those edits yourself)'}; other lanes go on.`, true, null, blockedBy.owner ?? (blockedBy.place.lane || ownerOf(ctx)));
   if (blockedBy.origin) note(blockedBy.origin, `✗ The worker left uncommitted edits from "${blockedBy.task}": the worker lane of [${blockedBy.label}] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).`, true);
   showHeader(ctx);
   if (!lane.pumping) watchLane(shop, lane);
@@ -1254,7 +1260,7 @@ function hold(ctx, blockedBy) {
 function release(ctx, lane) {
   const was = lane.blockedBy;
   lane.blockedBy = null;
-  workNote(ctx, `The worker's folder ${was.place.path} is clean again: its queue resumes.`);
+  workNote(ctx, `The worker's folder ${was.place.path} is clean again: its queue resumes.`, false, null, was.owner ?? (was.place.lane || ownerOf(ctx)));
   if (was?.origin) note(was.origin, 'The worker\'s folder is clean again: this discussion\'s worker tasks resume.');
   showHeader(ctx);
 }
@@ -1292,7 +1298,7 @@ async function pumpLane(shop, lane) {
       if (running.length >= PARALLEL_WORKERS || running.some((r) => r.origin === t.origin) || earlier) {
         if (!t.waitNoted && running.length >= PARALLEL_WORKERS) {
           t.waitNoted = true;
-          workNote(t.origin, `[${originLabel(t.origin)}] "${firstLine(t.text)}" waits for a free place: ${plural(running.length, 'worker task')} running, at most ${PARALLEL_WORKERS} at once.`, false, originLabel(t.origin));
+          workNote(t.origin, `[${t.label}] "${firstLine(t.text)}" waits for a free place: ${plural(running.length, 'worker task')} running, at most ${PARALLEL_WORKERS} at once.`, false, t.label, t.owner);
         }
         break;
       }
@@ -2297,7 +2303,7 @@ async function readTested(place) {
 }
 // The worker's last "Tested: <branch commit> with main <main commit>: tests passed|failed" line, if
 // Git agrees: the branch commit is on its branch, it contains the main commit, which is main's.
-async function recordTested(ctx, place, text) {
+async function recordTested(ctx, place, text, owner, label) {
   const m = [...String(text).matchAll(/^Tested: ([0-9a-f]{7,64}) with main ([0-9a-f]{7,64}): tests (passed|failed)\.?$/gm)].at(-1);
   if (!m) return;
   try {
@@ -2310,7 +2316,7 @@ async function recordTested(ctx, place, text) {
     const file = await testedFile(place);
     writeFileSync(`${file}.tmp`, JSON.stringify({ version: 1, branch, main: mainId, result: m[3], at: new Date().toISOString() }) + '\n', { mode: 0o600 });
     renameSync(`${file}.tmp`, file);
-  } catch (err) { workNote(ctx, `✗ The worker's "Tested:" line was not recorded: ${err.message}.`, true); }
+  } catch (err) { workNote(ctx, `✗ The worker's "Tested:" line was not recorded: ${err.message}.`, true, label, owner); }
 }
 // Git's exit status as well as its output (git merge-tree exits 1 for a conflict).
 const gitStatus = (dir, ...args) => new Promise((done) => execFile('git', ['-C', dir, ...args], { maxBuffer: 1 << 22 },
@@ -2364,7 +2370,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   const worker = t?.worker?.seat ? t.worker : ctx.worker;
   const seat = worker !== ctx.worker ? worker.seat : null;
   const own = seat ?? { briefed: ctx.workerBriefed, tree: ctx.workerTree, label: ctx.workerLabel, handoff: ctx.workerHandoff, brainstorm: !!ctx.state.brainstorm };
-  const shop = shopOf(ctx), screen = ctx.screen, label = seat ? seat.origin : originLabel(ctx);
+  const shop = shopOf(ctx), screen = ctx.screen, label = t?.label ?? (seat ? seat.origin : originLabel(ctx)), owner = t?.owner ?? ownerOf(ctx);
   // First of all: its discussion's checkpoint records it as running (see "Work in flight").
   const record = t?.record, work = record ? workOf(shop, t.workName) : null;
   if (record) {
@@ -2377,7 +2383,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   if (!rollback && recovery && shop.rollbacks?.get(label)?.task === recovery.task) rollback = shop.rollbacks.get(label);
   if (rollback) { rollback.status = 'running'; showHeader(ctx); }
   let before = null, mainAtStart = null, leftUsage = null;
-  const history = own.handoff ? screen.worker.filter((m) => m.speaker).map((m) =>
+  const history = own.handoff ? screen.worker.filter((m) => m.owner === owner && m.speaker).map((m) =>
     `${m.speaker}${m.error ? ' (failed)' : ''}:\n${m.html}`).join('\n\n') : '';
   // The task's context, read once, here, before anything awaits: its discussion (for the briefing
   // and the /move lock) and its transcript. If New discussion or Resume changes the room's
@@ -2392,12 +2398,12 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     catch (err) { saveError ??= err; }
   };
   const show = (entry, meta) => {
-    const view = { ...ctx.docs.messageView(entry), ...(meta && { meta }), origin: label };
+    const view = { ...ctx.docs.messageView(entry), ...(meta && { meta }), origin: label, owner };
     shop.log.push(view);
     toShop(ctx, { type: 'work', message: view });
   };
   // Its own discussion's window shows its worker working: other discussions' tasks run alongside.
-  const working = (name) => { ctx.screen.working = name; toScreen(ctx, { type: 'working', name }); };
+  const working = (name) => { if (ownerOf(ctx) === owner) { ctx.screen.working = name; toScreen(ctx, { type: 'working', name }); } showHeader(ctx); };
   // The discussion this task writes to (transcript, notes): /move refuses it until the task ends.
   ctx.workingIn = task.discussion?.dir ?? null;
   if (ctx.workingIn) shop.writing.add(ctx.workingIn);
@@ -2473,7 +2479,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       // Its usage counts for its own discussion: the one in use, or the one left meanwhile (saveLeftWorker).
       if (worker.lastUsage && worker === ctx.worker) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
       else if (worker.lastUsage) leftUsage = worker.lastUsage;
-      await recordTested(ctx, place, entry.text); // its "Tested:" line, if Git agrees
+      await recordTested(ctx, place, entry.text, owner, label); // its "Tested:" line, if Git agrees
     } catch (err) {
       entry = { speaker: worker.name, text: err.message, error: true };
     }
@@ -2481,14 +2487,14 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     workLog(`**${worker.name}** (worker${entry.error ? ', failed' : ''}, ${meta})\n\n${entry.text}\n\n`);
     out(ctx, entry.error ? red(`\n✗ ${worker.name} (worker) failed: ${entry.text}\n`) : `\n${bold(worker.name)}${dim(` (worker, ${meta})`)} › ${entry.text}\n`);
     show(entry, meta);
-    if (saveError) workNote(ctx, `✗ ${worker.name}: couldn't save to the transcript: ${saveError.message}`, true);
+    if (saveError) workNote(ctx, `✗ ${worker.name}: couldn't save to the transcript: ${saveError.message}`, true, label, owner);
     // Its commits must carry its label: one without it is reported, not trusted.
     if (before) {
       const finished = await labelledCommits(lane.path, `${before}..HEAD`);
       rememberCommits(shop, finished);
       const subjects = (await git(lane.path, 'log', '--format=%h %s', `${before}..HEAD`, ...(mainAtStart ? ['--not', mainAtStart] : [])).catch(() => '')).split('\n').filter(Boolean);
       const unlabelled = subjects.filter((l) => !l.slice(l.indexOf(' ') + 1).startsWith(`[${label}]`));
-      if (unlabelled.length) workNote(ctx, `✗ Commits without the [${label}] label: ${unlabelled.join(' · ')}.`, true);
+      if (unlabelled.length) workNote(ctx, `✗ Commits without the [${label}] label: ${unlabelled.join(' · ')}.`, true, label, owner);
     }
     if (record && work.running?.id === record.id) {
       // Stopped by Quit or Restart: kept as interrupted, to report on Resume.

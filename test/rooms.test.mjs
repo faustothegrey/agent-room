@@ -276,11 +276,17 @@ process.stdin.on('end', () => {
     assert.deepEqual([startA, startB, againA], ['--session-id', '--session-id', '--resume']);
     assert.equal(idA2, idA);
     assert.notEqual(idB, idA);
-    // A worker task from the second discussion: its report goes back there (both pages see the shared tab).
+    // The second discussion receives its own worker output; the first receives status updates only.
     await fetch(baseB + '__work', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'task from beta' }) });
-    const report = await pageA.until((e) => e.type === 'work' && e.message.speaker === 'W');
+    const start = await pageA.until((e) => e.type === 'room' && e.room.open.some((o) => o.title === 'Beta topic' && o.working));
+    assert.equal(start.room.open.find((o) => o.title === 'Beta topic').working, true);
+    const report = await b.until((e) => e.type === 'work' && e.message.speaker === 'W');
     assert.match(report.message.html, /report on: task from beta/);
     assert.match(report.message.origin, /beta-topic$/);
+    await pageA.until((e) => e.type === 'room' && e.room.open.some((o) => o.title === 'Beta topic' && !o.working));
+    const historyA = await stream(baseA), historyB = await stream(baseB);
+    assert.equal((await historyA.next()).worker.some((m) => m.html?.includes('task from beta')), false);
+    assert.equal((await historyB.next()).worker.some((m) => m.html?.includes('task from beta')), true);
     const transcript = (d) => readFileSync(join(repo, 'discussions', d, 'transcripts', readdirSync(join(repo, 'discussions', d, 'transcripts'))[0]), 'utf8');
     const beta = readdirSync(join(repo, 'discussions')).find((n) => n.endsWith('beta-topic'));
     assert.match(transcript(beta), /task from beta[\s\S]*report on: task from beta/);
