@@ -132,7 +132,10 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   background; it does not resume its sessions.
 - **Reload:** load code and rulebook edits between discussion commands without losing the
   current conversation. Open pages refresh by themselves when the page's own code changed,
-  keeping what you were typing.
+  keeping what you were typing. From the code before each discussion had its own worker queue,
+  Reload waits while that worker still has a task running or queued: it says so, keeps the previous
+  code, and you reload again once the Worker tab is idle. A hold over uncommitted worker edits is
+  kept across it.
 - **Restart:** click twice to replace the server process on the same address, for changes Reload
   can't load (such as `cli.mjs`). It acts on the whole server: the new process brings back every
   room, each with its current agents and worker, and resumes each one's discussion in use from its
@@ -704,8 +707,8 @@ in `docs.mjs`; after a Reload, open pages refresh by themselves when they change
 module in `src/` or a rulebook is saved, as if you had pressed Reload: the conversation continues,
 and the page refreshes only when its own code changed. Saving `cli.mjs` shows a reminder to
 Restart instead. Restart keeps dev mode. Saves by anyone count, including the worker's or another
-agent's edits to agent-room itself; a half-finished save that doesn't load leaves the previous
-code running.
+agent's edits to agent-room itself, and a `git merge` into the checkout the server runs from; a
+half-finished save that doesn't load leaves the previous code running.
 
 For unfinished decisions, historical designs and deferred research, start at
 [the discussions index](discussions/README.md).

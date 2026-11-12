@@ -206,8 +206,10 @@ export async function load(ctx, v) {
   // The folder's workshop (see "Several open discussions"): the worker's queue, worktree and tab,
   // shared by every discussion open in this folder, and by reference so it survives reloads.
   const shop = ctx.shop ?? siblings(ctx).find((r) => r !== ctx && r.shop)?.shop ?? null;
+  if (shop && !shop.lanes) await convertWorkshop(ctx, shop); // a Reload from the code before lanes
   // The worktree its worker's task runs in (see refreshWorker): its own, as tasks of different
   // discussions run at the same time; by reference, so it survives reloads and settings copies.
+  if (shop?.workerDir && ctx.workerDir === shop.workerDir) ctx.workerDir = { path: shop.workerDir.path }; // 1a shared one
   const workerDir = ctx.workerDir ??= { path: null };
   const worker = createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions, shell: true,
     timeoutMs: WORKER_TIMEOUT_MS, runner, session: ctx.sessions.get(`worker:${wName}`) });
@@ -217,6 +219,31 @@ export async function load(ctx, v) {
   return { room: createRoom(agents, ctx.state), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: shop ?? newShop(screen.worker),
     suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }) };
+}
+
+// A Reload from the code before lanes (slice 1a) finds its workshop in memory: one shared queue
+// (tasks, running), one hold (blockedBy) and one inspection error. Its running task is a promise in
+// the old code's loop, which goes on to its queued ones: they can't move to this code. So while it
+// has any, the Reload waits (cli.mjs reports the reason and keeps the old code). Idle, it converts:
+// its hold goes to its worktree's lane, the same object, so it is never lost; an inspection that
+// failed didn't record its worktree, so every lane is inspected again now, before any task starts.
+async function convertWorkshop(ctx, shop) {
+  const queued = shop.tasks?.length ?? 0, running = shop.running ? 1 : 0;
+  if (queued || running) throw new Error(`Reload waits: the worker has ${plural(queued + running, 'task')} from before this code (${running} running, ${queued} queued). They finish under the code they started with; reload again once the Worker tab is idle.`);
+  if (shop.pumping || shop.confirming) throw new Error('Reload waits: the worker queue from before this code is between two steps; reload again in a moment.');
+  clearTimeout(shop.recheck); // the old code's recheck would run the old queue on this workshop
+  const held = shop.blockedBy, holder = shop.holdContext ?? ctx;
+  for (const key of ['tasks', 'running', 'blockedBy', 'holdContext', 'inspectionError', 'recheck', 'workingIn', 'pumping', 'confirming']) delete shop[key];
+  shop.lanes = new Map();
+  shop.writing = new Set();
+  if (held) {
+    const place = held.place ?? await lanePlace(ctx, null); // before 1a there was only worker/main's
+    const lane = laneState(shop, place.lane);
+    if (!held.place) held.place = place;
+    Object.assign(lane, { blockedBy: held, holdContext: holder });
+  }
+  // Its inspection error isn't carried: its worktree is unknown, and the inspection below replaces it.
+  await recoverWorkerOwner(ctx); // every lane's worktree as it is now: leftovers hold, unreadable ones wait
 }
 
 // A room's id in its addresses (/r/<id>/…): its folder's name and a short hash of its real path, so

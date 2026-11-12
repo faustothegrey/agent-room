@@ -824,6 +824,84 @@ test('the Worker tab checks each branch with work not in main: whether it contai
   assert.ok(lines().some((l) => l.startsWith(`Last tested (the worker's report): ${branch} ${tip.slice(0, 7)}`)));
 });
 
+// ── Reload from the code before lanes (slice 1a) ──
+// Slice 1a's workshop, as it is in memory when a Reload loads slice 1b's code: one shared queue
+// (tasks, running), one hold (blockedBy, with its worktree's place), one inspection error, one
+// worktree path shared by every context (workerDir).
+test('Reload from the code before lanes: refused while that workshop runs or queues a task; an idle one converts, keeping a hold over uncommitted edits, and an inspection that failed is made again', async () => {
+  const { realpathSync, writeFileSync, readFileSync } = await import('node:fs');
+  const { queueWork, workerPlace } = await import('../src/ui.mjs');
+  const { ctx, got } = await workerRoom();
+  ctx.noScreen = true;
+  const git = await gitRoom(ctx.cwd);
+  await handleLine('hello', ctx);
+  const name = ctx.discussion.name, lane = `${realpathSync(ctx.cwd)}.workers/${name}`;
+  await work(ctx, 'make the lane');
+  const stub = () => { ctx.worker.turn = async (p) => { got.push(p); return 'ok'; }; };
+  // What cli.mjs's applyReload does: the new code's load on the same context.
+  const reload = async () => {
+    Object.assign(ctx, { agentSpecs: 'claude:A,claude:B', workerSpec: 'claude:W', sessions: ctx.sessions ?? new Map(), code: {}, refreshQuota: () => {} });
+    Object.assign(ctx, await load(ctx, `?old=${Date.now()}`));
+    stub();
+  };
+  const oldShop = (extra = {}) => {
+    const shared = { path: lane };
+    ctx.workerDir = shared; // 1a: every context's worker used the workshop's one path
+    ctx.shop = { tasks: [], running: null, blockedBy: null, workingIn: null, contexts: 0, workerDir: shared, log: ctx.screen.worker, ...extra };
+    return ctx.shop;
+  };
+  const sent = () => got.map((p) => p.split('\n').at(-1));
+
+  // 1. Busy: a task running under 1a and one queued. The Reload is refused, and nothing changes.
+  const busy = oldShop({ running: { origin: ctx, text: 'running under 1a', lane: name }, tasks: [{ origin: ctx, text: 'queued under 1a', lane: name, done() {} }] });
+  const before = ctx.worker;
+  await assert.rejects(reload(), /^Error: Reload waits: the worker has 2 tasks from before this code \(1 running, 1 queued\)\. They finish under the code they started with; reload again once the Worker tab is idle\.$/);
+  assert.deepEqual([ctx.shop, busy.lanes, busy.tasks.length, busy.running.text, ctx.worker], [busy, undefined, 1, 'running under 1a', before]);
+
+  // 2. Idle: it converts; each context gets its own worktree path; tasks run in their lane.
+  const idle = oldShop();
+  await reload();
+  assert.equal(ctx.shop, idle);
+  assert.ok(idle.lanes instanceof Map);
+  assert.deepEqual([idle.tasks, idle.running, idle.blockedBy], [undefined, undefined, undefined]);
+  assert.notEqual(ctx.workerDir, idle.workerDir);
+  await work(ctx, 'after the reload');
+  assert.deepEqual([sent().at(-1), realpathSync(ctx.workerDir.path)], ['after the reload', lane]);
+
+  // 3. A hold over uncommitted edits (here of unknown origin): kept, the same object, in its lane;
+  // no task starts over the edits until they are resolved.
+  writeFileSync(`${lane}/wip.txt`, 'unresolved\n');
+  const hold = { origin: null, place: await workerPlace(ctx.cwd, name) };
+  oldShop({ blockedBy: hold, holdContext: ctx });
+  await reload();
+  assert.equal(workerLane(ctx).blockedBy, hold);
+  const count = got.length;
+  let ran = false;
+  queueWork(ctx, 'over the edits');
+  ctx.workQueue.then(() => { ran = true; });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual([ran, got.length, workerLane(ctx).blockedBy, git('-C', lane, 'status', '--porcelain')], [false, count, hold, '?? wip.txt']);
+  git('-C', lane, 'add', 'wip.txt'); git('-C', lane, 'commit', '-q', '-m', 'resolved by hand');
+  await ctx.workQueue; // the recheck finds it clean: the hold is released, and the task runs
+  assert.deepEqual([sent().at(-1), workerLane(ctx).blockedBy], ['over the edits', null]);
+
+  // 4. An inspection that had failed (1a didn't record which worktree): every lane is inspected
+  // again at the Reload; one that still can't be read holds, and starts nothing until it can.
+  const index = `${git('-C', lane, 'rev-parse', '--absolute-git-dir')}/index`, saved = readFileSync(index);
+  writeFileSync(index, 'bad');
+  try {
+    oldShop({ inspectionError: { message: 'unreadable', origin: ctx } });
+    await reload();
+    assert.match(workerLane(ctx).inspectionError?.message ?? '', /index/);
+    const n = got.length;
+    queueWork(ctx, 'while unreadable');
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(got.length, n);
+  } finally { writeFileSync(index, saved); }
+  await ctx.workQueue; // readable again: the recheck lets it run
+  assert.deepEqual([sent().at(-1), workerLane(ctx).inspectionError], ['while unreadable', null]);
+});
+
 test('the header\'s version: the checkout\'s commit and uncommitted changes, outside discussions/, as a snapshot', async () => {
   const { mkdtempSync, mkdirSync, writeFileSync, realpathSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
