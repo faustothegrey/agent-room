@@ -1481,7 +1481,8 @@ test('one workshop per folder: tasks labelled by origin, one worker session, lan
   assert.match(second.prompts[0], new RegExp(`come from \\[${second.discussion.name}\\]`));
   assert.match(first.prompts[0], new RegExp(`The active discussion's folder is ${first.discussion.dir}:`)); // its own folder, its own session
   assert.match(second.prompts[0], new RegExp(`The active discussion's folder is ${second.discussion.dir}:`));
-  assert.deepEqual(first.shop.log.filter((m) => m.speaker === 'User').map((m) => m.origin), [first.discussion.name, second.discussion.name]);
+  // The two tasks run at once (two lanes), so their entries may come in either order.
+  assert.deepEqual(first.shop.log.filter((m) => m.speaker === 'User').map((m) => m.origin).sort(), [first.discussion.name, second.discussion.name].sort());
   assert.match(readFileSync(first.logPath, 'utf8'), /task for a[\s\S]*committed/); // each report goes back to its origin
   assert.doesNotMatch(readFileSync(first.logPath, 'utf8'), /task for b/);
   assert.match(readFileSync(second.logPath, 'utf8'), /task for b/);
