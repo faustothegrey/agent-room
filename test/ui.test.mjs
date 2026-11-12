@@ -1523,8 +1523,11 @@ test('lanes run at the same time: two discussions\' tasks overlap with separate 
 
   // While both run: a queue, a worktree and a worker session each; each window shows its own worker working.
   assert.deepEqual([la.running?.text, lb.running?.text, la.tasks.length, lb.tasks.map((t) => t.text)], ['a: leave edits', 'b: one', 0, ['b: two']]);
-  assert.deepEqual(started.map(([t, dir]) => [t, dir]), [['a: leave edits', `${root}.workers/${first.discussion.name}`], ['b: one', `${root}.workers/${second.discussion.name}`]]);
-  assert.notEqual(started[0][2], started[1][2]); // two worker agents, each with its own session
+  // (The two lanes start together: either turn may begin first.)
+  const byText = Object.fromEntries(started.map(([t, dir, w]) => [t, { dir, w }]));
+  assert.deepEqual([byText['a: leave edits'].dir, byText['b: one'].dir], [`${root}.workers/${first.discussion.name}`, `${root}.workers/${second.discussion.name}`]);
+  assert.deepEqual([byText['a: leave edits'].w, byText['b: one'].w], [first.worker, second.worker]); // two worker agents, each with its own session
+  assert.notEqual(first.worker, second.worker);
   assert.deepEqual([first, second, third].map((c) => c.screen.working ?? null), [first.worker.name, second.worker.name, null]);
   assert.deepEqual([la.blockedBy, lb.blockedBy], [null, null]);
 
@@ -1541,7 +1544,7 @@ test('lanes run at the same time: two discussions\' tasks overlap with separate 
   await until(() => gates.has('b: two')); // b's next task, in order, while a's lane holds
   gates.get('b: two')('ok'); gates.get('c: waits')('ok');
   await Promise.all([second.workQueue, third.workQueue]);
-  assert.deepEqual(started.map(([t]) => t), ['a: leave edits', 'b: one', 'c: waits', 'b: two']);
+  assert.deepEqual([started.slice(0, 2).map(([t]) => t).sort(), started.slice(2).map(([t]) => t)], [['a: leave edits', 'b: one'], ['c: waits', 'b: two']]);
   assert.equal(la.blockedBy.origin, first); // still held, and it stopped no one else
   assert.deepEqual([second.prompts.length, third.prompts.length], [2, 1]);
 });
