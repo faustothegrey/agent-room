@@ -236,6 +236,21 @@ async function convertWorkshop(ctx, shop) {
   for (const key of ['tasks', 'running', 'blockedBy', 'holdContext', 'inspectionError', 'recheck', 'workingIn', 'pumping', 'confirming']) delete shop[key];
   shop.lanes = new Map();
   shop.writing = new Set();
+  // The folder's other open discussions switch to this code one at a time, each after its round in
+  // progress; meanwhile a worker instruction to one of them (its Worker tab, an auto dev relay) still
+  // enters the old code's queueWork, which pushes onto shop.tasks and runs its own loop. So the old
+  // fields stay as an empty queue whose push hands the task to its lane here, and a loop that never
+  // runs again (pumping). Commands wait in each room's input behind its Reload: they run this code.
+  const handOver = [];
+  handOver.push = (t) => {
+    t.lane ??= t.workName ?? null;
+    shop.sent = (shop.sent ?? 0) + 1;
+    t.sent = shop.sent;
+    laneState(shop, t.lane).tasks.push(t);
+    setImmediate(() => pump(shop).catch((err) => note(t.origin, `✗ ${err.stack}\n`, true))); // after the old queueWork has recorded it
+    return 0;
+  };
+  Object.assign(shop, { tasks: handOver, running: null, pumping: true });
   if (held) {
     const place = held.place ?? await lanePlace(ctx, null); // before 1a there was only worker/main's
     const lane = laneState(shop, place.lane);

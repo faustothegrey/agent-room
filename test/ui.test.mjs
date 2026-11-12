@@ -863,7 +863,7 @@ test('Reload from the code before lanes: refused while that workshop runs or que
   await reload();
   assert.equal(ctx.shop, idle);
   assert.ok(idle.lanes instanceof Map);
-  assert.deepEqual([idle.tasks, idle.running, idle.blockedBy], [undefined, undefined, undefined]);
+  assert.deepEqual([[...idle.tasks], idle.running, idle.pumping, idle.blockedBy], [[], null, true, undefined]); // the old loop never runs again
   assert.notEqual(ctx.workerDir, idle.workerDir);
   await work(ctx, 'after the reload');
   assert.deepEqual([sent().at(-1), realpathSync(ctx.workerDir.path)], ['after the reload', lane]);
@@ -900,6 +900,52 @@ test('Reload from the code before lanes: refused while that workshop runs or que
   } finally { writeFileSync(index, saved); }
   await ctx.workQueue; // readable again: the recheck lets it run
   assert.deepEqual([sent().at(-1), workerLane(ctx).inspectionError], ['while unreadable', null]);
+});
+
+// Slice 1a's real code: the last commit before lanes had their own queues.
+const BEFORE_LANES = 'fc0ca68dbfffea4a48a5b8529fc7b308ed4efdb0';
+test('Reload with two open discussions in one folder: a worker instruction to the second, still on the code before lanes, between the two switches, runs and reports back', async (t) => {
+  const { execFileSync } = await import('node:child_process');
+  const { realpathSync, symlinkSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const repo = new URL('..', import.meta.url).pathname;
+  try { execFileSync('git', ['-C', repo, 'cat-file', '-e', `${BEFORE_LANES}^{commit}`], { stdio: 'pipe' }); }
+  catch { return t.skip(`commit ${BEFORE_LANES.slice(0, 7)} (the code before lanes) is not in this repository`); }
+  const oldRoot = await tmp('before-lanes-');
+  execFileSync('sh', ['-c', `git -C "${repo}" archive ${BEFORE_LANES} | tar -x -C "${oldRoot}"`]);
+  symlinkSync(join(repo, 'node_modules'), join(oldRoot, 'node_modules'));
+  const old = await import(`${oldRoot}/src/ui.mjs`);
+  const next = await import(`../src/ui.mjs?next=${Date.now()}`);
+  const cwd = await tmp('reload-race-');
+  await gitRoom(cwd);
+  const hub = { rooms: new Map() };
+  // Two discussions open in one folder, on the old code, as cli.mjs's addRoom makes them.
+  const make = async (tag) => {
+    const ctx = { cwd, hub, context: tag, key: realpathSync(cwd) + (tag ? `#${tag}` : ''), agentSpecs: 'claude:A', workerSpec: 'claude:W', noScreen: true,
+      state: { transcript: [], seen: new Map() }, sessions: new Map(), code: {}, refreshQuota: () => {}, say: () => {} };
+    hub.rooms.set(ctx.key, ctx);
+    Object.assign(ctx, await old.load(ctx, ''));
+    ctx.ui = old;
+    ctx.worker.turn = async (p) => `done: ${p.split('\n').at(-1)}`;
+    return ctx;
+  };
+  const first = await make(null), second = await make('d1');
+  assert.equal(first.shop, second.shop);
+  // cli.mjs's applyReload, for the first discussion only: the second's waits behind its round.
+  const applyReload = async (ctx) => { Object.assign(ctx, await next.load(ctx, '')); ctx.ui = next; await next.reloaded(ctx); ctx.worker.turn = async (p) => `done: ${p.split('\n').at(-1)}`; };
+  await applyReload(first);
+  assert.ok(first.shop.lanes instanceof Map);
+  // A worker instruction to the second, which still runs the old code (its Worker tab calls it).
+  assert.doesNotThrow(() => second.ui.queueWork(second, 'between the two switches'));
+  await second.workQueue;
+  assert.deepEqual(first.shop.log.filter((m) => m.speaker).map((m) => m.speaker), ['User', 'W']);
+  assert.match(first.shop.log.at(-1).html, /done: between the two switches/);
+  // Then the second switches too, and both discussions' instructions run on the new code.
+  await applyReload(second);
+  next.queueWork(first, 'after, from the first'); next.queueWork(second, 'after, from the second');
+  await Promise.all([first.workQueue, second.workQueue]);
+  assert.deepEqual(first.shop.log.filter((m) => m.speaker === 'W').map((m) => m.html.match(/done: ([^<]*)/)[1]).sort(),
+    ['after, from the first', 'after, from the second', 'between the two switches']);
 });
 
 test('the header\'s version: the checkout\'s commit and uncommitted changes, outside discussions/, as a snapshot', async () => {
