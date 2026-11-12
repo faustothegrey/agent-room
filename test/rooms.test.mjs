@@ -38,7 +38,7 @@ process.stdin.on('end', () => {
   const args = process.argv.slice(2);
   const reply = (result) => console.log(JSON.stringify({ result }));
   if (args.includes('--no-session-persistence')) return reply('A topic');
-  if (args.includes('Bash') && input.includes('long task')) { const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio:'ignore'}); fs.appendFileSync(${JSON.stringify(pids)}, process.pid + '\\n' + child.pid + '\\n'); return setTimeout(() => reply('done'), 60000); }
+  if (args.includes('Bash') && input.includes('long task')) { const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(pids + '.tmp')}, process.pid + '\\n' + child.pid + '\\n'); fs.renameSync(${JSON.stringify(pids + '.tmp')}, ${JSON.stringify(pids)}); return setTimeout(() => reply('done'), 60000); }
   setTimeout(() => reply('PASS'), input.includes('slow') ? 3000 : 0);
 });
 `, { mode: 0o755 });
@@ -154,8 +154,11 @@ process.stdin.on('end', () => {
     // room ends, beta goes on.
     assert.equal((await post(baseA, '__work', { text: 'a long task' })).status, 204);
     await a.until((e) => e.type === 'working' && e.name === 'Wa');
+    // Written whole (renamed into place): once it exists, it holds both PIDs.
     for (let i = 0; i < 100 && !existsSync(pids); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(existsSync(pids), 'the fake worker never wrote its PIDs');
     const [workerPid, commandPid] = readFileSync(pids, 'utf8').trim().split('\n').map(Number);
+    assert.ok(workerPid > 0 && commandPid > 0, `the fake worker's PIDs should both be positive: read ${workerPid} and ${commandPid}`);
     // All unconfirmed server-wide routes refuse before stopping a busy room.
     for (const command of ['/restart', '/shutdown']) {
       const refused = await post(baseB, '__say', { text: command });
@@ -409,12 +412,17 @@ test('stopping a room kills provider child commands even after the provider exit
     const ctx = { programs: { running: new Set(), stopping: false }, noScreen: true, docs: { broadcast() {} }, screen: {} };
     const task = run(process.execPath, ['-e', `
       const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio:'ignore'});
-      require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+      // Written whole: a temporary file renamed into place, so a reader never sees an empty or partial ID.
+      require('node:fs').writeFileSync(${JSON.stringify(pidFile + '.tmp')}, String(child.pid));
+      require('node:fs').renameSync(${JSON.stringify(pidFile + '.tmp')}, ${JSON.stringify(pidFile)});
       ${exits ? 'child.unref();' : 'setInterval(()=>{},1000);'}
     `], { procs: ctx.programs.running });
     const settled = task.catch(() => {});
     for (let i = 0; i < 100 && !existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(existsSync(pidFile), `the provider never wrote its child's PID (exits: ${exits})`);
     const child = Number(readFileSync(pidFile, 'utf8'));
+    // 0 would make the check below pass or fail by accident: process.kill(0, 0) signals this test's own group.
+    assert.ok(child > 0, `the child's PID should be positive: read ${child} (exits: ${exits})`);
     if (exits) await settled;
     await stopRoom(ctx);
     await settled;
