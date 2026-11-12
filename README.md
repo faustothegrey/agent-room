@@ -132,10 +132,10 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   background; it does not resume its sessions.
 - **Reload:** load code and rulebook edits between discussion commands without losing the
   current conversation. Open pages refresh by themselves when the page's own code changed,
-  keeping what you were typing. From the code before each discussion had its own worker queue,
-  Reload waits while that worker still has a task running or queued: it says so, keeps the previous
-  code, and you reload again once the Worker tab is idle. A hold over uncommitted worker edits is
-  kept across it.
+  keeping what you were typing. An update from the code before each discussion had its own worker
+  queue can't be reloaded: Reload (and dev mode's) is refused in every room with "This update
+  changes the worker's queues: Restart to apply it (Reload can't).", and so is opening another
+  discussion in a folder meanwhile; everything goes on with the previous code until Restart.
 - **Restart:** click twice to replace the server process on the same address, for changes Reload
   can't load (such as `cli.mjs`). It acts on the whole server: the new process brings back every
   room, each with its current agents and worker, and resumes each one's discussion in use from its

@@ -824,128 +824,164 @@ test('the Worker tab checks each branch with work not in main: whether it contai
   assert.ok(lines().some((l) => l.startsWith(`Last tested (the worker's report): ${branch} ${tip.slice(0, 7)}`)));
 });
 
-// ── Reload from the code before lanes (slice 1a) ──
-// Slice 1a's workshop, as it is in memory when a Reload loads slice 1b's code: one shared queue
-// (tasks, running), one hold (blockedBy, with its worktree's place), one inspection error, one
-// worktree path shared by every context (workerDir).
-test('Reload from the code before lanes: refused while that workshop runs or queues a task; an idle one converts, keeping a hold over uncommitted edits, and an inspection that failed is made again', async () => {
-  const { realpathSync, writeFileSync, readFileSync } = await import('node:fs');
-  const { queueWork, workerPlace } = await import('../src/ui.mjs');
-  const { ctx, got } = await workerRoom();
-  ctx.noScreen = true;
-  const git = await gitRoom(ctx.cwd);
-  await handleLine('hello', ctx);
-  const name = ctx.discussion.name, lane = `${realpathSync(ctx.cwd)}.workers/${name}`;
-  await work(ctx, 'make the lane');
-  const stub = () => { ctx.worker.turn = async (p) => { got.push(p); return 'ok'; }; };
-  // What cli.mjs's applyReload does: the new code's load on the same context.
-  const reload = async () => {
-    Object.assign(ctx, { agentSpecs: 'claude:A,claude:B', workerSpec: 'claude:W', sessions: ctx.sessions ?? new Map(), code: {}, refreshQuota: () => {} });
-    Object.assign(ctx, await load(ctx, `?old=${Date.now()}`));
-    stub();
-  };
-  const oldShop = (extra = {}) => {
-    const shared = { path: lane };
-    ctx.workerDir = shared; // 1a: every context's worker used the workshop's one path
-    ctx.shop = { tasks: [], running: null, blockedBy: null, workingIn: null, contexts: 0, workerDir: shared, log: ctx.screen.worker, ...extra };
-    return ctx.shop;
-  };
-  const sent = () => got.map((p) => p.split('\n').at(-1));
-
-  // 1. Busy: a task running under 1a and one queued. The Reload is refused, and nothing changes.
-  const busy = oldShop({ running: { origin: ctx, text: 'running under 1a', lane: name }, tasks: [{ origin: ctx, text: 'queued under 1a', lane: name, done() {} }] });
-  const before = ctx.worker;
-  await assert.rejects(reload(), /^Error: Reload waits: the worker has 2 tasks from before this code \(1 running, 1 queued\)\. They finish under the code they started with; reload again once the Worker tab is idle\.$/);
-  assert.deepEqual([ctx.shop, busy.lanes, busy.tasks.length, busy.running.text, ctx.worker], [busy, undefined, 1, 'running under 1a', before]);
-
-  // 2. Idle: it converts; each context gets its own worktree path; tasks run in their lane.
-  const idle = oldShop();
-  await reload();
-  assert.equal(ctx.shop, idle);
-  assert.ok(idle.lanes instanceof Map);
-  assert.deepEqual([[...idle.tasks], idle.running, idle.pumping, idle.blockedBy], [[], null, true, undefined]); // the old loop never runs again
-  assert.notEqual(ctx.workerDir, idle.workerDir);
-  await work(ctx, 'after the reload');
-  assert.deepEqual([sent().at(-1), realpathSync(ctx.workerDir.path)], ['after the reload', lane]);
-
-  // 3. A hold over uncommitted edits (here of unknown origin): kept, the same object, in its lane;
-  // no task starts over the edits until they are resolved.
-  writeFileSync(`${lane}/wip.txt`, 'unresolved\n');
-  const hold = { origin: null, place: await workerPlace(ctx.cwd, name) };
-  oldShop({ blockedBy: hold, holdContext: ctx });
-  await reload();
-  assert.equal(workerLane(ctx).blockedBy, hold);
-  const count = got.length;
-  let ran = false;
-  queueWork(ctx, 'over the edits');
-  ctx.workQueue.then(() => { ran = true; });
-  await new Promise((r) => setTimeout(r, 300));
-  assert.deepEqual([ran, got.length, workerLane(ctx).blockedBy, git('-C', lane, 'status', '--porcelain')], [false, count, hold, '?? wip.txt']);
-  git('-C', lane, 'add', 'wip.txt'); git('-C', lane, 'commit', '-q', '-m', 'resolved by hand');
-  await ctx.workQueue; // the recheck finds it clean: the hold is released, and the task runs
-  assert.deepEqual([sent().at(-1), workerLane(ctx).blockedBy], ['over the edits', null]);
-
-  // 4. An inspection that had failed (1a didn't record which worktree): every lane is inspected
-  // again at the Reload; one that still can't be read holds, and starts nothing until it can.
-  const index = `${git('-C', lane, 'rev-parse', '--absolute-git-dir')}/index`, saved = readFileSync(index);
-  writeFileSync(index, 'bad');
-  try {
-    oldShop({ inspectionError: { message: 'unreadable', origin: ctx } });
-    await reload();
-    assert.match(workerLane(ctx).inspectionError?.message ?? '', /index/);
-    const n = got.length;
-    queueWork(ctx, 'while unreadable');
-    await new Promise((r) => setTimeout(r, 300));
-    assert.equal(got.length, n);
-  } finally { writeFileSync(index, saved); }
-  await ctx.workQueue; // readable again: the recheck lets it run
-  assert.deepEqual([sent().at(-1), workerLane(ctx).inspectionError], ['while unreadable', null]);
-});
-
-// Slice 1a's real code: the last commit before lanes had their own queues.
+// ── Updating from the code before lanes (slice 1a): Reload is refused, Restart applies it ──
+// Slice 1a's real code, from Git: the last commit before each discussion had its own worker queue.
 const BEFORE_LANES = 'fc0ca68dbfffea4a48a5b8529fc7b308ed4efdb0';
-test('Reload with two open discussions in one folder: a worker instruction to the second, still on the code before lanes, between the two switches, runs and reports back', async (t) => {
+let beforeLanes; // its ui.mjs module, or null if the commit isn't in this repository (the tests skip)
+async function codeBeforeLanes() {
+  if (beforeLanes !== undefined) return beforeLanes;
   const { execFileSync } = await import('node:child_process');
-  const { realpathSync, symlinkSync } = await import('node:fs');
-  const { join } = await import('node:path');
+  const { symlinkSync } = await import('node:fs');
   const repo = new URL('..', import.meta.url).pathname;
   try { execFileSync('git', ['-C', repo, 'cat-file', '-e', `${BEFORE_LANES}^{commit}`], { stdio: 'pipe' }); }
-  catch { return t.skip(`commit ${BEFORE_LANES.slice(0, 7)} (the code before lanes) is not in this repository`); }
-  const oldRoot = await tmp('before-lanes-');
-  execFileSync('sh', ['-c', `git -C "${repo}" archive ${BEFORE_LANES} | tar -x -C "${oldRoot}"`]);
-  symlinkSync(join(repo, 'node_modules'), join(oldRoot, 'node_modules'));
-  const old = await import(`${oldRoot}/src/ui.mjs`);
-  const next = await import(`../src/ui.mjs?next=${Date.now()}`);
-  const cwd = await tmp('reload-race-');
-  await gitRoom(cwd);
-  const hub = { rooms: new Map() };
-  // Two discussions open in one folder, on the old code, as cli.mjs's addRoom makes them.
-  const make = async (tag) => {
+  catch { return (beforeLanes = null); }
+  const root = await tmp('before-lanes-');
+  execFileSync('sh', ['-c', `git -C "${repo}" archive ${BEFORE_LANES} | tar -x -C "${root}"`]);
+  symlinkSync(`${repo}/node_modules`, `${root}/node_modules`);
+  return (beforeLanes = await import(`${root}/src/ui.mjs`));
+}
+// A folder with `n` discussions open on 1a's code, as cli.mjs's addRoom makes them (with no
+// discussion started, their tasks go to worker/main). Each worker's turn is `turn(ctx, prompt)`.
+async function folderBeforeLanes(old, n, turn = async (c, p) => `done: ${p.split('\n').at(-1)}`) {
+  const { realpathSync } = await import('node:fs');
+  const cwd = await tmp('before-lanes-room-'), git = await gitRoom(cwd), hub = { rooms: new Map() };
+  const make = async (tag, ui = old) => {
     const ctx = { cwd, hub, context: tag, key: realpathSync(cwd) + (tag ? `#${tag}` : ''), agentSpecs: 'claude:A', workerSpec: 'claude:W', noScreen: true,
-      state: { transcript: [], seen: new Map() }, sessions: new Map(), code: {}, refreshQuota: () => {}, say: () => {} };
+      state: { transcript: [], seen: new Map() }, sessions: new Map(), code: {}, refreshQuota: () => {}, say: () => {}, prompts: [] };
     hub.rooms.set(ctx.key, ctx);
-    Object.assign(ctx, await old.load(ctx, ''));
-    ctx.ui = old;
-    ctx.worker.turn = async (p) => `done: ${p.split('\n').at(-1)}`;
+    try { Object.assign(ctx, await ui.load(ctx, '')); } catch (err) { hub.rooms.delete(ctx.key); throw err; } // as addRoom does
+    ctx.ui = ui;
+    ctx.worker.turn = (p) => { ctx.prompts.push(p.split('\n').at(-1)); return turn(ctx, p); };
     return ctx;
   };
-  const first = await make(null), second = await make('d1');
-  assert.equal(first.shop, second.shop);
-  // cli.mjs's applyReload, for the first discussion only: the second's waits behind its round.
-  const applyReload = async (ctx) => { Object.assign(ctx, await next.load(ctx, '')); ctx.ui = next; await next.reloaded(ctx); ctx.worker.turn = async (p) => `done: ${p.split('\n').at(-1)}`; };
-  await applyReload(first);
-  assert.ok(first.shop.lanes instanceof Map);
-  // A worker instruction to the second, which still runs the old code (its Worker tab calls it).
-  assert.doesNotThrow(() => second.ui.queueWork(second, 'between the two switches'));
-  await second.workQueue;
-  assert.deepEqual(first.shop.log.filter((m) => m.speaker).map((m) => m.speaker), ['User', 'W']);
-  assert.match(first.shop.log.at(-1).html, /done: between the two switches/);
-  // Then the second switches too, and both discussions' instructions run on the new code.
-  await applyReload(second);
-  next.queueWork(first, 'after, from the first'); next.queueWork(second, 'after, from the second');
-  await Promise.all([first.workQueue, second.workQueue]);
-  assert.deepEqual(first.shop.log.filter((m) => m.speaker === 'W').map((m) => m.html.match(/done: ([^<]*)/)[1]).sort(),
-    ['after, from the first', 'after, from the second', 'between the two switches']);
+  const contexts = [];
+  for (let i = 0; i < n; i++) contexts.push(await make(i ? `d${i}` : null));
+  return { cwd, git, hub, contexts, make, tree: `${realpathSync(cwd)}.worker` };
+}
+// cli.mjs's applyReload: the new code's load, then reloaded. Resolves to the error, or null.
+async function applyReload(ctx) {
+  const next = await import('../src/ui.mjs');
+  try { Object.assign(ctx, await next.load(ctx, '')); ctx.ui = next; await next.reloaded(ctx); return null; }
+  catch (err) { return err.message; }
+}
+// Everything a refused Reload must leave as it was: the shared workshop (the same object and the
+// same value in every field, no lanes) and each context's code, worker, room and worktree setting.
+function before(contexts) {
+  const shop = contexts[0].shop;
+  return { shop, fields: { ...shop }, per: contexts.map((c) => [c.ui, c.worker, c.room, c.workerDir, c.shop]) };
+}
+function unchanged(contexts, was) {
+  const shop = contexts[0].shop;
+  assert.equal(shop, was.shop);
+  assert.deepEqual(Object.keys(shop).sort(), Object.keys(was.fields).sort());
+  for (const [k, v] of Object.entries(was.fields)) assert.equal(shop[k], v, k);
+  assert.equal(shop.lanes, undefined);
+  contexts.forEach((c, i) => was.per[i].forEach((v, j) => assert.equal([c.ui, c.worker, c.room, c.workerDir, c.shop][j], v)));
+}
+const refusal = async (contexts) => {
+  const { UPDATE_NEEDS_RESTART } = await import('../src/ui.mjs');
+  assert.equal(UPDATE_NEEDS_RESTART, 'This update changes the worker\'s queues: Restart to apply it (Reload can\'t).');
+  for (const c of contexts) assert.equal(await applyReload(c), UPDATE_NEEDS_RESTART); // every room
+};
+
+test('Reload from the code before lanes is refused, before anything changes, idle or busy; the tasks then go on under that code', async (t) => {
+  const old = await codeBeforeLanes();
+  if (!old) return t.skip(`commit ${BEFORE_LANES.slice(0, 7)} (the code before lanes) is not in this repository`);
+  const gates = [];
+  const { contexts: [ctx], tree } = await folderBeforeLanes(old, 1, (c, p) => (p.endsWith('wait') ? new Promise((r) => gates.push(r)) : 'ok'));
+  // Idle.
+  let was = before([ctx]);
+  await refusal([ctx]);
+  unchanged([ctx], was);
+  old.queueWork(ctx, 'on the old code'); await ctx.workQueue;
+  assert.deepEqual(ctx.prompts, ['on the old code']);
+  // Busy: one task running, one queued.
+  old.queueWork(ctx, 'first, wait'); old.queueWork(ctx, 'second, wait');
+  await until(() => gates.length === 1);
+  assert.deepEqual([ctx.shop.running?.text, ctx.shop.tasks.map((x) => x.text)], ['first, wait', ['second, wait']]);
+  was = before([ctx]);
+  await refusal([ctx]);
+  unchanged([ctx], was);
+  gates[0]('done'); await until(() => gates.length === 2); gates[1]('done'); await ctx.workQueue;
+  assert.deepEqual([ctx.prompts, ctx.shop.running, ctx.shop.tasks.length, ctx.workerDir.path === tree], [['on the old code', 'first, wait', 'second, wait'], null, 0, true]);
+});
+
+test('Reload from the code before lanes is refused with a hold over uncommitted edits, or after a failed worktree inspection; the hold and the wait go on under that code', async (t) => {
+  const old = await codeBeforeLanes();
+  if (!old) return t.skip(`commit ${BEFORE_LANES.slice(0, 7)} (the code before lanes) is not in this repository`);
+  const { writeFileSync, readFileSync } = await import('node:fs');
+  const { contexts: [a, b], git, tree } = await folderBeforeLanes(old, 2, (c, p) => {
+    if (p.endsWith('leave edits')) writeFileSync(`${c.workerDir.path}/wip.txt`, 'half done\n');
+    return 'ok';
+  });
+  // A hold: a's task left edits; b's task waits for them to be resolved.
+  old.queueWork(a, 'leave edits'); await a.workQueue;
+  const hold = a.shop.blockedBy;
+  assert.equal(hold.origin, a);
+  let ran = false;
+  old.queueWork(b, 'after the edits'); b.workQueue.then(() => { ran = true; });
+  let was = before([a, b]);
+  await refusal([a, b]);
+  unchanged([a, b], was);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual([ran, a.shop.blockedBy, git('-C', tree, 'status', '--porcelain')], [false, hold, '?? wip.txt']);
+  git('-C', tree, 'add', 'wip.txt'); git('-C', tree, 'commit', '-q', '-m', 'resolved by hand');
+  await b.workQueue; // 1a's own recheck releases it
+  assert.deepEqual([b.prompts, a.shop.blockedBy], [['after the edits'], null]);
+  // A failed inspection: the worktree can't be read; the task waits.
+  const index = `${git('-C', tree, 'rev-parse', '--absolute-git-dir')}/index`, saved = readFileSync(index);
+  writeFileSync(index, 'bad');
+  let done = false;
+  try {
+    old.queueWork(b, 'while unreadable'); b.workQueue.then(() => { done = true; });
+    await eventually(() => a.shop.inspectionError);
+    was = before([a, b]);
+    await refusal([a, b]);
+    unchanged([a, b], was);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(done, false);
+  } finally { writeFileSync(index, saved); }
+  await b.workQueue; // readable again: 1a's recheck lets it run
+  assert.deepEqual([b.prompts.at(-1), a.shop.inspectionError], ['while unreadable', null]);
+});
+
+test('Reload from the code before lanes with two or three open discussions is refused in each, and a discussion opened beside is refused too; their tasks run one at a time in 1a\'s worktree, and a fresh start loads the new code', async (t) => {
+  const old = await codeBeforeLanes();
+  if (!old) return t.skip(`commit ${BEFORE_LANES.slice(0, 7)} (the code before lanes) is not in this repository`);
+  const { realpathSync } = await import('node:fs');
+  const { load: loadNew, queueWork, UPDATE_NEEDS_RESTART, workerLane } = await import('../src/ui.mjs');
+  for (const n of [2, 3]) {
+    const gates = new Map(), running = [];
+    let overlap = false;
+    const { contexts, hub, make, tree, cwd } = await folderBeforeLanes(old, n, (c, p) => {
+      if (running.length) overlap = true;
+      running.push(c);
+      return new Promise((r) => gates.set(c, () => { running.splice(running.indexOf(c), 1); r('done'); }));
+    });
+    const was = before(contexts);
+    await refusal(contexts);
+    unchanged(contexts, was);
+    // A discussion opened beside them meanwhile (addRoom with the new code): refused, nothing attached.
+    await assert.rejects(make(`d${n}`, await import('../src/ui.mjs')), new Error(UPDATE_NEEDS_RESTART));
+    assert.equal(hub.rooms.size, n);
+    unchanged(contexts, was);
+    // A task to each discussion that didn't switch: 1a's one queue runs them one at a time, in 1a's worktree.
+    const others = contexts.slice(1);
+    for (const c of others) old.queueWork(c, `from ${c.context}`);
+    for (const c of others) { await until(() => gates.has(c)); assert.equal(realpathSync(c.workerDir.path), tree); gates.get(c)(); await c.workQueue; }
+    assert.deepEqual([overlap, others.map((c) => c.prompts)], [false, others.map((c) => [`from ${c.context}`])]);
+
+    // After Restart (a fresh start in that folder), the new code loads normally: lanes, its own queue.
+    const fresh = { cwd, hub: { rooms: new Map() }, key: realpathSync(cwd), agentSpecs: 'claude:A', workerSpec: 'claude:W', noScreen: true,
+      state: { transcript: [], seen: new Map() }, sessions: new Map() };
+    fresh.hub.rooms.set(fresh.key, fresh);
+    Object.assign(fresh, await loadNew(fresh, ''));
+    fresh.worker.turn = async () => 'new code';
+    assert.ok(fresh.shop.lanes instanceof Map);
+    queueWork(fresh, 'after Restart'); await fresh.workQueue;
+    assert.equal(workerLane(fresh).blockedBy, null);
+    assert.ok(fresh.shop.log.some((m) => m.speaker === 'W' && /new code/.test(m.html)));
+  }
 });
 
 test('the header\'s version: the checkout\'s commit and uncommitted changes, outside discussions/, as a snapshot', async () => {
