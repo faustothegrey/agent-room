@@ -283,7 +283,6 @@ const when = (d) => d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 
 // in UI mode, the Worker tab's input.
 function wire(ctx) {
   ctx.screen.room = header(ctx);
-  ctx.screen.sections = ['discussions'];
   // With --node only the launch room replicates: its Peers panel works, the others' says why.
   ctx.screen.replicaOff = ctx.hub?.node && !ctx.node ? replicaOff(ctx) : null;
   if (ctx.replica) wireReplica(ctx); // its peer endpoint works in terminal mode too
@@ -2691,7 +2690,8 @@ const answers = (port) => new Promise((ok) => {
 // Enter opens the file alone in the browser.
 async function showDocs(ctx) {
   if (!ctx.noScreen) return toScreen(ctx, { type: 'files' });
-  const files = ctx.screen.sections.flatMap((s) => (existsSync(join(ctx.cwd, s)) ? ctx.docs.listFiles(join(ctx.cwd, s)).map((f) => join(s, f)) : []));
+  const files = ctx.docs.docFiles ? ctx.docs.docFiles(ctx.cwd, ctx.screen)
+    : (ctx.screen.sections ? ctx.screen.sections.flatMap((s) => (existsSync(join(ctx.cwd, s)) ? ctx.docs.listFiles(join(ctx.cwd, s)).map((f) => join(s, f)) : [])) : ctx.docs.listFiles(ctx.cwd));
   if (!files.length) return console.log(`No documents in ${join(ctx.cwd, 'discussions')} yet: they appear when an agent writes one.\n`);
   const base = `${(await viewerUrl(ctx)).slice(0, -1)}${roomPath(ctx)}`;
   const open = (f) => browse(base + ctx.docs.urlPath(f));
@@ -2737,10 +2737,18 @@ async function setupReplica(ctx) {
 
 function wireReplica(ctx) {
   const R = ctx.replicate, r = ctx.replica;
+  // A peeked received snapshot is not pinned (so the room stays writable); if a newer round
+  // replaces it, fall back to the line's current published snapshot.
+  const resolveCommit = (d, n, c) => {
+    const dir = R.snapshotPath(r.s, d, n, c);
+    if (dir && existsSync(dir)) return c;
+    if (!R.snapshotPath(r.s, d, n, '0'.repeat(40))) return c;
+    try { return JSON.parse(readFileSync(join(r.s.received, d, n, 'published.json'), 'utf8')).commit; } catch { return c; }
+  };
   Object.assign(ctx.screen, {
     replicaHandler: (req, res) => R.handle(r, req, res),
-    receivedFile: (d, n, c, rel) => R.snapshotFile(r.s, d, n, c, rel),
-    receivedFiles: (d, n, c) => { const dir = R.snapshotPath(r.s, d, n, c); return dir && existsSync(dir) ? ctx.docs.listFiles(dir).map((f) => f.split(sep).join('/')) : []; },
+    receivedFile: (d, n, c, rel) => R.snapshotFile(r.s, d, n, resolveCommit(d, n, c), rel),
+    receivedFiles: (d, n, c) => { const dir = R.snapshotPath(r.s, d, n, resolveCommit(d, n, c)); return dir && existsSync(dir) ? ctx.docs.listFiles(dir).map((f) => f.split(sep).join('/')) : []; },
     view: (body) => {
       const task = (ctx.viewQueue ?? Promise.resolve()).then(() => viewLine(ctx, body));
       ctx.viewQueue = task.catch(() => {});

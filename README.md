@@ -48,10 +48,11 @@ hover or focus the room name for the full **root folder** and, when replication 
 replication line. Under the room name is **● Server ▾** (blue, or red when down), whose menu holds
 **Reload**, **Restart** and **Shutdown server**; hover or focus **Server** for its uptime, port and
 the server's version. An amber ⚠ to the right of **Server** means a replication peer is unreachable
-(hover for how many); click it to open **Peers…**. **Current discussion** (green): the selected
+(hover for how many); click it to open **Peers…**. **Current discussion** (green): on the left, the selected
 discussion, **Brainstorm** or **No discussion started**, with its state under it (who is thinking, or your
 turn); **Actions ▾** holds **Summarize**, **New discussion**, **New brainstorm** and (on the screen)
-**Close discussion**. **Monitoring** (amber): the monitor panel, with the subscription usage gauges
+**Close discussion**; on the right, every open discussion whose worker is working is listed, one per line,
+as `<title> · Worker is working` (the shown discussion included). **Monitoring** (amber): the monitor panel, with the subscription usage gauges
 and a warning per provider (below).
 
 The monitor panel watches agent-room's own Claude, Codex and agy programs and Claude and Codex login, for the room
@@ -104,15 +105,11 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   [The worker's worktrees](#the-workers-worktrees)). A discussion's instructions run one at a time,
   in the order sent, alongside the discussion and alongside other discussions' (at most two
   worker tasks at once in a folder), with a 30-minute timeout per instruction.
-- **Explorer** and **Document** (right pane, two tabs): in **Explorer**, browse discussions (the one
-  in use first), then choose a Markdown document, SVG drawing, transcript or other supported file:
-  it opens in **Document**, which shows its path and the file. Each tab keeps its place when you
-  switch; Document is disabled until a file is chosen. Expand a discussion to reach its files directly; each subfolder (`drawings/`,
-  `transcripts/`, …) opens to its files. The chosen document stays selected when agents edit
-  other files. A line under Explorer's tabs shows the room's live activity, whichever left tab
-  is shown: **Idle**, "<Agent> is thinking", "Worker is working", or both joined by "·". Open
-  documents check for changes every two seconds. Drag the divider to resize
-  the panes. Browsing is available during agent turns and does not notify the agents.
+- **Discussions**, **Explorer** and **Document** (right pane, three tabs):
+  - In **Discussions**, browse discussions (the active one first), check their state, and manage them (Resume, Go to, Archive, Defer, and actions menu). Archived and deferred discussions are kept in their own sections; received discussions from peers show **Peek files** and **View chat** buttons. Rows show state and actions only, no inline files.
+  - In **Explorer**, view one tree at a time, chosen with the bar `[ Discussion | Room checkout | Worker copy ]` (Worker copy is coming soon). Under the bar, a line shows the folder and branch. **Discussion** shows the active (or peeked) discussion's files. **Room checkout** shows the room's root checkout, excluding hidden and gitignored files (non-discussion files in `discussions/`, such as `discussions/README.md`, remain reachable). Code, config, and other text files open as plain text in Document; supported images and PDFs stay viewable; files that cannot be displayed are greyed out ("can't be shown here").
+  - **Peek**: clicking another discussion's name in Discussions shows its files in Explorer without switching discussions. An orange banner ("Looking at <name> · Back to current") and an orange dot on the Explorer tab indicate the peek; Document's path line names the peeked discussion.
+  - In **Document**, view the chosen file with its path. Each tab keeps its place when you switch; Document is disabled until a file is chosen. The chosen document stays selected when agents edit other files, and open documents check for changes every two seconds. Drag the divider to resize the panes. Browsing is available during agent turns and does not notify the agents.
 - **Terminal** (below Explorer/Document, collapsed): a shell on this computer, in the room's
   folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening it starts a
   fresh shell; collapsing it, reloading the page or stopping the server ends it. It appears only
@@ -192,11 +189,11 @@ and is not delivered to the agents.
     deferred/                  # postponed discussions, moved here whole
 ```
 
-**Archive and deferred.** Each local discussion row in **Explorer** has **Archive** and **Defer**
+**Archive and deferred.** Each local discussion row in **Discussions** has **Archive** and **Defer**
 buttons (or `/move <folder-name> archive|deferred`), which move the whole discussion, documents and
 transcripts, into `discussions/archive/` or `discussions/deferred/`; **Make active**
 (`/move archive/<folder-name> active`) moves it back. `archive/` and `deferred/` are created when
-first needed, and always listed at the bottom of **Explorer**, after the active discussions.
+first needed, and always listed at the bottom of **Discussions**, after the active discussions.
 Archive and Defer are disabled for the discussion in use, with the reason in a tooltip. New discussion names also skip names already
 taken in `archive/` and `deferred/`.
 
@@ -218,7 +215,7 @@ message, Start fresh, or Resume without a checkpoint) begins a new one.
 several discussions open at once, each with its own agents' sessions, chat and auto dev, and its
 own worker session, worktree and queue (below): their worker tasks run at the same time, at most
 two at once. You can switch discussion while one waits for its worker task: the window shows one
-discussion, the one what you type goes to, and the task's report still goes back to its own. One window shows one of them; Explorer marks the others "open". **Resume** shows an open one as
+discussion, the one what you type goes to, and the task's report still goes back to its own. One window shows one of them; Discussions marks the others "open". **Resume** shows an open one as
 it is: its agents carry on, nothing is restarted. An open brainstorm, or an open discussion that
 hasn't started (no message yet), has **Go to** instead, which only shows it. **New discussion** opens
 the new one beside the discussion in use, which stays open, and ends an open brainstorm. Resume
@@ -268,7 +265,7 @@ tab, its provider/model choices and usage totals. The discussion part is as of t
 latest round. Checkpoints are private local files under `~/.local/state/agent-room/paused/`,
 separated by root folder; they are not replicated to peers.
 
-**Resume** (on a discussion's row in **Explorer** or on its page, or `/resume <folder-name>`), for
+**Resume** (on a discussion's row in **Discussions** or on its page, or `/resume <folder-name>`), for
 any discussion not on screen, works between rounds:
 - open in another discussion of this folder: it is only shown, as it is;
 - with a checkpoint: it continues there, with the same agent and worker sessions and its chat;
@@ -548,7 +545,7 @@ Transcripts are included even if the project's ignore rules exclude them. Failed
 labelled as failed. A saving error leaves discussion files in place. Sending runs in the
 background; unreachable peers retry with a delay capped at five minutes, including after restart.
 
-Received-only discussions appear under **Received from peers · read-only** in **Explorer**, with the peer name and **View**. Mixed discussions keep one local row: expand it for **Local ·** files and **Received ·** versions with **View**. **View** opens that peer's conversation and files read-only,
+Received-only discussions appear under **Received from peers · read-only** in **Discussions**, with the peer name, **Peek files** and **View chat**. Mixed discussions keep one local row with **Peek files** and **View chat** for the peer version. **View chat** opens that peer's conversation read-only,
 without starting or stopping agents. **Back to <node>'s line** returns to the local conversation when that discussion has a local line.
 The header keeps Restart and Quit room in its menus; ⓘ on each row shows node details on hover or keyboard focus, and Peers… is in the room's **agent-room ▾** menu.
 New received rounds do not change an open View. Each browser pins its selected snapshot;

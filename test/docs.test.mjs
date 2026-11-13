@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createServer, request } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ATTACH_LIMIT, broadcast, handle, listFiles, messageView, pick, saveAttachments } from '../src/docs.mjs';
+import { ATTACH_LIMIT, broadcast, docFiles, handle, isTextFile, isViewable, listFiles, messageView, pick, roomBranch, saveAttachments } from '../src/docs.mjs';
 
 // A proposal/ folder with a doc, a drawing, a hidden file, and a file just outside it.
 function fixture() {
@@ -605,4 +606,243 @@ test('the room header shows the folder basename, puts the full path in #replica-
     ['code', '/tmp/other-project/'],
     ['span', "mac 127.0.0.1:5566 · mac's line, round 4 · agents run on mac · Project abc123"],
   ]);
+});
+
+test('room checkout: docFiles, servable, unknown text files as plain text, gitignored/binary files handling', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'checkout-test-'));
+  execFileSync('git', ['init', '-b', 'main', root]);
+  execFileSync('git', ['-C', root, 'config', 'user.email', 'test@test.local']);
+  execFileSync('git', ['-C', root, 'config', 'user.name', 'Test']);
+  writeFileSync(join(root, '.gitignore'), 'ignored.txt\nbuild/\n');
+  writeFileSync(join(root, 'README.md'), '# Hello World\n');
+  writeFileSync(join(root, 'config.json'), '{"key": "value"}\n');
+  mkdirSync(join(root, 'src'), { recursive: true });
+  writeFileSync(join(root, 'src', 'index.js'), 'console.log("hi");\n');
+  writeFileSync(join(root, 'ignored.txt'), 'secret ignored\n');
+  writeFileSync(join(root, '.hidden'), 'hidden\n');
+  mkdirSync(join(root, 'discussions', '2026-11-13-topic'), { recursive: true });
+  writeFileSync(join(root, 'discussions', 'README.md'), '# Discussions Readme\n');
+  writeFileSync(join(root, 'discussions', '2026-11-13-topic', 'notes.md'), '# Notes\n');
+  writeFileSync(join(root, 'app.icns'), Buffer.from([0, 0, 1, 0, 0, 0, 0, 0]));
+  writeFileSync(join(root, 'zero.bin'), Buffer.from([65, 66, 0, 67]));
+  execFileSync('git', ['-C', root, 'add', '.gitignore', 'README.md', 'config.json', 'src/index.js', 'discussions/README.md', 'discussions/2026-11-13-topic/notes.md', 'app.icns', 'zero.bin']);
+  execFileSync('git', ['-C', root, 'commit', '-m', 'Initial commit']);
+
+  assert.equal(roomBranch(root), 'main');
+  const files = docFiles(root);
+  assert.ok(files.includes('README.md'));
+  assert.ok(files.includes('config.json'));
+  assert.ok(files.includes('src/index.js'));
+  assert.ok(files.includes('discussions/README.md'));
+  assert.ok(files.includes('discussions/2026-11-13-topic/notes.md'));
+  assert.ok(files.includes('app.icns'));
+  assert.ok(files.includes('zero.bin'));
+  assert.ok(!files.includes('ignored.txt'));
+  assert.ok(!files.includes('.hidden'));
+
+  assert.equal(isTextFile(join(root, 'src/index.js')), true);
+  assert.equal(isTextFile(join(root, 'config.json')), true);
+  assert.equal(isTextFile(join(root, 'app.icns')), false);
+  assert.equal(isTextFile(join(root, 'zero.bin')), false);
+  assert.equal(isViewable(join(root, 'app.icns')), false);
+  assert.equal(isViewable(join(root, 'zero.bin')), false);
+  assert.equal(isViewable(join(root, 'src/index.js')), true);
+  assert.equal(isViewable(join(root, 'README.md')), true);
+
+  const s = await serve(root, { clients: new Set(), transcript: [] });
+  try {
+    const listRes = await s.get('/__files');
+    assert.equal(listRes.status, 200);
+    const list = await listRes.json();
+    assert.ok(Array.isArray(list));
+
+    const detailRes = await s.get('/__files?detail=1');
+    assert.equal(detailRes.status, 200);
+    const detail = await detailRes.json();
+    assert.equal(detail.branch, 'main');
+    assert.deepEqual(detail.unviewable.sort(), ['app.icns', 'zero.bin']);
+    assert.ok(detail.files.includes('README.md'));
+
+    const txtRes = await s.get('/src/index.js');
+    assert.equal(txtRes.status, 200);
+    assert.match(txtRes.headers.get('content-type'), /text\/plain; charset=utf-8/);
+    assert.equal(await txtRes.text(), 'console.log("hi");\n');
+
+    const mdRes = await s.get('/discussions/README.md');
+    assert.equal(mdRes.status, 200);
+    assert.match(mdRes.headers.get('content-type'), /text\/html/);
+    assert.match(await mdRes.text(), /<h1>Discussions Readme<\/h1>/);
+
+    assert.equal((await s.get('/ignored.txt')).status, 404);
+    assert.equal((await s.get('/.hidden')).status, 404);
+
+    assert.equal((await postFrom(s, '/__show', { file: 'src/index.js' })).status, 204);
+    assert.equal((await postFrom(s, '/__show', { file: 'app.icns' })).status, 404);
+    assert.equal((await postFrom(s, '/__show', { file: 'zero.bin' })).status, 404);
+  } finally {
+    s.close();
+  }
+});
+
+test('right pane three tabs, header disc-workers, and docLabel behavior', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'html-test-'));
+  const s = await serve(root, { clients: new Set(), transcript: [] });
+  try {
+    const html = await (await s.get('/__room')).text();
+    assert.match(html, /id="tab-discussions"/);
+    assert.match(html, /id="tab-explorer"/);
+    assert.match(html, /id="tab-document"/);
+    assert.match(html, /id="discussions"/);
+    assert.match(html, /id="discussions-pane"/);
+    assert.match(html, /id="explorer"/);
+    assert.match(html, /id="pane"/);
+    assert.match(html, /id="docpane"/);
+    assert.match(html, /id="disc-workers"/);
+    assert.doesNotMatch(html, /id="activity"/);
+    assert.match(html, /#tab-explorer\.peeking::after/);
+    assert.match(html, /\.explorer-bar/);
+    assert.match(html, /\.peek-banner/);
+
+    // Exercise updateDiscWorkers
+    const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+    const workerCode = source.slice(source.indexOf('function updateDiscWorkers() {'), source.indexOf('function updateReplicaView() {'));
+    const node = (tag = 'span') => ({
+      tag, textContent: '', style: {}, children: [], hidden: false,
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+    });
+    const discWorkers = node('div');
+    const fn = new Function('$', 'document', 'room', workerCode + '; return updateDiscWorkers;')((id) => id === 'disc-workers' ? discWorkers : null, { createElement: node }, {
+      open: [
+        { title: 'Topic A', working: true },
+        { title: 'Topic B', working: false },
+        { title: 'Topic C', working: 'W' },
+      ],
+    });
+    fn();
+    assert.equal(discWorkers.hidden, false);
+    assert.equal(discWorkers.children.length, 2);
+    assert.match(discWorkers.children[0].children[1], /Topic A · Worker is working/);
+    assert.match(discWorkers.children[1].children[1], /Topic C · Worker is working/);
+
+    // Exercise docLabel
+    const labelCode = source.slice(source.indexOf('function docLabel(file) {'), source.indexOf('function showDoc(file) {'));
+    const docLabelFn = new Function('replica', 'peek',
+      'const isDiscussion = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(name);\n' +
+      'const SECTIONS = { archive: "Archived", deferred: "Deferred" };\n' +
+      labelCode + '; return docLabel;')(null, null);
+    assert.equal(docLabelFn(null), 'No document shown.');
+    assert.equal(docLabelFn('README.md'), 'Room checkout · README.md');
+    assert.equal(docLabelFn('src/index.js'), 'Room checkout · src/index.js');
+    assert.equal(docLabelFn('discussions/2026-11-13-topic/notes.md'), '2026-11-13-topic · notes.md');
+    assert.equal(docLabelFn('discussions/archive/2026-11-10-old/notes.md'), '2026-11-10-old · notes.md');
+    assert.equal(docLabelFn('discussions/README.md'), 'Room checkout · discussions/README.md');
+    assert.equal(docLabelFn('__received/2026-11-13-topic/peer1/abc123/notes.md'), '2026-11-13-topic · notes.md');
+  } finally {
+    s.close();
+  }
+});
+
+test('peek lifecycle: tab indicator, banner, Back to current, revealDoc immunity, and active discussion change', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return {
+      toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(cls) { s.add(cls); }, remove(cls) { s.delete(cls); }, contains(cls) { return s.has(cls); }
+    };
+  };
+  const node = (tag = 'div') => ({
+    tag, textContent: '', title: '', disabled: false, children: [], dataset: {}, style: {},
+    classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    set innerHTML(html) {
+      this.children = [node('div')];
+    },
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    addEventListener() {},
+    setAttribute() {},
+    getAttribute() { return null; },
+  });
+  const els = {
+    'tab-discussions': node('button'),
+    'tab-explorer': node('button'),
+    'tab-document': node('button'),
+    'discussions': node('div'),
+    'explorer': node('div'),
+    'document': node('div'),
+    'discussions-pane': node('div'),
+    'pane': node('div'),
+    'docpane': node('div'),
+    'current': node('span'),
+    'feed': node('button'),
+    'doc-menu': node('details'),
+    'room-name': node('b'),
+    'disc': node('span'),
+    'code': node('span'),
+    'disc-status': node('span'),
+    'remote-view': node('div'),
+    'composer': node('div'),
+    'attach-row': node('div'),
+    'disc-workers': node('div'),
+    'replica-header': node('span'),
+  };
+  const document = { createElement: node, title: '' };
+  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'const renderAttachments = () => {};\n' +
+    code + '\n' +
+    'return { ' +
+    '  setRoom, updateTabs, renderExplorer, revealDoc, showDoc, ' +
+    '  getPeek: () => peek, setPeek: (p) => { peek = p; updateTabs(); }, ' +
+    '  getDoc: () => doc, getSubtab: () => subtab ' +
+    '};'
+  )(
+    (id) => els[id] || (els[id] = node(id)), document, { href: '' }, null, () => {}, (cb) => cb(), () => {}
+  );
+
+  // Initialize room with active discussion
+  harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-13-current', discussion: 'Current' });
+  assert.equal(harness.getPeek(), null);
+  assert.equal(els['tab-explorer'].classList.contains('peeking'), false);
+
+  // Enter peek for another discussion
+  harness.setPeek({ kind: 'local', path: 'discussions/2026-11-13-other', name: '2026-11-13-other', readonly: false });
+  assert.equal(els['tab-explorer'].classList.contains('peeking'), true);
+
+  // renderExplorer renders peek banner
+  await harness.renderExplorer();
+  const banner = els['pane'].children[0]?.children?.[0]; // inside #files container
+  assert.ok(banner);
+  assert.equal(banner.children[0].children[0].textContent, '2026-11-13-other');
+  const backBtn = banner.children[1];
+  assert.equal(backBtn.textContent, 'Back to current');
+
+  // Show a doc from the peeked discussion
+  harness.showDoc('discussions/2026-11-13-other/notes.md');
+  assert.equal(harness.getDoc(), 'discussions/2026-11-13-other/notes.md');
+
+  // Click Back to current
+  backBtn.onclick();
+  assert.equal(harness.getPeek(), null);
+  assert.equal(els['tab-explorer'].classList.contains('peeking'), false);
+  // Document keeps its file after Back to current
+  assert.equal(harness.getDoc(), 'discussions/2026-11-13-other/notes.md');
+
+  // Calling revealDoc() after Back to current must NOT re-enter peek
+  harness.revealDoc();
+  assert.equal(harness.getPeek(), null);
+  assert.equal(els['tab-explorer'].classList.contains('peeking'), false);
+
+  // Peeking again, then switching active discussion clears peek
+  harness.setPeek({ kind: 'local', path: 'discussions/2026-11-13-other', name: '2026-11-13-other', readonly: false });
+  assert.ok(harness.getPeek());
+  harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-13-next', discussion: 'Next' });
+  assert.equal(harness.getPeek(), null);
+  assert.equal(els['tab-explorer'].classList.contains('peeking'), false);
 });

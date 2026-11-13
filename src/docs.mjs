@@ -8,8 +8,9 @@
 // room's discussions: their documents, drawings and transcripts). In terminal
 // mode (npm run terminal) the page only watches.
 // cli.mjs loads this module in load(), so /reload swaps it too.
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { Marked } from 'marked';
@@ -22,8 +23,35 @@ const TYPES = {
   '.webp': 'image/webp', '.svg': 'image/svg+xml', '.pdf': 'application/pdf',
   '.html': 'text/html; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.json': 'application/json',
 };
+const BINARY_EXT = new Set([
+  '.icns', '.ico', '.bmp', '.tiff', '.tif', '.heic', '.avif',
+  '.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.rar', '.zst',
+  '.dmg', '.pkg', '.iso', '.bin', '.exe', '.dll', '.so', '.dylib', '.a', '.o', '.wasm',
+  '.woff', '.woff2', '.ttf', '.otf', '.eot',
+  '.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac',
+  '.mp4', '.mov', '.webm', '.avi', '.mkv',
+  '.sqlite', '.sqlite3', '.db', '.pyc', '.class', '.jar',
+]);
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+// Code, config and other UTF-8/ASCII files without NUL bytes open as plain text; binary files
+// that aren't already in TYPES are marked unviewable in Explorer ("can't be shown here").
+export function isTextFile(file) {
+  if (BINARY_EXT.has(extname(file).toLowerCase())) return false;
+  let fd;
+  try {
+    fd = openSync(file, 'r');
+    const buf = Buffer.allocUnsafe(8192);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    return !buf.subarray(0, n).includes(0);
+  } catch { return false; }
+  finally { if (fd !== undefined) try { closeSync(fd); } catch {} }
+}
+export function isViewable(file) {
+  if (/\.md$/i.test(file) || TYPES[extname(file).toLowerCase()]) return true;
+  return isTextFile(file);
+}
 
 const md = new Marked({
   renderer: {
@@ -68,13 +96,61 @@ function inside(dir, rel) {
   } catch { return null; }
 }
 
-// A room serves only some folders of its root (screen.sections: discussions/);
-// without sections (the plain viewer), all of dir.
+const isDatedDiscussion = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(name);
+const DISC_SECTIONS = new Set(['archive', 'deferred']);
+// Files inside a dated discussion (active, archived or deferred): kept even when .gitignore ignores
+// patterns such as transcripts/. Room checkout files outside discussions respect .gitignore.
+function inDiscussion(rel) {
+  const p = rel.split(/[/\\]/);
+  return p[0] === 'discussions' && ((p.length >= 2 && isDatedDiscussion(p[1])) || (p.length >= 2 && DISC_SECTIONS.has(p[1])));
+}
+function isGitIgnored(dir, rel) {
+  try {
+    execFileSync('git', ['-C', dir, 'check-ignore', '-q', '--', rel], { stdio: 'ignore' });
+    return true;
+  } catch { return false; }
+}
+// A room serves its discussions and its non-hidden, non-gitignored root checkout files
+// (or only screen.sections when a caller sets that explicitly).
 const inSection = (screen, rel) => !screen?.sections || screen.sections.includes(rel.split('/')[0]);
-const servable = (dir, rel, screen) => (inSection(screen, rel) ? inside(dir, rel) : null);
-function docFiles(dir, screen) {
-  if (!screen?.sections) return listFiles(dir);
-  return screen.sections.flatMap((s) => { try { return listFiles(join(dir, s)).map((f) => join(s, f)); } catch { return []; } });
+const servable = (dir, rel, screen) => {
+  if (!inSection(screen, rel)) return null;
+  const target = inside(dir, rel);
+  if (!target) return null;
+  if (!screen?.sections && !inDiscussion(rel) && isGitIgnored(dir, rel)) return null;
+  return target;
+};
+export function docFiles(dir, screen) {
+  if (screen?.sections) {
+    return screen.sections.flatMap((s) => { try { return listFiles(join(dir, s)).map((f) => join(s, f).split(sep).join('/')); } catch { return []; } });
+  }
+  let rootFiles;
+  try {
+    const out = execFileSync('git', ['-C', dir, 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    rootFiles = [...new Set(out.split('\0').filter(Boolean))]
+      .filter((f) => !f.split('/').some((p) => p.startsWith('.')) && !inDiscussion(f) && inside(dir, f));
+  } catch {
+    rootFiles = listFiles(dir).map((f) => f.split(sep).join('/')).filter((f) => !inDiscussion(f));
+  }
+  let discFiles = [];
+  try {
+    discFiles = listFiles(join(dir, 'discussions')).map((f) => 'discussions/' + f.split(sep).join('/')).filter(inDiscussion);
+  } catch {}
+  return [...new Set([...rootFiles, ...discFiles])].sort();
+}
+export function roomBranch(dir) {
+  try { return execFileSync('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null; } catch { return null; }
+}
+function discussionDirs(dir) {
+  const found = [];
+  for (const prefix of ['discussions', 'discussions/archive', 'discussions/deferred']) {
+    try {
+      for (const e of readdirSync(join(dir, prefix), { withFileTypes: true })) {
+        if (e.isDirectory() && isDatedDiscussion(e.name)) found.push(`${prefix}/${e.name}`);
+      }
+    } catch {}
+  }
+  return found.sort();
 }
 
 // The page polls the file's mtime and reloads when an agent changes it.
@@ -182,8 +258,10 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .menu-items button:hover { background: #8882; }
 .menu-items .danger { color: #ef4444; }
 .menu-items hr { width: 100%; border: 0; border-top: 1px solid var(--line); margin: .25rem 0; }
-#disc-zone { flex-direction: row; align-items: center; gap: .3rem .5rem; justify-content: flex-start; }
+#disc-zone { flex-direction: row; align-items: center; gap: .3rem .8rem; justify-content: space-between; }
 #disc-text { flex: 0 1 auto; min-width: 5rem; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+#disc-workers { flex: 0 1 auto; display: flex; flex-direction: column; align-items: flex-end; gap: .1rem; font-size: .72rem; color: light-dark(#b45309, #f59e0b); text-align: right; }
+#disc-workers[hidden] { display: none; }
 #disc-heading { display: flex; align-items: baseline; gap: .15rem; min-width: 0; }
 #disc { min-width: 0; }
 #actions-menu { flex: none; }
@@ -286,19 +364,17 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: .45rem .9rem; font-size: .9rem; }
 .tab.on { border-bottom-color: #3b82f6; font-weight: 600; }
 .tab.news::after { content: ' •'; color: #3b82f6; }
+#tab-explorer.peeking::after { content: ' ●'; color: #f59e0b; }
 .view { flex: 1; display: flex; flex-direction: column; min-height: 0; } .view[hidden] { display: none; }
-/* Explorer's line: the room's live activity, whichever left tab is shown. */
-#activity { padding: .35rem 1rem; border-bottom: 1px solid var(--line); font-size: .85rem; color: var(--dim); }
-#activity .on { color: inherit; } #activity .on::before { content: '● '; color: #10b981; } #activity .worker::before { color: #f59e0b; } #activity .idle::before { content: '○ '; }
 #split { cursor: col-resize; background: var(--line); background-clip: content-box; padding: 0 3px; touch-action: none; }
 #split:hover, #split:focus-visible, body.resizing #split { background-color: #3b82f6; outline: none; }
 body.resizing { cursor: col-resize; user-select: none; }
 body.resizing iframe { pointer-events: none; } /* the document would swallow the drag */
 .chat-wrap { position: relative; display: flex; flex: 1; min-height: 0; }
-.chat-wrap::before, #explorer::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .07; background: 0 0 / 240px repeat; }
-.chat-wrap::before { background-image: ${DOODLE}; } #explorer::before { background-image: ${DOODLE_EXPLORER}; }
-@media (prefers-color-scheme: dark) { .chat-wrap::before, #explorer::before { opacity: .09; filter: invert(1); } }
-#explorer { position: relative; } #explorer > * { position: relative; } /* its content above the wallpaper */
+.chat-wrap::before, #discussions::before, #explorer::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .07; background: 0 0 / 240px repeat; }
+.chat-wrap::before { background-image: ${DOODLE}; } #discussions::before, #explorer::before { background-image: ${DOODLE_EXPLORER}; }
+@media (prefers-color-scheme: dark) { .chat-wrap::before, #discussions::before, #explorer::before { opacity: .09; filter: invert(1); } }
+#discussions, #explorer { position: relative; } #discussions > *, #explorer > * { position: relative; } /* its content above the wallpaper */
 .chat { position: relative; flex: 1; min-width: 0; overflow-y: auto; padding: 1rem; }
 .scroll-end { position: absolute; right: 1rem; bottom: .6rem; width: 2rem; height: 2rem; padding: 0; border-radius: 50%; background: Canvas; color: CanvasText; box-shadow: 0 2px 8px #0004; }
 .msg { margin: 0 0 .9rem; padding: .5rem .75rem; border-radius: 8px; background: linear-gradient(#8881, #8881), Canvas; }
@@ -323,7 +399,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #bar { display: flex; gap: .6rem; align-items: center; padding: .4rem .6rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
 #current { color: var(--dim); } #feed { margin-left: auto; }
 #siblings { max-height: 60vh; overflow-y: auto; } #siblings .shown { font-weight: 600; }
-#pane, #docpane { flex: 1; min-height: 0; }
+#discussions-pane, #pane, #docpane { flex: 1; min-height: 0; }
 /* The terminal pane (host-shell.mjs): a shell on this computer, shown only in pages opened on this computer. */
 #hostshell { border-top: 1px solid var(--line); } #hostshell[hidden], #hostshell-term[hidden] { display: none; }
 #hostshell-toggle { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: .3rem .6rem; font-size: .8rem; }
@@ -343,35 +419,50 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #notes-status { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } #notes-status.error { color: #ef4444; }
 #notes-ask { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; padding: .3rem .5rem; border: 1px solid #b08900; border-radius: 6px; background: #b0890018; font-size: .8rem; }
 #notes-ask button { font-size: .8rem; }
-#pane { overflow-y: auto; }
+#discussions-pane, #pane { overflow-y: auto; }
 #doc { border: 0; width: 100%; height: 100%; }
 .empty { display: grid; place-items: center; color: var(--dim); height: 100%; padding: 1rem; text-align: center; }
-#files { padding: 1rem; }
-#files .entry { display: block; width: 100%; text-align: left; margin: 0; padding: .3rem .5rem; border: 0; border-radius: 4px; background: none; font-size: .9rem; }
-#files .entry:hover { background: #8882; }
-#files .entry::before { display: inline-block; width: 1.5em; }
-#files .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.discussion::before { content: '💬'; }
-#files .entry .tag { color: var(--dim); font-size: .8rem; margin-left: .5rem; }
-#files .back { border: 0; background: none; padding: 0; color: var(--dim); font-size: .85rem; margin: 0 0 .4rem; }
-#files .back:hover { color: CanvasText; text-decoration: underline; }
-#files .title { font-size: 1.05rem; font-weight: 600; margin: 0 0 .5rem; }
-#files .status { font-size: .75rem; font-weight: 400; padding: .05rem .45rem; border-radius: 9px; background: #8883; margin-left: .5rem; vertical-align: middle; }
-#files .status.archive { background: #8882; } #files .status.deferred { background: #eab30833; } #files .status.inuse { background: #3b82f633; }
-#files .actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; padding: 0 0 .8rem; border-bottom: 1px solid var(--line); }
-#files .actions .primary { background: #3b82f6; border-color: #3b82f6; color: white; }
-#files .row { display: flex; align-items: center; gap: .3rem; }
-#files .row .entry { flex: 1; min-width: 0; }
-#files button.archiving::before { content: ""; display: inline-block; width: .65em; height: .65em; margin-right: .35em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: archive-spin .7s linear infinite; }
+#files, #disc-list { padding: 1rem; }
+. files-pane .entry, #files .entry, #disc-list .entry { display: block; width: 100%; text-align: left; margin: 0; padding: .3rem .5rem; border: 0; border-radius: 4px; background: none; font-size: .9rem; }
+#files .entry:hover, #disc-list .entry:hover { background: #8882; }
+#files .entry.unviewable { opacity: .5; cursor: default; }
+#files .entry.unviewable:hover { background: none; }
+#files .entry::before, #disc-list .entry::before { display: inline-block; width: 1.5em; }
+#files .entry.folder::before, #disc-list .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.discussion::before, #disc-list .entry.discussion::before { content: '💬'; }
+#files .entry .tag, #disc-list .entry .tag { color: var(--dim); font-size: .8rem; margin-left: .5rem; }
+#files .back, #disc-list .back { border: 0; background: none; padding: 0; color: var(--dim); font-size: .85rem; margin: 0 0 .4rem; }
+#files .back:hover, #disc-list .back:hover { color: CanvasText; text-decoration: underline; }
+#files .title, #disc-list .title { font-size: 1.05rem; font-weight: 600; margin: 0 0 .5rem; }
+#files .status, #disc-list .status { font-size: .75rem; font-weight: 400; padding: .05rem .45rem; border-radius: 9px; background: #8883; margin-left: .5rem; vertical-align: middle; }
+#files .status.archive, #disc-list .status.archive { background: #8882; } #files .status.deferred, #disc-list .status.deferred { background: #eab30833; } #files .status.inuse, #disc-list .status.inuse { background: #3b82f633; }
+#files .actions, #disc-list .actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; padding: 0 0 .8rem; border-bottom: 1px solid var(--line); }
+#files .actions .primary, #disc-list .actions .primary { background: #3b82f6; border-color: #3b82f6; color: white; }
+#files .row, #disc-list .row { display: flex; align-items: center; gap: .3rem; }
+#files .row .entry, #disc-list .row .entry { flex: 1; min-width: 0; }
+#files button.archiving::before, #disc-list button.archiving::before { content: ""; display: inline-block; width: .65em; height: .65em; margin-right: .35em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: archive-spin .7s linear infinite; }
 @keyframes archive-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { #files button.archiving::before { animation: none; } }
-#files .row .reopen { font-size: .75rem; padding: .1rem .5rem; }
-#files .row-menu > summary { font-size: .75rem; margin-left: 0; }
-#files .row-menu .menu-items { left: auto; right: 0; }
-#files .row-menu .menu-items button { font-size: .85rem; padding: .3rem .6rem; }
+@media (prefers-reduced-motion: reduce) { #files button.archiving::before, #disc-list button.archiving::before { animation: none; } }
+#files .row .reopen, #disc-list .row .reopen { font-size: .75rem; padding: .1rem .5rem; }
+#files .row-menu > summary, #disc-list .row-menu > summary { font-size: .75rem; margin-left: 0; }
+#files .row-menu .menu-items, #disc-list .row-menu .menu-items { left: auto; right: 0; }
+#files .row-menu .menu-items button, #disc-list .row-menu .menu-items button { font-size: .85rem; padding: .3rem .6rem; }
 .menu-items button:disabled { color: var(--dim); cursor: default; background: none; }
-#files .discussion-row { align-items: baseline; flex-wrap: wrap; }
-#files .discussion-row > .discussion-lines { flex-basis: 14rem; }
-#files .discussion-row.in-use { background: linear-gradient(#3b82f614, #3b82f614), Canvas; box-shadow: inset 3px 0 #60a5fa; border-radius: 4px; padding-left: .5rem; }
+#files .discussion-row, #disc-list .discussion-row { align-items: baseline; flex-wrap: wrap; }
+#files .discussion-row > .discussion-lines, #disc-list .discussion-row > .discussion-lines, #disc-list .discussion-row > .discussion-block { flex-basis: 14rem; flex: 1; min-width: 0; }
+#files .discussion-row.in-use, #disc-list .discussion-row.in-use { background: linear-gradient(#3b82f614, #3b82f614), Canvas; box-shadow: inset 3px 0 #60a5fa; border-radius: 4px; padding-left: .5rem; }
+#disc-list .discussion-row.peeking { background: linear-gradient(#f59e0b18, #f59e0b18), Canvas; box-shadow: inset 3px 0 #f59e0b; border-radius: 4px; padding-left: .5rem; }
+.peek-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem; margin: 0 0 .6rem; padding: .35rem .6rem; border: 1px solid #f59e0b; border-radius: 6px; background: #f59e0b1f; color: light-dark(#92400e, #fcd34d); font-size: .82rem; }
+.peek-banner button { font-size: .78rem; padding: .1rem .5rem; border-color: #f59e0b88; color: inherit; background: #f59e0b22; }
+.explorer-bar { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 0 0 .35rem; }
+.explorer-bar button { border: 0; border-right: 1px solid var(--line); border-radius: 0; background: none; padding: .22rem .65rem; font-size: .8rem; }
+.explorer-bar button:last-child { border-right: 0; }
+.explorer-bar button.on { background: #3b82f622; color: #60a5fa; font-weight: 600; }
+.explorer-bar button:disabled { opacity: .45; cursor: default; }
+.explorer-sub { font-size: .75rem; color: var(--dim); font-family: ui-monospace, monospace; margin: 0 0 .6rem; overflow-wrap: anywhere; }
+.section-group { margin: .3rem 0; }
+.section-group > summary { cursor: pointer; padding: .3rem .5rem; border-radius: 4px; font-size: .9rem; }
+.section-group > summary:hover { background: #8882; }
+.section-group > summary .tag { color: var(--dim); font-size: .8rem; margin-left: .5rem; }
 .inline-folder { margin-left: 1rem; }
 .inline-folder > summary { cursor: pointer; padding: .3rem; }
 .local-label { color: var(--dim); font-size: .8rem; margin: .3rem 0; }
@@ -379,8 +470,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .discussion-info > button { border: 0; background: none; color: #8fa8ee; padding: .15rem; }
 .info-detail { display: none; position: absolute; right: 0; top: 100%; z-index: 5; width: 15rem; padding: .5rem; background: Canvas; color: CanvasText; border: 1px solid var(--line); border-radius: 4px; font-size: .8rem; }
 .discussion-info:hover .info-detail, .discussion-info:focus-within .info-detail { display: block; }
-#files .actions .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 .3rem; }
-#files h3 { color: var(--dim); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; margin: .9rem 0 .3rem; }
+#files .actions .sep, #disc-list .actions .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 .3rem; }
+#files h3, #disc-list h3 { color: var(--dim); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; margin: .9rem 0 .3rem; }
+#disc-list .hint { display: block; margin: 0 0 .8rem; }
 #talk, #tab-talk { --accent: #3b82f6; --tint: #3b82f612; }
 #work, #tab-work { --accent: #a855f7; --tint: #a855f712; }
 .tab.on { border-bottom-color: var(--accent); background: var(--tint); }
@@ -414,7 +506,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b id="room-name">agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, kept only in memory: no folder, transcript or notes. It ends this session; Restart or Quit room loses it, and a new one replaces it.">New brainstorm</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Explorer.">Close discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div></div>
+<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, kept only in memory: no folder, transcript or notes. It ends this session; Restart or Quit room loses it, and a new one replaces it.">New brainstorm</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
 <div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 </header>
 <div id="left">
@@ -459,8 +551,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </div>
 <div id="split" role="separator" aria-orientation="vertical" aria-label="Resize the chat and the document" tabindex="0" title="Drag to resize"></div>
 <div id="right">
-  <div id="subtabs" role="tablist"><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button></div>
-  <div class="view" id="explorer"><div id="activity" role="status" aria-live="polite"></div><div id="pane"></div></div>
+  <div id="subtabs" role="tablist"><button class="tab" id="tab-discussions" role="tab">Discussions</button><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button></div>
+  <div class="view" id="discussions" hidden><div id="discussions-pane"></div></div>
+  <div class="view" id="explorer"><div id="pane"></div></div>
   <div class="view" id="document" hidden>
     <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
     <div id="docpane"></div>
@@ -645,29 +738,57 @@ function setThinking(name) {
   talk.think(name ? '… ' + name + ' is thinking' : null);
 }
 const urlFor = (file) => file.split('/').map(encodeURIComponent).join('/');
-// The right pane's two subtabs. Each keeps its place while the other is shown: Explorer its folder
-// and scroll position, Document its file and scroll position. Document needs a file.
+const BINARY_FILE = /\.(icns|ico|bmp|tiff?|heic|avif|zip|tar|gz|tgz|bz2|xz|7z|rar|zst|dmg|pkg|iso|bin|exe|dll|so|dylib|a|o|wasm|woff2?|ttf|otf|eot|mp3|wav|ogg|flac|m4a|aac|mp4|mov|webm|avi|mkv|sqlite3?|db|pyc|class|jar)$/i;
+// The right pane's three subtabs: Discussions, Explorer, Document. Each keeps its place while
+// another is shown: Explorer its tree and scroll position, Document its file and scroll position.
+let subtab = 'explorer', explorerMode = 'discussion', peek = null, lastActiveKey = undefined;
+const hasDiscussionTree = () => !!(peek || viewing || room?.active);
+const effectiveExplorerMode = () => (hasDiscussionTree() ? explorerMode : 'root');
 function showSub(name) {
   if (name === 'document' && !doc) return;
+  subtab = name;
+  if ($('discussions')) $('discussions').hidden = name !== 'discussions';
   $('explorer').hidden = name !== 'explorer'; $('document').hidden = name !== 'document';
+  if ($('tab-discussions')) $('tab-discussions').classList.toggle('on', name === 'discussions');
   $('tab-explorer').classList.toggle('on', name === 'explorer'); $('tab-document').classList.toggle('on', name === 'document');
 }
+if ($('tab-discussions')) $('tab-discussions').onclick = () => showSub('discussions');
 $('tab-explorer').onclick = () => { showSub('explorer'); revealDoc(); };
-// Back to Explorer with a local file shown: open the list where that file is and scroll it into
-// view. Active discussions unfold in place; archive/ and deferred/ open the file's folder page.
-// A received snapshot's files keep Explorer where it was.
+// Back to Explorer with a local file shown: if that file is inside the tree Explorer is showing now,
+// unfold its parent folders and scroll it into view. Never re-enters a peek that was ended.
 async function revealDoc() {
   if (!doc || doc.startsWith('__received/') || viewing) return;
-  const parts = doc.split('/');
-  if (parts[0] === 'discussions' && SECTIONS[parts[1]] && parts.length > 3) await openFiles(parts.slice(0, -1).join('/'));
-  else {
-    if (parts[0] === 'discussions' && parts.length > 2)
-      for (let i = 2; i < parts.length; i++) expandedLines.add(parts.slice(0, i).join('/'));
-    await openFiles('');
+  const mode = effectiveExplorerMode();
+  if (mode === 'root') {
+    const p = doc.split('/');
+    if (p[0] !== 'discussions' || (p.length >= 2 && !isDiscussion(p[1]) && !SECTIONS[p[1]])) {
+      for (let i = 1; i < p.length; i++) expandedLines.add('root:' + p.slice(0, i).join('/'));
+    }
+  } else {
+    const base = peek?.kind === 'local' ? peek.path : room?.active;
+    if (base && doc.startsWith(base + '/')) {
+      const rel = doc.slice(base.length + 1).split('/');
+      for (let i = 1; i < rel.length; i++) expandedLines.add(base + '/' + rel.slice(0, i).join('/'));
+    }
   }
+  await openFiles();
   requestAnimationFrame(() => [...pane.querySelectorAll('.entry.file')].find((b) => b.querySelector('.tag')?.textContent === 'shown')?.scrollIntoView({ block: 'center' }));
 }
 $('tab-document').onclick = () => showSub('document');
+// Document's path line: names the discussion (current, peeked or received) or "Room checkout", plus the file's path inside it.
+function docLabel(file) {
+  if (!file) return 'No document shown.';
+  if (file.startsWith('__received/')) {
+    const [, d, node, , ...rest] = file.split('/');
+    const rec = replica?.received?.find((l) => l.discussion === d && l.node === node);
+    const name = (peek?.kind === 'received' && peek.discussion === d ? peek.name : null) || rec?.local || rec?.name || d;
+    return name + ' · ' + rest.join('/');
+  }
+  const p = file.split('/');
+  if (p[0] === 'discussions' && p.length >= 3 && isDiscussion(p[1])) return p[1] + ' · ' + p.slice(2).join('/');
+  if (p[0] === 'discussions' && p.length >= 4 && SECTIONS[p[1]] && isDiscussion(p[2])) return p[2] + ' · ' + p.slice(3).join('/');
+  return 'Room checkout · ' + file;
+}
 // A file chosen (here, on another page, or by the room) opens in Document, which comes to the front.
 function showDoc(file) {
   const same = !!file && file === doc && !!docpane.firstChild;
@@ -683,11 +804,11 @@ function showDoc(file) {
     const root = room.folder.endsWith('/') ? room.folder : room.folder + '/';
     send('Please read this transcript of an earlier session in full, as background for our discussion: ' + root + file);
   };
-  $('current').textContent = doc ? doc.split('/').pop() : 'No document shown.';
+  $('current').textContent = docLabel(doc);
   $('doc-menu').open = false;
   $('current').title = doc || ''; // the full path, on hover
   $('tab-document').disabled = !doc;
-  if (!doc) { docpane.replaceChildren(); return showSub('explorer'); }
+  if (!doc) { docpane.replaceChildren(); if (subtab === 'document') showSub('explorer'); return; }
   if (!same) { docpane.innerHTML = '<iframe id="doc"></iframe>'; docpane.firstChild.src = urlFor(doc); }
   document.title = doc + ' · agent-room';
   showSub('document');
@@ -700,18 +821,27 @@ $('doc-menu').addEventListener('toggle', async () => {
   box.replaceChildren();
   if (!doc) return;
   const received = doc.startsWith('__received/');
-  const prefix = received ? doc.split('/').slice(0, 4).join('/') + '/' : '';
+  const parts = doc.split('/');
+  const prefix = received ? parts.slice(0, 4).join('/') + '/' : '';
   const rel = doc.slice(prefix.length), folder = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/') + 1) : '';
-  let files = [];
+  let files = [], unviewable = new Set();
   try {
-    files = received ? (viewing ? await (await fetch('__rfiles?d=' + viewing.discussion + '&n=' + viewing.node + '&c=' + viewing.commit)).json() : [])
-      : await (await fetch('__files')).json();
+    if (received) {
+      files = await (await fetch('__rfiles?d=' + encodeURIComponent(parts[1]) + '&n=' + encodeURIComponent(parts[2]) + '&c=' + encodeURIComponent(parts[3]))).json();
+    } else {
+      const raw = await (await fetch('__files?detail=1')).json();
+      files = Array.isArray(raw) ? raw : raw.files;
+      unviewable = new Set(Array.isArray(raw) ? [] : raw.unviewable);
+    }
   } catch {}
   const siblings = files.filter((f) => f.startsWith(folder) && !f.slice(folder.length).includes('/')).sort();
   for (const f of siblings) {
-    const b = document.createElement('button'); b.textContent = f.slice(folder.length);
+    const b = document.createElement('button');
+    const cantShow = !received && (unviewable.has(f) || BINARY_FILE.test(f)) || (received && BINARY_FILE.test(f));
+    b.textContent = f.slice(folder.length) + (cantShow ? " · can't be shown here" : '');
+    if (cantShow) { b.disabled = true; b.title = "can't be shown here"; }
     if (prefix + f === doc) b.className = 'shown';
-    b.onclick = () => { closeMenus(); if (prefix + f === doc) return; if (received) showDoc(prefix + f); else post('__show', { file: f }); };
+    b.onclick = () => { closeMenus(); if (cantShow || prefix + f === doc) return; if (received) showDoc(prefix + f); else post('__show', { file: f }); };
     box.append(b);
   }
   if (!siblings.length) box.textContent = 'No other files here.';
@@ -735,13 +865,15 @@ async function viewRemote(line) {
   const res = await post('__view', line ? { discussion: line.discussion, node: line.node } : { back: true });
   if (!res.ok) return status(await res.text(), true);
   viewing = (await res.json()).viewing;
+  peek = null;
   viewExpired = false; viewNotice = null;
   updateReplicaView();
   showDoc(null);
   talk.clear();
   if (viewing) {
+    explorerMode = 'discussion';
     viewing.messages.forEach((m) => { if (!m.pass && !m.hidden) talk.add(bubble(m)); });
-    await remoteFiles();
+    await openFiles();
   } else {
     localMessages.forEach((m) => { if (!m.pass && !m.hidden) talk.add(bubble(m)); });
     setThinking(localThinking); openFiles();
@@ -780,17 +912,22 @@ function talkStatus() {
   if (room.autoDev?.status === 'running') return 'Auto dev running';
   return room.started && yourTurn ? 'your turn' : '';
 }
-// "Idle", or what runs now: "<Agent> is thinking", "Worker is working", or both.
-function roomActivity() {
-  const parts = [];
-  if (localThinking) parts.push(['on', localThinking + ' is thinking']);
-  return parts.length ? parts : [['idle', 'Idle']];
+function updateDiscWorkers() {
+  const el = $('disc-workers');
+  if (!el) return;
+  const workers = (room?.open ?? []).filter((o) => o.working);
+  el.hidden = !workers.length;
+  el.replaceChildren(...workers.map((o) => {
+    const s = document.createElement('span');
+    const dot = document.createElement('span');
+    dot.textContent = '● ';
+    dot.style.color = '#f59e0b';
+    s.append(dot, o.title + ' · Worker is working');
+    return s;
+  }));
 }
 function updateReplicaView() {
-  $('activity').replaceChildren(...roomActivity().flatMap(([cls, text], i) => {
-    const s = document.createElement('span'); s.className = cls; s.textContent = text;
-    return i ? [' · ', s] : [s];
-  }));
+  updateDiscWorkers();
   updateReplicaHeader();
   renderAutoDev();
   if (room) { $('disc').textContent = viewing ? viewing.title : room.discussion; $('disc').dataset.active = !viewing && room.active ? 'true' : 'false'; }
@@ -849,7 +986,7 @@ async function remoteFiles() {
 function showReplica(r) {
   replica = r;
   updateReplicaView();
-  if (listed !== null) openFiles(listed);
+  openFiles();
   $('peers-open').hidden = !replica && !replicaOff;
   const down = replica?.peers.filter((p) => p.reachable === false).length ?? 0, warning = $('peer-warning');
   warning.hidden = !down;
@@ -976,227 +1113,398 @@ function archiveButton(b, ref) {
       status(await res.text(), true);
     } catch (err) { status(err.message, true); }
     pendingArchives.delete('discussions/' + ref);
-    if (listed !== null) openFiles(listed);
+    openFiles();
   };
 }
 const expandedLines = new Set();
-let openRowMenu = null; // the discussion path whose Explorer ▾ Actions menu is open
-let listed = null; // the list path shown in the pane ('' for the top), or null when a document is shown
-async function openFiles(group) {
-  if (typeof group !== 'string') group = ''; // as a click handler, group is the event
-  const scroll = group === listed ? pane.scrollTop : 0; // drawn again in place: keep where you were
-  listed = group;
-  const files = await (await fetch('__files')).json();
-  pane.innerHTML = '<div id="files"></div>';
-  const list = pane.firstChild;
-  requestAnimationFrame(() => { pane.scrollTop = scroll; });
+const expandedDiscussions = new Set(['archive', 'deferred']);
+let openRowMenu = null; // the discussion path whose ▾ Actions menu is open
+let cachedDetail = { files: [], unviewable: new Set(), branch: null };
+
+function updateTabs() {
+  const tabExp = $('tab-explorer');
+  if (tabExp) tabExp.classList.toggle('peeking', !!peek);
+}
+
+function discussionsIn(prefix) {
+  const all = cachedDetail?.files || [];
+  return [...new Set(all.filter((f) => f.startsWith(prefix + '/'))
+    .map((f) => f.slice(prefix.length + 1)).filter((r) => r.includes('/')).map((r) => r.split('/')[0]))]
+    .filter(isDiscussion).sort((a, b) => b.localeCompare(a));
+}
+
+function renderDiscussions() {
+  const container = $('discussions-pane');
+  if (!container) return;
+  const scroll = container.scrollTop;
+  container.innerHTML = '<div id="disc-list"></div>';
+  const list = container.firstChild;
+  requestAnimationFrame(() => { container.scrollTop = scroll; });
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
-  // A row in the list: a discussion, a folder or a file, with an optional grey tag after its name.
-  const entry = (kind, label, onclick, tag, title) => {
-    const b = el('button', 'entry ' + kind, label); b.onclick = onclick;
-    if (tag) b.append(el('span', 'tag', tag));
-    if (title) b.title = title;
-    list.append(b);
-  };
   const heading = (text) => list.append(el('h3', '', text));
-  const storedDiscussionRow = (name, path, id = replica?.own[name]?.discussion) => {
-    if (!replica) return entry('discussion', name, () => openFiles(path), path === room?.active ? 'in use' : '');
-    const remote = replica.received.filter((l) => id ? l.discussion === id : l.local === name);
-    const key = path || id;
-    const details = el('details', 'discussion-lines');
-    details.open = expandedLines.has(key);
-    details.ontoggle = () => { if (details.open) expandedLines.add(key); else expandedLines.delete(key); };
-    const summary = el('summary', '', '💬 ' + name + (path && path === room?.active ? ' · in use' : '')); details.append(summary);
-    if (path) {
-      const own = replica.own[name];
-      const label = replica.node + ' (this node) · ' + (own ? 'round ' + own.round : 'no saved round') + (own ? Object.entries(own.sent).map(([n, sent]) => ' · ' + (sent ? 'sent to ' + n + ' ✓' : n + ' pending')).join('') : '');
-      const b = el('button', 'entry', '● ' + label);
-      b.onclick = async () => { if (viewing) await viewRemote(null); openFiles(path); }; details.append(b);
-    }
-    for (const line of remote) {
-      const row = el('div', 'line-row'); row.append(el('span', '', '● ' + line.node + ' · round ' + line.round + ' · received ' + receivedTime(line.receivedAt) + ' · ' + line.node + ' ' + peerActivity(line.node)));
-      const b = el('button', '', 'View'); b.onclick = () => viewRemote(line); row.append(b); details.append(row);
-    }
-    list.append(details);
-  };
-  const info = (text) => {
-    const wrap = el('span', 'discussion-info');
-    const b = el('button', '', 'ⓘ'); b.setAttribute('aria-label', text);
-    wrap.append(b, el('span', 'info-detail', text)); return wrap;
-  };
-  const localFile = async (file) => {
-    if (viewing) await viewRemote(null);
-    if (!viewing) post('__show', { file });
-  };
-  const inlineFiles = (parent, path) => {
-    const rel = files.filter((f) => f.startsWith(path + '/')).map((f) => f.slice(path.length + 1));
-    const folders = [...new Set(rel.filter((f) => f.includes('/')).map((f) => f.split('/')[0]))].sort();
-    for (const folder of folders) {
-      const nested = el('details', 'inline-folder'), key = path + '/' + folder;
-      nested.open = expandedLines.has(key);
-      nested.ontoggle = () => { if (nested.open) expandedLines.add(key); else expandedLines.delete(key); };
-      nested.append(el('summary', '', folder + '/')); inlineFiles(nested, key); parent.append(nested);
-    }
-    for (const name of rel.filter((f) => !f.includes('/'))) {
-      const file = path + '/' + name, b = el('button', 'entry file', name);
-      b.onclick = () => localFile(file);
-      if (file === doc) b.append(el('span', 'tag', 'shown'));
-      parent.append(b);
-    }
-    if (!rel.length) parent.append(el('span', 'hint', 'No files yet.'));
-  };
-  const receivedRow = (line, label) => {
-    const row = el('div', 'line-row'); row.append(el('span', '', label));
-    row.append(info(line.node + ' · round ' + line.round + ' · received ' + receivedTime(line.receivedAt) + ' · ' + line.node + ' ' + peerActivity(line.node)));
-    const b = el('button', '', 'View'); b.onclick = () => viewRemote(line); row.append(b); return row;
-  };
-  const discussionRow = (name, path) => {
-    // Archive/deferred retain their existing discussion pages and Make active action.
-    if (!path.startsWith('discussions/') || path.split('/').length !== 2)
-      return storedDiscussionRow(name, path);
-    const own = replica?.own[name];
-    const remote = replica?.received.filter((l) => own ? l.discussion === own.discussion : l.local === name) || [];
-    const details = el('details', 'discussion-lines');
-    details.open = expandedLines.has(path);
-    details.ontoggle = () => { if (details.open) expandedLines.add(path); else expandedLines.delete(path); };
-    // Open in another context of this folder (the screen keeps several open): Resume shows it, or
-    // Go to before its first message (it has nothing to resume yet).
+  const canAct = room && localInput && !viewing;
+
+  const activeName = room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
+  const discussions = discussionsIn('discussions').sort((a, b) => (b === activeName) - (a === activeName));
+
+  for (const o of (room?.open ?? []).filter((x) => !x.current && !x.active)) {
+    const r = el('div', 'row discussion-row');
+    const block = el('div', 'discussion-block');
+    block.append(el('div', 'title', o.title));
+    block.append(el('div', 'local-label', 'open' + (o.working ? ' · worker working' : '')));
+    r.append(block);
+    const b = el('button', 'reopen', 'Go to');
+    b.onclick = () => { location.href = o.url; };
+    r.append(b);
+    list.append(r);
+  }
+
+  const currentWorker = room?.open?.find((o) => o.current)?.working ? ' · worker working' : '';
+  if (room?.brainstorm && canAct) {
+    list.append(el('span', 'hint', (room.multi ? 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Close discussion ends it.' : 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Resume ends it.') + currentWorker));
+  } else if (!discussions.length && !replica?.received?.some((l) => !l.local)) {
+    list.append(el('span', 'hint', (room?.started ? '' : 'No active discussions: your first message starts one.') + currentWorker));
+  } else if (room && !room.started && canAct) {
+    list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Resume on its row.' + currentWorker));
+  }
+
+  heading('Discussions');
+  for (const d of discussions) {
+    const path = 'discussions/' + d;
+    const isCurrent = path === room?.active;
+    const isPeeking = peek?.kind === 'local' && peek.path === path;
+    const row = el('div', 'row discussion-row' + (isCurrent ? ' in-use' : '') + (isPeeking ? ' peeking' : ''));
+    const block = el('div', 'discussion-block');
+
+    const nameBtn = el('button', 'entry discussion', d);
+    nameBtn.onclick = () => {
+      if (isCurrent) {
+        peek = null;
+        explorerMode = 'discussion';
+        showSub('explorer');
+        renderExplorer();
+        renderDiscussions();
+      } else {
+        peek = { kind: 'local', path, name: d, readonly: false };
+        explorerMode = 'discussion';
+        showSub('explorer');
+        renderExplorer();
+        renderDiscussions();
+      }
+    };
+    block.append(nameBtn);
+
     const openEntry = room?.open?.find((o) => o.active === path);
     const openHere = openEntry?.current ? null : openEntry;
-    details.append(el('summary', '', name + (path === room?.active ? ' · in use' : openHere ? ' · open' : '') + (openEntry?.working ? ' · worker working' : '')));
-    const row = el('div', 'row discussion-row' + (path === room?.active ? ' in-use' : '')); row.append(details);
-    const label = (replica?.node || 'Local') + ' (this node) · ' + (own ? 'round ' + own.round : 'no saved round') +
-      (own ? Object.entries(own.sent).map(([n, sent]) => ' · ' + (sent ? 'sent to ' + n + ' ✓' : n + ' pending')).join('') : '');
-    row.append(info(label));
+    let statusText = '';
+    if (isCurrent) statusText = 'current' + (room?.started ? ' · started' : '');
+    else if (openHere) statusText = openHere.started ? 'open, paused' : 'not started';
+    else statusText = 'paused';
+    if (openEntry?.working) statusText += ' · worker working';
+    block.append(el('div', 'local-label', statusText));
+    row.append(block);
+
     if (canAct) {
       if (openHere && !openHere.started) {
-        const b = el('button', 'reopen', 'Go to'); b.title = 'Show this open discussion: it has not started yet'; b.onclick = () => { location.href = openHere.url; }; row.append(b);
-      } else if (path !== room.active) {
-        const b = el('button', 'reopen', 'Resume'); b.title = resumeTip(name, openHere, null);
-        b.onclick = (e) => { e.stopPropagation(); send('/resume ' + name); }; row.append(b);
+        const b = el('button', 'reopen', 'Go to');
+        b.title = 'Show this open discussion: it has not started yet';
+        b.onclick = () => { location.href = openHere.url; };
+        row.append(b);
+      } else if (!isCurrent) {
+        const b = el('button', 'reopen primary', 'Resume');
+        b.title = resumeTip(d, openHere, null);
+        b.onclick = (e) => { e.stopPropagation(); send('/resume ' + d); };
+        row.append(b);
       }
-      // The other actions (moving and rollback) in one ▾ menu; it stays open across redraws.
       const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
       menu.append(el('summary', '', 'Actions'), items);
       menu.open = openRowMenu === path;
       menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
       for (const [label, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
         const b = el('button', '', label);
-        b.disabled = path === room.active;
-        b.title = path === room.active ? 'The discussion in use cannot be moved' : 'Move the whole discussion into ' + target + '/';
-        b.onclick = () => { closeMenus(); send('/move ' + name + ' ' + target); };
-        if (target === 'archive') archiveButton(b, name);
+        b.disabled = isCurrent;
+        b.title = isCurrent ? 'The discussion in use cannot be moved' : 'Move the whole discussion into ' + target + '/';
+        b.onclick = () => { closeMenus(); send('/move ' + d + ' ' + target); };
+        if (target === 'archive') archiveButton(b, d);
         items.append(b);
       }
-      // Start fresh: not for the discussion in use before its first message (nothing to discard).
-      if (!(path === room.active && !room.started)) { const f = el('button', '', 'Start fresh'); freshButton(f, name); items.append(f); }
+      if (!(isCurrent && !room.started)) {
+        const f = el('button', '', 'Start fresh'); freshButton(f, d); items.append(f);
+      }
       items.append(el('hr'));
-      rollbackButtons(items, details, name, name, path === room.active);
+      rollbackButtons(items, block, d, d, isCurrent);
       row.append(menu);
     }
-    if (remote.length) details.append(el('div', 'local-label', 'Local · ' + (replica?.node || 'this node')));
-    inlineFiles(details, path);
-    for (const line of remote) details.append(receivedRow(line, 'Received · ' + line.node));
     list.append(row);
-  };
-  const inUse = (path) => path === room?.active;
-  const discussionsIn = (prefix) => [...new Set(files.filter((f) => f.startsWith(prefix + '/'))
-    .map((f) => f.slice(prefix.length + 1)).filter((r) => r.includes('/')).map((r) => r.split('/')[0]))]
-    .filter(isDiscussion).sort((a, b) => b.localeCompare(a));
-  const canAct = room && localInput && !viewing;
-  const back = (label, to) => { const b = el('button', 'back', '← ' + label); b.onclick = () => openFiles(to); list.append(b); };
-  const title = (text, status, cls) => { const t = el('div', 'title', text); if (status) t.append(el('span', 'status ' + (cls || ''), status)); list.append(t); };
+  }
 
-  if (group === 'discussions/archive' || group === 'discussions/deferred') { // archive/ or deferred/: their discussions
-    const section = group.split('/')[1];
-    back('All discussions', '');
-    title(section === 'archive' ? 'Archive' : 'Deferred');
-    const found = discussionsIn(group);
-    if (!found.length) list.append(el('span', 'hint', section === 'archive' ? 'No archived discussions.' : 'No deferred discussions.'));
-    for (const d of found) discussionRow(d, group + '/' + d);
-    return;
-  }
-  if (group) { // a discussion or one of its folders
-    const parts = group.split('/');
-    const disc = discussionOf(parts);
-    const parent = parts.length > 2 ? parts.slice(0, -1).join('/') : '';
-    back(parent ? (SECTIONS[parent.split('/')[1]] && parts.length === 3 ? SECTIONS[parent.split('/')[1]] : parts.at(-2) + '/') : 'All discussions', parent);
-    if (disc) {
-      const status = inUse(group) ? ['in use', 'inuse'] : disc.section ? [disc.section === 'archive' ? 'archived' : 'deferred', disc.section] : ['active', ''];
-      title(parts.at(-1), status[0], status[1]);
-    } else title(parts.slice(1).join('/'));
-    if (disc && canAct) {
-      // Actions, apart from the files: Resume (or Go to) and Start fresh, then moving the whole discussion.
-      const actions = el('div', 'actions');
-      const action = (label, onclick, tip, cls) => { const b = el('button', cls || '', label); b.onclick = onclick; b.title = tip; actions.append(b); return b; };
-      const name = disc.ref.split('/').at(-1), openHere = room.open?.find((o) => !o.current && o.active === 'discussions/' + name);
-      if (openHere && !openHere.started) action('Go to', () => { location.href = openHere.url; }, 'Show this open discussion: it has not started yet', 'primary');
-      else if (!inUse(group)) action(disc.section ? 'Resume (makes it active)' : 'Resume', () => send('/resume ' + disc.ref), resumeTip(name, openHere, disc.section), 'primary');
-      // Start fresh: not for the discussion in use before anything was said in it (nothing to discard).
-      if (!(inUse(group) && !room.started)) freshButton(action('Start fresh', null, ''), disc.ref);
-      // Moving the whole discussion; not the one in use (its transcript is open there).
-      if (!inUse(group)) {
-        if (actions.children.length) actions.append(el('span', 'sep'));
-        if (disc.section) action('Make active', () => send('/move ' + disc.ref + ' active'), 'Move it back to the active discussions');
-        if (disc.section !== 'archive') archiveButton(action('Archive', null, 'Move the whole discussion into archive/'), disc.ref);
-        if (disc.section !== 'deferred') action('Defer', () => send('/move ' + disc.ref + ' deferred'), 'Move the whole discussion into deferred/');
-      }
-      if (disc.section !== 'archive') rollbackButtons(actions, list, name, disc.ref, inUse(group));
-      if (actions.children.length) list.append(actions);
-    }
-    const rel = files.filter((f) => f.startsWith(group + '/')).map((f) => f.slice(group.length + 1));
-    const folders = [...new Set(rel.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))].sort();
-    const own = rel.filter((r) => !r.includes('/'));
-    heading('Files');
-    if (!folders.length && !own.length) list.append(el('span', 'hint', 'No files yet.'));
-    for (const d of folders) entry('folder', d + '/', () => openFiles(group + '/' + d), '', 'Open this folder');
-    for (const r of own) {
-      const f = group + '/' + r;
-      entry('file', r, () => post('__show', { file: f }), f === room?.transcript ? 'this session' : f === doc ? 'shown' : '');
-    }
-    return;
-  }
-  // The top: active discussions, the room's own documents, then archive/ and deferred/.
-  // The discussion in use first; the others newest first.
-  const active = room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
-  const discussions = discussionsIn('discussions').sort((a, b) => (b === active) - (a === active));
-  // The folder's other open contexts that have no discussion row: the brainstorm, a new one.
-  for (const o of (room?.open ?? []).filter((x) => !x.current && !x.active)) {
-    const r = el('div', 'row'); r.append(el('span', '', o.title + ' · open' + (o.working ? ' · worker working' : '')));
-    const b = el('button', 'reopen', 'Go to'); b.onclick = () => { location.href = o.url; }; r.append(b); list.append(r);
-  }
-  const currentWorker = room?.open?.find((o) => o.current)?.working ? ' · worker working' : '';
-  if (room?.brainstorm && canAct) list.append(el('span', 'hint', room.multi ? 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Close discussion ends it.' : 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Resume ends it.') + currentWorker);
-  else if (!discussions.length && !replica?.received.some((l) => !l.local)) list.append(el('span', 'hint', room?.started ? '' : 'No active discussions: your first message starts one.' + currentWorker));
-  else if (room && !room.started && canAct) list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Resume on its row.' + currentWorker));
-  heading('Discussions');
-  for (const d of discussions) {
-    const path = 'discussions/' + d;
-    discussionRow(d, path);
-  }
   if (replica) {
     const remoteOnly = replica.received.filter((l) => !l.local && !discussions.some((d) => replica.own[d]?.discussion === l.discussion));
-    if (remoteOnly.length) heading('Received from peers · read-only');
-    for (const line of remoteOnly) list.append(receivedRow(line, line.name + ' · ' + line.node));
+    if (remoteOnly.length) {
+      heading('Received from peers · read-only');
+      for (const line of remoteOnly) {
+        const isPeeking = peek?.kind === 'received' && peek.discussion === line.discussion;
+        const row = el('div', 'row discussion-row' + (isPeeking ? ' peeking' : ''));
+        const block = el('div', 'discussion-block');
+        const nameBtn = el('button', 'entry discussion', line.name || line.local || line.discussion);
+        nameBtn.onclick = () => {
+          peek = { kind: 'received', discussion: line.discussion, node: line.node, commit: line.commit, round: line.round, name: line.name || line.local || line.discussion };
+          explorerMode = 'discussion';
+          showSub('explorer');
+          renderExplorer();
+          renderDiscussions();
+        };
+        block.append(nameBtn);
+        block.append(el('div', 'local-label', line.node + ' · round ' + line.round));
+        row.append(block);
+
+        const peekBtn = el('button', 'reopen', 'Peek files');
+        peekBtn.title = 'Peek at this received discussion’s files in Explorer';
+        peekBtn.onclick = () => {
+          peek = { kind: 'received', discussion: line.discussion, node: line.node, commit: line.commit, round: line.round, name: line.name || line.local || line.discussion };
+          explorerMode = 'discussion';
+          showSub('explorer');
+          renderExplorer();
+          renderDiscussions();
+        };
+        row.append(peekBtn);
+
+        const viewBtn = el('button', 'reopen primary', 'View chat');
+        viewBtn.title = 'View this peer’s discussion in full, read-only';
+        viewBtn.onclick = () => viewRemote(line);
+        row.append(viewBtn);
+
+        list.append(row);
+      }
+    }
   }
-  const top = files.filter((f) => f.startsWith('discussions/')).map((f) => f.slice('discussions/'.length));
-  const own = [...new Set(top.filter((r) => r.includes('/')).map((r) => r.split('/')[0]))].filter((n) => !isDiscussion(n) && !SECTIONS[n]).sort();
-  const loose = top.filter((r) => !r.includes('/'));
-  if (own.length || loose.length) {
-    heading("This room's own documents");
-    for (const d of own) entry('folder', d + '/', () => openFiles('discussions/' + d), '', 'Open this folder');
-    for (const r of loose) entry('file', r, () => post('__show', { file: 'discussions/' + r }), 'discussions/' + r === doc ? 'shown' : '');
-  }
+
   heading('Archive and deferred');
-  for (const s of Object.keys(SECTIONS)) {
-    const n = discussionsIn('discussions/' + s).length;
-    entry('folder', s + '/', () => openFiles('discussions/' + s), n + (n === 1 ? ' discussion' : ' discussions'), s === 'archive' ? 'Finished discussions' : 'Postponed discussions');
+  for (const s of ['archive', 'deferred']) {
+    const sList = discussionsIn('discussions/' + s);
+    const details = el('details', 'section-group');
+    details.open = expandedDiscussions.has(s);
+    details.ontoggle = () => { if (details.open) expandedDiscussions.add(s); else expandedDiscussions.delete(s); };
+    const summary = el('summary', '', (s === 'archive' ? 'Archived' : 'Deferred') + ' (' + sList.length + ')');
+    details.append(summary);
+    if (!sList.length) {
+      details.append(el('span', 'hint', s === 'archive' ? 'No archived discussions.' : 'No deferred discussions.'));
+    }
+    for (const d of sList) {
+      const path = 'discussions/' + s + '/' + d;
+      const isPeeking = peek?.kind === 'local' && peek.path === path;
+      const row = el('div', 'row discussion-row' + (isPeeking ? ' peeking' : ''));
+      const block = el('div', 'discussion-block');
+      const nameBtn = el('button', 'entry discussion', d);
+      nameBtn.onclick = () => {
+        peek = { kind: 'local', path, name: d, readonly: true };
+        explorerMode = 'discussion';
+        showSub('explorer');
+        renderExplorer();
+        renderDiscussions();
+      };
+      block.append(nameBtn);
+      block.append(el('div', 'local-label', s === 'archive' ? 'archived' : 'deferred'));
+      row.append(block);
+
+      if (canAct) {
+        const b = el('button', 'reopen primary', 'Resume');
+        b.title = 'Resume: makes it active first';
+        b.onclick = (e) => { e.stopPropagation(); send('/resume ' + s + '/' + d); };
+        row.append(b);
+
+        const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
+        menu.append(el('summary', '', 'Actions'), items);
+        menu.open = openRowMenu === path;
+        menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
+
+        const makeActive = el('button', '', 'Make active');
+        makeActive.onclick = () => { closeMenus(); send('/move ' + s + '/' + d + ' active'); };
+        items.append(makeActive);
+
+        const otherSection = s === 'archive' ? 'deferred' : 'archive';
+        const moveOther = el('button', '', otherSection === 'archive' ? 'Archive' : 'Defer');
+        moveOther.onclick = () => { closeMenus(); send('/move ' + s + '/' + d + ' ' + otherSection); };
+        if (otherSection === 'archive') archiveButton(moveOther, s + '/' + d);
+        items.append(moveOther);
+
+        const fresh = el('button', '', 'Start fresh');
+        freshButton(fresh, s + '/' + d);
+        items.append(fresh);
+
+        items.append(el('hr'));
+        rollbackButtons(items, block, d, s + '/' + d, false);
+        row.append(menu);
+      }
+      details.append(row);
+    }
+    list.append(details);
   }
+}
+
+async function renderExplorer() {
+  const container = $('pane');
+  if (!container) return;
+  const scroll = container.scrollTop;
+  container.innerHTML = '<div id="files"></div>';
+  const list = container.firstChild;
+  requestAnimationFrame(() => { container.scrollTop = scroll; });
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+
+  if (peek) {
+    const banner = el('div', 'peek-banner');
+    const note = el('span', '', 'Looking at ');
+    const bold = el('b', '', peek.name);
+    note.append(bold);
+    banner.append(note);
+    const backBtn = el('button', '', 'Back to current');
+    backBtn.onclick = () => {
+      peek = null;
+      updateTabs();
+      renderExplorer();
+      renderDiscussions();
+    };
+    banner.append(backBtn);
+    list.append(banner);
+  }
+
+  const bar = el('div', 'explorer-bar');
+  const hasDisc = hasDiscussionTree();
+  const effMode = effectiveExplorerMode();
+
+  const btnDisc = el('button', effMode === 'discussion' ? 'on' : '', 'Discussion');
+  btnDisc.title = "This discussion's own files: notes, drawings, transcripts, attachments. Always read from the room's folder (discussions/<name>/).";
+  btnDisc.disabled = !hasDisc;
+  btnDisc.onclick = () => { explorerMode = 'discussion'; renderExplorer(); };
+
+  const btnRoot = el('button', effMode === 'root' ? 'on' : '', 'Room checkout');
+  const roomFolder = (room?.folder || 'agent-room').replace(/[/]+$/, '').split('/').pop() || 'agent-room';
+  const roomBranchName = cachedDetail?.branch || room?.code?.branch || 'main';
+  btnRoot.title = "The project as it is in the room's folder (" + roomFolder + "/, branch " + roomBranchName + "): what you have merged, plus your own uncommitted edits.";
+  btnRoot.onclick = () => { explorerMode = 'root'; renderExplorer(); };
+
+  const btnWorker = el('button', '', 'Worker copy');
+  btnWorker.disabled = true;
+  btnWorker.title = 'Coming soon';
+
+  bar.append(btnDisc, btnRoot, btnWorker);
+  list.append(bar);
+
+  const subline = el('div', 'explorer-sub');
+  if (effMode === 'root') {
+    subline.textContent = roomFolder + '/ · ' + roomBranchName;
+  } else {
+    if (peek?.kind === 'received') {
+      subline.textContent = peek.name + ' (' + peek.node + ')';
+    } else {
+      const activePath = peek?.kind === 'local' ? peek.path : room?.active;
+      subline.textContent = activePath ? activePath + '/' : '';
+    }
+  }
+  list.append(subline);
+
+  const renderFileEntry = (parent, name, fullPath, clickHandler) => {
+    const cantShow = cachedDetail.unviewable?.has(fullPath) || BINARY_FILE.test(fullPath);
+    const b = el('button', 'entry file' + (cantShow ? ' unviewable' : ''), name + (cantShow ? " · can't be shown here" : ''));
+    if (cantShow) {
+      b.disabled = true;
+      b.title = "can't be shown here";
+    } else {
+      b.onclick = () => clickHandler(fullPath);
+      if (fullPath === doc) b.append(el('span', 'tag', 'shown'));
+    }
+    parent.append(b);
+  };
+
+  const renderTreeNested = (parent, items, prefix, clickHandler) => {
+    const folders = [...new Set(items.filter((f) => f.includes('/')).map((f) => f.split('/')[0]))].sort();
+    const files = items.filter((f) => !f.includes('/')).sort();
+
+    for (const folder of folders) {
+      const folderKey = prefix + '/' + folder;
+      const details = el('details', 'inline-folder');
+      details.open = expandedLines.has(folderKey);
+      details.ontoggle = () => { if (details.open) expandedLines.add(folderKey); else expandedLines.delete(folderKey); };
+      details.append(el('summary', '', folder + '/'));
+      const subItems = items.filter((f) => f.startsWith(folder + '/')).map((f) => f.slice(folder.length + 1));
+      renderTreeNested(details, subItems, folderKey, clickHandler);
+      parent.append(details);
+    }
+
+    for (const name of files) {
+      const fullPath = prefix + '/' + name;
+      renderFileEntry(parent, name, fullPath, clickHandler);
+    }
+  };
+
+  const renderTree = (items, prefix, clickHandler) => {
+    const folders = [...new Set(items.filter((f) => f.includes('/')).map((f) => f.split('/')[0]))].sort();
+    const files = items.filter((f) => !f.includes('/')).sort();
+
+    for (const folder of folders) {
+      const folderKey = (prefix ? prefix + '/' : '') + folder;
+      const details = el('details', 'inline-folder');
+      details.open = expandedLines.has(folderKey);
+      details.ontoggle = () => { if (details.open) expandedLines.add(folderKey); else expandedLines.delete(folderKey); };
+      details.append(el('summary', '', folder + '/'));
+      const subItems = items.filter((f) => f.startsWith(folder + '/')).map((f) => f.slice(folder.length + 1));
+      renderTreeNested(details, subItems, folderKey, clickHandler);
+      list.append(details);
+    }
+
+    for (const name of files) {
+      const fullPath = (prefix ? prefix + '/' : '') + name;
+      renderFileEntry(list, name, fullPath, clickHandler);
+    }
+    if (!folders.length && !files.length) {
+      list.append(el('span', 'hint', 'No files yet.'));
+    }
+  };
+
+  if (effMode === 'root') {
+    const rootFiles = (cachedDetail.files || []).filter((f) => !inDiscussion(f));
+    renderTree(rootFiles, '', (fullPath) => post('__show', { file: fullPath }));
+  } else {
+    if (peek?.kind === 'received') {
+      let rfiles = [];
+      try {
+        rfiles = await (await fetch('__rfiles?d=' + encodeURIComponent(peek.discussion) + '&n=' + encodeURIComponent(peek.node) + '&c=' + encodeURIComponent(peek.commit || ''))).json();
+      } catch {}
+      renderTree(rfiles, '', (relPath) => {
+        const fullReceivedPath = '__received/' + peek.discussion + '/' + peek.node + '/' + peek.commit + '/' + relPath;
+        showDoc(fullReceivedPath);
+      });
+    } else {
+      const basePath = peek?.kind === 'local' ? peek.path : room?.active;
+      if (!basePath) {
+        list.append(el('span', 'hint', 'No discussion open: choose Room checkout above.'));
+      } else {
+        const discFiles = (cachedDetail.files || []).filter((f) => f.startsWith(basePath + '/')).map((f) => f.slice(basePath.length + 1));
+        renderTree(discFiles, basePath, (fullPath) => {
+          if (peek?.readonly) showDoc(fullPath);
+          else post('__show', { file: fullPath });
+        });
+      }
+    }
+  }
+}
+
+async function openFiles() {
+  try {
+    const raw = await (await fetch('__files?detail=1')).json();
+    if (Array.isArray(raw)) cachedDetail = { files: raw, unviewable: new Set(), branch: null };
+    else cachedDetail = { files: raw.files || [], unviewable: new Set(raw.unviewable || []), branch: raw.branch || null };
+  } catch {}
+  updateTabs();
+  renderDiscussions();
+  await renderExplorer();
 }
 // The header: the room's folder name, its full root path (in the tooltip) and its active discussion.
 let room = null;
 function setRoom(r) {
+  const changed = room && r && room.active !== r.active;
   room = r;
+  if (changed) { peek = null; updateTabs(); }
   renderAutoDev();
   $('room-name').textContent = r.folder?.replace(/[/]+$/, '').split('/').pop() || r.folder || 'agent-room';
   $('disc').textContent = r.discussion || '';
@@ -1695,7 +2003,7 @@ events.onmessage = (e) => {
     localMessages = []; localInput = ev.input;
     talk.clear();
     ev.messages.forEach(message);
-    yourTurn = !ev.thinking; setThinking(ev.thinking); if (!viewing) { showDoc(ev.doc); openFiles(listed ?? ''); }
+    yourTurn = !ev.thinking; setThinking(ev.thinking); if (!viewing) { showDoc(ev.doc); openFiles(); }
     if (!ev.input) { $('composer').hidden = true; } // terminal mode: the page only watches
     work.clear();
     if (!ev.worker.length) work.add(statusEl('Give the worker instructions here. It works alongside the discussion and sees only what you send it.'));
@@ -1712,7 +2020,7 @@ events.onmessage = (e) => {
     showReplica(ev.replica);
   }
   if (ev.type === 'replica') showReplica(ev.replica);
-  if (ev.type === 'room') { setRoom(ev.room); if (listed !== null) openFiles(listed); } // its buttons and "in use" follow
+  if (ev.type === 'room') { setRoom(ev.room); openFiles(); } // its buttons and "in use" follow
   if (ev.type === 'work') workMessage(ev.message, true);
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
   if (ev.type === 'monitor') showMonitor(ev.monitor);
@@ -1725,14 +2033,14 @@ events.onmessage = (e) => {
     status(ev.text, ev.error);
     if (ev.error && pendingArchives.size) {
       pendingArchives.clear();
-      if (listed !== null) openFiles(listed);
+      openFiles();
     }
   }
   if (ev.type === 'doc' && !viewing) showDoc(ev.file);
   if (ev.type === 'files') { showSub('explorer'); openFiles(); }
   if (ev.type === 'moved') {
     pendingArchives.delete(ev.from);
-    if (listed !== null) openFiles(listed === ev.from || listed.startsWith(ev.from + '/') ? ev.to + listed.slice(ev.from.length) : listed);
+    openFiles();
   }
   if (ev.type === 'goto') { location.href = ev.url; return; } // this window switches discussion
   if (ev.type === 'ended') { ended = true; status('This room has ended. You can close this window.'); events.close(); box.disabled = true; wbox.disabled = true; }
@@ -1996,6 +2304,15 @@ function handleScreen(req, res, url, dir, screen) {
   if (url.pathname === '/__files') {
     let files = [];
     try { files = docFiles(dir, screen); } catch {} // no discussions/ yet
+    if (url.searchParams.get('detail') === '1') {
+      const unviewable = files.filter((f) => {
+        const full = servable(dir, f, screen);
+        return full ? !isViewable(full) : false;
+      });
+      const branch = roomBranch(dir);
+      send(200, 'application/json', JSON.stringify({ files, unviewable, branch }));
+      return true;
+    }
     send(200, 'application/json', JSON.stringify(files));
     return true;
   }
@@ -2038,10 +2355,10 @@ function handleScreen(req, res, url, dir, screen) {
           (err) => send(err.status ?? 500, 'text/plain; charset=utf-8', err.message));
       }
       if (url.pathname === '/__show') {
-        const file = typeof body?.file === 'string' && servable(dir, body.file, screen) ? body.file : null;
-        if (!file) return send(404, 'text/plain; charset=utf-8', 'No such document.');
-        screen.doc = file;
-        broadcast(screen, { type: 'doc', file });
+        const target = typeof body?.file === 'string' ? servable(dir, body.file, screen) : null;
+        if (!target || !isViewable(target)) return send(404, 'text/plain; charset=utf-8', 'No such document.');
+        screen.doc = body.file;
+        broadcast(screen, { type: 'doc', file: body.file });
         return send(204, 'text/plain', '');
       }
       if (url.pathname === '/__workerinfo') { // the Worker tab is shown: recheck its branches (sent as a workerinfo event)
@@ -2135,7 +2452,8 @@ export function handle(req, res, dir, screen, base = '/') {
   // no-cache: a reload after the file changes shows the new content, not a cached copy.
   const sendDoc = (type, body) => { res.writeHead(200, { 'content-type': type, 'cache-control': 'no-cache' }); res.end(body); };
   if (/\.md$/i.test(file)) return sendDoc('text/html; charset=utf-8', page(rel, ((/(^|\/)transcripts\//.test(rel)) ? mdText : md).parse(readFileSync(file, 'utf8')), rel, base));
-  sendDoc(TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream', readFileSync(file));
+  const type = TYPES[extname(file).toLowerCase()] ?? (isTextFile(file) ? 'text/plain; charset=utf-8' : 'application/octet-stream');
+  sendDoc(type, readFileSync(file));
 }
 
 // Terminal list: ↑/↓ (or j/k) to move, Enter calls onOpen(file) and stays, Esc/q resolves.
