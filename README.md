@@ -226,8 +226,8 @@ discussion** (in **Actions ▾**, or `/close`) closes the one shown and its agen
 whose worker edits are unresolved (below); its checkpoint is kept. **Quit room** closes them all, and
 Restart brings back every open discussion from its checkpoint (not brainstorms or empty ones). In a
 `--node` launch room every open discussion replicates, through the room's one replica; the first one
-holds it, so it closes last (or with Quit room). The worker's provider and model are one setting for
-all open discussions; each keeps its own worker session. In the terminal one discussion is open at
+holds it, so it closes last (or with Quit room). Each discussion keeps its own worker settings and
+session. In the terminal one discussion is open at
 a time, as described next: its one input can't switch between discussions.
 
 **New discussion** in the terminal (`/new`) works between rounds. It ends this
@@ -355,12 +355,14 @@ Expand **Discussion agents · provider & model** in Discussion, or **Worker · p
 in Worker. Each existing agent has a name, provider and model. Use `--agents` at launch to choose
 the number and order of discussion agents; the screen edits the existing slots.
 
-Changes save automatically to `~/.config/agent-room/defaults.json`, shared across project
+Defaults save automatically to `~/.config/agent-room/defaults.json`, shared across project
 folders and subsequent launches, including the Dock launcher. Dropdown selections save on change;
 text edits save when committed, such as by leaving the field. A custom model choice waits for
 its model ID. Invalid choices show a save error and do not replace the saved defaults.
 
-Worker provider and model changes apply to the next instruction, including after a failed turn.
+Worker provider, name and model changes apply only to this discussion or brainstorm, starting with
+the next instruction, including after a failed turn. Before work starts they also become defaults
+for new ones; after work starts they do not change the defaults.
 A running instruction finishes with its original settings; resend a failed instruction yourself.
 Changing models keeps the provider session. Changing provider or worker name starts a fresh
 session supplied with the previous Worker-tab conversation and its worktree/discussion context.

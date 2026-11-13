@@ -20,8 +20,8 @@ Providers: claude, codex, agy. Each agent is provider[:name[:model]], e.g. --age
 Without saved defaults: discussion claude,codex; worker claude:Worker.
 The provider/model sections in the Discussion and Worker tabs save changes automatically to
 ~/.config/agent-room/defaults.json. CLI flags override the corresponding defaults for this launch.
-Worker changes apply to the next instruction. Discussion changes apply before work starts;
-after that they set defaults for future rooms.
+Worker changes apply to this discussion on the next instruction, and become defaults only before work starts.
+Discussion changes apply before work starts; after that they set defaults for future rooms.
 The worker (the screen's Worker tab) is one more agent, outside the discussion: it carries out the
 instructions sent from that tab, sees only those (and the active discussion's folder, for its
 notes), and can edit files and run commands. It works in its own Git worktree of the room's
@@ -130,57 +130,56 @@ export function modelChoices() {
   } catch {}
   return { claude: ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) })), codex, agy: agyModels() };
 }
+// Work in another open discussion must not change this discussion's settings boundary.
+const settingsStarted = (ctx) => !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length;
 export async function saveSettings(ctx, value, file = defaultsFile()) {
-  const settings = validateSettings(value);
-  const next = { ...ctx, agentSpecs: settings.agents.map(specFor).join(','), workerSpec: specFor(settings.worker), sessions: new Map(), state: { ...ctx.state, seen: new Map(ctx.state.seen) } };
-  // Build first so validation/loading errors cannot replace defaults or the running room.
-  const applied = !ctx.agentsStarted && !ctx.logPath && !ctx.state.transcript.length && !ctx.screen.worker.length;
+  const applied = !settingsStarted(ctx);
+  const scope = value?.scope;
+  const current = ctx.agentSpecs ? currentSettings(ctx) : { agents: value.agents, worker: parseSpec(ctx.workerSpec, true) };
+  const defaults = readDefaults(file) ?? { ...current, worker: parseSpec(ctx.workerDefault ?? ctx.workerSpec, true) };
+  // Once work has started, the worker tab validates against the running agents, not future defaults.
+  const settings = validateSettings(!applied && scope === 'work' ? { ...value, agents: current.agents } : value);
+  const worker = !applied && scope === 'talk' ? current.worker : settings.worker;
+  if (!applied && ctx.room.agents.some((a) => a.name.toLowerCase() === worker.name.toLowerCase()))
+    throw new Error('The worker needs a different name from the running discussion agents.');
+  // Discussion changes still save as defaults. A started discussion's worker changes do not.
+  const saved = validateSettings({ agents: !applied && scope === 'work' ? defaults.agents : settings.agents,
+    worker: applied ? worker : defaults.worker });
+  const next = { ...ctx, agentSpecs: settings.agents.map(specFor).join(','), workerSpec: specFor(worker),
+    sessions: new Map(), state: { ...ctx.state, seen: new Map(ctx.state.seen) } };
   const workerChanged = next.workerSpec !== ctx.workerSpec;
   const previous = parseSpec(ctx.workerSpec, true);
-  const freshWorker = previous.provider !== settings.worker.provider || previous.name !== settings.worker.name;
-  // The worker is one, shared by the folder's open discussions: its provider and model are one
-  // setting for all of them. Its name must differ from the running discussion agents in every one,
-  // checked before anything changes: a clash rejects the change for the whole room.
-  const taken = (c) => c.room.agents.some((a) => a.name.toLowerCase() === settings.worker.name.toLowerCase());
-  if (!applied && taken(ctx)) throw new Error('The worker needs a different name from the running discussion agents.');
-  const others = workerChanged ? siblings(ctx).filter((c) => c !== ctx && c.room && c.workerSpec !== next.workerSpec) : [];
-  const clash = others.find(taken);
-  if (clash) throw new Error(`The worker needs a different name from the discussion agents in every open discussion: [${originLabel(clash)}] has an agent named ${settings.worker.name}. Nothing was changed.`);
+  const freshWorker = previous.provider !== worker.provider || previous.name !== worker.name;
   if (!applied) {
     next.sessions = new Map(ctx.sessions);
-    if (freshWorker) next.sessions.set(`worker:${settings.worker.name}`, {});
+    if (freshWorker) next.sessions.set(`worker:${worker.name}`, {});
   }
+  // Build first so validation/loading errors cannot replace defaults or the running room.
   const loaded = await load(next, '');
-  // Every other open discussion's worker, built before anything is applied (each keeps its own
-  // worker session, a fresh one if the provider changed).
-  const built = [];
-  for (const c of others) {
-    const sessions = new Map(c.sessions);
-    if (freshWorker) sessions.set(`worker:${settings.worker.name}`, {});
-    built.push([c, await load({ ...c, workerSpec: next.workerSpec, sessions }, ''), sessions]);
+  if (applied || JSON.stringify(saved) !== JSON.stringify(defaults)) {
+    mkdirSync(dirname(file), { recursive: true });
+    const temp = `${file}.${process.pid}.tmp`;
+    writeFileSync(temp, JSON.stringify(saved, null, 2) + '\n', { mode: 0o600 });
+    renameSync(temp, file);
   }
-  mkdirSync(dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.tmp`;
-  writeFileSync(temp, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 });
-  renameSync(temp, file);
-  const useWorker = (c, built, sessions) => {
-    c.worker = built.worker;
-    c.workerSpec = next.workerSpec;
-    c.sessions.set(`worker:${settings.worker.name}`, sessions.get(`worker:${settings.worker.name}`));
-    if (freshWorker) {
-      c.workerBriefed = null;
-      c.workerTree = null;
-      c.workerLabel = null;
-      c.workerHandoff = true;
-    }
-  };
   if (applied) {
-    Object.assign(ctx, loaded, { agentSpecs: next.agentSpecs, workerSpec: next.workerSpec, sessions: next.sessions, state: next.state });
+    Object.assign(ctx, loaded, { agentSpecs: next.agentSpecs, workerSpec: next.workerSpec, workerDefault: next.workerSpec, sessions: next.sessions, state: next.state });
     wire(ctx);
-  } else if (workerChanged) useWorker(ctx, loaded, next.sessions);
-  for (const [c, b, sessions] of built) useWorker(c, b, sessions);
+  } else if (workerChanged) {
+    ctx.worker = loaded.worker;
+    ctx.makeWorker = loaded.makeWorker;
+    ctx.workerSpec = next.workerSpec;
+    ctx.sessions.set(`worker:${worker.name}`, next.sessions.get(`worker:${worker.name}`));
+    if (freshWorker) {
+      ctx.workerBriefed = null;
+      ctx.workerTree = null;
+      ctx.workerLabel = null;
+      ctx.workerHandoff = true;
+    }
+    saveCheckpoint(ctx);
+  }
   showHeader(ctx);
-  return { applied, workerApplied: true, settings };
+  return { applied, workerApplied: true, settings: saved };
 }
 
 // Imports fresh copies of the modules and the two rulebooks and builds a room on ctx.state, and the worker. Returns
@@ -197,6 +196,7 @@ export async function load(ctx, v) {
     ctx.agentSpecs ??= saved ? saved.agents.map(specFor).join(',') : 'claude,codex';
     ctx.workerSpec ??= saved ? specFor(saved.worker) : 'claude:Worker';
   }
+  ctx.workerDefault ??= ctx.workerSpec;
   const instructions = readFileSync(new URL('../README-for-brainstorming-agents.md', import.meta.url), 'utf8');
   const workerInstructions = readFileSync(new URL('../README-for-worker-agents.md', import.meta.url), 'utf8');
   const { createAgent, claudeTitle, run, findLeftovers } = await import(`./agents.mjs${v}`);
@@ -293,7 +293,7 @@ function wire(ctx) {
   ctx.screen.newRoom = (body) => newRoom(ctx, body);
   ctx.screen.listRooms = async () => listRooms(ctx);
   if (!agyModelsWarmed) { agyModelsWarmed = true; agyModels(); } // start without delaying room startup
-  ctx.screen.getSettings = () => ({ settings: currentSettings(ctx), defaults: readDefaults(), models: modelChoices(), started: !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length || !!ctx.screen.worker.length });
+  ctx.screen.getSettings = () => ({ settings: currentSettings(ctx), defaults: readDefaults(), models: modelChoices(), started: settingsStarted(ctx) });
   ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
 }
 
@@ -986,12 +986,23 @@ function switchTo(ctx, next) {
 
 // /new (New discussion): between rounds, like every command. The discussion session ends (its
 // checkpoint is kept); the next message names and creates the new discussion, as in a fresh room. Nothing is
-// created until then. The worker is not affected: a task already running keeps its target, its log
-// stays (with a marker line), and its session is kept (decided by the User, 2026-11-07).
-function newDiscussion(ctx) {
+// created until then. A running task keeps its target, log and session; the new discussion uses
+// the saved worker default.
+// A new terminal discussion or brainstorm starts with the saved worker default.
+async function defaultWorker(ctx) {
+  const worker = readDefaults()?.worker ?? (ctx.workerDefault ? parseSpec(ctx.workerDefault, true) : null);
+  if (!worker || specFor(worker) === ctx.workerSpec) return;
+  const sessions = new Map(ctx.sessions);
+  sessions.set(`worker:${worker.name}`, {});
+  const next = { ...ctx, workerSpec: specFor(worker), sessions };
+  const loaded = await load(next, '');
+  Object.assign(ctx, { worker: loaded.worker, makeWorker: loaded.makeWorker, workerSpec: next.workerSpec, sessions });
+}
+async function newDiscussion(ctx) {
   const was = ctx.discussion;
   if (!was && !ctx.logPath && !ctx.state.brainstorm) return note(ctx, 'No discussion started yet: your next message starts a new one.');
   if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a new discussion');
+  await defaultWorker(ctx);
   if (was && ctx.screen.worker.length) {
     const view = { owner: ownerOf(ctx), note: `New discussion: ${was.name} keeps its worker session; its tasks still running or queued finish there and report to it. The new discussion's worker starts a fresh session.` };
     ctx.screen.worker.push(view);
@@ -1006,9 +1017,10 @@ function newDiscussion(ctx) {
 // Reload and a page refresh, not a Restart or Quit). One per room: a new one discards it, and New
 // discussion or Resume ends it. It ends the discussion session in use as New discussion does; the
 // worker carries on as with no discussion.
-function newBrainstorm(ctx) {
+async function newBrainstorm(ctx) {
   const was = ctx.discussion;
   if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a brainstorm');
+  await defaultWorker(ctx);
   ctx.state.brainstorm = true;
   ctx.state.brainstormId = randomBytes(12).toString('hex');
   ctx.state.briefing = `This is a brainstorm, not a discussion: it has no folder and agent-room keeps no record of it. Write no files; you may read the project in the room's root, ${ctx.cwd}.`;
@@ -1022,7 +1034,7 @@ function newBrainstorm(ctx) {
 // a ctx with its own agents' sessions, chat, input queue, auto dev and page, made by cli.mjs's addRoom
 // with a `context` tag (ctx.key is then "<folder>#<tag>"). They share the folder's workshop
 // (ctx.shop): one worker queue, worktree and Worker tab; each task is labelled with its origin and
-// its report goes back there, and each context has its own worker session. One window shows one
+// its report goes back there, and each context has its own worker settings and session. One window shows one
 // context; Explorer and the header switch between them ('goto'). New discussion, Resume and Start
 // fresh open another context and keep this one; Close discussion closes one (its checkpoint stays);
 // Quit room closes them all.
@@ -1092,7 +1104,8 @@ async function openBeside(ctx) {
   const shop = shopOf(ctx);
   let tag;
   do tag = `d${++shop.contexts}`; while (ctx.hub.rooms.has(`${baseKey(ctx)}#${tag}`));
-  const { ctx: next } = await ctx.hub.addRoom(ctx.cwd, { agents: ctx.agentSpecs, worker: ctx.workerSpec, context: tag });
+  const worker = readDefaults()?.worker;
+  const { ctx: next } = await ctx.hub.addRoom(ctx.cwd, { agents: ctx.agentSpecs, worker: worker ? specFor(worker) : ctx.workerDefault ?? ctx.workerSpec, context: tag });
   showHeader(ctx);
   return next;
 }

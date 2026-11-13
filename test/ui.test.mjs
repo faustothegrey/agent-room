@@ -244,7 +244,7 @@ test('agent settings persist, apply before startup, and switch only the active w
   assert.equal(ctx.worker.name, 'Bob');
   assert.equal(ctx.workerSpec, 'claude:Bob:haiku');
   assert.equal(ctx.workerHandoff, true);
-  assert.deepEqual(readDefaults(file), future);
+  assert.deepEqual(readDefaults(file), settings);
   const before = readFileSync(file, 'utf8');
   await assert.rejects(saveSettings(ctx, { ...settings, worker: settings.agents[0] }, file), /different name/);
   assert.equal(readFileSync(file, 'utf8'), before);
@@ -2041,28 +2041,55 @@ test('leftover edits hold their own lane for their origin, which can recover the
   void git;
 });
 
-test('the worker is one setting for every open discussion: a name clash in any of them rejects the change and leaves the room as it was', async () => {
-  const { existsSync } = await import('node:fs');
-  const { saveSettings } = await import('../src/ui.mjs');
+test('worker changes stay in their discussion and only unstarted changes update defaults', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { saveSettings, readDefaults } = await import('../src/ui.mjs');
   const { first, contexts } = await multiRoom();
   await handleLine('topic-a', first);
   await handleLine('/new', first);
   const second = contexts()[1];
-  await handleLine('topic-b', second);
-  for (const c of contexts()) Object.assign(c, { agentSpecs: 'claude:A,claude:B', workerSpec: 'claude:W', sessions: new Map([['worker:W', { id: `session-of-${c.discussion.name}` }]]) });
-  second.room.agents[1].name = 'X'; // an agent of the second discussion already uses the name
-  const file = `${await tmp('settings-')}/defaults.json`;
   const agents = [{ provider: 'claude', name: 'A', model: '' }, { provider: 'claude', name: 'B', model: '' }];
-  const before = contexts().map((c) => [c.worker, c.workerSpec, [...c.sessions]]);
-  await assert.rejects(saveSettings(first, { agents, worker: { provider: 'claude', name: 'X', model: '' } }, file),
-    new RegExp(`\\[${second.discussion.name}\\] has an agent named X\\. Nothing was changed\\.`));
-  assert.deepEqual(contexts().map((c) => [c.worker, c.workerSpec, [...c.sessions]]), before);
-  assert.equal(existsSync(file), false);
-  // Without a clash, the change applies to every open discussion; each keeps its own worker session.
-  await saveSettings(first, { agents, worker: { provider: 'claude', name: 'W', model: 'sonnet' } }, file);
-  assert.deepEqual(contexts().map((c) => c.workerSpec), ['claude:W:sonnet', 'claude:W:sonnet']);
-  assert.ok(contexts().every((c, i) => c.worker !== before[i][0])); // rebuilt, with the new model
-  assert.deepEqual(contexts().map((c) => c.sessions.get('worker:W').id), [`session-of-${first.discussion.name}`, `session-of-${second.discussion.name}`]);
+  for (const c of [first, second]) Object.assign(c, { agentSpecs: 'claude:A,claude:B', workerSpec: 'claude:W',
+    sessions: new Map([['worker:W', { id: 'session-' + (c === first ? 'first' : 'second') }]]) });
+  const file = `${await tmp('settings-')}/defaults.json`;
+  // The other open discussion is already active, and its session and worker must not change.
+  const oldWorker = first.worker, oldSpec = first.workerSpec;
+  const oldSession = first.sessions.get('worker:W');
+  const oldSessionData = JSON.stringify(oldSession);
+  // A shared Worker-tab log must not make the new discussion count as started.
+  second.screen.worker.push({ speaker: 'W', origin: first.discussion.name, html: 'old work' });
+  const beforeStart = { provider: 'codex', name: 'W', model: 'model-one' };
+  await saveSettings(second, { agents, worker: beforeStart, scope: 'work' }, file);
+  assert.deepEqual(readDefaults(file).worker, beforeStart);
+  assert.equal(second.screen.getSettings().started, false);
+  assert.equal(second.workerSpec, 'codex:W:model-one');
+  assert.equal(first.worker, oldWorker);
+  assert.equal(first.workerSpec, oldSpec);
+  assert.equal(first.sessions.get('worker:W'), oldSession);
+  assert.equal(JSON.stringify(oldSession), oldSessionData);
+  for (const agent of second.room.agents) agent.turn = async () => 'PASS';
+  await handleLine('topic-b', second);
+  const savedDefaults = readFileSync(file, 'utf8');
+  const afterStart = { provider: 'claude', name: 'A2', model: 'sonnet' };
+  // A name used by a different discussion is permitted.
+  first.room.agents[0].name = 'A2';
+  await saveSettings(second, { agents, worker: afterStart, scope: 'work' }, file);
+  assert.equal(second.workerSpec, 'claude:A2:sonnet');
+  assert.equal(readFileSync(file, 'utf8'), savedDefaults);
+  assert.equal(first.worker, oldWorker);
+  assert.equal(first.workerSpec, oldSpec);
+  assert.equal(first.sessions.get('worker:W'), oldSession);
+  const name = second.discussion.name;
+  const checkpoint = JSON.parse(readFileSync(await checkpointPath(second.cwd, name), 'utf8'));
+  assert.equal(checkpoint.workerSpec, 'claude:A2:sonnet');
+  // Closing and resuming restores that worker, rather than the saved default.
+  second.noScreen = true;
+  await handleLine('/close', second);
+  await handleLine('/resume ' + name, second);
+  assert.equal(second.workerSpec, 'claude:A2:sonnet');
+  assert.equal(second.worker.name, 'A2');
+  assert.deepEqual(readDefaults(file).worker, beforeStart);
+  assert.equal(first.worker, oldWorker);
 });
 
 test('Restart brings back every open discussion of a folder, each in its own context', () => {
@@ -2819,4 +2846,67 @@ test('agy model lookup failure keeps the initial fallback and is throttled', asy
   finish(new Error('not installed'));
   assert.deepEqual(catalog(), []);
   assert.equal(calls, 1);
+});
+
+test('started discussion settings preserve the local worker and permit names from future agent defaults', async () => {
+  const { saveSettings, readDefaults } = await import('../src/ui.mjs');
+  const ctx = { ...freshCtx(), workerSpec: 'claude:W' };
+  Object.assign(ctx, await load(ctx, '?worker-local-settings'));
+  const file = `${await tmp('local-settings-')}/defaults.json`;
+  const currentAgents = [{ provider: 'claude', name: 'A', model: '' }, { provider: 'codex', name: 'B', model: '' }];
+  const futureAgents = [{ provider: 'claude', name: 'Future', model: '' }];
+  const defaultWorker = { provider: 'claude', name: 'W', model: '' };
+  await saveSettings(ctx, { agents: currentAgents, worker: defaultWorker }, file);
+  ctx.agentsStarted = true;
+  await saveSettings(ctx, { agents: futureAgents, worker: defaultWorker, scope: 'talk' }, file);
+  const localWorker = { provider: 'agy', name: 'Future', model: 'model' };
+  await saveSettings(ctx, { agents: futureAgents, worker: localWorker, scope: 'work' }, file);
+  assert.equal(ctx.workerSpec, 'agy:Future:model');
+  assert.deepEqual(readDefaults(file), { agents: futureAgents, worker: defaultWorker });
+  const laterAgents = [{ provider: 'claude', name: 'Next', model: '' }];
+  await saveSettings(ctx, { agents: laterAgents, worker: defaultWorker, scope: 'talk' }, file);
+  assert.equal(ctx.workerSpec, 'agy:Future:model');
+  assert.deepEqual(readDefaults(file), { agents: laterAgents, worker: defaultWorker });
+});
+
+test('new screen discussions and terminal sessions use the saved worker default', async () => {
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const home = await tmp('worker-default-home-'), before = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const defaults = { agents: [{ provider: 'claude', name: 'A', model: '' }, { provider: 'claude', name: 'B', model: '' }],
+      worker: { provider: 'codex', name: 'W', model: 'default-model' } };
+    mkdirSync(join(home, '.config', 'agent-room'), { recursive: true });
+    writeFileSync(join(home, '.config', 'agent-room', 'defaults.json'), JSON.stringify(defaults));
+    const { first, hub } = await multiRoom();
+    await handleLine('topic', first);
+    first.agentSpecs = 'claude:A,claude:B'; first.workerSpec = 'agy:W:local-model';
+    let options;
+    const add = hub.addRoom;
+    hub.addRoom = async (folder, opts) => { options = opts; return add(folder, opts); };
+    await handleLine('/new', first);
+    assert.equal(options.worker, 'codex:W:default-model');
+
+    const terminal = await savedRoom(await tmp('worker-default-terminal-'), 'worker-default-terminal');
+    await handleLine('topic', terminal);
+    terminal.workerSpec = 'agy:W:local-model';
+    await handleLine('/new', terminal);
+    assert.equal(terminal.workerSpec, 'codex:W:default-model');
+    assert.equal(terminal.worker.provider, 'codex');
+  } finally { process.env.HOME = before; }
+});
+
+test('a started worker-only change leaves an absent defaults file absent', async () => {
+  const { existsSync } = await import('node:fs');
+  const { saveSettings } = await import('../src/ui.mjs');
+  const ctx = { ...freshCtx(), workerSpec: 'claude:W' };
+  Object.assign(ctx, await load(ctx, '?no-default-write'));
+  ctx.agentsStarted = true;
+  const file = `${await tmp('absent-worker-defaults-')}/defaults.json`;
+  const agents = [{ provider: 'claude', name: 'A', model: '' }, { provider: 'codex', name: 'B', model: '' }];
+  await saveSettings(ctx, { agents, worker: { provider: 'agy', name: 'W', model: '' }, scope: 'work' }, file);
+  assert.equal(existsSync(file), false);
+  assert.equal(ctx.workerSpec, 'agy:W:');
+  assert.equal(ctx.workerDefault, 'claude:W');
 });
