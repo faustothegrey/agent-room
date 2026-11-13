@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { claudeTitle, createClaudeAgent, createCodexAgent, findLeftovers, parseCodexEvents, probeProcess, recordProgram, run } from '../src/agents.mjs';
+import { claudeTitle, createAgyAgent, createClaudeAgent, createCodexAgent, parseAgyOutput, findLeftovers, parseCodexEvents, probeProcess, recordProgram, run } from '../src/agents.mjs';
 
 // A fake runner that records each call and returns scripted stdout.
 function fakeRunner(outputs) {
@@ -281,4 +281,44 @@ test('leftovers with real processes: a live group is found until it ends; a reus
   assert.equal(existsSync(file), false);
   proc.stopGroup('SIGTERM');
   await assert.rejects(turn, /stopped/);
+});
+
+
+test('agy turns resume and resend changed rulebooks, including after session serialization', async () => {
+  const output = JSON.stringify({ status: 'SUCCESS', conversation_id: 'c1', response: ' hello\n',
+    usage: { input_tokens: 100, cache_read_tokens: 30, output_tokens: 15, thinking_tokens: 10 } });
+  const { calls, runner } = fakeRunner([output, output, output, output, output]);
+  let session = {};
+  let agent = createAgyAgent({ name: 'A', model: 'model-one', instructions: 'rules one', session, runner });
+  assert.equal(await agent.turn('first'), 'hello');
+  assert.deepEqual(agent.lastUsage, { input: 100, cached: 30, output: 15 });
+  await agent.turn('second');
+  session = JSON.parse(JSON.stringify(session)); // checkpoint round trip
+  agent = createAgyAgent({ name: 'A', model: 'model-one', instructions: 'rules one', session, runner });
+  await agent.turn('third');
+  agent = createAgyAgent({ name: 'A', instructions: 'rules two', session, runner });
+  await agent.turn('fourth');
+  agent.reset();
+  await agent.turn('fifth');
+  assert.deepEqual(calls.map((c) => c.input), ['rules one\n\nfirst', 'second', 'third', 'rules two\n\nfourth', 'rules two\n\nfifth']);
+  assert.deepEqual(calls[0].args, ['--output-format', 'json', '--dangerously-skip-permissions', '--model', 'model-one']);
+  assert.deepEqual(calls[1].args, [...calls[0].args, '--conversation', 'c1']);
+  assert.deepEqual(calls[3].args, ['--output-format', 'json', '--dangerously-skip-permissions', '--conversation', 'c1']);
+  assert.ok(!calls[4].args.includes('--conversation'));
+  assert.ok(calls.every((c) => c.command === 'agy' && !c.args.includes('--print-timeout')));
+});
+
+test('agy errors do not record rules or leave stale usage', async () => {
+  assert.throws(() => parseAgyOutput('{"status":"ERROR","error":"bad"}'), /agy: bad/);
+  assert.throws(() => parseAgyOutput('bad'), SyntaxError);
+  const session = { conversationId: 'old', receivedInstructions: 'old' };
+  const { calls, runner } = fakeRunner(['{"status":"ERROR","error":"bad"}', '{"status":"SUCCESS","response":"ok"}',
+    '{"status":"SUCCESS","conversation_id":"old","response":"ok"}']);
+  const agent = createAgyAgent({ name: 'Worker', instructions: 'new', session, runner });
+  await assert.rejects(agent.turn('one'), /agy: bad/);
+  await assert.rejects(agent.turn('two'), /missing conversation ID/);
+  assert.equal(agent.lastUsage, null);
+  assert.equal(session.receivedInstructions, 'old');
+  await agent.turn('three');
+  assert.ok(calls.every((c) => c.input.startsWith('new\n\n')));
 });

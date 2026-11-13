@@ -246,3 +246,28 @@ process.stdin.on('end', () => {
     for (const cli of children) cli.kill();
   }
 });
+
+test('CLI accepts agy for discussion and worker and exposes both in settings', { timeout: 15000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'screen-agy-'));
+  const cli = spawn(process.execPath, [new URL('../src/cli.mjs', import.meta.url).pathname,
+    '--cwd', dir, '--port', '0', '--agents', 'agy:A:gemini-4-argon-high', '--worker', 'agy:W']);
+  const exited = new Promise((done) => cli.once('exit', done));
+  try {
+    let out = '', errors = '';
+    cli.stderr.on('data', (d) => { errors += d; });
+    const base = await new Promise((resolve, reject) => {
+      cli.once('error', reject);
+      cli.once('exit', (code) => reject(new Error(`CLI exited ${code}: ${errors}`)));
+      cli.stdout.on('data', (d) => {
+        out += d;
+        const match = out.match(/Room screen: (http:\/\/127\.0\.0\.1:\d+\/r\/[^/]+\/)__room/);
+        if (match) resolve(match[1]);
+      });
+    });
+    const data = await (await fetch(base + '__settings')).json();
+    assert.deepEqual(data.settings, { agents: [{ provider: 'agy', name: 'A', model: 'gemini-4-argon-high' }],
+      worker: { provider: 'agy', name: 'W', model: '' } });
+    await fetch(base + '__say', { method: 'POST', headers: { 'content-type': 'application/json', origin: new URL(base).origin }, body: JSON.stringify({ text: '/quit' }) });
+    assert.equal(await exited, 0);
+  } finally { cli.kill(); }
+});

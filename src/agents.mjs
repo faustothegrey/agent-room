@@ -1,7 +1,7 @@
 // Provider adapters. Each agent is { name, provider, turn(prompt) -> Promise<string> }.
 // One CLI process per turn; the provider's own session id carries memory between turns.
 // That id lives in `session`, a plain object owned by the caller, so it survives a code reload.
-// `instructions` (the brainstorming rulebook) go in as system-level instructions on every turn.
+// Claude and Codex receive instructions each turn; agy receives them in the prompt when changed.
 // Agents get full filesystem access (the owner's call): Claude has pre-approved Bash,
 // and Codex runs with no sandbox. Keeping to the active discussion's folder is left to their instructions.
 // Access settings apply on every turn for discussion agents and the worker.
@@ -233,7 +233,40 @@ export function parseCodexEvents(stdout) {
   return { threadId, text: text.trim(), usage };
 }
 
-const FACTORIES = { claude: createClaudeAgent, codex: createCodexAgent };
+// agy reads its prompt on stdin and returns one JSON object per invocation.
+export function parseAgyOutput(stdout) {
+  const result = JSON.parse(stdout);
+  if (result.status !== 'SUCCESS') throw new Error(`agy: ${result.error || 'turn failed'}`);
+  const u = result.usage;
+  return { conversationId: result.conversation_id, text: String(result.response ?? '').trim(),
+    usage: u ? { input: u.input_tokens ?? 0, cached: u.cache_read_tokens ?? 0, output: u.output_tokens ?? 0 } : null };
+}
+
+export function createAgyAgent({ name, model, cwd, timeoutMs, instructions, runner = run, session = {} }) {
+  const agent = {
+    name, provider: 'agy', lastUsage: null,
+    reset() { delete session.conversationId; delete session.receivedInstructions; },
+    async turn(prompt) {
+      agent.lastUsage = null;
+      const args = ['--output-format', 'json', '--dangerously-skip-permissions'];
+      if (model) args.push('--model', model);
+      if (session.conversationId) args.push('--conversation', session.conversationId);
+      const rules = instructions ?? '';
+      const includeRules = !session.conversationId || session.receivedInstructions !== rules;
+      const input = includeRules && rules ? `${rules}\n\n${prompt}` : prompt;
+      const out = await runner('agy', args, { input, cwd: at(cwd), timeoutMs, agent: name });
+      const result = parseAgyOutput(out);
+      if (!result.conversationId) throw new Error('agy: missing conversation ID');
+      session.conversationId = result.conversationId;
+      session.receivedInstructions = rules;
+      agent.lastUsage = result.usage;
+      return result.text;
+    },
+  };
+  return agent;
+}
+
+const FACTORIES = { claude: createClaudeAgent, codex: createCodexAgent, agy: createAgyAgent };
 
 export function createAgent(provider, options) {
   const factory = FACTORIES[provider];

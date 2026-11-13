@@ -394,6 +394,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .agent-row { display: flex; flex-wrap: wrap; gap: .5rem; padding: .6rem; margin: .6rem 0; border: 1px solid var(--line); border-left: 3px solid var(--provider); border-radius: 6px; background: Canvas; }
 .agent-row[data-provider="claude"] { --provider: #d97706; }
 .agent-row[data-provider="codex"] { --provider: #10b981; }
+.agent-row[data-provider="agy"] { --provider: #6366f1; }
 .agent-row label { display: flex; flex-direction: column; font-size: .8rem; flex: 1; min-width: 100px; }
 .agent-row label[hidden] { display: none; }
 .agent-row input, .agent-row select { font: inherit; padding: .3rem; width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 4px; }
@@ -1212,7 +1213,7 @@ function agentRow(parent, a, models, title) {
   const field = (text, el) => { const label = document.createElement('label'); label.textContent = title + ' ' + text; label.append(el); row.append(label); return el; };
   const name = field('name', document.createElement('input')); name.value = a.name; name.required = true;
   const provider = field('provider', document.createElement('select'));
-  for (const p of ['claude', 'codex']) provider.add(new Option(p === 'claude' ? 'Claude' : 'Codex', p));
+  for (const p of ['claude', 'codex', 'agy']) provider.add(new Option(p === 'claude' ? 'Claude' : p === 'codex' ? 'Codex' : 'agy', p));
   provider.value = a.provider;
   const model = field('model', document.createElement('select'));
   const custom = field('custom model ID', document.createElement('input')); custom.placeholder = 'Model ID';
@@ -1460,6 +1461,7 @@ function providerHealth(provider) {
   const problem = (text, red) => { problems.push([text, red]); level = red || level === 'red' ? 'red' : 'amber'; };
   const l = m.login, ends = l?.expiresAt ? longDate(l.expiresAt) : null;
   if (!l) state.push('login not checked yet');
+  else if (l.state === 'unmonitored') state.push('login not monitored');
   else if (l.state === 'out') { problem('logged out', true); state.push('logged out'); }
   else if (l.state === 'expired') { problem('login expired on ' + ends, true); state.push(name + ' reports login ended ' + ends); }
   else if (l.state === 'unknown') { problem('login status unknown: ' + l.error); state.push('login status unknown'); }
@@ -1925,7 +1927,12 @@ function handleScreen(req, res, url, dir, screen) {
   }
   if (url.pathname === '/__settings') {
     if (!screen.getSettings || !screen.saveSettings) { send(409, 'text/plain', 'Settings are unavailable in this room.'); return true; }
-    if (req.method === 'GET') { send(200, 'application/json', JSON.stringify(screen.getSettings())); return true; }
+    if (req.method === 'GET') {
+      Promise.resolve().then(() => screen.getSettings()).then(
+        (settings) => send(200, 'application/json', JSON.stringify(settings)),
+        (err) => send(500, 'text/plain; charset=utf-8', err.message));
+      return true;
+    }
     if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain', 'Refused: only the room page can save settings.'); return true; }
     readJson(req).then((body) => screen.saveSettings(body)).then(
       (result) => send(200, 'application/json', JSON.stringify(result)),

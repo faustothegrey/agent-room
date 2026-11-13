@@ -35,9 +35,16 @@ export async function fetchQuota(url = METER_URL, timeoutMs = 1500) {
 
 // Each provider's quota windows as [label, { used_percent, resets }] pairs; empty if unavailable.
 function windows(quota, provider) {
-  const block = quota?.[provider];
+  const block = quota?.[provider === 'agy' ? 'antigravity' : provider];
   if (!block?.ok) return [];
   const p = block.parsed ?? {};
+  if (provider === 'agy') {
+    const models = Array.isArray(p.models) ? p.models : [];
+    return [['5h', '5h'], ['week', 'weekly']].flatMap(([label, window]) => {
+      const entries = models.filter((m) => m?.window === window && typeof m.used_percent === 'number');
+      return entries.length ? [[label, entries.reduce((a, b) => a.used_percent >= b.used_percent ? a : b)]] : [];
+    });
+  }
   const pairs = provider === 'claude'
     ? [['5h', p.current_session], ['week', p.current_week_all_models]]
     : provider === 'codex' ? [['5h', p.five_hour_limit], ['week', p.weekly_limit]] : [];
@@ -139,6 +146,7 @@ const LOGIN_COMMANDS = { claude: ['claude', ['auth', 'status', '--json'], (out) 
 // Runs the provider's status command. Its exit code isn't trusted alone (logged out may exit
 // non-zero with a readable answer); a failure to run, or unreadable output, is 'unknown'.
 export function checkLogin(provider, exec = execFile) {
+  if (provider === 'agy') return Promise.resolve({ state: 'unmonitored' });
   const known = LOGIN_COMMANDS[provider];
   if (!known) return Promise.resolve({ state: 'unknown', error: `no login check for ${provider}` });
   const [command, args, parse] = known;

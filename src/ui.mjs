@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--port 5566] [--no-screen] [--open] [--reopen NAME] [--dev]
                   [--node NAME [--peer NAME=http://ADDRESS:PORT ...]]
 
-Each agent is provider[:name[:model]], e.g. --agents claude:Ada:opus,codex:Linus
+Providers: claude, codex, agy. Each agent is provider[:name[:model]], e.g. --agents claude:Ada:opus,codex:Linus
 Without saved defaults: discussion claude,codex; worker claude:Worker.
 The provider/model sections in the Discussion and Worker tabs save changes automatically to
 ~/.config/agent-room/defaults.json. CLI flags override the corresponding defaults for this launch.
@@ -81,7 +81,7 @@ export function validateSettings(value) {
     throw new Error('Choose between 1 and 8 discussion agents.');
   const names = new Set();
   const agent = (a) => {
-    if (!a || !['claude', 'codex'].includes(a.provider)) throw new Error('Choose Claude or Codex.');
+    if (!a || !['claude', 'codex', 'agy'].includes(a.provider)) throw new Error('Choose Claude, Codex or agy.');
     if (typeof a.name !== 'string' || !/^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(a.name)) throw new Error('Names must use letters, numbers, underscores or hyphens.');
     if (names.has(a.name.toLowerCase())) throw new Error('Each agent and the worker need a different name.');
     names.add(a.name.toLowerCase());
@@ -100,14 +100,21 @@ export function readDefaults(file = defaultsFile()) {
 function currentSettings(ctx) {
   return { agents: ctx.agentSpecs.split(',').map((s) => parseSpec(s)), worker: parseSpec(ctx.workerSpec, true) };
 }
-export function modelChoices() {
+export async function modelChoices(exec = execFile) {
   // Codex maintains this catalog itself; unavailable catalogs still allow a custom model ID.
   let codex = [];
   try {
     const cache = JSON.parse(readFileSync(join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'models_cache.json'), 'utf8'));
     codex = cache.models.filter((m) => m.visibility === 'list' && typeof m.slug === 'string').map((m) => ({ id: m.slug, label: m.display_name || m.slug }));
   } catch {}
-  return { claude: ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) })), codex };
+  const agy = await new Promise((done) => exec('agy', ['models'], { timeout: 5000 }, (err, stdout = '') => {
+    if (err) return done([]);
+    done(String(stdout).split('\n').flatMap((line) => {
+      const [id, label] = line.trim().split('\t');
+      return label && /^[A-Za-z0-9._[\]()-]+$/.test(id) ? [{ id, label: label.trim() }] : [];
+    }));
+  }));
+  return { claude: ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) })), codex, agy };
 }
 export async function saveSettings(ctx, value, file = defaultsFile()) {
   const settings = validateSettings(value);
@@ -271,7 +278,7 @@ function wire(ctx) {
   };
   ctx.screen.newRoom = (body) => newRoom(ctx, body);
   ctx.screen.listRooms = async () => listRooms(ctx);
-  ctx.screen.getSettings = () => ({ settings: currentSettings(ctx), defaults: readDefaults(), models: modelChoices(), started: !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length || !!ctx.screen.worker.length });
+  ctx.screen.getSettings = async () => ({ settings: currentSettings(ctx), defaults: readDefaults(), models: await modelChoices(), started: !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length || !!ctx.screen.worker.length });
   ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
 }
 
@@ -740,7 +747,8 @@ async function loadCheckpoint(ctx, saved, name) {
     const session = sessions.get(spec.worker ? `worker:${spec.name}` : spec.name);
     if (!session || typeof session !== 'object'
       || (spec.provider === 'claude' && !session.id)
-      || (spec.provider === 'codex' && !spec.worker && seen.get(spec.name) > 0 && !session.threadId))
+      || (spec.provider === 'codex' && !spec.worker && seen.get(spec.name) > 0 && !session.threadId)
+      || (spec.provider === 'agy' && !spec.worker && seen.get(spec.name) > 0 && !session.conversationId))
       throw new Error(`The saved provider session for ${spec.name} is missing. The checkpoint was kept; Start fresh starts the discussion from its handoff instead.`);
     // A Claude session whose first turn never completed may exist under its ID already: a new one.
     if (spec.provider === 'claude' && !session.started) session.id = randomUUID();

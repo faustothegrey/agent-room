@@ -2756,3 +2756,42 @@ test('worker notes follow their captured owner, including brainstorms and room-w
   a.state.brainstormId = 'two';
   assert.deepEqual(docs.resetEvent(a.screen).worker, []);
 });
+
+test('agy is accepted for discussion and worker settings, and its catalog is read with a fallback', async () => {
+  const { modelChoices, validateSettings, readDefaults } = await import('../src/ui.mjs');
+  const { writeFileSync } = await import('node:fs');
+  const settings = { agents: [{ provider: 'agy', name: 'Ada', model: 'gemini-4-argon-high' }],
+    worker: { provider: 'agy', name: 'Worker', model: '' } };
+  assert.deepEqual(validateSettings(settings), settings);
+  const file = `${await tmp('agy-defaults-')}/defaults.json`;
+  writeFileSync(file, JSON.stringify(settings));
+  assert.deepEqual(readDefaults(file), settings);
+  const ctx = { ...freshCtx(), agentSpecs: 'agy:Ada:gemini-4-argon-high', workerSpec: 'agy:Worker' };
+  Object.assign(ctx, await load(ctx, '?agy-settings'));
+  assert.equal(ctx.room.agents[0].provider, 'agy');
+  assert.equal(ctx.worker.provider, 'agy');
+  const exec = (cmd, args, opts, done) => { assert.equal(cmd, 'agy'); assert.deepEqual(args, ['models']); done(null, 'Fetching available models...\ngemini-one\tGemini One\ninvalid entry\n'); };
+  assert.deepEqual((await modelChoices(exec)).agy, [{ id: 'gemini-one', label: 'Gemini One' }]);
+  assert.deepEqual((await modelChoices((cmd, args, opts, done) => done(new Error('missing')))).agy, []);
+});
+
+test('agy rulebook delivery state survives a saved checkpoint for both roles', async () => {
+  const { readFileSync } = await import('node:fs');
+  const cwd = await tmp('agy-checkpoint-');
+  const ctx = { ...freshCtx(), cwd, agentSpecs: 'agy:A', workerSpec: 'agy:W', noScreen: true };
+  Object.assign(ctx, await load(ctx, '?agy-checkpoint'));
+  ctx.suggestTitle = async () => ({ title: 'Agy checkpoint' });
+  ctx.room.agents[0].turn = async () => 'PASS';
+  Object.assign(ctx.sessions.get('A'), { conversationId: 'talk-id', receivedInstructions: 'talk-rules' });
+  Object.assign(ctx.sessions.get('worker:W'), { conversationId: 'work-id', receivedInstructions: 'work-rules' });
+  ctx.state.summaries = 3;
+  await handleLine('hello', ctx);
+  const name = ctx.discussion.name;
+  const saved = JSON.parse(readFileSync(await checkpointPath(cwd, name), 'utf8'));
+  assert.deepEqual(new Map(saved.sessions).get('A'), { conversationId: 'talk-id', receivedInstructions: 'talk-rules' });
+  assert.deepEqual(new Map(saved.sessions).get('worker:W'), { conversationId: 'work-id', receivedInstructions: 'work-rules' });
+  await handleLine('/close', ctx);
+  await handleLine('/resume ' + name, ctx);
+  assert.deepEqual(ctx.sessions.get('A'), { conversationId: 'talk-id', receivedInstructions: 'talk-rules' });
+  assert.deepEqual(ctx.sessions.get('worker:W'), { conversationId: 'work-id', receivedInstructions: 'work-rules' });
+});

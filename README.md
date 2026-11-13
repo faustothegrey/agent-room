@@ -4,7 +4,7 @@ agent-room is a collaboration platform for a human and several AI agents. You an
 discuss and revise ideas around shared documents and drawings, with the conversation and its
 subject visible together, and a separate worker agent carries out your instructions in its own
 Git worktree. It is domain-agnostic: a room is any folder, holding any kind of work. Agents run
-through your installed Claude Code and Codex CLIs, using their existing authentication and
+through your installed Claude Code, Codex and Antigravity (`agy`) CLIs, using their existing authentication and
 subscriptions.
 
 The project stays deliberately small: eight source modules and four dependencies: `marked`, and for
@@ -14,7 +14,7 @@ the main loop, the core protocol, the summary contract, current restrictions) is
 
 ## Start a room
 
-Requires Node.js 20 or newer and installed, authenticated `claude` and `codex` commands.
+Requires Node.js 20 or newer and the installed, authenticated CLI commands for the providers you use (`claude`, `codex` or `agy`).
 The default discussion uses both providers; Claude also supplies new discussion titles.
 Browser opening, the folder chooser and the Dock launcher use macOS commands.
 
@@ -53,7 +53,7 @@ warning per provider (below);
 hover or focus **Server** for its uptime, port and the server's version.
 An amber ⚠ under **Server** means a replication peer is unreachable (hover for how many); click it to open **Peers…**.
 
-The monitor panel watches agent-room's own Claude and Codex programs and their login, for the room
+The monitor panel watches agent-room's own Claude, Codex and agy programs and Claude and Codex login, for the room
 being viewed. A ⚠ right of a provider's name means a problem: **amber** when its login ends in 2
 days or less, its login status is unknown (the status command failed or its output couldn't be
 read; the error is shown), or one of its programs is left over; **red** when logged out or the login
@@ -370,10 +370,11 @@ message, request a summary, or send worker instructions, changes are saved for *
 discussion agents keep their settings. Settings shown then may describe future defaults rather
 than the running sessions. Each tab saves its own choices without replacing the other tab's.
 
-- **Provider:** Claude or Codex, for both discussion agents and the worker.
+- **Provider:** Claude, Codex or agy, for both discussion agents and the worker.
 - **Model:** Claude offers Opus, Sonnet and Haiku aliases. Codex reads the visible entries in
   its local `models_cache.json` under `CODEX_HOME` or `~/.codex`. There is no live account-model
-  lookup; if the catalog is unavailable, use CLI default or a custom model ID.
+  lookup for Codex. agy reads its available models from `agy models`. If a catalog is unavailable,
+  use CLI default or a custom model ID.
 - **CLI default:** pass no model argument and let that CLI choose.
 - **Custom…:** enter a model ID supported by your installed CLI and account.
 - **Names:** use distinct names for the agents and worker, with letters, numbers, underscores
@@ -434,7 +435,8 @@ reset times, and when the meter last measured them, as `on HH:MM` (hover for whe
 
 Quotas come from the optional local meter at `http://127.0.0.1:9899` (override with
 `AGENT_ROOM_METER`). They refresh every minute and after turns. If the meter is unavailable,
-the header and usage report say so; the room still works.
+the header and usage report say so; the room still works. For agy, the meter’s Antigravity
+model entries supply the highest used percentage in each available window. agy login is not monitored.
 
 ## Launch options and commands
 
@@ -672,7 +674,9 @@ is an instruction, not a sandbox. The worker may edit files and run commands whe
 Claude discussion agents and workers get pre-approved Bash, file tools, web search/fetch,
 sub-agents, skills, and the allowed look-and-click Chrome tools.
 Claude uses strict MCP configuration rather than your claude.ai connectors. Codex discussion
-agents and workers run without a sandbox and with live web search configured.
+agents and workers run without a sandbox and with live web search configured. agy discussion agents
+and workers use `--dangerously-skip-permissions`; agy also loads its own local instructions. Its
+rulebook is prefixed to the first prompt and sent again when it changes.
 
 The server listens on `0.0.0.0`: devices on the LAN can open its printed IP address and
 send instructions to local agents. This version has no authentication; use it on a trusted LAN. Browser input endpoints require the room's own origin

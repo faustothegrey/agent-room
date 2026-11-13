@@ -112,3 +112,23 @@ test('checkLogin: a command that fails or times out is unknown, with its error; 
   assert.deepEqual(await checkLogin('codex', exec([null, '', 'Logged in using ChatGPT\n'])), { state: 'ok', expiresAt: null });
   assert.match((await checkLogin('codex', exec([out, '', 'boom']))).error, /exit 1: boom/);
 });
+
+
+test('agy gauges use Antigravity model windows and hide missing data', () => {
+  const quota = { ...QUOTA, antigravity: { ok: true, parsed: { models: [
+    { window: 'weekly', used_percent: 12, resets: 'in 12h' }, { window: '5h', used_percent: 5 },
+    { window: 'weekly', used_percent: 30, resets: 'in 4h' }, { window: 'other', used_percent: 99 },
+    { window: '5h', used_percent: 'bad' },
+  ] } } };
+  assert.deepEqual(quotaGauges(quota, ['agy']), [
+    { provider: 'agy', label: '5h', used: 5, resets: null },
+    { provider: 'agy', label: 'week', used: 30, resets: 'in 4h' },
+  ]);
+  assert.equal(quotaSummary(quota, ['agy']), 'agy 5% 5h / 30% week');
+  assert.deepEqual(quotaGauges({ antigravity: { ok: false, parsed: quota.antigravity.parsed } }, ['agy']), []);
+  assert.deepEqual(quotaGauges({ antigravity: { ok: true, parsed: {} } }, ['agy']), []);
+});
+
+test('agy login is unmonitored without invoking a command', async () => {
+  assert.deepEqual(await checkLogin('agy', () => { throw new Error('must not run'); }), { state: 'unmonitored' });
+});
