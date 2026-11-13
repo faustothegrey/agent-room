@@ -2,26 +2,25 @@
 // One CLI process per turn; the provider's own session id carries memory between turns.
 // That id lives in `session`, a plain object owned by the caller, so it survives a code reload.
 // `instructions` (the brainstorming rulebook) go in as system-level instructions on every turn.
-// Agents get full filesystem access (the owner's call): claude can read and write any path but has
-// no shell; codex runs with no sandbox. Keeping to the active discussion's folder is left to their instructions.
-// Access settings apply on every turn. The worker (ui.mjs) can use either provider;
-// a Claude worker is created with `shell: true` to add pre-approved Bash.
+// Agents get full filesystem access (the owner's call): Claude has pre-approved Bash,
+// and Codex runs with no sandbox. Keeping to the active discussion's folder is left to their instructions.
+// Access settings apply on every turn for discussion agents and the worker.
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-// Claude: the file, web and sub-agent built-ins (no Bash), plus the
+// Claude: Bash and the file, web and sub-agent built-ins, plus the
 // look-and-click subset of Claude in Chrome (no JavaScript, forms, uploads or batches). The
 // claude.ai connectors (Gmail, Calendar, Drive, Docs) are left out: --strict-mcp-config drops them.
-const CLAUDE_TOOLS = ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch'];
+const CLAUDE_TOOLS = ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch', 'Bash'];
 const CHROME_TOOLS = ['tabs_context_mcp', 'tabs_create_mcp', 'tabs_close_mcp', 'navigate', 'computer', 'read_page',
   'get_page_text', 'find', 'read_console_messages', 'read_network_requests', 'resize_window'].map((t) => `mcp__claude-in-chrome__${t}`);
 // Headless claude refuses anything that would need a permission prompt, so these are pre-approved.
 // The plain tool names allow any path. The read tools are listed too: inside the working directory
 // they need no approval, but outside it they do.
-const CLAUDE_ALLOWED = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch', ...CHROME_TOOLS];
+const CLAUDE_ALLOWED = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch', ...CHROME_TOOLS, 'Bash'];
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 // An agent's working directory: a path, or a function giving it at each turn (the worker's worktree,
@@ -132,7 +131,7 @@ export async function findLeftovers(tracked, { dir = programsDirectory(), probe 
   return found;
 }
 
-export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, shell = false, runner = run, session = {} }) {
+export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, runner = run, session = {} }) {
   session.id ??= randomUUID();
   const agent = {
     name,
@@ -146,10 +145,9 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, s
       args.push(session.started ? '--resume' : '--session-id', session.id);
       if (model) args.push('--model', model);
       if (instructions) args.push('--append-system-prompt', instructions);
-      const bash = shell ? ['Bash'] : [];
-      args.push('--chrome', '--strict-mcp-config', '--allowedTools', ...CLAUDE_ALLOWED, ...bash);
+      args.push('--chrome', '--strict-mcp-config', '--allowedTools', ...CLAUDE_ALLOWED);
       // --tools is variadic, so it must come last: the prompt goes on stdin.
-      args.push('--tools', ...CLAUDE_TOOLS, ...bash);
+      args.push('--tools', ...CLAUDE_TOOLS);
       const out = await runner('claude', args, { input: prompt, cwd: at(cwd), timeoutMs, agent: name });
       const result = JSON.parse(out);
       if (result.is_error) throw new Error(`claude: ${result.result || 'turn failed'}`);

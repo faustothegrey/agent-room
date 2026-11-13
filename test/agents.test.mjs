@@ -15,7 +15,7 @@ function fakeRunner(outputs) {
   return { calls, runner };
 }
 
-test('claude: first turn creates the session, later turns resume it, writes anywhere but no shell', async () => {
+test('claude: first turn creates the session, later turns resume it, writes anywhere and has Bash', async () => {
   const { calls, runner } = fakeRunner([
     JSON.stringify({ result: 'hi', is_error: false }),
     JSON.stringify({ result: 'again', is_error: false }),
@@ -27,13 +27,13 @@ test('claude: first turn creates the session, later turns resume it, writes anyw
   assert.ok(id);
   assert.equal(calls[1].args[calls[1].args.indexOf('--resume') + 1], id);
   for (const c of calls) {
-    assert.deepEqual(c.args.slice(-11), ['--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch']);
+    assert.deepEqual(c.args.slice(-12), ['--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch', 'Bash']);
     assert.ok(!c.args.includes('--permission-mode'));
     const i = c.args.indexOf('--allowedTools');
     const allowed = c.args.slice(i + 1, c.args.indexOf('--tools'));
     assert.deepEqual(allowed.slice(0, 10), ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch']);
-    // Writes go anywhere (owner's call), but still no shell.
-    assert.ok(!allowed.includes('Bash'));
+    // Writes and Bash are pre-approved (owner's call).
+    assert.ok(allowed.includes('Bash'));
   }
   assert.equal(calls[0].input, 'p1');
 });
@@ -102,7 +102,7 @@ test('the rulebook goes in as system-level instructions on every turn, for both 
   await claude.turn('p2');
   for (const call of c.calls) {
     assert.equal(call.args[call.args.indexOf('--append-system-prompt') + 1], rules);
-    assert.deepEqual(call.args.slice(-11), ['--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch']);
+    assert.deepEqual(call.args.slice(-12), ['--tools', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebSearch', 'WebFetch', 'Task', 'Skill', 'ToolSearch', 'Bash']);
   }
 
   const x = fakeRunner(['{"type":"thread.started","thread_id":"t-1"}', '']);
@@ -135,9 +135,9 @@ test('each turn reports its usage: claude from its JSON result, codex from turn.
   assert.equal(codex.lastUsage, null);
 });
 
-test('claude with shell (the worker): Bash is added to the tools and pre-approved', async () => {
+test('claude worker: Bash is available and pre-approved', async () => {
   const { calls, runner } = fakeRunner([JSON.stringify({ result: 'done', is_error: false })]);
-  const agent = createClaudeAgent({ name: 'W', runner, shell: true });
+  const agent = createClaudeAgent({ name: 'W', runner });
   assert.equal(await agent.turn('fix it'), 'done');
   const { args } = calls[0];
   assert.equal(args.at(-1), 'Bash');

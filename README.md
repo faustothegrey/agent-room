@@ -669,8 +669,8 @@ worker/<folder-name>` in the room); nothing is merged automatically.
 Agents have full filesystem access. Keeping brainstorming output inside the active discussion
 is an instruction, not a sandbox. The worker may edit files and run commands where you ask.
 
-Claude discussion agents get file tools, web search/fetch, sub-agents, skills, and the allowed
-look-and-click Chrome tools, with no Bash. A Claude worker additionally gets pre-approved Bash.
+Claude discussion agents and workers get pre-approved Bash, file tools, web search/fetch,
+sub-agents, skills, and the allowed look-and-click Chrome tools.
 Claude uses strict MCP configuration rather than your claude.ai connectors. Codex discussion
 agents and workers run without a sandbox and with live web search configured.
 

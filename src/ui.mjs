@@ -214,7 +214,7 @@ export async function load(ctx, v) {
   // The worktree its worker's task runs in (see refreshWorker): its own, as tasks of different
   // discussions run at the same time; by reference, so it survives reloads and settings copies.
   const workerDir = ctx.workerDir ??= { path: null };
-  const worker = createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions, shell: true,
+  const worker = createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
     timeoutMs: WORKER_TIMEOUT_MS, runner, session: ctx.sessions.get(`worker:${wName}`) });
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
   // ctx so they survive a reload.
@@ -222,7 +222,7 @@ export async function load(ctx, v) {
   return { room: createRoom(agents, ctx.state), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: shop ?? newShop(screen.worker),
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
-    makeWorker: (session) => createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions, shell: true,
+    makeWorker: (session) => createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
       timeoutMs: WORKER_TIMEOUT_MS, runner, session }),
     suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }) };
 }
