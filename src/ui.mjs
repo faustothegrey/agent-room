@@ -100,21 +100,35 @@ export function readDefaults(file = defaultsFile()) {
 function currentSettings(ctx) {
   return { agents: ctx.agentSpecs.split(',').map((s) => parseSpec(s)), worker: parseSpec(ctx.workerSpec, true) };
 }
-export async function modelChoices(exec = execFile) {
+// Refresh in the background at most once every five minutes, including after a failed lookup.
+// Keep the previous list while refreshing; an unavailable catalog still allows a custom ID.
+export function agyModelCatalog(exec = execFile, now = Date.now) {
+  let models = [], lastAttempt = -Infinity, pending = false;
+  return () => {
+    if (!pending && now() - lastAttempt >= 5 * 60_000) {
+      lastAttempt = now();
+      pending = true;
+      exec('agy', ['models'], { timeout: 5000 }, (err, stdout = '') => {
+        if (!err) models = String(stdout).split('\n').flatMap((line) => {
+          const [id, label] = line.trim().split('\t');
+          return label && /^[A-Za-z0-9._[\]()-]+$/.test(id) ? [{ id, label: label.trim() }] : [];
+        });
+        pending = false;
+      });
+    }
+    return models;
+  };
+}
+const agyModels = agyModelCatalog();
+let agyModelsWarmed = false;
+export function modelChoices() {
   // Codex maintains this catalog itself; unavailable catalogs still allow a custom model ID.
   let codex = [];
   try {
     const cache = JSON.parse(readFileSync(join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'models_cache.json'), 'utf8'));
     codex = cache.models.filter((m) => m.visibility === 'list' && typeof m.slug === 'string').map((m) => ({ id: m.slug, label: m.display_name || m.slug }));
   } catch {}
-  const agy = await new Promise((done) => exec('agy', ['models'], { timeout: 5000 }, (err, stdout = '') => {
-    if (err) return done([]);
-    done(String(stdout).split('\n').flatMap((line) => {
-      const [id, label] = line.trim().split('\t');
-      return label && /^[A-Za-z0-9._[\]()-]+$/.test(id) ? [{ id, label: label.trim() }] : [];
-    }));
-  }));
-  return { claude: ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) })), codex, agy };
+  return { claude: ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) })), codex, agy: agyModels() };
 }
 export async function saveSettings(ctx, value, file = defaultsFile()) {
   const settings = validateSettings(value);
@@ -278,7 +292,8 @@ function wire(ctx) {
   };
   ctx.screen.newRoom = (body) => newRoom(ctx, body);
   ctx.screen.listRooms = async () => listRooms(ctx);
-  ctx.screen.getSettings = async () => ({ settings: currentSettings(ctx), defaults: readDefaults(), models: await modelChoices(), started: !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length || !!ctx.screen.worker.length });
+  if (!agyModelsWarmed) { agyModelsWarmed = true; agyModels(); } // start without delaying room startup
+  ctx.screen.getSettings = () => ({ settings: currentSettings(ctx), defaults: readDefaults(), models: modelChoices(), started: !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length || !!ctx.screen.worker.length });
   ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
 }
 

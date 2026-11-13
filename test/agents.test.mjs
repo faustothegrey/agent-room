@@ -310,7 +310,7 @@ test('agy turns resume and resend changed rulebooks, including after session ser
 
 test('agy errors do not record rules or leave stale usage', async () => {
   assert.throws(() => parseAgyOutput('{"status":"ERROR","error":"bad"}'), /agy: bad/);
-  assert.throws(() => parseAgyOutput('bad'), SyntaxError);
+  assert.throws(() => parseAgyOutput('bad'), /agy: non-JSON output \(unrecognized error\)/);
   const session = { conversationId: 'old', receivedInstructions: 'old' };
   const { calls, runner } = fakeRunner(['{"status":"ERROR","error":"bad"}', '{"status":"SUCCESS","response":"ok"}',
     '{"status":"SUCCESS","conversation_id":"old","response":"ok"}']);
@@ -321,4 +321,18 @@ test('agy errors do not record rules or leave stale usage', async () => {
   assert.equal(session.receivedInstructions, 'old');
   await agent.turn('three');
   assert.ok(calls.every((c) => c.input.startsWith('new\n\n')));
+});
+
+
+test('agy non-JSON diagnostics are short and do not echo authentication data', () => {
+  for (const text of ['Error: authentication failed bearer SECRET-123', 'API_KEY=private-value',
+    'unlabelled-private-credential-' + 'x'.repeat(5000)]) {
+    assert.throws(() => parseAgyOutput(text), (err) => {
+      assert.match(err.message, /agy: non-JSON output/);
+      assert.ok(err.message.length < 120);
+      assert.doesNotMatch(err.message, /SECRET-123|private-value|unlabelled|xxx/);
+      return true;
+    });
+  }
+  assert.throws(() => parseAgyOutput('Network connection failed'), /connection error/);
 });

@@ -235,7 +235,17 @@ export function parseCodexEvents(stdout) {
 
 // agy reads its prompt on stdin and returns one JSON object per invocation.
 export function parseAgyOutput(stdout) {
-  const result = JSON.parse(stdout);
+  let result;
+  try { result = JSON.parse(stdout); } catch {
+    // Never echo unstructured output: even unlabeled text can contain authentication data.
+    // Classify common failures with fixed text instead, and cap the inspected input.
+    const text = String(stdout).slice(0, 2000);
+    const detail = /auth|login|credential|token|api.?key/i.test(text) ? 'authentication error'
+      : /rate.?limit|quota/i.test(text) ? 'quota or rate limit error'
+        : /network|connect|timeout/i.test(text) ? 'connection error'
+          : /model/i.test(text) ? 'model error' : 'unrecognized error';
+    throw new Error(`agy: non-JSON output (${detail}); details withheld`);
+  }
   if (result.status !== 'SUCCESS') throw new Error(`agy: ${result.error || 'turn failed'}`);
   const u = result.usage;
   return { conversationId: result.conversation_id, text: String(result.response ?? '').trim(),

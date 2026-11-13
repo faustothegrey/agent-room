@@ -2758,7 +2758,7 @@ test('worker notes follow their captured owner, including brainstorms and room-w
 });
 
 test('agy is accepted for discussion and worker settings, and its catalog is read with a fallback', async () => {
-  const { modelChoices, validateSettings, readDefaults } = await import('../src/ui.mjs');
+  const { agyModelCatalog, validateSettings, readDefaults } = await import('../src/ui.mjs');
   const { writeFileSync } = await import('node:fs');
   const settings = { agents: [{ provider: 'agy', name: 'Ada', model: 'gemini-4-argon-high' }],
     worker: { provider: 'agy', name: 'Worker', model: '' } };
@@ -2770,9 +2770,24 @@ test('agy is accepted for discussion and worker settings, and its catalog is rea
   Object.assign(ctx, await load(ctx, '?agy-settings'));
   assert.equal(ctx.room.agents[0].provider, 'agy');
   assert.equal(ctx.worker.provider, 'agy');
-  const exec = (cmd, args, opts, done) => { assert.equal(cmd, 'agy'); assert.deepEqual(args, ['models']); done(null, 'Fetching available models...\ngemini-one\tGemini One\ninvalid entry\n'); };
-  assert.deepEqual((await modelChoices(exec)).agy, [{ id: 'gemini-one', label: 'Gemini One' }]);
-  assert.deepEqual((await modelChoices((cmd, args, opts, done) => done(new Error('missing')))).agy, []);
+  let reply, time = 0, calls = 0;
+  const catalog = agyModelCatalog((cmd, args, opts, done) => {
+    assert.equal(cmd, 'agy'); assert.deepEqual(args, ['models']); calls++; reply = done;
+  }, () => time);
+  assert.deepEqual(catalog(), []); // request starts but the panel does not wait
+  assert.deepEqual(catalog(), []);
+  assert.equal(calls, 1);
+  reply(null, 'Fetching available models...\ngemini-one\tGemini One\ninvalid entry\n');
+  assert.deepEqual(catalog(), [{ id: 'gemini-one', label: 'Gemini One' }]);
+  time += 300_000;
+  assert.deepEqual(catalog(), [{ id: 'gemini-one', label: 'Gemini One' }]);
+  assert.equal(calls, 2);
+  reply(new Error('missing'));
+  assert.deepEqual(catalog(), [{ id: 'gemini-one', label: 'Gemini One' }]);
+  assert.equal(calls, 2);
+  time += 300_000;
+  catalog(); reply(null, 'gemini-two\tGemini Two\n');
+  assert.deepEqual(catalog(), [{ id: 'gemini-two', label: 'Gemini Two' }]);
 });
 
 test('agy rulebook delivery state survives a saved checkpoint for both roles', async () => {
@@ -2794,4 +2809,14 @@ test('agy rulebook delivery state survives a saved checkpoint for both roles', a
   await handleLine('/resume ' + name, ctx);
   assert.deepEqual(ctx.sessions.get('A'), { conversationId: 'talk-id', receivedInstructions: 'talk-rules' });
   assert.deepEqual(ctx.sessions.get('worker:W'), { conversationId: 'work-id', receivedInstructions: 'work-rules' });
+});
+
+test('agy model lookup failure keeps the initial fallback and is throttled', async () => {
+  const { agyModelCatalog } = await import('../src/ui.mjs');
+  let calls = 0, finish;
+  const catalog = agyModelCatalog((cmd, args, opts, done) => { calls++; finish = done; }, () => 0);
+  assert.deepEqual(catalog(), []);
+  finish(new Error('not installed'));
+  assert.deepEqual(catalog(), []);
+  assert.equal(calls, 1);
 });
