@@ -375,6 +375,11 @@ message, request a summary, or send worker instructions, changes are saved for *
 discussion agents keep their settings. Settings shown then may describe future defaults rather
 than the running sessions. Each tab saves its own choices without replacing the other tab's.
 
+If a discussion agent fails, **Disable** appears above the conversation. It excludes that agent
+from later rounds and summaries in this discussion; **Enable** brings it back with its existing
+session. At least one agent must remain enabled. This choice survives Reload and Resume of the
+discussion, and does not change other discussions or future-room defaults.
+
 - **Provider:** Claude, Codex or agy, for both discussion agents and the worker.
 - **Model:** Claude offers Opus, Sonnet and Haiku aliases. Codex reads the visible entries in
   its local `models_cache.json` under `CODEX_HOME` or `~/.codex`. There is no live account-model

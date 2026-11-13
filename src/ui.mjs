@@ -308,6 +308,7 @@ function wire(ctx) {
   };
   ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
   ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
+  ctx.screen.setAgentEnabled = (name, enabled) => setAgentEnabled(ctx, name, enabled);
 }
 
 // The screen's header: the full root path, the active discussion (active: its folder, under the
@@ -318,6 +319,7 @@ function header(ctx) {
     discussion: d ? d.title : ctx.state.brainstorm ? 'Brainstorm' : 'No discussion started',
     active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath || !!ctx.state.brainstorm,
     brainstorm: !!ctx.state.brainstorm, // a conversation kept only in memory (see newBrainstorm)
+    failedAgents: ctx.room.agents.filter((a) => ctx.state.transcript.some((m) => m.error && m.speaker === a.name) || (ctx.state.disabledAgents ?? []).includes(a.name)).map((a) => ({ name: a.name, disabled: (ctx.state.disabledAgents ?? []).includes(a.name) })),
     autoDev: autoDevView(ctx), retryId: ctx.retryFailure?.available ? ctx.retryFailure.id : null,
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
     checkpoints: checkpoints(ctx), // the saved discussions, for Explorer's Resume (see "Checkpoints")
@@ -333,6 +335,22 @@ function showHeader(ctx) {
     c.screen.room = header(c);
     toScreen(c, { type: 'room', room: c.screen.room });
   }
+}
+
+// A failed participant can be disabled in this discussion without changing future-room defaults.
+export function setAgentEnabled(ctx, name, enabled) {
+  const agent = ctx.room.agents.find((a) => a.name === name);
+  if (!agent || typeof enabled !== 'boolean') throw new Error('Unknown discussion agent.');
+  if (ctx.busy || ctx.stopped) throw new Error('Wait for the current discussion turn to end.');
+  const disabled = new Set(ctx.state.disabledAgents ?? []);
+  if (!enabled) {
+    if (!ctx.state.transcript.some((m) => m.speaker === name && m.error)) throw new Error('Only a failed agent can be disabled here.');
+    if (!disabled.has(name) && ctx.room.agents.length - disabled.size <= 1) throw new Error('At least one discussion agent must stay enabled.');
+    disabled.add(name);
+  } else disabled.delete(name);
+  ctx.state.disabledAgents = [...disabled];
+  captureRound(ctx);
+  showHeader(ctx);
 }
 
 // ── Discussions ───────────────────────────────────────────────────────
@@ -636,7 +654,7 @@ const logSize = (ctx) => { try { return statSync(ctx.logPath).size; } catch { re
 const saveable = (ctx) => !!ctx.discussion && !!ctx.logPath && !ctx.state.brainstorm && !!ctx.agentSpecs && !!ctx.workerSpec;
 // At the end of a round, and of /summary: the discussion part, copied, then saved.
 function captureRound(ctx) {
-  if (!saveable(ctx)) return;
+  if (!saveable(ctx)) { showHeader(ctx); return; }
   ctx.logBytes = logSize(ctx);
   const agents = new Set(ctx.room.agents.map((a) => a.name));
   ctx.lastRound = JSON.parse(JSON.stringify({
@@ -644,6 +662,7 @@ function captureRound(ctx) {
     state: { ...ctx.state, seen: [...ctx.state.seen] }, totals: ctx.totals ?? {}, doc: ctx.screen.doc ?? null,
   }));
   saveCheckpoint(ctx);
+  showHeader(ctx);
 }
 // The latest round's copy and the worker's current session and briefing. Nothing before the first
 // round of this session (or a Resume): until then the previous checkpoint stands.
@@ -975,6 +994,7 @@ function endSession(ctx, why) {
   state.transcript.length = 0; // emptied in place: the room and the screen hold this array
   for (const a of ctx.room.agents) state.seen.set(a.name, 0);
   state.summaries = 0;
+  delete state.disabledAgents;
   state.briefing = null;
   state.brainstorm = false;
   ctx.retryFailure = null;

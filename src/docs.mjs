@@ -430,6 +430,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
         <p class="settings-status" id="talk-settings-status" role="status"></p>
       </form>
     </details>
+    <div id="failed-agents" role="status" hidden></div>
     <div class="chat-wrap"><div class="chat" id="chat"></div><button class="scroll-end" id="talk-end" aria-label="Scroll to latest discussion messages" title="Scroll to latest messages" hidden>↓</button></div>
     <div class="composer" id="composer">
       <div id="remote-view" hidden></div>
@@ -579,6 +580,20 @@ async function chooseRetry(id) {
     };
     dialog.showModal();
   } catch (err) { status(err.message, true, 'Worker'); }
+}
+function showFailedAgents(agents) {
+  const panel = $('failed-agents'); panel.replaceChildren(); panel.hidden = !agents?.length;
+  for (const agent of agents ?? []) {
+    const row = document.createElement('div');
+    const text = document.createElement('span'); text.textContent = agent.name + (agent.disabled ? ' is disabled. ' : ' failed. ');
+    const button = document.createElement('button'); button.textContent = agent.disabled ? 'Enable' : 'Disable';
+    button.onclick = async () => {
+      button.disabled = true;
+      try { const res = await post('__agent-enabled', { name: agent.name, enabled: agent.disabled }); if (!res.ok) throw new Error(await res.text()); }
+      catch (err) { status(err.message, true); button.disabled = false; }
+    };
+    row.append(text, button); panel.append(row);
+  }
 }
 // The Worker tab's line: its worktree, or why the worker is disabled.
 function setWorkerInfo(info) {
@@ -1748,13 +1763,13 @@ events.onmessage = (e) => {
     setWorkerInfo(ev.workerInfo);
     monitor = ev.monitor ?? {};
     showQuota(ev.quota, ev.quotaAt);
-    if (ev.room) { retryId = ev.room.retryId ?? null; updateRetry(); setRoom(ev.room); }
+    if (ev.room) { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); }
     $('newroom').hidden = !ev.newRoom;
     replicaOff = ev.replicaOff ?? null;
     showReplica(ev.replica);
   }
   if (ev.type === 'replica') showReplica(ev.replica);
-  if (ev.type === 'room') { retryId = ev.room.retryId ?? null; updateRetry(); setRoom(ev.room); if (listed !== null) openFiles(listed); } // its buttons and "in use" follow
+  if (ev.type === 'room') { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); if (listed !== null) openFiles(listed); } // its buttons and "in use" follow
   if (ev.type === 'work') workMessage(ev.message, true);
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
   if (ev.type === 'monitor') showMonitor(ev.monitor);
@@ -2070,7 +2085,7 @@ function handleScreen(req, res, url, dir, screen) {
       (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
-  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom', '/__retry'].includes(url.pathname)) {
+  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom', '/__retry', '/__agent-enabled'].includes(url.pathname)) {
     if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain; charset=utf-8', 'Refused: only the room page can send input.'); return true; }
     readJson(req, url.pathname === '/__say' ? ATTACH_TOTAL * 1.4 : undefined).then((body) => {
       if (url.pathname === '/__newroom') {
@@ -2089,6 +2104,11 @@ function handleScreen(req, res, url, dir, screen) {
       if (url.pathname === '/__workerinfo') { // the Worker tab is shown: recheck its branches (sent as a workerinfo event)
         screen.refreshWorker?.();
         return send(204, 'text/plain', '');
+      }
+      if (url.pathname === '/__agent-enabled') {
+        if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before changing discussion agents.');
+        if (!screen.setAgentEnabled) return send(409, 'text/plain', 'Discussion agent controls are unavailable.');
+        return Promise.resolve().then(() => screen.setAgentEnabled(body?.name, body?.enabled)).then(() => send(204, 'text/plain', ''), (err) => send(400, 'text/plain', err.message));
       }
       if (url.pathname === '/__retry') {
         if (!screen.retryWork) return send(409, 'text/plain', 'Retry is unavailable.');
