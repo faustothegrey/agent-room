@@ -535,8 +535,50 @@ $('tab-talk').onclick = () => showTab('talk');
 $('tab-work').onclick = () => showTab('work');
 function workMessage(m, live) {
   if (m.note) return status(m.note, m.error, 'Worker'); // a marker (New discussion) or an error
-  work.add(bubble(m));
+  const el = bubble(m);
+  if (m.retryId) el.dataset.retryId = m.retryId;
+  work.add(el);
+  updateRetry();
   if (live && m.speaker !== 'User' && tab !== 'work') $('tab-work').classList.add('news');
+}
+let retryId = null;
+function updateRetry() {
+  document.querySelectorAll('#wchat .retry-actions').forEach((el) => el.remove());
+  if (!retryId) return;
+  const target = [...document.querySelectorAll('#wchat [data-retry-id]')].find((el) => el.dataset.retryId === retryId);
+  if (!target) return;
+  const actions = document.createElement('div'); actions.className = 'retry-actions';
+  const retry = document.createElement('button'); retry.textContent = 'Retry';
+  const choose = document.createElement('button'); choose.textContent = 'Retry with…';
+  retry.onclick = async () => { retry.disabled = choose.disabled = true; try { const res = await post('__retry', { id: retryId }); if (!res.ok) throw new Error(await res.text()); } catch (err) { status(err.message, true, 'Worker'); retry.disabled = choose.disabled = false; } };
+  choose.onclick = () => chooseRetry(retryId);
+  actions.append(retry, choose); target.append(actions);
+}
+async function chooseRetry(id) {
+  try {
+    await settingsSave;
+    const res = await fetch('__settings'); if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    const dialog = document.createElement('dialog'), form = document.createElement('form');
+    const title = document.createElement('h3'); title.textContent = 'Retry with…'; form.append(title);
+    const row = agentRow(form, data.settings.worker, data.models, 'Worker');
+    row.row.querySelector('input').readOnly = true; // Retry changes the provider and model, not the worker name.
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.onclick = () => dialog.close();
+    const send = document.createElement('button'); send.type = 'submit'; send.textContent = 'Retry';
+    const error = document.createElement('p'); form.append(cancel, send, error); dialog.append(form); document.body.append(dialog);
+    dialog.onclose = () => dialog.remove();
+    form.onsubmit = async (e) => {
+      e.preventDefault(); if (row.incomplete()) { error.textContent = 'Enter a custom model ID.'; return; }
+      send.disabled = true;
+      try {
+        const latest = await fetch('__settings'); if (!latest.ok) throw new Error(await latest.text());
+        const now = await latest.json(), settings = { ...selectedSettings(now), worker: row.get(), scope: 'work' };
+        const result = await post('__retry', { id, settings }); if (!result.ok) throw new Error(await result.text());
+        dialog.close();
+      } catch (err) { error.textContent = err.message; send.disabled = false; }
+    };
+    dialog.showModal();
+  } catch (err) { status(err.message, true, 'Worker'); }
 }
 // The Worker tab's line: its worktree, or why the worker is disabled.
 function setWorkerInfo(info) {
@@ -1706,13 +1748,13 @@ events.onmessage = (e) => {
     setWorkerInfo(ev.workerInfo);
     monitor = ev.monitor ?? {};
     showQuota(ev.quota, ev.quotaAt);
-    if (ev.room) setRoom(ev.room);
+    if (ev.room) { retryId = ev.room.retryId ?? null; updateRetry(); setRoom(ev.room); }
     $('newroom').hidden = !ev.newRoom;
     replicaOff = ev.replicaOff ?? null;
     showReplica(ev.replica);
   }
   if (ev.type === 'replica') showReplica(ev.replica);
-  if (ev.type === 'room') { setRoom(ev.room); if (listed !== null) openFiles(listed); } // its buttons and "in use" follow
+  if (ev.type === 'room') { retryId = ev.room.retryId ?? null; updateRetry(); setRoom(ev.room); if (listed !== null) openFiles(listed); } // its buttons and "in use" follow
   if (ev.type === 'work') workMessage(ev.message, true);
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
   if (ev.type === 'monitor') showMonitor(ev.monitor);
@@ -2028,7 +2070,7 @@ function handleScreen(req, res, url, dir, screen) {
       (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
-  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom'].includes(url.pathname)) {
+  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom', '/__retry'].includes(url.pathname)) {
     if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain; charset=utf-8', 'Refused: only the room page can send input.'); return true; }
     readJson(req, url.pathname === '/__say' ? ATTACH_TOTAL * 1.4 : undefined).then((body) => {
       if (url.pathname === '/__newroom') {
@@ -2047,6 +2089,10 @@ function handleScreen(req, res, url, dir, screen) {
       if (url.pathname === '/__workerinfo') { // the Worker tab is shown: recheck its branches (sent as a workerinfo event)
         screen.refreshWorker?.();
         return send(204, 'text/plain', '');
+      }
+      if (url.pathname === '/__retry') {
+        if (!screen.retryWork) return send(409, 'text/plain', 'Retry is unavailable.');
+        return Promise.resolve(screen.retryWork(body?.id, body?.settings)).then(() => send(204, 'text/plain', ''), (err) => send(400, 'text/plain', err.message));
       }
       if (url.pathname === '/__work') {
         if (!screen.work) return send(409, 'text/plain; charset=utf-8', 'This room has no worker input; the page only watches.');

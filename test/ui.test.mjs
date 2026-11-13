@@ -1629,9 +1629,9 @@ test('auto dev pauses on WAIT FOR USER, an unagreed summary, a failed turn, or a
     worker: async () => { if (fail) throw new Error('timed out'); fail = true; return 'did A'; } });
   await handleLine('/autodev', wait.ctx);
   await wait.settle();
-  assert.deepEqual([wait.ctx.autoDev.status, wait.ctx.autoDev.reason, wait.ctx.autoDev.cycle], ['paused', 'the discussion waits for you (WAIT FOR USER)', 2]);
+  assert.deepEqual([wait.ctx.autoDev.status, wait.ctx.autoDev.reason, wait.ctx.autoDev.cycle], ['paused', 'the worker failed: Retry or Retry with…', 2]);
   assert.match(wait.ctx.state.transcript.filter((m) => m.speaker === 'Worker report')[1].text, /^The worker's attempt failed: timed out/);
-  assert.deepEqual(wait.ctx.screen.room.autoDev.offer, { text: 'C' });
+  assert.equal(wait.ctx.screen.room.autoDev.offer, null);
 
   // Not agreed: the reviewer keeps revising.
   let n = 0;
@@ -3024,4 +3024,156 @@ test('launch defaults follow flags and panel changes per folder, without changin
     assert.equal(later.shop.launchDefaults.worker, 'claude:NewW:');
     assert.equal(later.shop.launchDefaults.agents, 'claude:NewA:,codex:NewB:');
   } finally { process.env.HOME = before; }
+});
+
+
+test('auto dev: retry keeps the failure pause through discussion and resumes the same cycle', async () => {
+  const { retryWork, reloaded } = await import('../src/ui.mjs');
+  let attempts = 0;
+  const room = await autoDevRoom({ summaries: [summaryWith('A'), summaryWith('B', 'WAIT FOR USER')],
+    worker: async () => { if (!attempts++) throw new Error('quota'); return 'fixed'; } });
+  const promptCount = room.prompts.length;
+  await handleLine('/autodev', room.ctx);
+  await room.settle();
+  assert.equal(room.prompts.length, promptCount); // the failure starts no agent round
+  const run = room.ctx.autoDev, failure = room.ctx.retryFailure;
+  assert.equal(run.reason, 'the worker failed: Retry or Retry with…');
+  assert.equal(run.cycle, 1);
+  assert.equal(failure.available, true);
+  Object.assign(room.ctx, { code: {}, refreshQuota: () => {} });
+  await reloaded(room.ctx);
+  await handleLine('let us discuss', room.ctx);
+  assert.ok(room.prompts.some((p) => p.includes("The worker's attempt failed: quota")));
+  assert.equal(run.reason, 'the worker failed: Retry or Retry with…');
+  assert.equal(room.ctx.retryFailure, failure);
+  await retryWork(room.ctx, failure.id);
+  await room.settle();
+  assert.equal(run.cycle, 1);
+  assert.equal(run.reason, 'the discussion waits for you (WAIT FOR USER)');
+  assert.ok(room.got[1].includes('quota'));
+  assert.ok(room.got[1].includes('merge or revert in progress'));
+  assert.equal(room.got[1].split('\n').at(-1), 'A');
+  assert.ok(room.ctx.state.transcript.some((m) => m.speaker === 'Worker report' && m.text === 'fixed'));
+});
+
+test('auto dev: a retry cannot resume a run that ended while it was working', async () => {
+  const { retryWork } = await import('../src/ui.mjs');
+  let release, attempts = 0;
+  const gate = new Promise((r) => { release = r; });
+  const room = await autoDevRoom({ summaries: [summaryWith('A')], worker: async () => {
+    if (!attempts++) throw new Error('quota'); await gate; return 'fixed';
+  } });
+  await handleLine('/autodev', room.ctx); await room.settle();
+  const run = room.ctx.autoDev;
+  await retryWork(room.ctx, room.ctx.retryFailure.id);
+  run.status = 'finished';
+  release(); await room.settle();
+  assert.equal(run.status, 'finished');
+  assert.ok(room.ctx.state.transcript.some((m) => m.speaker === 'Worker report' && m.text === 'fixed'));
+});
+
+test('retry runs before later queued instructions and reports commits made since the failure', async () => {
+  const { queueWork, retryWork } = await import('../src/ui.mjs');
+  const { ctx } = await workerRoom();
+  const git = await gitRoom(ctx.cwd);
+  await handleLine('hello', ctx);
+  let release, attempts = 0;
+  const prompts = [];
+  ctx.worker.turn = async (p) => {
+    prompts.push(p);
+    if (!attempts++) throw new Error('failed once');
+    if (p.endsWith('in progress')) return new Promise((r) => { release = r; });
+    return 'ok';
+  };
+  queueWork(ctx, 'original');
+  await ctx.workQueue;
+  const failure = ctx.retryFailure;
+  queueWork(ctx, 'in progress');
+  await until(() => release);
+  queueWork(ctx, 'later');
+  git('-C', ctx.workerDir.path, 'commit', '-q', '--allow-empty', '-m', `[${ctx.discussion.name}] later work`);
+  await retryWork(ctx, failure.id);
+  release('done');
+  await ctx.workQueue;
+  assert.deepEqual(prompts.map((p) => p.split('\n').at(-1)), ['original', 'in progress', 'original', 'later']);
+  assert.match(prompts[2], /failed once/);
+  assert.match(prompts[2], /later work/);
+});
+
+test('Retry with applies worker settings for later instructions', async () => {
+  const { retryWork, queueWork } = await import('../src/ui.mjs');
+  const cwd = await tmp('retry-settings-');
+  await gitRoom(cwd);
+  const ctx = await savedRoom(cwd, 'retry-settings');
+  await handleLine('hello', ctx);
+  ctx.worker.turn = async () => { throw new Error('quota'); };
+  queueWork(ctx, 'original'); await ctx.workQueue;
+  const lane = workerLane(ctx); lane.pumping = true;
+  const settings = { agents: [{ provider: 'claude', name: 'A', model: '' }, { provider: 'codex', name: 'B', model: '' }], worker: { provider: 'codex', name: 'W', model: 'gpt-6.1-terra' } };
+  await retryWork(ctx, ctx.retryFailure.id, settings);
+  assert.equal(ctx.workerSpec, 'codex:W:gpt-6.1-terra');
+  assert.equal(ctx.worker.provider, 'codex');
+  assert.equal(ctx.workerHandoff, true);
+  const got = [];
+  ctx.worker.turn = async (prompt) => { got.push(prompt); return 'ok'; };
+  lane.pumping = false;
+  queueWork(ctx, 'later'); await ctx.workQueue;
+  assert.deepEqual(got.map((p) => p.split('\n').at(-1)), ['original', 'later']);
+  assert.match(got[0], /Previous Worker-tab conversation/);
+  assert.equal(ctx.workerSpec, 'codex:W:gpt-6.1-terra');
+});
+
+test('auto dev: restarting while a retry runs cannot resume the old run', async () => {
+  const { retryWork } = await import('../src/ui.mjs');
+  let release, attempts = 0;
+  const gate = new Promise((r) => { release = r; });
+  const room = await autoDevRoom({ summaries: [summaryWith('A')], worker: async () => {
+    if (!attempts++) throw new Error('quota'); await gate; return 'fixed';
+  } });
+  await handleLine('/autodev', room.ctx); await room.settle();
+  const old = room.ctx.autoDev;
+  await retryWork(room.ctx, room.ctx.retryFailure.id);
+  room.ctx.state.transcript.push({ speaker: 'Summary', outcome: 'agreed', by: 'A', text: summaryWith('new task') });
+  await handleLine('/autodev', room.ctx);
+  const restarted = room.ctx.autoDev;
+  assert.notEqual(restarted, old);
+  // Keep the new run from sending further work when its own report is reviewed.
+  restarted.status = 'paused'; restarted.reason = 'test pause';
+  release(); await room.settle();
+  assert.equal(old.status, 'paused');
+  assert.equal(restarted.status, 'paused');
+  assert.ok(room.ctx.state.transcript.some((m) => m.speaker === 'Worker report' && m.text === 'fixed'));
+});
+
+test('a failed retry offers another retry and keeps the auto dev failure pause', async () => {
+  const { retryWork } = await import('../src/ui.mjs');
+  let attempts = 0;
+  const room = await autoDevRoom({ summaries: [summaryWith('A')], worker: async () => { throw new Error(`failure ${++attempts}`); } });
+  await handleLine('/autodev', room.ctx); await room.settle();
+  const first = room.ctx.retryFailure;
+  await retryWork(room.ctx, first.id);
+  assert.equal(first.available, false);
+  await room.settle();
+  assert.notEqual(room.ctx.retryFailure.id, first.id);
+  assert.equal(room.ctx.retryFailure.available, true);
+  assert.equal(room.ctx.retryFailure.error, 'failure 2');
+  assert.equal(room.ctx.autoDev.reason, 'the worker failed: Retry or Retry with…');
+  assert.equal(room.ctx.autoDev.cycle, 1);
+});
+
+test('auto dev: a failure during an agent turn reaches that agent with the next message', async () => {
+  let failWorker, finishTurn;
+  const workerGate = new Promise((resolve) => { failWorker = resolve; });
+  const turnGate = new Promise((resolve) => { finishTurn = resolve; });
+  const room = await autoDevRoom({ summaries: [summaryWith('A')], worker: async () => { await workerGate; throw new Error('quota'); } });
+  const prompts = [];
+  room.ctx.room.agents[0].turn = async (p) => { prompts.push(p); if (prompts.length === 1) await turnGate; return 'PASS'; };
+  await handleLine('/autodev', room.ctx);
+  const round = handleLine('message already in progress', room.ctx);
+  await until(() => prompts.length === 1);
+  failWorker(); await room.ctx.workQueue;
+  assert.equal(room.ctx.autoDev.reason, 'the worker failed: Retry or Retry with…');
+  finishTurn(); await round; await room.settle();
+  await handleLine('next message', room.ctx);
+  assert.ok(prompts.at(-1).includes("The worker's attempt failed: quota"));
 });
