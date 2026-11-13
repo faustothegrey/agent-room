@@ -67,6 +67,8 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
   const { transcript, seen } = state;
   for (const a of agents) if (!seen.has(a.name)) seen.set(a.name, 0);
 
+  const activeAgents = () => agents.filter((a) => !(state.disabledAgents ?? []).includes(a.name));
+
   function unseenFor(agent) {
     return transcript
       .slice(seen.get(agent.name))
@@ -77,7 +79,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
   function promptFor(agent, task) {
     const parts = [];
     // state.briefing (set by ui.mjs once the discussion folder exists): where to write, and so on.
-    if (seen.get(agent.name) === 0) parts.push(introduction(agent, agents), ...(state.briefing ? [state.briefing] : []));
+    if (seen.get(agent.name) === 0) parts.push(introduction(agent, activeAgents()), ...(state.briefing ? [state.briefing] : []));
     // After a Resume or Restart (ui.mjs): one sentence, in each agent's next prompt only.
     if (state.restored?.pending?.includes(agent.name)) parts.push(state.restored.text);
     parts.push('New messages since your last turn:', formatMessages(unseenFor(agent)));
@@ -107,8 +109,8 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
   // "@name ..." at the very start addresses one agent; anything else goes to all of them.
   function selectFor(userText) {
     const match = /^@(\w[\w-]*)/.exec(userText);
-    if (!match) return agents;
-    const agent = agents.find((a) => a.name.toLowerCase() === match[1].toLowerCase());
+    if (!match) return activeAgents();
+    const agent = activeAgents().find((a) => a.name.toLowerCase() === match[1].toLowerCase());
     if (!agent) throw new Error(`Unknown agent "@${match[1]}". Known: ${agents.map((a) => a.name).join(', ')}`);
     return [agent];
   }
@@ -120,7 +122,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
     // Rejects on an unknown @name, before anything is recorded or sent. `speaker`: who the round's
     // first message is from (auto dev's "Worker report", sent to every agent), the User by default.
     async round(userText, { onTurnStart, onMessage, onNotice, speaker = 'User' } = {}) {
-      const selected = speaker === 'User' ? selectFor(userText) : agents;
+      const selected = speaker === 'User' ? selectFor(userText) : activeAgents();
       const user = { speaker, text: userText };
       transcript.push(user);
       onMessage?.(user);
@@ -144,10 +146,11 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
     // Summary entry), { status: 'empty' } if the drafter had nothing to summarize, or
     // { status: 'failed' } if a turn failed.
     async summary({ onTurnStart, onMessage, extra } = {}) {
-      const n = agents.length;
+      const active = activeAgents();
+      const n = active.length;
       const first = (state.summaries ?? 0) % n;
       state.summaries = (state.summaries ?? 0) + 1;
-      const order = [...agents.slice(first), ...agents.slice(0, first)];
+      const order = [...active.slice(first), ...active.slice(0, first)];
       const maxTurns = SUMMARY_TURNS_EACH * n;
       let version = null;
       let author = null;

@@ -306,6 +306,8 @@ function wire(ctx) {
       models: modelChoices(), started: settingsStarted(ctx) };
   };
   ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
+  ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
+  ctx.screen.setAgentEnabled = (name, enabled) => setAgentEnabled(ctx, name, enabled);
 }
 
 // The screen's header: the full root path, the active discussion (active: its folder, under the
@@ -316,7 +318,8 @@ function header(ctx) {
     discussion: d ? d.title : ctx.state.brainstorm ? 'Brainstorm' : 'No discussion started',
     active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath || !!ctx.state.brainstorm,
     brainstorm: !!ctx.state.brainstorm, // a conversation kept only in memory (see newBrainstorm)
-    autoDev: autoDevView(ctx),
+    failedAgents: ctx.room.agents.filter((a) => ctx.state.transcript.some((m) => m.error && m.speaker === a.name) || (ctx.state.disabledAgents ?? []).includes(a.name)).map((a) => ({ name: a.name, disabled: (ctx.state.disabledAgents ?? []).includes(a.name) })),
+    autoDev: autoDevView(ctx), retryId: ctx.retryFailure?.available ? ctx.retryFailure.id : null,
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
     checkpoints: checkpoints(ctx), // the saved discussions, for Explorer's Resume (see "Checkpoints")
     back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
@@ -331,6 +334,22 @@ function showHeader(ctx) {
     c.screen.room = header(c);
     toScreen(c, { type: 'room', room: c.screen.room });
   }
+}
+
+// A failed participant can be disabled in this discussion without changing future-room defaults.
+export function setAgentEnabled(ctx, name, enabled) {
+  const agent = ctx.room.agents.find((a) => a.name === name);
+  if (!agent || typeof enabled !== 'boolean') throw new Error('Unknown discussion agent.');
+  if (ctx.busy || ctx.stopped) throw new Error('Wait for the current discussion turn to end.');
+  const disabled = new Set(ctx.state.disabledAgents ?? []);
+  if (!enabled) {
+    if (!ctx.state.transcript.some((m) => m.speaker === name && m.error)) throw new Error('Only a failed agent can be disabled here.');
+    if (!disabled.has(name) && ctx.room.agents.length - disabled.size <= 1) throw new Error('At least one discussion agent must stay enabled.');
+    disabled.add(name);
+  } else disabled.delete(name);
+  ctx.state.disabledAgents = [...disabled];
+  captureRound(ctx);
+  showHeader(ctx);
 }
 
 // ── Discussions ───────────────────────────────────────────────────────
@@ -634,7 +653,7 @@ const logSize = (ctx) => { try { return statSync(ctx.logPath).size; } catch { re
 const saveable = (ctx) => !!ctx.discussion && !!ctx.logPath && !ctx.state.brainstorm && !!ctx.agentSpecs && !!ctx.workerSpec;
 // At the end of a round, and of /summary: the discussion part, copied, then saved.
 function captureRound(ctx) {
-  if (!saveable(ctx)) return;
+  if (!saveable(ctx)) { showHeader(ctx); return; }
   ctx.logBytes = logSize(ctx);
   const agents = new Set(ctx.room.agents.map((a) => a.name));
   ctx.lastRound = JSON.parse(JSON.stringify({
@@ -642,6 +661,7 @@ function captureRound(ctx) {
     state: { ...ctx.state, seen: [...ctx.state.seen] }, totals: ctx.totals ?? {}, doc: ctx.screen.doc ?? null,
   }));
   saveCheckpoint(ctx);
+  showHeader(ctx);
 }
 // The latest round's copy and the worker's current session and briefing. Nothing before the first
 // round of this session (or a Resume): until then the previous checkpoint stands.
@@ -973,8 +993,10 @@ function endSession(ctx, why) {
   state.transcript.length = 0; // emptied in place: the room and the screen hold this array
   for (const a of ctx.room.agents) state.seen.set(a.name, 0);
   state.summaries = 0;
+  delete state.disabledAgents;
   state.briefing = null;
   state.brainstorm = false;
+  ctx.retryFailure = null;
   ctx.autoDev = null; // Resume, Start fresh, New discussion and New brainstorm end an auto dev run
   ctx.autoDevSent = [];
   Object.assign(screen, { doc: null, thinking: null, status: null });
@@ -1414,6 +1436,7 @@ function dropTask(shop, t) {
 // it survives a Reload; ctx.autoDevSent: the summaries already sent (transcript indexes) this session.
 export const AUTO_DEV_CYCLES = 5;
 const AUTO_DEV_REPORT = '/autodev report';
+const AUTO_DEV_FAILURE = '/autodev failure';
 const AUTO_DEV_MEANS = 'FINISH: development is complete and reviewed; only the User\'s merge, Reload or live trial may remain. '
   + 'WAIT FOR USER: the User must answer or act before development can continue.';
 const autoDevTask = (run) => [
@@ -1540,21 +1563,38 @@ function pauseAutoDev(ctx, reason) {
   note(ctx, `Auto dev paused: ${reason}.`);
   showHeader(ctx);
 }
-// The worker finished a relayed instruction: its reply (or failure) goes to the discussion as a
-// round of its own, queued like a typed line. Not if the run has ended meanwhile.
-function reportBack(ctx, run, entry) {
-  if (ctx.autoDev !== run) return;
-  run.waiting = false;
-  run.report = entry.error ? `The worker's attempt failed: ${entry.text}` : entry.text;
+// A failure is added to the conversation without starting a round. A reply is queued as a report;
+// only a retry may report after its original run has ended or been replaced.
+function reportBack(ctx, run, entry, retry = false) {
+  if (entry.error) {
+    if (ctx.autoDev !== run || ctx.stopped) return;
+    run.waiting = false;
+    if (run.status === 'running') pauseAutoDev(ctx, 'the worker failed: Retry or Retry with…');
+    else if (run.status === 'paused') { run.reason = 'the worker failed: Retry or Retry with…'; showHeader(ctx); }
+    else return;
+    const message = { speaker: 'Worker report', text: `The worker's attempt failed: ${entry.text}` };
+    // A turn already in progress must not mark this new message as seen before its agent received it.
+    if (ctx.busy && ctx.say) {
+      (ctx.workerFailures ??= []).push({ message, owner: ownerOf(ctx) });
+      ctx.say(AUTO_DEV_FAILURE);
+    } else ctx.state.transcript.push(message);
+    log(ctx, `**${message.speaker}**\n\n${message.text}\n\n`);
+    toScreen(ctx, { type: 'message', message: ctx.docs.messageView(message) });
+    return;
+  }
+  if (ctx.autoDev !== run && !retry) return;
+  if (ctx.autoDev === run) {
+    run.waiting = false;
+    if (retry && run.status === 'paused' && run.reason === 'the worker failed: Retry or Retry with…') Object.assign(run, { status: 'running', reason: null });
+  }
+  (ctx.workerReports ??= []).push({ text: entry.text, run, retry, owner: ownerOf(ctx) });
   showHeader(ctx);
   if (ctx.say) ctx.say(AUTO_DEV_REPORT);
 }
 async function autoDevReport(ctx) {
-  const run = ctx.autoDev;
-  if (!run?.report) return;
-  const text = run.report;
-  run.report = null;
-  await runRound(text, ctx, { speaker: 'Worker report', run: run.status === 'running' ? run : null });
+  const report = ctx.workerReports?.shift();
+  if (!report || report.owner !== ownerOf(ctx) || (!report.retry && ctx.autoDev !== report.run)) return;
+  await runRound(report.text, ctx, { speaker: 'Worker report', run: ctx.autoDev === report.run && report.run.status === 'running' ? report.run : null });
 }
 function finishAutoDev(ctx, run) {
   Object.assign(run, { status: 'finished', reason: null });
@@ -1931,6 +1971,11 @@ export async function handleLine(line, ctx) {
   if (line === '/close') return closeDiscussion(ctx);
   if (line === '/autodev') return startAutoDev(ctx);
   if (line === AUTO_DEV_REPORT) return autoDevReport(ctx);
+  if (line === AUTO_DEV_FAILURE) {
+    const failure = ctx.workerFailures?.shift();
+    if (failure && failure.owner === ownerOf(ctx)) ctx.state.transcript.push(failure.message);
+    return;
+  }
   const rollback = /^\/rollback\s+(\S+)$/.exec(line);
   if (rollback) return requestRollback(ctx, rollback[1]);
   const archiveRollback = /^\/archive-rollback\s+(\S+)$/.exec(line);
@@ -2403,7 +2448,24 @@ async function mergePreview(place, main) {
 // instruction itself; the origin's own worker session holds the earlier ones. ctx.workQueue settles
 // when this context's queued tasks have run (or were dropped).
 // `run`: an auto dev run relaying this instruction (shown as "Relayed from discussion").
-export function queueWork(ctx, text, run = null, rollback = null) {
+export async function retryWork(ctx, id, settings = null) {
+  const failure = ctx.retryFailure;
+  if (!failure?.available || failure.id !== id || ctx.stopped || ctx.screen.workerInfo?.disabled) throw new Error('This failure is no longer available for retry.');
+  failure.available = false;
+  showHeader(ctx);
+  try {
+    if (settings) await saveSettings(ctx, { ...settings, scope: 'work' });
+    if (ctx.retryFailure !== failure || ctx.stopped) throw new Error('This failure is no longer available for retry.');
+    if (failure.run && ctx.autoDev === failure.run) failure.run.waiting = true;
+    queueWork(ctx, failure.text, failure.run, failure.rollback, failure);
+  } catch (err) {
+    if (ctx.retryFailure === failure) failure.available = true;
+    showHeader(ctx);
+    throw err;
+  }
+}
+
+export function queueWork(ctx, text, run = null, rollback = null, retry = null) {
   if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
   if (ctx.stopped) return note(ctx, 'This room is ending: the instruction was not sent.', true);
   ctx.agentsStarted = true;
@@ -2414,8 +2476,11 @@ export function queueWork(ctx, text, run = null, rollback = null) {
   const workName = ctx.discussion && !ctx.state.brainstorm ? ctx.discussion.name : null;
   const record = workName ? { id: randomBytes(6).toString('hex'), task: text, at: new Date().toISOString() } : null;
   shop.sent = (shop.sent ?? 0) + 1; // the order sent, across lanes: one worker session's tasks keep it
-  laneState(shop, workName).tasks.push({ origin: ctx, text, run, cycle: run?.cycle, done, rollback, record, workName, lane: workName, sent: shop.sent, worker: ctx.worker, owner: ownerOf(ctx), label: originLabel(ctx) });
-  if (record) { workOf(shop, workName).queued.push(record); persistWork(ctx, workName); }
+  const task = { origin: ctx, text, run, cycle: retry?.cycle ?? run?.cycle, done, rollback, retry, record, workName, lane: workName, sent: retry?.sent ?? shop.sent, worker: ctx.worker, owner: ownerOf(ctx), label: originLabel(ctx) };
+  const tasks = laneState(shop, workName).tasks;
+  if (retry) { const i = tasks.findIndex((t) => t.sent > retry.sent); tasks.splice(i < 0 ? tasks.length : i, 0, task); }
+  else tasks.push(task);
+  if (record) { const queued = workOf(shop, workName).queued; if (retry) queued.unshift(record); else queued.push(record); persistWork(ctx, workName); }
   ctx.workPending = (ctx.workPending ?? 0) + 1;
   ctx.workQueue = Promise.all([ctx.workQueue, finished]).then(() => {});
   // A bug here must not jam the queue: report it, and the next instruction still runs.
@@ -2458,7 +2523,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     catch (err) { saveError ??= err; }
   };
   const show = (entry, meta) => {
-    const view = { ...ctx.docs.messageView(entry), ...(meta && { meta }), origin: label, owner };
+    const view = { ...ctx.docs.messageView(entry), ...(entry.retryId && { retryId: entry.retryId }), ...(meta && { meta }), origin: label, owner };
     shop.log.push(view);
     toShop(ctx, { type: 'work', message: view });
   };
@@ -2524,7 +2589,8 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
         : `Before the instruction below, first merge main into ${place.branch} with a normal merge (git merge main). Label any merge commit "[${label}] catch up with main". If it clashes, do not force it or do the requested task: leave the state intact and report the conflict; this origin must resolve it before other worker tasks can run. After a successful merge, run the project's tests (npm test, if it has them) and report their real output, then end your reply with the line "Tested: <full commit ID of ${place.branch}> with main <full commit ID of main>: tests passed" (or "tests failed"), naming the commits you tested. Never merge into main or push.\n\n`) : '';
       const interrupted = told.map((r) => `Your previous instruction "${firstLine(r.task)}" was interrupted by a Restart, Quit or a crash: check the worktree before continuing.\n\n`).join('');
       if (told.length) work.interrupted = work.interrupted.filter((r) => !told.includes(r));
-      entry = { speaker: worker.name, text: (await worker.turn(interrupted + brief + tree + commit + leftover + merge + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
+      const retryBrief = t?.retry ? `Your earlier attempt at this instruction failed: ${t.retry.error}\nInspect the current worktree and Git state first, including uncommitted edits and any merge or revert in progress. Commits made since the failure:\n${t.retry.after ? (await git(place.path, 'log', '--format=%H %s', `${t.retry.after}..HEAD`).catch(() => '(could not read commits)') || '(none)') : '(the failure commit could not be determined)'}\n\n` : '';
+      entry = { speaker: worker.name, text: (await worker.turn(interrupted + brief + tree + commit + retryBrief + leftover + merge + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
       // Its briefing is now known to the session: the context's, or the seat of a discussion left
       // meanwhile (even if it was left while this turn ran).
       const now = worker === ctx.worker ? null : worker.seat;
@@ -2545,7 +2611,13 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     const meta = [`${Math.round((Date.now() - t0) / 1000)}s`, entry.error ? '' : ctx.usage.formatUsage(worker.lastUsage)].filter(Boolean).join(' · ');
     workLog(`**${worker.name}** (worker${entry.error ? ', failed' : ''}, ${meta})\n\n${entry.text}\n\n`);
     out(ctx, entry.error ? red(`\n✗ ${worker.name} (worker) failed: ${entry.text}\n`) : `\n${bold(worker.name)}${dim(` (worker, ${meta})`)} › ${entry.text}\n`);
+    if (entry.error && !ctx.stopped && record && ownerOf(ctx) === owner) {
+      const id = randomBytes(6).toString('hex');
+      ctx.retryFailure = { id, available: true, text: t.retry?.text ?? text, error: entry.text, after: lane?.path ? await git(lane.path, 'rev-parse', 'HEAD').catch(() => null) : null, sent: t.retry?.sent ?? t.sent, cycle, run, rollback };
+      entry.retryId = id;
+    }
     show(entry, meta);
+    showHeader(ctx);
     if (saveError) workNote(ctx, `✗ ${worker.name}: couldn't save to the transcript: ${saveError.message}`, true, label, owner);
     // Its commits must carry its label: one without it is reported, not trusted.
     if (before) {
@@ -2562,7 +2634,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       persistWork(ctx, t.workName);
     }
     if (rollback) await rollbackReport(ctx, rollback, entry, worker === ctx.worker ? null : worker.seat);
-    if (run) reportBack(ctx, run, entry);
+    if (run && ownerOf(ctx) === owner) reportBack(ctx, run, entry, !!t?.retry);
   } finally {
     if (ctx.workingIn) shop.writing.delete(ctx.workingIn);
     ctx.workingIn = null;

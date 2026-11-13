@@ -372,6 +372,11 @@ message, request a summary, or send worker instructions, changes are saved for *
 discussion agents keep their settings. Settings shown then may describe future defaults rather
 than the running sessions. Each tab saves its own choices without replacing the other tab's.
 
+If a discussion agent fails, **Disable** appears above the conversation. It excludes that agent
+from later rounds and summaries in this discussion; **Enable** brings it back with its existing
+session. At least one agent must remain enabled. This choice survives Reload and Resume of the
+discussion, and does not change other discussions or future-room defaults.
+
 - **Provider:** Claude, Codex or agy, for both discussion agents and the worker.
 - **Model:** Claude offers Opus, Sonnet and Haiku aliases. Codex reads the visible entries in
   its local `models_cache.json` under `CODEX_HOME` or `~/.codex`. There is no live account-model
@@ -415,9 +420,7 @@ paste them. When the latest agreed summary's **Next step** is `Send to the Worke
 **Start auto dev** button appears beside it (`/autodev`). It sends that instruction to the worker as
 cycle 1 of up to 5, shown in the Worker tab as **Relayed from discussion**; each instruction sent is
 also announced in the Discussion ("Auto dev sent the instruction "…" to the Worker (cycle n of 5)."),
-which the agents receive and the transcript keeps. The worker's full reply,
-or its failure, comes back to the Discussion as a **Worker report** and starts a round; both are in
-the transcript like typed messages. That round is always summarized, and the summary must end with `Outcome: SEND`, `FINISH` or
+which the agents receive and the transcript keeps. The worker's full reply comes back to the Discussion as a **Worker report** and starts a round. If the worker fails, auto dev pauses with **Retry** and **Retry with…** in the Worker tab; the failure appears in the Discussion without starting a round, and the agents receive it with your next message. You can discuss it without ending that pause. A successful retry reports at the same cycle and resumes the run, unless it was restarted or ended meanwhile; another failure leaves it paused. That round is always summarized, and the summary must end with `Outcome: SEND`, `FINISH` or
 `WAIT FOR USER`; passing on it accepts its quoted instruction exactly as it stands. Only an agreed
 SEND summary written after the latest report sends its instruction, once; repeating earlier text
 there is a deliberate retry. The run pauses, with its reason above the message box, on `WAIT FOR
@@ -427,7 +430,7 @@ the 5th report is still reviewed). When paused, the next agreed instruction is s
 auto dev**, which grants another 5 cycles. While paused, any summary asks for `Outcome: FINISH`
 or `WAIT FOR USER` instead, and sends nothing. An agreed `FINISH`, running or paused, ends the run:
 review and merge the discussion's branch (`worker/<name>`) yourself, as ever. An instruction that can't be read reliably from Next step (two of them, no
-closing quotation mark…) is never sent, and the page says why. Reload keeps a run, its cycle count
+closing quotation mark…) is never sent, and the page says why. Reload keeps a run, its cycle count, a failure pause and its retry buttons,
 and what was sent; a relay whose result is lost pauses the run. Resume, Start fresh, Close discussion, Restart
 and Quit room end it (a resumed discussion comes back without its run); in the terminal, New
 discussion and New brainstorm do too (on the screen they leave the discussion and its run open). Auto dev is for discussions only, not brainstorms.
@@ -642,6 +645,7 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   Nothing is archived automatically; existing Archive guards apply. Changed worker state requires
   a fresh report. Reload keeps the report; Restart loses this in-memory confirmation, so request a
   fresh report. The User keeps the final merge into main; no automatic conflict-free rollback is promised.
+- The latest failed instruction in a discussion offers **Retry** with the current worker settings, or **Retry with…** to choose a provider and model. The chosen settings remain for later instructions. A retry runs ahead of later queued instructions and tells the worker the original instruction, failure, and commits made since, asking it to inspect the worktree and Git state first. The buttons return if the retry fails. They are not offered for interrupted instructions or brainstorms.
 - The worker commits every completed task on its branch, with a message starting with its origin
   in brackets (`[<discussion folder name>]`, or `[brainstorm]`) and the commit ID in its reply.
   agent-room reports commits without that label. Each instruction in the Worker tab shows its
