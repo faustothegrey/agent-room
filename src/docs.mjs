@@ -163,7 +163,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
    Rare room and server actions sit in the ▾ menus; the gauges never shrink. */
 #header { grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(16rem, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
 .zone { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; border: 1.5px solid var(--zone); border-radius: 6px; padding: .3rem .6rem; align-self: stretch; justify-content: center; }
-#room-zone { --zone: #5a7bd8; } #disc-zone { --zone: #4caf7a; } #server-zone { --zone: #d6a84c; }
+#room-zone { --zone: #5a7bd8; padding-inline: 1rem; } #disc-zone { --zone: #4caf7a; } #server-zone { --zone: #d6a84c; }
 /* Details shown on hover or keyboard focus of the room name and of "Server" (not while their menu is open). */
 .hover-detail { display: none; position: absolute; top: 100%; left: 0; z-index: 11; flex-direction: column; gap: .1rem; width: max-content; max-width: min(26rem, 80vw); padding: .4rem .6rem; border: 1px solid var(--zone); border-radius: 6px; background: Canvas; box-shadow: 0 6px 20px #0004; font-size: .7rem; color: var(--dim); overflow-wrap: anywhere; }
 /* No gap under the trigger, and it stays while hovered, so the version's own tooltip can be reached. */

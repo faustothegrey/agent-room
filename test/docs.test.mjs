@@ -573,6 +573,7 @@ test('the room header shows the folder basename, puts the full path in #replica-
   assert.match(roomZone, /id="room-menu"[\s\S]*id="replica-header"[\s\S]*id="server-box"[\s\S]*id="server-head"[\s\S]*id="server-menu"[\s\S]*id="server-details"[\s\S]*id="peer-warning"/);
   assert.doesNotMatch(serverZone, /id="server-box"|id="peer-warning"/);
   assert.match(serverZone, /aria-label="Monitoring"/);
+  assert.match(html, /#room-zone \{ --zone: #5a7bd8; padding-inline: 1rem; \}/);
   assert.match(html, /#server \{[^}]*color: light-dark\(#3d5fc4, #5a7bd8\);/);
   assert.match(html, /#server\[data-state="down"\] \{[^}]*color: #ef4444;/);
   assert.match(html, /\.quota:not\(:first-child\) \{ border-left: 1px solid var\(--line\); padding-left: \.5rem; \}/);
