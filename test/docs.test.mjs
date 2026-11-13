@@ -554,6 +554,8 @@ test('member panel keeps legacy agent lists intact rather than truncating them',
     const agents = Array.from({ length: n }, (_, i) => ({ name: 'A' + i }));
     assert.deepEqual(select({ settings: { agents }, defaults: { agents: [{ name: 'other' }, { name: 'next' }] }, started: true }), agents);
   }
+  const launch = [{ name: 'FlagA' }, { name: 'FlagB' }];
+  assert.equal(select({ settings: { agents: launch }, defaults: { agents: [{ name: 'SavedA' }, { name: 'SavedB' }] }, launchDefaults: { agents: launch }, started: true }), launch);
   assert.match(source, /This discussion has .* agents, set outside this panel; members can be chosen here only for 2 or 3/);
   assert.match(source, /At least two members\. To swap one, tick the new row first, then untick the old one\./);
 });

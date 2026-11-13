@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -268,6 +268,48 @@ test('CLI accepts agy for discussion and worker and exposes both in settings', {
     assert.deepEqual(data.settings, { agents: [{ provider: 'agy', name: 'A', model: 'gemini-4-argon-high' }],
       worker: { provider: 'agy', name: 'W', model: '' } });
     await fetch(base + '__say', { method: 'POST', headers: { 'content-type': 'application/json', origin: new URL(base).origin }, body: JSON.stringify({ text: '/quit' }) });
+    assert.equal(await exited, 0);
+  } finally { cli.kill(); }
+});
+
+test('CLI flags remain the defaults for a new brainstorm and a beside discussion', { timeout: 20000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), 'screen-launch-defaults-'));
+  const room = join(home, 'room'), bin = join(home, 'bin'), config = join(home, '.config', 'agent-room');
+  mkdirSync(room); mkdirSync(bin); mkdirSync(config, { recursive: true });
+  writeFileSync(join(config, 'defaults.json'), JSON.stringify({ agents: [{ provider: 'claude', name: 'Saved', model: '' }],
+    worker: { provider: 'claude', name: 'SavedWorker', model: '' } }));
+  writeFileSync(join(bin, 'claude'), `#!${process.execPath}\nprocess.stdin.resume(); process.stdin.on('end', () => console.log(JSON.stringify({ result: process.argv.includes('--no-session-persistence') ? 'Topic' : 'PASS' })));\n`, { mode: 0o755 });
+  const cli = spawn(process.execPath, [new URL('../src/cli.mjs', import.meta.url).pathname, '--cwd', room, '--port', '0',
+    '--agents', 'claude:FlagA,claude:FlagB', '--worker', 'agy:FlagW:chosen'],
+    { env: { ...process.env, HOME: home, PATH: bin + ':' + process.env.PATH } });
+  const exited = new Promise((done) => cli.once('exit', done));
+  try {
+    let out = '';
+    const base = await new Promise((resolve, reject) => {
+      cli.once('exit', (code) => reject(new Error('CLI exited ' + code)));
+      cli.stdout.on('data', (d) => { out += d; const match = out.match(/Room screen: (http:\/\/127\.0\.0\.1:\d+\/r\/[^/]+\/)__room/); if (match) resolve(match[1]); });
+    });
+    const reader = (await fetch(base + '__events')).body.getReader();
+    let buffer = '';
+    const next = async () => {
+      while (!buffer.includes('\n\n')) buffer += new TextDecoder().decode((await reader.read()).value);
+      const at = buffer.indexOf('\n\n'), chunk = buffer.slice(0, at); buffer = buffer.slice(at + 2);
+      return JSON.parse(chunk.replace(/^data: /, ''));
+    };
+    const until = async (fn) => { for (;;) { const e = await next(); if (fn(e)) return e; } };
+    const say = (text) => fetch(base + '__say', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+    const flags = { agents: [{ provider: 'claude', name: 'FlagA', model: '' }, { provider: 'claude', name: 'FlagB', model: '' }],
+      worker: { provider: 'agy', name: 'FlagW', model: 'chosen' } };
+    await next();
+    await say('/brainstorm'); await until((e) => e.type === 'note' && /New brainstorm/.test(e.text));
+    assert.deepEqual((await (await fetch(base + '__settings')).json()).settings, flags);
+    await say('/new'); await until((e) => e.type === 'note' && /brainstorm ended/.test(e.text));
+    assert.deepEqual((await (await fetch(base + '__settings')).json()).settings, flags);
+    await say('hello'); await until((e) => e.type === 'turn');
+    await say('/new');
+    const nextRoom = await until((e) => e.type === 'goto');
+    assert.deepEqual((await (await fetch(new URL(nextRoom.url.replace('__room', '__settings'), base))).json()).settings, flags);
+    await fetch(new URL('/__shutdown', base), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     assert.equal(await exited, 0);
   } finally { cli.kill(); }
 });

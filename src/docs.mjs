@@ -1278,7 +1278,7 @@ function agentRow(parent, a, models, title, member = null) {
     active: () => !member || checked.checked, incomplete: () => (!member || checked.checked) && model.value === '__custom' && !custom.value.trim() };
 }
 function selectedSettings(data) {
-  return data.started && data.defaults ? data.defaults : data.settings;
+  return data.started ? data.launchDefaults ?? data.defaults ?? data.settings : data.settings;
 }
 function memberPanelAgents(data) {
   const current = data.settings.agents;

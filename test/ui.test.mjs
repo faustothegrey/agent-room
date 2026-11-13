@@ -2881,6 +2881,7 @@ test('new screen discussions and terminal sessions use the saved worker default'
     writeFileSync(join(home, '.config', 'agent-room', 'defaults.json'), JSON.stringify(defaults));
     const { first, hub } = await multiRoom();
     await handleLine('topic', first);
+    first.shop.launchDefaults = { agents: 'claude:A,claude:B', worker: 'codex:W:default-model' };
     first.agentSpecs = 'claude:A,claude:B'; first.workerSpec = 'agy:W:local-model';
     let options;
     const add = hub.addRoom;
@@ -2892,8 +2893,8 @@ test('new screen discussions and terminal sessions use the saved worker default'
     await handleLine('topic', terminal);
     terminal.workerSpec = 'agy:W:local-model';
     await handleLine('/new', terminal);
-    assert.equal(terminal.workerSpec, 'codex:W:default-model');
-    assert.equal(terminal.worker.provider, 'codex');
+    assert.equal(terminal.workerSpec, 'claude:W');
+    assert.equal(terminal.worker.provider, 'claude');
   } finally { process.env.HOME = before; }
 });
 
@@ -2908,7 +2909,7 @@ test('a started worker-only change leaves an absent defaults file absent', async
   await saveSettings(ctx, { agents, worker: { provider: 'agy', name: 'W', model: '' }, scope: 'work' }, file);
   assert.equal(existsSync(file), false);
   assert.equal(ctx.workerSpec, 'agy:W:');
-  assert.equal(ctx.workerDefault, 'claude:W');
+  assert.equal(ctx.shop.launchDefaults.worker, 'claude:W');
 });
 
 test('open discussions keep their members and sessions; new and resumed discussions use their own sets', async () => {
@@ -2956,5 +2957,71 @@ test('open discussions keep their members and sessions; new and resumed discussi
     await handleLine('/resume ' + name, second);
     assert.deepEqual(second.room.agents.map((a) => a.name), ['C', 'D', 'E']);
     assert.deepEqual(second.room.agents.map((a) => second.sessions.get(a.name).id), savedIds);
+  } finally { process.env.HOME = before; }
+});
+
+test('launch defaults follow flags and panel changes per folder, without changing other rooms', async () => {
+  const { mkdirSync, writeFileSync, readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { saveSettings } = await import('../src/ui.mjs');
+  const home = await tmp('launch-defaults-home-'), before = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const file = join(home, '.config', 'agent-room', 'defaults.json');
+    const saved = { agents: [{ provider: 'claude', name: 'SavedA', model: '' }, { provider: 'codex', name: 'SavedB', model: '' }],
+      worker: { provider: 'claude', name: 'SavedW', model: '' } };
+    mkdirSync(join(home, '.config', 'agent-room'), { recursive: true });
+    writeFileSync(file, JSON.stringify(saved));
+    const folderA = await tmp('launch-room-a-'), folderB = await tmp('launch-room-b-');
+    const hub = { rooms: new Map() }, options = [];
+    const make = async (cwd, context, agents, worker) => {
+      const ctx = { cwd, context, key: cwd + (context ? '#' + context : ''), hub, noScreen: false,
+        agentSpecs: agents, workerSpec: worker, state: { transcript: [], seen: new Map() }, sessions: new Map() };
+      Object.assign(ctx, await load(ctx, '?launch-' + (context ?? cwd)));
+      ctx.suggestTitle = async () => ({ title: 'topic' });
+      for (const a of ctx.room.agents) a.turn = async () => 'PASS';
+      hub.rooms.set(ctx.key, ctx);
+      return ctx;
+    };
+    hub.addRoom = async (folder, opts) => { options.push(opts); return { ctx: await make(folder, opts.context, opts.agents, opts.worker) }; };
+    const first = await make(folderA, null, 'claude:FlagA,codex:FlagB', 'agy:FlagW:chosen');
+    const other = await make(folderB, null); // no flags: initialized from defaults.json
+    assert.deepEqual(other.shop.launchDefaults, { agents: 'claude:SavedA:,codex:SavedB:', worker: 'claude:SavedW:' });
+    first.noScreen = true;
+    await handleLine('first message', first);
+    await handleLine('/new', first);
+    assert.deepEqual([first.agentSpecs, first.workerSpec], ['claude:FlagA,codex:FlagB', 'agy:FlagW:chosen']);
+    await handleLine('/brainstorm', first);
+    assert.deepEqual([first.agentSpecs, first.workerSpec], ['claude:FlagA,codex:FlagB', 'agy:FlagW:chosen']);
+    first.noScreen = false;
+    await handleLine('/new', first); // end brainstorm in place
+    for (const a of first.room.agents) a.turn = async () => 'PASS';
+    await handleLine('second message', first);
+    await handleLine('/new', first); // beside
+    assert.deepEqual([options.at(-1).agents, options.at(-1).worker], ['claude:FlagA,codex:FlagB', 'agy:FlagW:chosen']);
+    const beside = [...hub.rooms.values()].find((c) => c.cwd === folderA && c !== first);
+    assert.equal(beside.shop.launchDefaults, first.shop.launchDefaults);
+    const memberChange = { agents: [{ provider: 'claude', name: 'NewA', model: '' }, { provider: 'codex', name: 'NewB', model: '' }], worker: saved.worker, scope: 'talk' };
+    await saveSettings(first, memberChange, file); // started: members become this folder's defaults
+    assert.equal(first.shop.launchDefaults.agents, 'claude:NewA:,codex:NewB:');
+    assert.equal(first.shop.launchDefaults.worker, 'agy:FlagW:chosen');
+    assert.deepEqual(other.shop.launchDefaults, { agents: 'claude:SavedA:,codex:SavedB:', worker: 'claude:SavedW:' });
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).worker, saved.worker);
+    await handleLine('/new', first);
+    assert.deepEqual([options.at(-1).agents, options.at(-1).worker], ['claude:NewA:,codex:NewB:', 'agy:FlagW:chosen']);
+    await saveSettings(first, { agents: memberChange.agents, worker: { provider: 'codex', name: 'LocalW', model: '' }, scope: 'work' }, file);
+    assert.equal(first.workerSpec, 'codex:LocalW:');
+    assert.equal(first.shop.launchDefaults.worker, 'agy:FlagW:chosen');
+    await handleLine('/new', first);
+    assert.equal(options.at(-1).worker, 'agy:FlagW:chosen');
+    // A not-yet-started discussion's worker update changes the folder default, not the other room.
+    await saveSettings(beside, { agents: memberChange.agents, worker: { provider: 'claude', name: 'NewW', model: '' }, scope: 'work' }, file);
+    assert.equal(first.shop.launchDefaults.worker, 'claude:NewW:');
+    assert.equal(other.shop.launchDefaults.worker, 'claude:SavedW:');
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).worker.name, 'NewW');
+    // A room opened later with no flags reads the saved defaults, not the first folder's old flags.
+    const later = await make(await tmp('launch-room-c-'), null);
+    assert.equal(later.shop.launchDefaults.worker, 'claude:NewW:');
+    assert.equal(later.shop.launchDefaults.agents, 'claude:NewA:,codex:NewB:');
   } finally { process.env.HOME = before; }
 });

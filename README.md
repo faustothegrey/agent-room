@@ -385,7 +385,9 @@ than the running sessions. Each tab saves its own choices without replacing the 
   or hyphens, so `@name` is unambiguous.
 
 Explicit `--agents` and `--worker` override their respective saved defaults for that launch
-without rewriting the defaults file. The title-generation call always uses Claude's CLI default,
+without rewriting the defaults file. New discussions and brainstorms in that folder use those
+launch choices until a panel change updates the corresponding default. Each open folder keeps its
+own choices; another folder opened later starts from the saved defaults. The title-generation call always uses Claude's CLI default,
 independently of the selected discussion and worker models.
 
 ## Summaries and usage
