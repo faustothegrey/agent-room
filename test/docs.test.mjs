@@ -559,3 +559,49 @@ test('member panel keeps legacy agent lists intact rather than truncating them',
   assert.match(source, /This discussion has .* agents, set outside this panel; members can be chosen here only for 2 or 3/);
   assert.match(source, /At least two members\. To swap one, tick the new row first, then untick the old one\./);
 });
+
+test('the room header shows the folder basename, puts the full path in #replica-header with and without replication, and places #server-box and #peer-warning in #room-zone', async () => {
+  const s = await serve(fixture(), { clients: new Set(), transcript: [] });
+  const html = await (await s.get('/__room')).text();
+  s.close();
+
+  // #folder is gone from the header; #server-box and #peer-warning sit inside #room-zone, under the room name.
+  assert.doesNotMatch(html, /id="folder"/);
+  const header = html.slice(html.indexOf('<header id="header">'), html.indexOf('</header>'));
+  const roomZone = header.slice(header.indexOf('<div id="room-zone"'), header.indexOf('<div id="disc-zone"'));
+  const serverZone = header.slice(header.indexOf('<div id="server-zone"'));
+  assert.match(roomZone, /id="room-menu"[\s\S]*id="replica-header"[\s\S]*id="server-box"[\s\S]*id="server-head"[\s\S]*id="server-menu"[\s\S]*id="server-details"[\s\S]*id="peer-warning"/);
+  assert.doesNotMatch(serverZone, /id="server-box"|id="peer-warning"/);
+  assert.match(serverZone, /aria-label="Monitoring"/);
+  assert.match(html, /#server \{[^}]*color: #5a7bd8;/);
+  assert.match(html, /#server\[data-state="down"\] \{[^}]*color: #ef4444;/);
+  assert.match(html, /\.quota:not\(:first-child\) \{ border-left: 1px solid var\(--line\); padding-left: \.5rem; \}/);
+
+  // Exercise setRoom and updateReplicaHeader from the page script.
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const replicaCode = source.slice(source.indexOf('const receivedTime ='), source.indexOf('// The status under the title'));
+  const roomCode = source.slice(source.indexOf('let room = null;\nfunction setRoom('), source.indexOf('// Settings stay outside'));
+  const node = (tag = 'span') => ({ tag, textContent: '', title: '', hidden: false, dataset: {}, children: [],
+    replaceChildren(...items) { this.children = items; }, append(...items) { this.children.push(...items); } });
+  const els = { 'room-name': node('b'), 'replica-header': node('span'), disc: node('span'), code: node('span') };
+  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev',
+    'let replica = null;\n' + replicaCode + '\nfunction updateReplicaView() { updateReplicaHeader(); }\n' + roomCode +
+    '\nreturn { setRoom, setReplica: (r) => { replica = r; updateReplicaHeader(); } };')(
+    (id) => els[id], { createElement: (tag) => node(tag) }, { port: '5566' }, null, () => {});
+
+  // Without replication: basename in the room menu title, full path as the first (monospace <code>) line of #replica-header.
+  harness.setRoom({ folder: '/Users/fausto/Software/agent-room', discussion: 'Topic', active: 'discussions/2026-11-13-topic' });
+  assert.equal(els['room-name'].textContent, 'agent-room');
+  assert.deepEqual(els['replica-header'].children.map((c) => [c.tag, c.textContent]), [
+    ['code', '/Users/fausto/Software/agent-room'],
+  ]);
+
+  // Trailing slash in folder still yields the basename, and replication adds its line below the full path.
+  harness.setRoom({ folder: '/tmp/other-project/', discussion: 'Topic', active: 'discussions/2026-11-13-topic' });
+  assert.equal(els['room-name'].textContent, 'other-project');
+  harness.setReplica({ node: 'mac', addresses: ['127.0.0.1:5566'], own: { '2026-11-13-topic': { round: 4 } }, peers: [], project: { commit: 'abc123', dirty: false } });
+  assert.deepEqual(els['replica-header'].children.map((c) => [c.tag, c.textContent]), [
+    ['code', '/tmp/other-project/'],
+    ['span', "mac 127.0.0.1:5566 · mac's line, round 4 · agents run on mac · Project abc123"],
+  ]);
+});

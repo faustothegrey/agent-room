@@ -42,16 +42,17 @@ mode; `/docs` opens a document separately in the browser.
 
 ## Use the screen
 
-The header has three zones. **Room** (blue): **agent-room ▾**, whose menu holds **Switch room…**,
-**Open room in folder…**, **Peers…** and **Quit room**, above the full **root folder**; hover or focus the room
-name for its replication line, when replication is on. **Current discussion** (green): the selected
+The header has three zones. **Room** (blue): **`<folder name> ▾`** (the last part of the room's root
+path), whose menu holds **Switch room…**, **Open room in folder…**, **Peers…** and **Quit room**;
+hover or focus the room name for the full **root folder** and, when replication is on, its
+replication line. Under the room name is **● Server ▾** (blue, or red when down), whose menu holds
+**Reload**, **Restart** and **Shutdown server**; hover or focus **Server** for its uptime, port and
+the server's version. An amber ⚠ to the right of **Server** means a replication peer is unreachable
+(hover for how many); click it to open **Peers…**. **Current discussion** (green): the selected
 discussion, **Brainstorm** or **No discussion started**, with its state under it (who is thinking, or your
 turn); **Actions ▾** holds **Summarize**, **New discussion**, **New brainstorm** and (on the screen)
-**Close discussion**. **Server and monitoring** (amber): **● Server ▾**, whose menu holds
-**Reload**, **Restart** and **Shutdown server**, then the monitor panel: the subscription usage gauges, with a
-warning per provider (below);
-hover or focus **Server** for its uptime, port and the server's version.
-An amber ⚠ under **Server** means a replication peer is unreachable (hover for how many); click it to open **Peers…**.
+**Close discussion**. **Monitoring** (amber): the monitor panel, with the subscription usage gauges
+and a warning per provider (below).
 
 The monitor panel watches agent-room's own Claude, Codex and agy programs and Claude and Codex login, for the room
 being viewed. A ⚠ right of a provider's name means a problem: **amber** when its login ends in 2

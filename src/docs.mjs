@@ -159,7 +159,7 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 :root { color-scheme: light dark; --line: #8884; --dim: #888; }
 * { box-sizing: border-box; }
 body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: var(--left, 38%) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
-/* The header: three zones, room (left), current discussion (middle), server and monitoring (right).
+/* The header: three zones, room (left), current discussion (middle), monitoring (right).
    Rare room and server actions sit in the ▾ menus; the gauges never shrink. */
 #header { grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(16rem, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
 .zone { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; border: 1.5px solid var(--zone); border-radius: 6px; padding: .3rem .6rem; align-self: stretch; justify-content: center; }
@@ -194,9 +194,9 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #new-discussion { display: contents; }
 #new-discussion[hidden] { display: none; }
 #server-zone { flex-direction: row; align-items: center; gap: .5rem; }
-#server-box { flex: none; display: flex; flex-direction: column; align-items: flex-start; }
-/* Under "● Server": some replication peer is unreachable (as in Peers…). Amber; red stays the server's. */
-#peer-warning { border: 0; background: none; padding: 0 .2rem; margin-left: -.2rem; font-size: .8rem; line-height: 1.1; color: light-dark(#92600a, #d6a84c); }
+#server-box { flex: none; display: flex; align-items: center; gap: .15rem; }
+/* Right of "● Server": some replication peer is unreachable (as in Peers…). Amber; red stays the server's. */
+#peer-warning { border: 0; background: none; padding: 0 .2rem; font-size: .8rem; line-height: 1.1; color: light-dark(#92600a, #d6a84c); }
 #peer-warning[hidden] { display: none; }
 #server-details { flex-direction: column; }
 /* The gauges' own children join this grid, so "on HH:MM" sits in the first row, as in the drawing. */
@@ -217,7 +217,6 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #ask-text { margin: 0 0 1rem; overflow-wrap: anywhere; }
 #ask-buttons { display: flex; justify-content: flex-end; gap: .5rem; }
 #rooms { max-width: min(28rem, 80vw); font: inherit; font-size: .75rem; }
-#folder { font-family: ui-monospace, monospace; font-size: .75rem; overflow-wrap: anywhere; line-height: 1.35; }
 #disc { font-size: .75rem; color: var(--dim); line-height: 1.35; }
 #disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
 #code { font-size: .7rem; color: var(--dim); font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
@@ -226,7 +225,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #winfo .error { color: #ef4444; }
 #winfo code { font-size: .7rem; overflow-wrap: anywhere; user-select: all; }
 #winfo button { align-self: flex-start; font-size: .75rem; margin-top: .2rem; }
-#server { max-width: 100%; font-size: .75rem; color: light-dark(#92600a, #d6a84c); display: inline-flex; align-items: center; gap: .4rem; }
+#server { max-width: 100%; font-size: .75rem; color: #5a7bd8; display: inline-flex; align-items: center; gap: .4rem; }
 #server[data-state="down"] { color: #ef4444; font-weight: 600; }
 #beat { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; flex: none; }
 #server[data-state="up"] #beat { background: #22c55e; } #server[data-state="down"] #beat { background: #ef4444; }
@@ -237,7 +236,8 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #files .hint { display: block; margin: 0 0 .8rem; }
 #gauges { display: contents; }
 .gauge { display: grid; grid-template-columns: 1.2rem 32px 1.8rem auto; gap: .2rem; align-items: center; line-height: 1.5; }
-.quota { display: grid; grid-template-columns: auto 1fr; gap: .05rem .35rem; align-items: center; border-left: 1px solid var(--line); padding-left: .5rem; }
+.quota { display: grid; grid-template-columns: auto 1fr; gap: .05rem .35rem; align-items: center; }
+.quota:not(:first-child) { border-left: 1px solid var(--line); padding-left: .5rem; }
 .gauge .bar { width: 32px; height: 6px; border-radius: 3px; background: #8883; overflow: hidden; }
 .gauge .bar i { display: block; height: 100%; background: #10b981; }
 .gauge.warn { color: #eab308; } .gauge.warn .bar i { background: #eab308; }
@@ -262,7 +262,6 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
   #header { grid-template-columns: 1fr; }
   #disc-zone { grid-row: 2; }
   #server-zone { grid-row: 3; }
-  .quota { padding-left: .5rem; }
 }
 .discussion-lines { margin: .4rem 0; min-width: 0; flex: 1; }
 .discussion-lines > summary { cursor: pointer; padding: .4rem 0; overflow-wrap: anywhere; }
@@ -414,9 +413,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .tools { flex-wrap: wrap; }
 </style></head><body>
 <header id="header">
-<div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b>agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><span id="folder" title="The room's root folder"></span><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
+<div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b id="room-name">agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
 <div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, kept only in memory: no folder, transcript or notes. It ends this session; Restart or Quit room loses it, and a new one replaces it.">New brainstorm</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Explorer.">Close discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div></div>
-<div id="server-zone" class="zone" aria-label="Server and monitoring"><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
+<div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 </header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
@@ -756,12 +755,21 @@ const peerActivity = (name) => {
 };
 function updateReplicaHeader() {
   const el = $('replica-header');
-  if (!el || !replica) { if (el) el.textContent = ''; return; }
+  if (!el) return;
+  el.replaceChildren();
+  if (room?.folder) {
+    const path = document.createElement('code');
+    path.textContent = room.folder;
+    el.append(path);
+  }
+  if (!replica) return;
   const r = replica, own = r.own[room?.active?.split('/').at(-1)];
   const project = r.project?.commit ? 'Project ' + r.project.commit + (r.project.dirty ? ' + uncommitted' : '') : 'Version unavailable';
   const line = viewing ? '[Viewing ' + viewing.node + "'s line, round " + viewing.round + ', received ' + receivedTime(viewing.receivedAt) + ' · read-only] · ' + viewing.node + ': ' + peerActivity(viewing.node)
     : r.node + "'s line" + (own ? ', round ' + own.round : ', no saved round') + ' · agents run on ' + r.node;
-  el.textContent = r.node + ' ' + (r.addresses[0] || '127.0.0.1:' + location.port) + ' · ' + line + ' · ' + project;
+  const info = document.createElement('span');
+  info.textContent = r.node + ' ' + (r.addresses[0] || '127.0.0.1:' + location.port) + ' · ' + line + ' · ' + project;
+  el.append(info);
 }
 // The status under the title, for the selected tab. While auto dev runs, the turn is not the User's.
 function talkStatus() {
@@ -1185,12 +1193,12 @@ async function openFiles(group) {
     entry('folder', s + '/', () => openFiles('discussions/' + s), n + (n === 1 ? ' discussion' : ' discussions'), s === 'archive' ? 'Finished discussions' : 'Postponed discussions');
   }
 }
-// The header: the room's full root path and its active discussion, if one has been selected.
+// The header: the room's folder name, its full root path (in the tooltip) and its active discussion.
 let room = null;
 function setRoom(r) {
   room = r;
   renderAutoDev();
-  $('folder').textContent = r.folder;
+  $('room-name').textContent = r.folder?.replace(/[/]+$/, '').split('/').pop() || r.folder || 'agent-room';
   $('disc').textContent = r.discussion || '';
   $('disc').dataset.active = r.active ? 'true' : 'false';
   showVersion(r.code);
