@@ -225,7 +225,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #winfo .error { color: #ef4444; }
 #winfo code { font-size: .7rem; overflow-wrap: anywhere; user-select: all; }
 #winfo button { align-self: flex-start; font-size: .75rem; margin-top: .2rem; }
-#server { max-width: 100%; font-size: .75rem; color: #5a7bd8; display: inline-flex; align-items: center; gap: .4rem; }
+#server { max-width: 100%; font-size: .75rem; color: light-dark(#3d5fc4, #5a7bd8); display: inline-flex; align-items: center; gap: .4rem; }
 #server[data-state="down"] { color: #ef4444; font-weight: 600; }
 #beat { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; flex: none; }
 #server[data-state="up"] #beat { background: #22c55e; } #server[data-state="down"] #beat { background: #ef4444; }
