@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 800" font-family="Helvetica, Arial, sans-serif" font-size="12">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#444"/>
+    </marker>
+  </defs>
+  <rect width="1080" height="800" fill="#fff"/>
+  <text x="20" y="28" font-size="17" font-weight="bold">Discussion lifecycle: states, checkpoints, Resume, Start fresh, Archive &amp; Defer — src/ui.mjs (2026-11-13)</text>
+  <text x="20" y="46" font-size="12" fill="#555">On the browser screen, several discussions can be open at once in a folder (each in its own context #d1, #d2…), plus at most one brainstorm.</text>
+
+  <!-- Row 1 Left: Empty / New discussion (x=20..340, y=64..210) -->
+  <rect x="20" y="64" width="320" height="146" rx="6" fill="#f3f7fb" stroke="#1168bd" stroke-width="1.5"/>
+  <rect x="20" y="64" width="320" height="26" rx="6" fill="#1168bd"/>
+  <text x="180" y="82" fill="#fff" text-anchor="middle" font-weight="bold">1. Unstarted context (/new or launch)</text>
+  <text x="32" y="106" font-size="11">• No folder, transcript or checkpoint on disk yet</text>
+  <text x="32" y="122" font-size="11">• Screen <tspan font-family="monospace">/new</tspan>: opens beside open discussions;</text>
+  <text x="42" y="136" font-size="10.5" fill="#444">ends any open brainstorm (if no worker hold)</text>
+  <text x="32" y="152" font-size="11">• Settings changes apply directly before 1st message</text>
+  <text x="32" y="168" font-size="11">• Worker tasks before 1st message use <tspan font-family="monospace">worker/main</tspan></text>
+  <text x="32" y="184" font-size="10.5" fill="#555">• Valid 1st message → <tspan font-family="monospace">openDiscussion()</tspan>:</text>
+  <text x="42" y="198" font-size="10.5" fill="#555"><tspan font-family="monospace">claudeTitle()</tspan> (30s) → mkdir + <tspan font-family="monospace">session-*.md</tspan></text>
+
+  <!-- Arrow 1 -> 3 (First message) -->
+  <line x1="340" y1="137" x2="388" y2="137" stroke="#444" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="364" y="129" font-size="10" text-anchor="middle" fill="#1168bd" font-weight="bold">1st msg</text>
+
+  <!-- Row 1 Right: Brainstorm (x=740..1060, y=64..210) -->
+  <rect x="740" y="64" width="320" height="146" rx="6" fill="#fafafa" stroke="#888" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <rect x="740" y="64" width="320" height="26" rx="6" fill="#777"/>
+  <text x="900" y="82" fill="#fff" text-anchor="middle" font-weight="bold">2. Brainstorm (/brainstorm)</text>
+  <text x="752" y="106" font-size="11">• At most one open per folder (<tspan font-family="monospace">state.brainstorm</tspan>)</text>
+  <text x="752" y="122" font-size="11">• Lives in server RAM only: no folder, no transcript,</text>
+  <text x="762" y="136" font-size="10.5" fill="#444">no checkpoint, no auto dev, no file attachments</text>
+  <text x="752" y="152" font-size="11" fill="#b07a1f">• Briefing asks agents to write no files</text>
+  <text x="752" y="168" font-size="11">• Worker uses shared <tspan font-family="monospace">&lt;repo&gt;.worker/</tspan> (<tspan font-family="monospace">worker/main</tspan>)</text>
+  <text x="752" y="184" font-size="10.5" fill="#555">• Survives Reload &amp; page refresh; lost on Restart,</text>
+  <text x="762" y="198" font-size="10.5" fill="#555">Quit room, <tspan font-family="monospace">/close</tspan>, <tspan font-family="monospace">/new</tspan> or another <tspan font-family="monospace">/brainstorm</tspan></text>
+
+  <!-- Center Box: Active Open Discussion (x=390..710, y=64..268) -->
+  <rect x="390" y="64" width="320" height="204" rx="6" fill="#e6f4ea" stroke="#2e7d32" stroke-width="2"/>
+  <rect x="390" y="64" width="320" height="26" rx="6" fill="#2e7d32"/>
+  <text x="550" y="82" fill="#fff" text-anchor="middle" font-weight="bold">3. Open discussion (in use / open beside)</text>
+  <text x="402" y="106" font-size="11">• Folder: <tspan font-family="monospace">discussions/&lt;date-title&gt;/</tspan></text>
+  <text x="402" y="122" font-size="11">• Current session log: <tspan font-family="monospace">transcripts/session-*.md</tspan></text>
+  <text x="402" y="138" font-size="11">• Own agent sessions + worker session (<tspan font-family="monospace">workerSeat</tspan>)</text>
+  <text x="402" y="154" font-size="11">• Worktree: <tspan font-family="monospace">&lt;repo&gt;.workers/&lt;name&gt;/</tspan></text>
+  <text x="412" y="168" font-size="10.5" fill="#444">(on branch <tspan font-family="monospace">worker/&lt;name&gt;</tspan>, own queue)</text>
+  <text x="402" y="184" font-size="11">• Saves checkpoint after every round, <tspan font-family="monospace">/summary</tspan>,</text>
+  <text x="412" y="198" font-size="10.5" fill="#444">worker task, and on <tspan font-family="monospace">endSession()</tspan> (Close, Quit, Restart)</text>
+  <text x="402" y="214" font-size="11">• <tspan font-family="monospace">/close</tspan>: refuses on <tspan font-family="monospace">workerHold()</tspan> or replica owner;</text>
+  <text x="412" y="228" font-size="10.5" fill="#444">otherwise calls <tspan font-family="monospace">endSession()</tspan> &amp; <tspan font-family="monospace">detachWorker()</tspan></text>
+  <text x="412" y="242" font-size="10.5" fill="#555">(in-flight worker tasks finish &amp; save to checkpoint)</text>
+
+  <!-- Arrow down from Active Discussion to Checkpoint / Closed states -->
+  <line x1="470" y1="268" x2="470" y2="306" stroke="#444" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="462" y="291" font-size="10" text-anchor="end" fill="#444">saveCheckpoint() / Close / Restart</text>
+  <line x1="620" y1="308" x2="620" y2="270" stroke="#2e7d32" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="628" y="291" font-size="10" fill="#2e7d32" font-weight="bold">Resume / 1st msg</text>
+
+  <!-- Row 2 Left: Resume with Full Checkpoint (x=20..525, y=308..518) -->
+  <rect x="20" y="308" width="505" height="210" rx="6" fill="#f3f7fb" stroke="#1168bd" stroke-width="1.5"/>
+  <rect x="20" y="308" width="505" height="26" rx="6" fill="#1168bd"/>
+  <text x="272" y="326" fill="#fff" text-anchor="middle" font-weight="bold">4a. Resume with full checkpoint (/resume &lt;name&gt;, or Restart)</text>
+  <text x="32" y="350" font-size="11">• Checkpoint file: <tspan font-family="monospace">~/.local/state/agent-room/paused/&lt;rootHash&gt;/&lt;nameHash&gt;.json</tspan></text>
+  <text x="32" y="367" font-size="11">• If already open in another context of this folder: <tspan font-family="monospace">goto()</tspan> shows it as-is</text>
+  <text x="32" y="384" font-size="11">• If in <tspan font-family="monospace">archive/</tspan> or <tspan font-family="monospace">deferred/</tspan>: moved back to <tspan font-family="monospace">discussions/&lt;name&gt;/</tspan> first</text>
+  <text x="32" y="401" font-size="11">• <tspan font-family="monospace">loadCheckpoint()</tspan> validates version, root, transcript file &amp; provider session IDs:</text>
+  <text x="42" y="416" font-size="10.5" fill="#444">– Restores same CLI sessions, chat, <tspan font-family="monospace">seen</tspan> map, token totals &amp; same <tspan font-family="monospace">session-*.md</tspan> file</text>
+  <text x="42" y="431" font-size="10.5" fill="#444">– Reattaches live worker if still running (<tspan font-family="monospace">reattachWorker</tspan>); else restores worker session</text>
+  <text x="42" y="446" font-size="10.5" fill="#444">– Adds <tspan font-family="monospace">state.restored</tspan> notice to each agent's next prompt ("restored from checkpoint…")</text>
+  <text x="42" y="461" font-size="10.5" fill="#444">– If transcript file grew after checkpoint (<tspan font-family="monospace">logBytes</tspan>): warns User with line number</text>
+  <text x="42" y="476" font-size="10.5" fill="#444">– <tspan font-family="monospace">reportWork()</tspan> reports any interrupted or unstarted worker tasks in chat &amp; Worker tab</text>
+  <text x="32" y="495" font-size="10.5" fill="#c0392b">• If checkpoint or provider session is invalid/missing: kept on disk, error suggests Start fresh</text>
+  <text x="42" y="509" font-size="10.5" fill="#c0392b">(Resume never silently starts a fresh session).</text>
+
+  <!-- Row 2 Right: Start fresh / Resume without checkpoint (x=555..1060, y=308..518) -->
+  <rect x="555" y="308" width="505" height="210" rx="6" fill="#fdf6ec" stroke="#b07a1f" stroke-width="1.5"/>
+  <rect x="555" y="308" width="505" height="26" rx="6" fill="#b07a1f"/>
+  <text x="807" y="326" fill="#fff" text-anchor="middle" font-weight="bold">4b. Start fresh (/fresh &lt;name&gt;) or Resume without checkpoint</text>
+  <text x="567" y="350" font-size="11">• <tspan font-family="monospace">/fresh &lt;name&gt;</tspan>: saves then discards old CLI sessions &amp; chat; extracts latest <tspan font-family="monospace">Summary</tspan></text>
+  <text x="567" y="367" font-size="11">• Writes a small checkpoint (<tspan font-family="monospace">fresh: true</tspan>) holding only <tspan font-family="monospace">summary</tspan> &amp; <tspan font-family="monospace">work</tspan> until round 1</text>
+  <text x="567" y="384" font-size="11">• <tspan font-family="monospace">/resume &lt;name&gt;</tspan> when no full checkpoint exists also enters this state (<tspan font-family="monospace">continued: true</tspan>)</text>
+  <text x="567" y="401" font-size="11">• On the User's next message (<tspan font-family="monospace">openDiscussion()</tspan>, no new title requested):</text>
+  <text x="577" y="416" font-size="10.5" fill="#444">– Creates a new <tspan font-family="monospace">transcripts/session-YYYY-MM-DD-HHMM.md</tspan> file (older ones stay)</text>
+  <text x="577" y="431" font-size="10.5" fill="#444">– Starts fresh agent &amp; worker CLI sessions</text>
+  <text x="577" y="446" font-size="10.5" fill="#444">– <tspan font-family="monospace">briefing()</tspan> tells agents this continues <tspan font-family="monospace">discussions/&lt;name&gt;/</tspan>, instructs them to start</text>
+  <text x="587" y="460" font-size="10.5" fill="#444">from <tspan font-family="monospace">handoff.md</tspan>, and appends the saved <tspan font-family="monospace">freshSummary</tspan> (marked if <tspan font-family="monospace">not agreed</tspan>)</text>
+  <text x="567" y="480" font-size="11" fill="#b07a1f">• Handoff convention (brainstorming rulebook, followed by agents in turn order):</text>
+  <text x="577" y="495" font-size="10.5" fill="#b07a1f">– 1st agent reads <tspan font-family="monospace">handoff.md</tspan>, marks Delivery read, renames to <tspan font-family="monospace">handoff-read-*.md</tspan>,</text>
+  <text x="587" y="509" font-size="10.5" fill="#b07a1f">and announces path; other agents read that archive and record their names.</text>
+
+  <!-- Arrows to Row 3 (Archive & Defer) -->
+  <line x1="272" y1="518" x2="272" y2="552" stroke="#444" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="280" y="539" font-size="10" fill="#444">/move, Archive, Defer, /rollback</text>
+
+  <!-- Row 3: Archive, Defer & Rollback (x=20..1060, y=554..734) -->
+  <rect x="20" y="554" width="1040" height="180" rx="6" fill="#fafafa" stroke="#888" stroke-width="1.5"/>
+  <rect x="20" y="554" width="1040" height="26" rx="6" fill="#555"/>
+  <text x="540" y="572" fill="#fff" text-anchor="middle" font-weight="bold">5. Moving discussions: discussions/archive/&lt;name&gt;/ &amp; discussions/deferred/&lt;name&gt;/ (moveDiscussion in src/ui.mjs)</text>
+
+  <!-- Left column inside Row 3 (x=34..530) -->
+  <text x="34" y="596" font-weight="bold" fill="#1168bd">Common guards (enforced before any move):</text>
+  <text x="34" y="612" font-size="11">• Refused if shown in this room context (<tspan font-family="monospace">ctx.discussion.dir === from</tspan>)</text>
+  <text x="34" y="628" font-size="11">• Refused if a round is running (<tspan font-family="monospace">open.busy</tspan>), a worker task is writing to it,</text>
+  <text x="44" y="642" font-size="10.5" fill="#444">or it holds unresolved worker edits (<tspan font-family="monospace">workerHold</tspan>). Open siblings update live.</text>
+  <text x="34" y="660" font-weight="bold" fill="#1168bd">Defer guard (<tspan font-family="monospace">/move &lt;name&gt; deferred</tspan>):</text>
+  <text x="34" y="676" font-size="11">• Also refused if <tspan font-family="monospace">worker/&lt;name&gt;</tspan> or <tspan font-family="monospace">worker/main</tspan> has commits for <tspan font-family="monospace">&lt;name&gt;</tspan></text>
+  <text x="44" y="690" font-size="10.5" fill="#444">not merged into <tspan font-family="monospace">main</tspan>. Merging into <tspan font-family="monospace">main</tspan> clears the guard.</text>
+  <text x="34" y="707" font-size="10.5" fill="#555">• <tspan font-family="monospace">Make active</tspan> (<tspan font-family="monospace">/move archive|deferred/&lt;name&gt; active</tspan>), <tspan font-family="monospace">/resume</tspan> or</text>
+  <text x="44" y="721" font-size="10.5" fill="#555"><tspan font-family="monospace">/fresh</tspan> moves the folder back to <tspan font-family="monospace">discussions/&lt;name&gt;/</tspan>.</text>
+
+  <!-- Divider inside Row 3 -->
+  <line x1="540" y1="588" x2="540" y2="726" stroke="#ccc"/>
+
+  <!-- Right column inside Row 3 (x=554..1050) -->
+  <text x="554" y="596" font-weight="bold" fill="#1168bd">Archive with rollback (<tspan font-family="monospace">/rollback &lt;name&gt;</tspan> → <tspan font-family="monospace">/archive-rollback &lt;name&gt;</tspan>):</text>
+  <text x="554" y="612" font-size="11">1. <tspan font-family="monospace">/rollback &lt;name&gt;</tspan> queues a worker task on <tspan font-family="monospace">worker/&lt;name&gt;</tspan> (blocks plain Archive)</text>
+  <text x="554" y="628" font-size="11">2. Worker inspects <tspan font-family="monospace">worker/&lt;name&gt;</tspan>, <tspan font-family="monospace">main</tspan> &amp; <tspan font-family="monospace">worker/main</tspan>; stops before editing if</text>
+  <text x="566" y="642" font-size="10.5" fill="#444">set or dependencies are ambiguous; otherwise merges <tspan font-family="monospace">main</tspan>, reverts <tspan font-family="monospace">[&lt;name&gt;]</tspan></text>
+  <text x="566" y="656" font-size="10.5" fill="#444">implementation commits newest-first, runs <tspan font-family="monospace">npm test</tspan>, commits with rollback trailers</text>
+  <text x="554" y="672" font-size="11">3. Harness checks clean tree, <tspan font-family="monospace">HEAD</tspan> &amp; trailer from <tspan font-family="monospace">Rollback ready: &lt;sha&gt;</tspan></text>
+  <text x="554" y="688" font-size="11">4. User reviews report, switches away, and runs <tspan font-family="monospace">/archive-rollback &lt;name&gt;</tspan></text>
+  <text x="566" y="702" font-size="10.5" fill="#444">(re-verifies <tspan font-family="monospace">HEAD</tspan> before moving folder to <tspan font-family="monospace">discussions/archive/</tspan>).</text>
+  <text x="566" y="716" font-size="10.5" fill="#555">User still merges <tspan font-family="monospace">worker/&lt;name&gt;</tspan> into <tspan font-family="monospace">main</tspan> manually.</text>
+
+  <!-- Footer -->
+  <rect x="20" y="746" width="1040" height="36" fill="#fafafa" stroke="#ccc"/>
+  <rect x="34" y="757" width="14" height="14" fill="#1168bd"/><text x="54" y="769" font-size="11">Harness-enforced state &amp; guards (<tspan font-family="monospace">src/ui.mjs</tspan>)</text>
+  <rect x="330" y="757" width="14" height="14" fill="#2e7d32"/><text x="350" y="769" font-size="11">Active discussion state</text>
+  <text x="510" y="769" font-size="11" fill="#b07a1f">Amber = Agent convention from rulebook (asked, not enforced)</text>
+</svg>

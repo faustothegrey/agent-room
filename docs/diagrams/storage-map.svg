@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 760" font-family="Helvetica, Arial, sans-serif" font-size="12">
+  <rect width="1060" height="760" fill="#fff"/>
+  <text x="20" y="28" font-size="17" font-weight="bold">Storage map: every file and folder read or written — checked against src/ (2026-11-13)</text>
+  <text x="20" y="46" font-size="12" fill="#555">Blue = written/enforced by agent-room harness · Amber = written by agents under role instructions · Grey = external CLI state</text>
+
+  <!-- Box 1: Room Root (x=20..520, y=64..384) -->
+  <rect x="20" y="64" width="500" height="320" rx="4" fill="#fafafa" stroke="#1168bd" stroke-width="1.5"/>
+  <rect x="20" y="64" width="500" height="28" rx="4" fill="#1168bd"/>
+  <text x="270" y="83" fill="#fff" text-anchor="middle" font-weight="bold" font-size="13">1. Room root: &lt;root&gt;/ (--cwd)</text>
+
+  <text x="32" y="110" font-weight="bold" fill="#333">&lt;root&gt;/* (project files &amp; root docs)</text>
+  <text x="32" y="126" font-size="11">• Read by discussion agents, worker, and <tspan font-family="monospace">docs.mjs</tspan> (confined to realpath)</text>
+  <text x="32" y="142" font-size="11">• User merges worker branches into <tspan font-family="monospace">&lt;root&gt;</tspan> manually (<tspan font-family="monospace">git merge</tspan>)</text>
+
+  <text x="32" y="166" font-weight="bold" fill="#1168bd">discussions/&lt;date-title&gt;/ (created by ui.mjs on 1st message)</text>
+  <text x="32" y="182" font-size="11" fill="#1168bd">• <tspan font-family="monospace">transcripts/session-YYYY-MM-DD-HHMM[-n].md</tspan></text>
+  <text x="42" y="196" font-size="10.5" fill="#444">Written by <tspan font-family="monospace">ui.mjs</tspan> (<tspan font-family="monospace">createSessionFile, log</tspan>): every round, summary &amp; report</text>
+  <text x="32" y="212" font-size="11" fill="#1168bd">• <tspan font-family="monospace">files/&lt;name&gt;</tspan>: attachments saved by <tspan font-family="monospace">ui.mjs</tspan> (≤25 MB each, ≤250 MB/msg)</text>
+
+  <text x="32" y="236" font-weight="bold" fill="#b07a1f">Written inside discussions/&lt;date-title&gt;/ by agents (role instructions):</text>
+  <text x="32" y="252" font-size="11" fill="#b07a1f">• <tspan font-family="monospace">notes.md</tspan>, <tspan font-family="monospace">drawings/*.svg</tspan>: discussion notes, diagrams &amp; worker plans</text>
+  <text x="32" y="268" font-size="11" fill="#b07a1f">• <tspan font-family="monospace">handoff.md</tspan> → renamed to <tspan font-family="monospace">handoff-read-YYYYMMDD-HHMMSS.md</tspan></text>
+  <text x="32" y="284" font-size="11" fill="#b07a1f">• <tspan font-family="monospace">pending-instructions.md</tspan>: unsent worker instructions word for word</text>
+
+  <text x="32" y="308" font-weight="bold" fill="#1168bd">discussions/archive/ &amp; discussions/deferred/</text>
+  <text x="32" y="324" font-size="11">• Whole discussion folder moved by <tspan font-family="monospace">ui.mjs</tspan> (<tspan font-family="monospace">/move</tspan>, Archive, Defer, Resume)</text>
+  <text x="32" y="344" font-size="10.5" fill="#555">Note: a Brainstorm has no folder, transcript or files here (lives in RAM only).</text>
+  <text x="32" y="362" font-size="10.5" fill="#555">Agent-room checkout also holds <tspan font-family="monospace">README-for-*-agents.md</tspan>, read on load/Reload.</text>
+
+  <!-- Box 2: Worker Worktrees & Git Metadata (x=540..1040, y=64..384) -->
+  <rect x="540" y="64" width="500" height="320" rx="4" fill="#fafafa" stroke="#1168bd" stroke-width="1.5"/>
+  <rect x="540" y="64" width="500" height="28" rx="4" fill="#1168bd"/>
+  <text x="790" y="83" fill="#fff" text-anchor="middle" font-weight="bold" font-size="13">2. Worker Git worktrees &amp; repository metadata</text>
+
+  <text x="552" y="110" font-weight="bold" fill="#1168bd">Sibling worktree folders (created by ui.mjs on 1st worker task)</text>
+  <text x="552" y="126" font-size="11">• <tspan font-family="monospace">&lt;repo&gt;.workers/&lt;name&gt;/</tspan> on branch <tspan font-family="monospace">worker/&lt;name&gt;</tspan> (one per discussion)</text>
+  <text x="552" y="142" font-size="11">• <tspan font-family="monospace">&lt;repo&gt;.worker/</tspan> on branch <tspan font-family="monospace">worker/main</tspan> (brainstorm, pre-title, or legacy)</text>
+  <text x="552" y="158" font-size="10.5" fill="#444">Fast-forwarded to <tspan font-family="monospace">main</tspan> before a task by <tspan font-family="monospace">ui.mjs</tspan> when clean &amp; strictly behind.</text>
+
+  <text x="552" y="182" font-weight="bold" fill="#b07a1f">Written inside the worktree by the Worker (worker rulebook):</text>
+  <text x="552" y="198" font-size="11" fill="#b07a1f">• Tracked project edits, committed on <tspan font-family="monospace">worker/&lt;name&gt;</tspan> with <tspan font-family="monospace">[&lt;origin&gt;]</tspan> prefix</text>
+  <text x="552" y="214" font-size="11" fill="#b07a1f">• <tspan font-family="monospace">.worker-notes/&lt;task&gt;/</tspan>: temporary scratch notes (deleted on stage accepted)</text>
+
+  <text x="552" y="242" font-weight="bold" fill="#1168bd">Private Git metadata (inside &lt;root&gt;/.git/, never committed)</text>
+  <text x="552" y="258" font-size="11" fill="#1168bd">• <tspan font-family="monospace">&lt;worktree-git-dir&gt;/agent-room-task.json</tspan> (<tspan font-family="monospace">ownerFile()</tspan> in <tspan font-family="monospace">ui.mjs</tspan>):</text>
+  <text x="562" y="272" font-size="10.5" fill="#444">Written before task starts (<tspan font-family="monospace">{ version, root, label, task, before }</tspan>); removed</text>
+  <text x="562" y="286" font-size="10.5" fill="#444">when worktree is clean. Identifies who holds the lane if uncommitted edits remain.</text>
+  <text x="552" y="304" font-size="11" fill="#1168bd">• <tspan font-family="monospace">&lt;main-git-dir&gt;/info/exclude</tspan>:</text>
+  <text x="562" y="318" font-size="10.5" fill="#444"><tspan font-family="monospace">ui.mjs</tspan> appends <tspan font-family="monospace">.worker-notes/</tspan> so worker scratch files stay untracked.</text>
+  <text x="552" y="340" font-size="10.5" fill="#555">• <tspan font-family="monospace">git merge-tree --write-tree</tspan> (Git ≥ 2.38) writes unreferenced preview objects</text>
+  <text x="562" y="354" font-size="10.5" fill="#555">during Worker tab status checks (cleaned up by Git's own <tspan font-family="monospace">git gc</tspan>).</text>
+
+  <!-- Box 3: Local Machine State (x=20..520, y=402..700) -->
+  <rect x="20" y="402" width="500" height="298" rx="4" fill="#fafafa" stroke="#1168bd" stroke-width="1.5"/>
+  <rect x="20" y="402" width="500" height="28" rx="4" fill="#1168bd"/>
+  <text x="270" y="421" fill="#fff" text-anchor="middle" font-weight="bold" font-size="13">3. Local machine state (~/.config, ~/.local — never replicated)</text>
+
+  <text x="32" y="446" font-weight="bold" fill="#1168bd">~/.config/agent-room/defaults.json (ui.mjs)</text>
+  <text x="32" y="461" font-size="10.5" fill="#444">Saved provider, agent name &amp; model defaults across folders and launches.</text>
+
+  <text x="32" y="483" font-weight="bold" fill="#1168bd">~/.local/state/agent-room/paused/&lt;sha256(root)&gt;/&lt;sha256(name)&gt;.json</text>
+  <text x="32" y="498" font-size="10.5" fill="#444">Per-discussion checkpoint (<tspan font-family="monospace">ui.mjs</tspan>): session IDs, chat, <tspan font-family="monospace">seen</tspan> map, worker log &amp;</text>
+  <text x="32" y="512" font-size="10.5" fill="#444">tasks, token totals; or <tspan font-family="monospace">fresh: true</tspan> holding only the previous session's summary.</text>
+
+  <text x="32" y="534" font-weight="bold" fill="#1168bd">~/.local/state/agent-room/programs/&lt;pid&gt;.json (agents.mjs)</text>
+  <text x="32" y="549" font-size="10.5" fill="#444">One file per running CLI process group; scanned by <tspan font-family="monospace">findLeftovers()</tspan> after crash/Restart.</text>
+
+  <text x="32" y="571" font-weight="bold" fill="#1168bd">~/.local/share/agent-room/notes/&lt;sha256(root)&gt;/&lt;id&gt;.md (notes.mjs)</text>
+  <text x="32" y="586" font-size="10.5" fill="#444">User's Notes pane files (loopback only); never in <tspan font-family="monospace">&lt;root&gt;</tspan>, unseen by agents.</text>
+
+  <text x="32" y="610" font-weight="bold" fill="#666">External CLI &amp; launcher files on this machine:</text>
+  <text x="32" y="626" font-size="10.5" fill="#555">• <tspan font-family="monospace">~/.codex/models_cache.json</tspan> (or <tspan font-family="monospace">$CODEX_HOME</tspan>): read by <tspan font-family="monospace">ui.mjs</tspan> for model dropdown</text>
+  <text x="32" y="642" font-size="10.5" fill="#555">• Provider session stores (e.g. <tspan font-family="monospace">~/.claude/projects/</tspan>, Codex &amp; agy state): owned by CLIs</text>
+  <text x="32" y="658" font-size="10.5" fill="#555">• <tspan font-family="monospace">~/Library/Logs/agent-room.log</tspan>: written by the macOS Dock launcher script</text>
+
+  <!-- Box 4: Replication Store (x=540..1040, y=402..700) -->
+  <rect x="540" y="402" width="500" height="298" rx="4" fill="#fafafa" stroke="#1168bd" stroke-width="1.5"/>
+  <rect x="540" y="402" width="500" height="28" rx="4" fill="#1168bd"/>
+  <text x="790" y="421" fill="#fff" text-anchor="middle" font-weight="bold" font-size="13">4. Replication store: &lt;root&gt;/.agent-room/ (optional, --node)</text>
+
+  <text x="552" y="446" font-size="10.5" fill="#444">Managed by <tspan font-family="monospace">src/replicate.mjs</tspan> (launch room only; separate from project Git):</text>
+
+  <text x="552" y="468" font-weight="bold" fill="#1168bd">store.git/ (bare Git repository)</text>
+  <text x="552" y="484" font-size="11">• <tspan font-family="monospace">refs/lines/&lt;discId&gt;/&lt;node&gt;</tspan>: local round commits (files + <tspan font-family="monospace">.agent-room-round.json</tspan>)</text>
+  <text x="552" y="500" font-size="11">• <tspan font-family="monospace">refs/received/&lt;discId&gt;/&lt;node&gt;</tspan> &amp; <tspan font-family="monospace">refs/incoming/…</tspan>: verified peer bundles</text>
+
+  <text x="552" y="524" font-weight="bold" fill="#1168bd">Metadata &amp; staging files in &lt;root&gt;/.agent-room/</text>
+  <text x="552" y="540" font-size="11">• <tspan font-family="monospace">room.json</tspan>: established room ID, this node's name, paired peers</text>
+  <text x="552" y="556" font-size="11">• <tspan font-family="monospace">discussions.json</tspan>: maps local discussion folder names to discussion IDs</text>
+  <text x="552" y="572" font-size="11">• <tspan font-family="monospace">acked.json</tspan>: latest commit SHA acknowledged by each peer</text>
+  <text x="552" y="588" font-size="11">• <tspan font-family="monospace">tmp/</tspan>: temporary bundles and atomic-write staging files</text>
+
+  <text x="552" y="612" font-weight="bold" fill="#1168bd">received/&lt;discId&gt;/&lt;node&gt;/ (read-only peer views)</text>
+  <text x="552" y="628" font-size="11">• <tspan font-family="monospace">snapshots/&lt;commit&gt;/</tspan>: unpacked peer discussion files (mode <tspan font-family="monospace">0444</tspan>)</text>
+  <text x="552" y="644" font-size="11">• <tspan font-family="monospace">published.json</tspan>: atomic pointer to latest snapshot; leased snapshots</text>
+  <text x="562" y="658" font-size="10.5" fill="#444">stay while viewed in a browser (2-min lease), older unleased ones are pruned.</text>
+
+  <!-- Footer -->
+  <rect x="20" y="712" width="1020" height="36" fill="#fafafa" stroke="#ccc"/>
+  <text x="34" y="734" font-size="11" fill="#555">All agent-room JSON state updates use write-aside (<tspan font-family="monospace">.tmp</tspan>) + atomic <tspan font-family="monospace">rename</tspan>. Agents have full filesystem access; folder boundaries are instructions.</text>
+</svg>

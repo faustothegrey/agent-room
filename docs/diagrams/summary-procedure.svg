@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" font-family="Helvetica, Arial, sans-serif" font-size="12">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#444"/></marker>
+  </defs>
+  <rect width="1000" height="640" fill="#fff"/>
+  <text x="20" y="28" font-size="17" font-weight="bold">The summary procedure: summary() in src/room.mjs (checked 2026-11-13)</text>
+  <text x="20" y="46" fill="#555">Runs after a round in which an agent spoke (or auto dev is deciding) and no turn failed; also on /summary. n = number of agents.</text>
+
+  <!-- Start -->
+  <rect x="20" y="66" width="300" height="64" rx="6" fill="#f3f7fb" stroke="#1168bd"/>
+  <text x="32" y="86" font-weight="bold" fill="#1168bd">1. Choose the drafter (rotates)</text>
+  <text x="32" y="103">first = summaries so far mod n; the order starts there.</text>
+  <text x="32" y="119">Summary 1: agent 1 drafts · summary 2: agent 2 · …</text>
+  <line x1="170" y1="130" x2="170" y2="156" stroke="#444" marker-end="url(#a)"/>
+
+  <rect x="20" y="158" width="300" height="64" rx="6" fill="#f3f7fb" stroke="#1168bd"/>
+  <text x="32" y="178" font-weight="bold" fill="#1168bd">2. Next agent in the order takes a turn</text>
+  <text x="32" y="195">No version yet: "draft" task (summaryFormat).</text>
+  <text x="32" y="211">Otherwise: "review the latest version by X" task.</text>
+  <line x1="170" y1="222" x2="170" y2="252" stroke="#444" marker-end="url(#a)"/>
+
+  <!-- Decision -->
+  <polygon points="170,254 300,300 170,346 40,300" fill="#fff8e6" stroke="#b07a1f"/>
+  <text x="170" y="297" text-anchor="middle" font-weight="bold">What did the</text>
+  <text x="170" y="313" text-anchor="middle" font-weight="bold">agent reply?</text>
+
+  <!-- Error -->
+  <line x1="40" y1="300" x2="20" y2="300" stroke="#444"/>
+  <line x1="20" y1="300" x2="20" y2="420" stroke="#444" marker-end="url(#a)"/>
+  <text x="26" y="370" font-size="11" fill="#444" transform="rotate(-90 26 370)">turn failed</text>
+  <rect x="0" y="422" width="150" height="48" rx="6" fill="#fde8e8" stroke="#c0392b" transform="translate(10 0)"/>
+  <text x="85" y="442" text-anchor="middle" font-weight="bold" fill="#c0392b">failed</text>
+  <text x="85" y="458" text-anchor="middle" font-size="11">summary stops</text>
+
+  <!-- Pass -->
+  <line x1="170" y1="346" x2="170" y2="420" stroke="#444" marker-end="url(#a)"/>
+  <text x="178" y="376" font-size="11" fill="#444">PASS</text>
+  <polygon points="250,422 330,452 250,482 170,452" fill="#fff8e6" stroke="#b07a1f" transform="translate(0 0)"/>
+  <text x="250" y="449" text-anchor="middle" font-size="11" font-weight="bold">any version</text>
+  <text x="250" y="463" text-anchor="middle" font-size="11" font-weight="bold">yet?</text>
+  <line x1="250" y1="482" x2="250" y2="518" stroke="#444" marker-end="url(#a)"/>
+  <text x="256" y="504" font-size="11" fill="#444">no</text>
+  <rect x="180" y="520" width="140" height="48" rx="6" fill="#eee" stroke="#888"/>
+  <text x="250" y="540" text-anchor="middle" font-weight="bold">empty</text>
+  <text x="250" y="556" text-anchor="middle" font-size="11">nothing to summarize</text>
+
+  <line x1="330" y1="452" x2="398" y2="452" stroke="#444" marker-end="url(#a)"/>
+  <text x="340" y="444" font-size="11" fill="#444">yes: passes + 1</text>
+  <polygon points="490,420 580,452 490,484 400,452" fill="#fff8e6" stroke="#b07a1f"/>
+  <text x="490" y="449" text-anchor="middle" font-size="11" font-weight="bold">passes =</text>
+  <text x="490" y="463" text-anchor="middle" font-size="11" font-weight="bold">n − 1 ?</text>
+  <line x1="580" y1="452" x2="668" y2="452" stroke="#444" marker-end="url(#a)"/>
+  <text x="600" y="444" font-size="11" fill="#444">yes</text>
+  <rect x="670" y="424" width="150" height="56" rx="6" fill="#e6f4ea" stroke="#2e7d32"/>
+  <text x="745" y="446" text-anchor="middle" font-weight="bold" fill="#2e7d32">agreed</text>
+  <text x="745" y="463" text-anchor="middle" font-size="11">every other agent</text>
+  <text x="745" y="476" text-anchor="middle" font-size="11">passed on this version</text>
+  <!-- no: loop back -->
+  <polyline points="490,420 490,396 670,396 670,190 525,190" fill="none" stroke="#444"/>
+  <text x="496" y="412" font-size="11" fill="#444">no</text>
+
+  <!-- New version -->
+  <line x1="300" y1="300" x2="398" y2="300" stroke="#444" marker-end="url(#a)"/>
+  <text x="306" y="292" font-size="11" fill="#444">a summary text</text>
+  <rect x="400" y="268" width="250" height="64" rx="6" fill="#f3f7fb" stroke="#1168bd"/>
+  <text x="412" y="288" font-weight="bold" fill="#1168bd">New version (draft or revision)</text>
+  <text x="412" y="305">Its writer counts as accepting it;</text>
+  <text x="412" y="321">passes reset to 0. (n = 1: agreed now.)</text>
+  <line x1="525" y1="268" x2="525" y2="190" stroke="#444"/>
+
+  <!-- loop line back to step 2 -->
+  <line x1="525" y1="190" x2="322" y2="190" stroke="#444" marker-end="url(#a)"/>
+  <rect x="690" y="240" width="290" height="80" rx="6" fill="#fafafa" stroke="#888" stroke-dasharray="5 3"/>
+  <text x="702" y="260" font-weight="bold">Turn limit: 3 (SUMMARY_TURNS_EACH) × n</text>
+  <text x="702" y="278">When used up without agreement, the</text>
+  <text x="702" y="294">last version is kept and shown,</text>
+  <text x="702" y="310">marked <tspan font-weight="bold" fill="#c0392b">not agreed</tspan>.</text>
+
+  <!-- After -->
+  <rect x="560" y="520" width="420" height="112" rx="6" fill="#fdf6ec" stroke="#b07a1f"/>
+  <text x="572" y="540" font-weight="bold" fill="#b07a1f">Afterwards, in src/ui.mjs (form checked, not content)</text>
+  <text x="572" y="558" font-size="11.5">• summaryInstruction(): the one "Send to the Worker" under Next step</text>
+  <text x="572" y="574" font-size="11.5">• summaryOutcome(): last line Outcome: SEND / FINISH / WAIT FOR USER</text>
+  <text x="572" y="590" font-size="11.5">• not agreed, failed or unreadable → auto dev pauses, with the reason</text>
+  <text x="572" y="606" font-size="11.5">• result recorded in the transcript as a "Summary" entry,</text>
+  <text x="582" y="621" font-size="11.5">credited to the last version's author</text>
+  <line x1="745" y1="480" x2="745" y2="518" stroke="#444" marker-end="url(#a)"/>
+</svg>

@@ -15,13 +15,13 @@ This page describes the current design. Operating instructions are in the
 Here "harness" means a deterministic engine wrapped around the agents' semantic work. agent-room
 has two of them, and this page always says which one it means.
 
-- **Provider CLI harness** (Claude Code's `claude`, OpenAI's `codex`): **required**. It gives the
+- **Provider CLI harness** (Claude Code's `claude`, OpenAI's `codex`, Google's Antigravity `agy`): **required**. It gives the
   model its basic means of acting on its environment: reading and writing files, running
   commands, searching the web, its own session memory. agent-room runs your installed,
   authenticated CLIs, on your own subscriptions.
 - **Room harness** (agent-room itself, the orchestrator): steers those CLIs and makes use of what
   they can do. It runs the conversation (turn order, passes, the turn cap, summaries), the
-  worker's queue and worktree, the browser screen, checkpoints and optional replication.
+  worker queues and worktrees, the browser screen, checkpoints and optional replication.
 
 The core capability an agent needs is the full agent CLI. Git is needed only for the worker (its
 worktree, below) and for replication between servers.
@@ -30,18 +30,19 @@ worktree, below) and for replication between servers.
 
 ![Containers and components: the room harness's modules, the provider CLIs, storage and external systems](diagrams/c4-containers.svg)
 
-One Node process serves several rooms, one per folder. Its eight source modules:
+One Node process serves several rooms, one per folder. Its nine source modules:
 
 | Module | Role |
 |---|---|
 | `src/cli.mjs` | Arguments, the server's rooms, each room's input queue, Reload, Restart, Quit room, Shutdown. Never reloaded. |
 | `src/room.mjs` | The main loop: turns, unseen messages, passes, the summary procedure. |
-| `src/ui.mjs` | Room setup, discussions, the worker and its worktree, auto dev, checkpoints, commands. |
-| `src/agents.mjs` | Provider adapters: one CLI process per turn, launch flags, sessions, usage parsing. |
+| `src/ui.mjs` | Room setup, discussions, the worker queues and worktrees, auto dev, checkpoints, commands. |
+| `src/agents.mjs` | Provider adapters (Claude, Codex, agy): one CLI process per turn, launch flags, sessions, usage parsing, the record of running programs. |
 | `src/docs.mjs` | HTTP server, the browser screen, document rendering, live events. |
 | `src/host-shell.mjs` | The Terminal pane's shell (this computer only). |
 | `src/replicate.mjs` | Optional replication of discussions to peer servers (`--node`, `--peer`). |
 | `src/usage.mjs` | Token totals and the optional quota meter. |
+| `src/notes.mjs` | The Notes pane: the User's own notes, kept on this computer only, never replicated nor shown to agents. |
 
 ## The main loop
 
@@ -80,6 +81,9 @@ pauses a running auto dev.
 
 ![One discussion round as a sequence: the User's message, the agents' turns, the stopping rules and the steps after the round](diagrams/discussion-round-sequence.svg)
 
+A reply counts as a pass after trimming whitespace. A message starting with an unknown `@name` is
+rejected before it is recorded.
+
 ## How the room harness steers the CLIs
 
 The room harness has two ways to steer a provider CLI today:
@@ -92,10 +96,18 @@ The room harness has two ways to steer a provider CLI today:
     look-and-click subset.
   - Codex (`codex exec`): `sandbox_mode="danger-full-access"` (no sandbox) and live web search.
     How Codex handles MCP servers under these flags has not been checked.
+  - agy (`agy --output-format json`): `--dangerously-skip-permissions`; the session is a
+    conversation ID, resumed with `--conversation`.
+
+Each turn's CLI process is recorded in `~/.local/state/agent-room/programs/<pid>.json` while it
+runs, so that programs left over after a crash or Restart can be found.
 - **Role instructions**: the rulebooks, sent as system-level instructions on every turn
-  (`--append-system-prompt` for Claude, `developer_instructions` for Codex), plus prompts the
+  (`--append-system-prompt` for Claude, `developer_instructions` for Codex; agy has no such
+  option, so they go at the head of its prompt on its first turn and whenever they change), plus prompts the
   room harness adds to a turn (the introduction, the briefing, the summary format, auto dev's
   outcome line).
+
+![One agent turn for each provider: command, session, instructions, tools and output](diagrams/agent-turn-providers.svg)
 
 A third way is possible but not used: the room harness could add **tools of its own** (for
 example through `--mcp-config` or a provider's equivalent). agent-room adds none today.
@@ -127,18 +139,55 @@ that an agent really had nothing to add, nor that a summary's content is right.
 
 ## Current restrictions
 
-These are implementation facts today; changing either is a separate decision.
+These are implementation facts today; changing any of them is a separate decision.
 
-- **No Bash for Claude discussion agents** (enforced: `Bash` is not in their tool list). They get
-  file tools, web search and fetch, sub-agents, skills and the look-and-click Chrome tools. A
-  Claude worker also gets pre-approved Bash. Codex agents, discussion and worker alike, run with
-  no sandbox, so they can run commands.
+- **Every agent can run commands.** Claude agents, discussion and worker alike, get pre-approved
+  `Bash`, file tools, web search and fetch, sub-agents, skills and the look-and-click Chrome tools.
+  Codex runs with no sandbox and agy with `--dangerously-skip-permissions`.
 - **Full filesystem access.** Agents can read and write any path. Keeping discussion agents'
   writing inside the active discussion's folder is an **instruction**, not a sandbox.
-- **The worker needs Git** for every task, not only coding ones: it always works in its own Git
-  worktree of the room's repository (`<repo>.worker/`, branch `worker/main`). Without a Git
-  repository with at least one commit, the worker is disabled; discussions work as usual. A
-  worktree separates working copies; it is not a sandbox.
+- **The worker needs Git** for every task, not only coding ones: it always works in a Git
+  worktree of the room's repository. Without a Git repository with at least one commit, the
+  worker is disabled; discussions work as usual. A worktree separates working copies; it is not
+  a sandbox.
+
+## The worker and auto dev
+
+Each discussion has its own worker **lane**: a worker session, a queue and a worktree
+`<repo>.workers/<name>/` on the branch `worker/<name>`, created at its first instruction. A
+brainstorm, and a task sent before a discussion's first message, use `<repo>.worker/` on
+`worker/main`. A lane runs one task at a time, in the order sent; at most two tasks run at once in
+a folder (`PARALLEL_WORKERS`). Uncommitted edits left by a task hold its lane until their origin
+resolves them. agent-room's own code only adds worktrees and fast-forwards a lane with nothing of
+its own; it never merges: the User reviews and merges into `main`.
+
+**Auto dev** (`/autodev`, browser screen only) sends the latest agreed summary's instruction to
+the worker; the worker's reply opens a round as a "Worker report", and the summary that follows
+ends with `Outcome:` SEND (the next instruction), FINISH or WAIT FOR USER. At most five worker
+cycles per start (`AUTO_DEV_CYCLES`). Anything unexpected, or the User typing, pauses it.
+
+![The worker and auto dev: one instruction from queue to merge, and auto dev's cycle with its pause reasons](diagrams/worker-and-auto-dev.svg)
+
+## Discussions: lifecycle and storage
+
+A discussion's folder, `discussions/<date>-<title>/`, is created at its first message, with its
+transcripts in `transcripts/`. A checkpoint on this computer after every round lets Resume and
+Restart continue the same sessions; Start fresh begins new sessions from the handoff, notes and
+latest summary. Discussions can be moved to `archive/` or `deferred/`. A brainstorm has no folder
+and lives in memory only.
+
+![Discussion lifecycle: unstarted, open, brainstorm, Resume, Start fresh, and moving to archive or deferred](diagrams/discussion-lifecycle.svg)
+
+![Storage map: every file and folder agent-room or its agents read or write, and who](diagrams/storage-map.svg)
+
+## Replication (optional)
+
+With `--node` and `--peer`, each round of the launch room's discussions is saved as a Git commit
+in `<root>/.agent-room/store.git` (not the project's repository) and sent to paired peer servers,
+which check it and show it as a read-only snapshot. Peer files are never merged into a working
+discussion.
+
+![Replication: capture, transfer, validation, publication and acknowledgement between paired nodes](diagrams/replication.svg)
 
 ## Summary contract
 
@@ -151,6 +200,8 @@ in future if ever needed, with extreme care.
 to the next. Writing or revising a version counts as accepting it; the summary is agreed when
 every other agent then replies `PASS` to it. Each agent gets at most three turns
 (`SUMMARY_TURNS_EACH`).
+
+![The summary procedure: drafter rotation, agreement and the empty, failed and not agreed outcomes](diagrams/summary-procedure.svg)
 
 **The format agents are asked to follow (contract).** `summaryFormat` in `src/room.mjs`:
 

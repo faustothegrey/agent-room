@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 720" font-family="Helvetica, Arial, sans-serif" font-size="14">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#405064"/></marker></defs>
+<rect width="1000" height="720" fill="white"/>
+<text x="25" y="32" font-size="21" font-weight="bold">Replication: one discussion line between paired rooms</text>
+<text x="25" y="55" fill="#586574">Optional; enabled with --node. Each node owns a separate line per discussion.</text>
+<rect x="25" y="80" width="440" height="463" rx="8" fill="#f1f7fd" stroke="#1168bd"/>
+<rect x="535" y="80" width="440" height="463" rx="8" fill="#f5f7f9" stroke="#607080"/>
+<text x="45" y="110" font-size="17" font-weight="bold" fill="#1168bd">Sending node</text>
+<text x="555" y="110" font-size="17" font-weight="bold" fill="#405064">Paired receiving node</text>
+<rect x="45" y="130" width="400" height="90" rx="5" fill="white" stroke="#1168bd"/>
+<text x="60" y="153" font-weight="bold">1. Capture at round end</text>
+<text x="60" y="175">Discussion files + round metadata → Git commit</text>
+<text x="60" y="196">Append to this node’s discussion line in store.git</text>
+<rect x="45" y="250" width="400" height="95" rx="5" fill="white" stroke="#1168bd"/>
+<text x="60" y="273" font-weight="bold">2. Background peer loop</text>
+<text x="60" y="295">Offer current tip over HTTP; if needed, send bundle</text>
+<text x="60" y="316">based on peer’s last acknowledged commit.</text>
+<text x="60" y="334">Missing base → retry once with a full bundle.</text>
+<rect x="555" y="250" width="400" height="122" rx="5" fill="white" stroke="#607080"/>
+<text x="570" y="273" font-weight="bold">3. Validate and import</text>
+<text x="570" y="295">Check pairing, identities, bundle, paths and metadata;</text>
+<text x="570" y="316">reject limits, invalid content or rewritten history.</text>
+<text x="570" y="337">Import to temporary ref; materialize a read-only</text>
+<text x="570" y="358">snapshot and atomically publish its pointer.</text>
+<line x1="445" y1="287" x2="553" y2="287" stroke="#405064" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="465" y="276" font-size="11">offer / bundle</text>
+<rect x="555" y="405" width="400" height="95" rx="5" fill="white" stroke="#607080"/>
+<text x="570" y="428" font-weight="bold">4. Acknowledge published commit</text>
+<text x="570" y="450">Already published? Acknowledge it again safely.</text>
+<text x="570" y="472">Received lines are viewed as read-only snapshots.</text>
+<rect x="45" y="405" width="400" height="95" rx="5" fill="white" stroke="#1168bd"/>
+<text x="60" y="428" font-weight="bold">5. Record acknowledgement</text>
+<text x="60" y="450">Save peer and commit in acked.json; retry failures</text>
+<text x="60" y="472">in background with increasing delay (5 s to 5 min).</text>
+<line x1="555" y1="450" x2="447" y2="450" stroke="#405064" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="475" y="439" font-size="11">ack</text>
+<line x1="245" y1="220" x2="245" y2="248" stroke="#405064" marker-end="url(#arrow)"/>
+<line x1="755" y1="372" x2="755" y2="403" stroke="#405064" marker-end="url(#arrow)"/>
+<rect x="25" y="570" width="950" height="105" rx="6" fill="#fff9ec" stroke="#bb8a2d"/>
+<text x="45" y="595" font-weight="bold">Setup and boundaries</text>
+<text x="45" y="618">Peers must be configured and paired with the same room identity before transfer. Each node sends its own lines.</text>
+<text x="45" y="640">Replication stores discussion snapshots under .agent-room/; it does not merge peer files into the working discussion.</text>
+<text x="45" y="661">Source: src/replicate.mjs and src/ui.mjs, checked 2026-11-13.</text>
+</svg>

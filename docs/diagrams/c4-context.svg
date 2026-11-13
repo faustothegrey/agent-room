@@ -3,7 +3,7 @@
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#444"/></marker>
   </defs>
   <rect width="800" height="420" fill="#fff"/>
-  <text x="20" y="30" font-size="18" font-weight="bold">agent-room — system context (C4 level 1)</text>
+  <text x="20" y="30" font-size="18" font-weight="bold">agent-room — system context (C4 level 1), checked 2026-11-13</text>
 
   <rect x="40" y="70" width="170" height="80" rx="40" fill="#08427b"/>
   <text x="125" y="105" fill="#fff" text-anchor="middle" font-weight="bold">User</text>
@@ -15,7 +15,7 @@
   <text x="400" y="236" fill="#fff" text-anchor="middle" font-size="11">between the User and AI agents</text>
 
   <rect x="580" y="60" width="190" height="80" fill="#999"/>
-  <text x="675" y="95" fill="#fff" text-anchor="middle" font-weight="bold">Claude Code / Codex CLIs</text>
+  <text x="675" y="95" fill="#fff" text-anchor="middle" font-weight="bold">claude / codex / agy CLIs</text>
   <text x="675" y="113" fill="#fff" text-anchor="middle" font-size="11">provider CLI harnesses (required)</text>
 
   <rect x="580" y="280" width="190" height="70" fill="#999"/>
@@ -25,7 +25,7 @@
   <rect x="40" y="280" width="190" height="70" fill="#e8e8e8" stroke="#888"/>
   <text x="135" y="310" text-anchor="middle" font-weight="bold">The room's folder</text>
   <text x="135" y="328" text-anchor="middle" font-size="11">any project + its discussions</text>
-  <text x="135" y="342" text-anchor="middle" font-size="10">(+ the worker's Git worktree)</text>
+  <text x="135" y="342" text-anchor="middle" font-size="10">(+ worker worktrees, one per discussion)</text>
 
   <line x1="190" y1="140" x2="300" y2="185" stroke="#444" marker-end="url(#a)"/>
   <text x="200" y="185" font-size="11" fill="#444">browser</text>

@@ -7,7 +7,7 @@ Git worktree. It is domain-agnostic: a room is any folder, holding any kind of w
 through your installed Claude Code, Codex and Antigravity (`agy`) CLIs, using their existing authentication and
 subscriptions.
 
-The project stays deliberately small: eight source modules and four dependencies: `marked`, and for
+The project stays deliberately small: nine source modules and four dependencies: `marked`, and for
 the Terminal pane `@lydell/node-pty`, `ws` and `ghostty-web`. How it works (the two harnesses,
 the main loop, the core protocol, the summary contract, current restrictions) is described in
 [docs/architecture.md](docs/architecture.md); this README covers how to use it.

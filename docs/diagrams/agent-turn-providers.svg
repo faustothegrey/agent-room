@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 800" font-family="Helvetica, Arial, sans-serif" font-size="12">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#444"/>
+    </marker>
+  </defs>
+  <rect width="1080" height="800" fill="#fff"/>
+  <text x="20" y="28" font-size="17" font-weight="bold">One agent turn across providers — src/agents.mjs (checked 2026-11-13)</text>
+  <text x="20" y="46" font-size="12" fill="#555">Each turn spawns one headless CLI process via run(), resumes the provider's session, sends the prompt on stdin, and parses stdout.</text>
+
+  <!-- Caller box -->
+  <rect x="20" y="62" width="1040" height="60" rx="4" fill="#f3f7fb" stroke="#1168bd"/>
+  <text x="34" y="82" fill="#1168bd" font-weight="bold" font-size="13">Caller: room.mjs takeTurn() (discussion / summary, 5 min timeout) or ui.mjs worker lane (30 min timeout)</text>
+  <text x="34" y="100" fill="#333">Calls <tspan font-family="monospace">agent.turn(prompt)</tspan>. Holds <tspan font-family="monospace">session</tspan> object in memory (and in checkpoints) so IDs survive Reload, Resume and Restart.</text>
+  <text x="34" y="115" fill="#b07a1f" font-size="11">Role instructions: README-for-brainstorming-agents.md (discussion) or README-for-worker-agents.md (worker), re-read on Reload.</text>
+
+  <!-- Arrows to 3 adapters -->
+  <line x1="190" y1="122" x2="190" y2="146" stroke="#444" marker-end="url(#a)"/>
+  <line x1="540" y1="122" x2="540" y2="146" stroke="#444" marker-end="url(#a)"/>
+  <line x1="890" y1="122" x2="890" y2="146" stroke="#444" marker-end="url(#a)"/>
+
+  <!-- Column 1: Claude (x=20..350, width=330) -->
+  <rect x="20" y="148" width="330" height="390" rx="4" fill="#fafafa" stroke="#1168bd" stroke-width="1.5"/>
+  <rect x="20" y="148" width="330" height="28" rx="4" fill="#1168bd"/>
+  <text x="185" y="167" fill="#fff" text-anchor="middle" font-weight="bold" font-size="13">1. Claude — createClaudeAgent()</text>
+
+  <text x="32" y="194" font-weight="bold" fill="#1168bd">Command &amp; mode</text>
+  <text x="32" y="210" font-family="monospace" font-size="11">claude -p --output-format json</text>
+
+  <text x="32" y="234" font-weight="bold" fill="#1168bd">Session (session.id = UUID, session.started)</text>
+  <text x="32" y="250" font-size="11">• 1st turn: <tspan font-family="monospace">--session-id &lt;uuid&gt;</tspan></text>
+  <text x="32" y="266" font-size="11">• Later turns: <tspan font-family="monospace">--resume &lt;uuid&gt;</tspan></text>
+  <text x="32" y="282" font-size="11">• <tspan font-family="monospace">reset()</tspan>: new UUID, <tspan font-family="monospace">started = false</tspan></text>
+
+  <text x="32" y="306" font-weight="bold" fill="#b07a1f">Role instructions (every turn)</text>
+  <text x="32" y="322" font-family="monospace" font-size="11">--append-system-prompt &lt;instructions&gt;</text>
+
+  <text x="32" y="346" font-weight="bold" fill="#1168bd">Tools &amp; access (discussion &amp; worker alike)</text>
+  <text x="32" y="362" font-size="11">• <tspan font-family="monospace">--chrome --strict-mcp-config</tspan></text>
+  <text x="42" y="376" font-size="10.5" fill="#444">(no external MCP servers / claude.ai connectors)</text>
+  <text x="32" y="392" font-size="11">• <tspan font-family="monospace">--allowedTools … --tools …</tspan> (last, variadic):</text>
+  <text x="42" y="406" font-size="10.5" fill="#444">Read, Grep, Glob, Edit, Write, WebSearch,</text>
+  <text x="42" y="420" font-size="10.5" fill="#444">WebFetch, Task, Skill, ToolSearch, Bash,</text>
+  <text x="42" y="434" font-size="10.5" fill="#444">+ 11 Chrome look-and-click tools</text>
+
+  <text x="32" y="458" font-weight="bold" fill="#1168bd">stdin / stdout &amp; usage</text>
+  <text x="32" y="474" font-size="11">• <tspan font-family="monospace">stdin</tspan>: <tspan font-family="monospace">prompt</tspan> only</text>
+  <text x="32" y="490" font-size="11">• <tspan font-family="monospace">stdout</tspan>: JSON (<tspan font-family="monospace">result</tspan>, <tspan font-family="monospace">is_error</tspan>)</text>
+  <text x="32" y="506" font-size="11">• <tspan font-family="monospace">lastUsage</tspan>: <tspan font-family="monospace">input</tspan> (incl. cache), <tspan font-family="monospace">cached</tspan>,</text>
+  <text x="42" y="520" font-size="11"><tspan font-family="monospace">output</tspan>, <tspan font-family="monospace">cost</tspan> (<tspan font-family="monospace">total_cost_usd</tspan>)</text>
+
+  <!-- Column 2: Codex (x=375..705, width=330) -->
+  <rect x="375" y="148" width="330" height="390" rx="4" fill="#fafafa" stroke="#1168bd" stroke-width="1.5"/>
+  <rect x="375" y="148" width="330" height="28" rx="4" fill="#1168bd"/>
+  <text x="540" y="167" fill="#fff" text-anchor="middle" font-weight="bold" font-size="13">2. Codex — createCodexAgent()</text>
+
+  <text x="387" y="194" font-weight="bold" fill="#1168bd">Command &amp; mode</text>
+  <text x="387" y="210" font-family="monospace" font-size="11">codex exec [resume] --json</text>
+
+  <text x="387" y="234" font-weight="bold" fill="#1168bd">Session (session.threadId)</text>
+  <text x="387" y="250" font-size="11">• 1st turn: <tspan font-family="monospace">codex exec … -</tspan></text>
+  <text x="387" y="266" font-size="11">• Reads <tspan font-family="monospace">thread_id</tspan> from <tspan font-family="monospace">thread.started</tspan></text>
+  <text x="387" y="282" font-size="11">• Later: <tspan font-family="monospace">codex exec resume … &lt;id&gt; -</tspan></text>
+
+  <text x="387" y="306" font-weight="bold" fill="#b07a1f">Role instructions (every turn)</text>
+  <text x="387" y="322" font-family="monospace" font-size="10.5">-c developer_instructions="&lt;JSON string&gt;"</text>
+
+  <text x="387" y="346" font-weight="bold" fill="#1168bd">Tools &amp; access (discussion &amp; worker alike)</text>
+  <text x="387" y="362" font-size="11">• <tspan font-family="monospace">--skip-git-repo-check</tspan></text>
+  <text x="387" y="378" font-size="11">• <tspan font-family="monospace">-c sandbox_mode="danger-full-access"</tspan></text>
+  <text x="400" y="392" font-size="10.5" fill="#444">(no sandbox: any file, command or network)</text>
+  <text x="387" y="408" font-size="11">• <tspan font-family="monospace">-c web_search="live"</tspan></text>
+  <text x="387" y="424" font-size="11">• Optional model: <tspan font-family="monospace">-m &lt;model&gt;</tspan></text>
+
+  <text x="387" y="458" font-weight="bold" fill="#1168bd">stdin / stdout &amp; usage</text>
+  <text x="387" y="474" font-size="11">• <tspan font-family="monospace">stdin</tspan> (<tspan font-family="monospace">-</tspan>): <tspan font-family="monospace">prompt</tspan> only</text>
+  <text x="387" y="490" font-size="11">• <tspan font-family="monospace">stdout</tspan>: JSONL events (<tspan font-family="monospace">parseCodexEvents</tspan>);</text>
+  <text x="397" y="504" font-size="10.5" fill="#444">reply = last <tspan font-family="monospace">agent_message</tspan> in <tspan font-family="monospace">item.completed</tspan></text>
+  <text x="387" y="520" font-size="11">• <tspan font-family="monospace">lastUsage</tspan>: from <tspan font-family="monospace">turn.completed</tspan> event</text>
+
+  <!-- Column 3: agy (x=730..1060, width=330) -->
+  <rect x="730" y="148" width="330" height="390" rx="4" fill="#fafafa" stroke="#1168bd" stroke-width="1.5"/>
+  <rect x="730" y="148" width="330" height="28" rx="4" fill="#1168bd"/>
+  <text x="895" y="167" fill="#fff" text-anchor="middle" font-weight="bold" font-size="13">3. Antigravity — createAgyAgent()</text>
+
+  <text x="742" y="194" font-weight="bold" fill="#1168bd">Command &amp; mode</text>
+  <text x="742" y="210" font-family="monospace" font-size="11">agy --output-format json</text>
+
+  <text x="742" y="234" font-weight="bold" fill="#1168bd">Session (session.conversationId)</text>
+  <text x="742" y="250" font-size="11">• 1st turn: no conversation flag</text>
+  <text x="742" y="266" font-size="11">• Reads <tspan font-family="monospace">conversation_id</tspan> from JSON output</text>
+  <text x="742" y="282" font-size="11">• Later: <tspan font-family="monospace">--conversation &lt;conversationId&gt;</tspan></text>
+
+  <text x="742" y="306" font-weight="bold" fill="#b07a1f">Role instructions (1st turn &amp; when changed)</text>
+  <text x="742" y="322" font-size="11">• Prefixed to <tspan font-family="monospace">stdin</tspan>: <tspan font-family="monospace">${rules}\n\n${prompt}</tspan></text>
+  <text x="742" y="338" font-size="11">• Tracked in <tspan font-family="monospace">session.receivedInstructions</tspan></text>
+
+  <text x="742" y="362" font-weight="bold" fill="#1168bd">Tools &amp; access (discussion &amp; worker alike)</text>
+  <text x="742" y="378" font-size="11">• <tspan font-family="monospace">--dangerously-skip-permissions</tspan></text>
+  <text x="742" y="394" font-size="11">• Optional model: <tspan font-family="monospace">--model &lt;model&gt;</tspan></text>
+  <text x="742" y="410" font-size="10.5" fill="#444">• (README: agy also loads its own local</text>
+  <text x="752" y="424" font-size="10.5" fill="#444">instructions; not configured by agents.mjs)</text>
+
+  <text x="742" y="458" font-weight="bold" fill="#1168bd">stdin / stdout &amp; usage</text>
+  <text x="742" y="474" font-size="11">• <tspan font-family="monospace">stdin</tspan>: <tspan font-family="monospace">[rules +] prompt</tspan></text>
+  <text x="742" y="490" font-size="11">• <tspan font-family="monospace">stdout</tspan>: JSON (<tspan font-family="monospace">status: "SUCCESS"</tspan>);</text>
+  <text x="752" y="504" font-size="10.5" fill="#444">non-JSON errors classified, raw text withheld</text>
+  <text x="742" y="520" font-size="11">• <tspan font-family="monospace">lastUsage</tspan>: <tspan font-family="monospace">input, cached, output</tspan></text>
+
+  <!-- Arrows down to run() -->
+  <line x1="190" y1="538" x2="190" y2="566" stroke="#444" marker-end="url(#a)"/>
+  <line x1="540" y1="538" x2="540" y2="566" stroke="#444" marker-end="url(#a)"/>
+  <line x1="890" y1="538" x2="620" y2="566" stroke="#444" marker-end="url(#a)"/>
+
+  <!-- Shared run() box (x=20..705, width=685) -->
+  <rect x="20" y="568" width="685" height="160" rx="4" fill="#f3f7fb" stroke="#1168bd" stroke-width="1.5"/>
+  <text x="34" y="590" fill="#1168bd" font-weight="bold" font-size="13">Shared process runner — run(command, args, { input, cwd, timeoutMs, procs, record })</text>
+  <text x="34" y="610" font-size="11">• Spawns <tspan font-family="monospace">spawn(command, args, { cwd: at(cwd), detached: true, stdio: ['pipe','pipe','pipe'] })</tspan></text>
+  <text x="34" y="627" font-size="11">• Working directory <tspan font-family="monospace">at(cwd)</tspan>: room root for discussion agents;</text>
+  <text x="44" y="642" font-size="11"><tspan font-family="monospace">&lt;repo&gt;.workers/&lt;name&gt;/</tspan> (or <tspan font-family="monospace">&lt;repo&gt;.worker/</tspan> for brainstorm / pre-title) for the worker</text>
+  <text x="34" y="659" font-size="11">• Tracks process in <tspan font-family="monospace">room.programs.running</tspan>; stops group via <tspan font-family="monospace">kill(-pid, signal)</tspan> on timeout or Quit</text>
+  <text x="34" y="676" font-size="11">• Title helper: <tspan font-family="monospace">claudeTitle(msg)</tspan> runs <tspan font-family="monospace">claude -p --no-session-persistence --tools ""</tspan> (30s timeout)</text>
+  <text x="34" y="693" font-size="11" fill="#555">• Rejects when room is stopping, exit code ≠ 0, stopped by signal, timed out, or JSON reports error</text>
+
+  <!-- Program record storage box (x=730..1060, width=330) -->
+  <rect x="730" y="568" width="330" height="160" rx="4" fill="#e8e8e8" stroke="#888"/>
+  <text x="742" y="590" font-weight="bold" font-size="12.5">Leftover record (local state)</text>
+  <text x="742" y="608" font-family="monospace" font-size="10">~/.local/state/agent-room/programs/&lt;pid&gt;.json</text>
+  <text x="742" y="627" font-size="11">• Written atomically (<tspan font-family="monospace">.tmp</tspan> → rename) on spawn:</text>
+  <text x="752" y="642" font-family="monospace" font-size="10" fill="#444">{ pid, started, provider, agent,</text>
+  <text x="752" y="655" font-family="monospace" font-size="10" fill="#444">  room, server: { pid, started } }</text>
+  <text x="742" y="673" font-size="11">• Removed by <tspan font-family="monospace">forgetProgram()</tspan> when group ends</text>
+  <text x="742" y="690" font-size="11">• <tspan font-family="monospace">findLeftovers()</tspan> checks <tspan font-family="monospace">ps</tspan> at startup &amp; 1 min</text>
+
+  <line x1="705" y1="640" x2="728" y2="640" stroke="#444" marker-end="url(#a)"/>
+
+  <!-- Footer / Legend -->
+  <rect x="20" y="740" width="1040" height="44" fill="#fafafa" stroke="#ccc"/>
+  <rect x="34" y="755" width="14" height="14" fill="#1168bd"/><text x="54" y="767" font-size="11">Room harness code (enforced)</text>
+  <rect x="240" y="755" width="14" height="14" fill="#e8e8e8" stroke="#888"/><text x="260" y="767" font-size="11">Local state on disk</text>
+  <text x="395" y="767" font-size="11" fill="#b07a1f">Amber = Role instructions passed to the model (asked, not sandbox-enforced)</text>
+</svg>
