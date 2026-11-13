@@ -352,8 +352,10 @@ Cancelling the chooser leaves everything as it was.
 ## Choose providers and models
 
 Expand **Discussion agents · provider & model** in Discussion, or **Worker · provider & model**
-in Worker. Each existing agent has a name, provider and model. Use `--agents` at launch to choose
-the number and order of discussion agents; the screen edits the existing slots.
+in Worker. The Discussion panel has three rows: tick two or three members, in the order they should
+speak. Untick a member only after ticking its replacement. Names suggested from the provider remain
+editable. If a discussion was launched with one or more than three agents, the panel keeps all its
+existing rows and lets you edit them; use `--agents` to choose a different count.
 
 Defaults save automatically to `~/.config/agent-room/defaults.json`, shared across project
 folders and subsequent launches, including the Dock launcher. Dropdown selections save on change;

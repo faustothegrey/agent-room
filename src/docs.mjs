@@ -397,6 +397,14 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .agent-row[data-provider="agy"] { --provider: #6366f1; }
 .agent-row label { display: flex; flex-direction: column; font-size: .8rem; flex: 1; min-width: 100px; }
 .agent-row label[hidden] { display: none; }
+.agent-row.member-row { flex-wrap: nowrap; align-items: end; padding: .35rem; margin: .25rem 0; }
+.agent-row.member-row .member-toggle { flex: 0 0 2.3rem; min-width: 0; align-items: center; }
+.agent-row.member-row .member-toggle input { width: auto; margin: .45rem 0; }
+.agent-row.member-row label { min-width: 0; }
+.agent-row.member-row .auto-name { background: light-dark(#fffbe6, #544a15); border-color: #d9a900; }
+.agent-row.member-row[data-active="false"] label:not(.member-toggle) { opacity: .58; }
+.member-note { color: light-dark(#a60, #e8ae54); }
+@media (max-width: 550px) { .agent-row.member-row { flex-wrap: wrap; } .agent-row.member-row label:not(.member-toggle) { min-width: 6rem; } }
 .agent-row input, .agent-row select { font: inherit; padding: .3rem; width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 4px; }
 #work .box:focus, #talk .box:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .msg { border-left: 3px solid #14b8a6; }
@@ -414,10 +422,11 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
   <div class="view" id="talk">
     <details class="agent-settings" id="talk-settings">
-      <summary>Discussion agents · provider & model</summary>
+      <summary>Discussion members · provider & model</summary>
       <form id="talk-settings-form">
         <p class="settings-hint" id="talk-settings-hint"></p>
         <div id="talk-agent-rows"></div>
+        <p class="settings-hint member-note" id="talk-member-note" hidden></p>
         <p class="settings-hint">CLI default uses the provider’s settings. Custom model IDs require account access.</p>
         <p class="settings-status" id="talk-settings-status" role="status"></p>
       </form>
@@ -1208,13 +1217,41 @@ function showVersion(c) {
 // Settings stay outside the conversation; saving never changes an active CLI session.
 const settingsRows = {};
 let settingsSave = Promise.resolve();
-function agentRow(parent, a, models, title) {
-  const row = document.createElement('div'); row.className = 'agent-row';
-  const field = (text, el) => { const label = document.createElement('label'); label.textContent = title + ' ' + text; label.append(el); row.append(label); return el; };
-  const name = field('name', document.createElement('input')); name.value = a.name; name.required = true;
+// Member editor state is independent of the DOM, so automatic names and ordering have one rule.
+function memberPlan(agents, worker, currentWorker = worker) {
+  const providers = ['claude', 'codex', 'agy'];
+  const display = (p) => p[0].toUpperCase() + p.slice(1);
+  const rows = agents.map((a) => ({ ...a, active: true,
+    automatic: new RegExp('^' + display(a.provider) + '[0-9]*$', 'i').test(a.name) }));
+  function freeName(provider, skip) {
+    const base = display(provider), used = new Set([worker.name, currentWorker.name, ...rows.filter((r) => r !== skip).map((r) => r.name)].map((n) => n.toLowerCase()));
+    const duplicate = rows.some((r) => r !== skip && r.provider === provider);
+    let n = duplicate ? 2 : 0, name = n ? base + n : base;
+    while (used.has(name.toLowerCase())) { n = n ? n + 1 : 2; name = base + n; }
+    return name;
+  }
+  while (rows.length < 3) {
+    const provider = providers.find((p) => !rows.some((r) => r.provider === p)) || 'claude';
+    rows.push({ provider, name: freeName(provider, null), model: '', active: false, automatic: true });
+  }
+  return {
+    rows,
+    setProvider(i, provider) { const row = rows[i]; row.provider = provider; row.model = ''; if (row.automatic) row.name = freeName(provider, row); },
+    setName(i, name) { rows[i].name = name; rows[i].automatic = false; },
+    toggle(i, checked) { if (!checked && rows[i].active && rows.filter((r) => r.active).length <= 2) return false; rows[i].active = checked; return true; },
+    locked(i) { return rows[i].active && rows.filter((r) => r.active).length <= 2; },
+    selected() { return rows.filter((r) => r.active).map(({ provider, name, model }) => ({ provider, name: name.trim(), model })); },
+  };
+}
+function agentRow(parent, a, models, title, member = null) {
+  const row = document.createElement('div'); row.className = 'agent-row' + (member ? ' member-row' : '');
+  const field = (text, el) => { const label = document.createElement('label'); label.textContent = member ? text : title + ' ' + text; label.append(el); row.append(label); return el; };
+  let checked;
+  if (member) { checked = field('On', document.createElement('input')); checked.type = 'checkbox'; checked.parentElement.className = 'member-toggle'; checked.checked = a.active; }
   const provider = field('provider', document.createElement('select'));
   for (const p of ['claude', 'codex', 'agy']) provider.add(new Option(p === 'claude' ? 'Claude' : p === 'codex' ? 'Codex' : 'agy', p));
   provider.value = a.provider;
+  const name = field('name', document.createElement('input')); name.value = a.name; name.required = !member || a.active;
   const model = field('model', document.createElement('select'));
   const custom = field('custom model ID', document.createElement('input')); custom.placeholder = 'Model ID';
   function choices(value) {
@@ -1226,13 +1263,26 @@ function agentRow(parent, a, models, title) {
     custom.value = model.value === '__custom' ? value : ''; custom.parentElement.hidden = model.value !== '__custom';
   }
   choices(a.model);
-  provider.onchange = () => choices('');
+  provider.onchange = () => { if (member) { member.provider(provider.value); name.value = a.name; } choices(''); member?.refresh(); };
+  name.oninput = () => { if (member) { member.name(name.value); member.refresh(); } };
   model.onchange = () => { custom.parentElement.hidden = model.value !== '__custom'; };
-  parent.append(row);
-  return () => ({ name: name.value.trim(), provider: provider.value, model: model.value === '__custom' ? custom.value.trim() : model.value });
+  if (member) checked.onchange = () => { member.toggle(checked.checked); member.refresh(); };
+  function refresh() {
+    if (!member) return;
+    checked.checked = a.active; checked.disabled = member.locked();
+    name.required = a.active; row.dataset.active = String(a.active);
+    name.classList.toggle('auto-name', a.automatic);
+  }
+  refresh(); parent.append(row);
+  return { row, refresh, get: () => ({ name: name.value.trim(), provider: provider.value, model: model.value === '__custom' ? custom.value.trim() : model.value }),
+    active: () => !member || checked.checked, incomplete: () => (!member || checked.checked) && model.value === '__custom' && !custom.value.trim() };
 }
 function selectedSettings(data) {
   return data.started && data.defaults ? data.defaults : data.settings;
+}
+function memberPanelAgents(data) {
+  const current = data.settings.agents;
+  return current.length < 2 || current.length > 3 ? current : selectedSettings(data).agents;
 }
 for (const scope of ['talk', 'work']) {
   const panel = $(scope + '-settings'), form = $(scope + '-settings-form');
@@ -1247,28 +1297,43 @@ for (const scope of ['talk', 'work']) {
       const res = await fetch('__settings');
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(), selected = selectedSettings(data);
+      if (scope === 'talk') selected.agents = memberPanelAgents(data);
       if (scope === 'work') selected.worker = data.settings.worker;
       const parent = $(scope + '-agent-rows'); parent.replaceChildren();
       const agents = scope === 'talk' ? selected.agents : [selected.worker];
-      settingsRows[scope] = agents.map((a, i) => agentRow(parent, a, data.models, scope === 'talk' ? 'Agent ' + (i + 1) : 'Worker'));
+      const note = $('talk-member-note');
+      if (scope === 'talk' && agents.length >= 2 && agents.length <= 3) {
+        const plan = memberPlan(agents, selected.worker, data.settings.worker), controls = [];
+        const refresh = () => { controls.forEach((c) => c.refresh()); note.hidden = !plan.rows.some((r, i) => plan.locked(i)); };
+        note.textContent = 'At least two members. To swap one, tick the new row first, then untick the old one.';
+        plan.rows.forEach((a, i) => controls.push(agentRow(parent, a, data.models, 'Agent ' + (i + 1), {
+          provider: (p) => plan.setProvider(i, p), name: (n) => plan.setName(i, n),
+          toggle: (on) => plan.toggle(i, on), locked: () => plan.locked(i), refresh,
+        })));
+        settingsRows[scope] = controls; refresh();
+      } else {
+        if (scope === 'talk') { note.textContent = 'This discussion has ' + agents.length + ' agents, set outside this panel; members can be chosen here only for 2 or 3.'; note.hidden = false; }
+        settingsRows[scope] = agents.map((a, i) => agentRow(parent, a, data.models, scope === 'talk' ? 'Agent ' + (i + 1) : 'Worker'));
+      }
       hint.textContent = scope === 'work' ? (data.started ? 'Changes apply to this discussion only' : 'Changes apply to this discussion, and the default for new ones') + ', starting with the next instruction. A running instruction finishes with its current settings. Switching provider carries the Worker conversation into a fresh session.' : data.started ? 'Changes save automatically for future rooms. Active sessions keep their settings.' : 'Changes save automatically and apply to this room before any agent starts.';
     } catch (err) { result.textContent = 'Could not load settings: ' + err.message; }
   };
   function saveChanges() {
     if (!settingsRows[scope]) return;
     // Choosing Custom opens its text field; persist once a model ID has been entered.
-    if ([...form.querySelectorAll('.agent-row')].some((row) =>
-      row.querySelectorAll('select')[1].value === '__custom' && !row.querySelectorAll('input')[1].value.trim())) {
+    if (settingsRows[scope].some((row) => row.incomplete())) {
       result.textContent = 'Enter a custom model ID to save this choice.';
       return;
     }
-    const choices = settingsRows[scope].map((get) => get());
+    const choices = settingsRows[scope].filter((row) => row.active()).map((row) => row.get());
     result.textContent = 'Saving…';
     // Serialize saves from both tabs so a quick second change cannot overwrite a newer choice.
     settingsSave = settingsSave.then(async () => {
       const latest = await fetch('__settings');
       if (!latest.ok) throw new Error(await latest.text());
-      const settings = selectedSettings(await latest.json());
+      const latestData = await latest.json(), settings = selectedSettings(latestData);
+      if (scope === 'talk' && choices.some((a) => a.name.toLowerCase() === latestData.settings.worker.name.toLowerCase()))
+        throw new Error('Each member and the worker need a different name.');
       if (scope === 'talk') settings.agents = choices; else settings.worker = choices[0];
       settings.scope = scope;
       const res = await post('__settings', settings);

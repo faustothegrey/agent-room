@@ -2910,3 +2910,51 @@ test('a started worker-only change leaves an absent defaults file absent', async
   assert.equal(ctx.workerSpec, 'agy:W:');
   assert.equal(ctx.workerDefault, 'claude:W');
 });
+
+test('open discussions keep their members and sessions; new and resumed discussions use their own sets', async () => {
+  const { mkdirSync, writeFileSync, readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { saveSettings } = await import('../src/ui.mjs');
+  const home = await tmp('members-home-'), before = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const cwd = await tmp('members-room-'), hub = { rooms: new Map() };
+    const create = async (context, agents, worker) => {
+      const ctx = { cwd, context, key: cwd + (context ? '#' + context : ''), hub, noScreen: false,
+        agentSpecs: agents, workerSpec: worker, state: { transcript: [], seen: new Map() }, sessions: new Map() };
+      Object.assign(ctx, await load(ctx, '?members-' + (context ?? 'first')));
+      ctx.suggestTitle = async (text) => ({ title: text });
+      for (const a of ctx.room.agents) a.turn = async () => { ctx.sessions.get(a.name).started = true; return 'PASS'; };
+      hub.rooms.set(ctx.key, ctx);
+      return ctx;
+    };
+    const first = await create(null, 'claude:A,claude:B', 'claude:W');
+    hub.addRoom = async (folder, opts) => ({ ctx: await create(opts.context, opts.agents, opts.worker) });
+    await handleLine('first topic', first);
+    const firstIds = [first.sessions.get('A'), first.sessions.get('B')];
+    const future = { agents: [{ provider: 'claude', name: 'C', model: '' }, { provider: 'claude', name: 'D', model: '' }, { provider: 'claude', name: 'E', model: '' }],
+      worker: { provider: 'claude', name: 'W', model: '' }, scope: 'talk' };
+    await saveSettings(first, future);
+    assert.deepEqual(first.room.agents.map((a) => a.name), ['A', 'B']);
+    assert.equal(first.sessions.get('A'), firstIds[0]);
+    await handleLine('/new', first);
+    const second = [...hub.rooms.values()].find((c) => c !== first);
+    assert.deepEqual(second.room.agents.map((a) => a.name), ['C', 'D', 'E']);
+    await handleLine('second topic', second);
+    const name = second.discussion.name, checkpoint = JSON.parse(readFileSync(await checkpointPath(cwd, name), 'utf8'));
+    assert.equal(checkpoint.agentSpecs, 'claude:C:,claude:D:,claude:E:');
+    assert.deepEqual(first.room.agents.map((a) => a.name), ['A', 'B']);
+    assert.deepEqual([first.sessions.get('A'), first.sessions.get('B')], firstIds);
+    // The next defaults change cannot replace either open discussion's sessions.
+    const ids = second.room.agents.map((a) => second.sessions.get(a.name));
+    await saveSettings(second, { ...future, agents: future.agents.slice(0, 2) });
+    assert.deepEqual(second.room.agents.map((a) => a.name), ['C', 'D', 'E']);
+    assert.deepEqual(second.room.agents.map((a) => second.sessions.get(a.name)), ids);
+    const savedIds = ids.map((s) => s.id);
+    second.noScreen = true;
+    await handleLine('/close', second);
+    await handleLine('/resume ' + name, second);
+    assert.deepEqual(second.room.agents.map((a) => a.name), ['C', 'D', 'E']);
+    assert.deepEqual(second.room.agents.map((a) => second.sessions.get(a.name).id), savedIds);
+  } finally { process.env.HOME = before; }
+});

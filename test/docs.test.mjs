@@ -495,3 +495,65 @@ test('the page keeps the text and the attachments when sending them fails, and c
   assert.equal(box.value, '');
   assert.deepEqual(page.pending(), []);
 });
+
+// Exercise the same member state and row code embedded in the screen, without a browser.
+function memberFunctions() {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('function memberPlan('), source.indexOf('function selectedSettings('));
+  class Element {
+    constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.classList = { toggle() {} }; this.value = ''; }
+    append(child) { child.parentElement = this; this.children.push(child); }
+    add(option) { this.children.push(option); }
+    replaceChildren(...children) { this.children = children; }
+    get options() { return this.children; }
+  }
+  const document = { createElement: (tag) => new Element(tag) };
+  const Option = function (label, value) { this.label = label; this.value = value; };
+  return new Function('document', 'Option', code + '; return { memberPlan, agentRow };')(document, Option);
+}
+
+test('member rows lock two checked boxes and keep the selected row order', () => {
+  const { memberPlan, agentRow } = memberFunctions();
+  const plan = memberPlan([{ provider: 'claude', name: 'Claude', model: '' }, { provider: 'codex', name: 'Codex', model: '' }], { name: 'Worker' });
+  const parent = { append() {} }, controls = [];
+  const refresh = () => controls.forEach((c) => c.refresh());
+  plan.rows.forEach((a, i) => controls.push(agentRow(parent, a, { claude: [], codex: [], agy: [] }, 'Agent', {
+    provider: (p) => plan.setProvider(i, p), name: (n) => plan.setName(i, n),
+    toggle: (on) => plan.toggle(i, on), locked: () => plan.locked(i), refresh,
+  })));
+  const box = (i) => controls[i].row.children[0].children[0];
+  assert.equal(controls.length, 3);
+  assert.deepEqual(plan.rows.map((r) => [r.provider, r.name, r.active]), [['claude', 'Claude', true], ['codex', 'Codex', true], ['agy', 'Agy', false]]);
+  assert.deepEqual(controls.map((_, i) => box(i).disabled), [true, true, false]);
+  assert.equal(plan.toggle(0, false), false);
+  box(2).checked = true; box(2).onchange();
+  assert.deepEqual(controls.map((_, i) => box(i).disabled), [false, false, false]);
+  box(0).checked = false; box(0).onchange();
+  assert.deepEqual(controls.map((_, i) => box(i).disabled), [false, true, true]);
+  assert.deepEqual(controls.filter((c) => c.active()).map((c) => c.get().name), ['Codex', 'Agy']);
+});
+
+test('automatic member names avoid rows and worker, while typed names stay editable', () => {
+  const { memberPlan } = memberFunctions();
+  const plan = memberPlan([{ provider: 'claude', name: 'Claude', model: '' }, { provider: 'codex', name: 'Codex', model: '' }], { name: 'Claude2' });
+  plan.setProvider(1, 'claude');
+  assert.equal(plan.rows[1].name, 'Claude3');
+  plan.setName(1, 'My_name');
+  plan.setProvider(1, 'agy');
+  assert.equal(plan.rows[1].name, 'My_name');
+  const duplicate = memberPlan([{ provider: 'claude', name: 'Claude', model: '' }, { provider: 'claude', name: 'Claude2', model: '' }, { provider: 'agy', name: 'Agy', model: '' }], { name: 'Worker' });
+  duplicate.setProvider(2, 'claude');
+  assert.equal(duplicate.rows[2].name, 'Claude3');
+});
+
+test('member panel keeps legacy agent lists intact rather than truncating them', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('function selectedSettings('), source.indexOf("for (const scope of ['talk', 'work'])"));
+  const select = new Function(code + '; return memberPanelAgents;')();
+  for (const n of [1, 4, 8]) {
+    const agents = Array.from({ length: n }, (_, i) => ({ name: 'A' + i }));
+    assert.deepEqual(select({ settings: { agents }, defaults: { agents: [{ name: 'other' }, { name: 'next' }] }, started: true }), agents);
+  }
+  assert.match(source, /This discussion has .* agents, set outside this panel; members can be chosen here only for 2 or 3/);
+  assert.match(source, /At least two members\. To swap one, tick the new row first, then untick the old one\./);
+});

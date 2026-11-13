@@ -988,21 +988,26 @@ function switchTo(ctx, next) {
 // checkpoint is kept); the next message names and creates the new discussion, as in a fresh room. Nothing is
 // created until then. A running task keeps its target, log and session; the new discussion uses
 // the saved worker default.
-// A new terminal discussion or brainstorm starts with the saved worker default.
-async function defaultWorker(ctx) {
-  const worker = readDefaults()?.worker ?? (ctx.workerDefault ? parseSpec(ctx.workerDefault, true) : null);
-  if (!worker || specFor(worker) === ctx.workerSpec) return;
-  const sessions = new Map(ctx.sessions);
-  sessions.set(`worker:${worker.name}`, {});
-  const next = { ...ctx, workerSpec: specFor(worker), sessions };
+// A new terminal discussion or brainstorm starts with the saved member and worker defaults.
+async function defaultsForNew(ctx) {
+  const defaults = readDefaults();
+  const worker = defaults?.worker ?? (ctx.workerDefault ? parseSpec(ctx.workerDefault, true) : null);
+  const workerSpec = worker ? specFor(worker) : ctx.workerSpec;
+  const agentSpecs = defaults ? defaults.agents.map(specFor).join(',') : ctx.agentSpecs;
+  if (workerSpec === ctx.workerSpec && agentSpecs === ctx.agentSpecs) return;
+  const sessions = new Map();
+  if (worker) sessions.set(`worker:${worker.name}`, workerSpec === ctx.workerSpec ? ctx.sessions.get(`worker:${worker.name}`) ?? {} : {});
+  const state = { ...ctx.state, seen: new Map() };
+  const next = { ...ctx, agentSpecs, workerSpec, sessions, state };
   const loaded = await load(next, '');
-  Object.assign(ctx, { worker: loaded.worker, makeWorker: loaded.makeWorker, workerSpec: next.workerSpec, sessions });
+  Object.assign(ctx, { room: loaded.room, worker: loaded.worker, makeWorker: loaded.makeWorker, agentSpecs, workerSpec, sessions, state });
+  wire(ctx);
 }
 async function newDiscussion(ctx) {
   const was = ctx.discussion;
   if (!was && !ctx.logPath && !ctx.state.brainstorm) return note(ctx, 'No discussion started yet: your next message starts a new one.');
   if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a new discussion');
-  await defaultWorker(ctx);
+  await defaultsForNew(ctx);
   if (was && ctx.screen.worker.length) {
     const view = { owner: ownerOf(ctx), note: `New discussion: ${was.name} keeps its worker session; its tasks still running or queued finish there and report to it. The new discussion's worker starts a fresh session.` };
     ctx.screen.worker.push(view);
@@ -1020,7 +1025,7 @@ async function newDiscussion(ctx) {
 async function newBrainstorm(ctx) {
   const was = ctx.discussion;
   if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, 'starting a brainstorm');
-  await defaultWorker(ctx);
+  await defaultsForNew(ctx);
   ctx.state.brainstorm = true;
   ctx.state.brainstormId = randomBytes(12).toString('hex');
   ctx.state.briefing = `This is a brainstorm, not a discussion: it has no folder and agent-room keeps no record of it. Write no files; you may read the project in the room's root, ${ctx.cwd}.`;
@@ -1104,8 +1109,9 @@ async function openBeside(ctx) {
   const shop = shopOf(ctx);
   let tag;
   do tag = `d${++shop.contexts}`; while (ctx.hub.rooms.has(`${baseKey(ctx)}#${tag}`));
-  const worker = readDefaults()?.worker;
-  const { ctx: next } = await ctx.hub.addRoom(ctx.cwd, { agents: ctx.agentSpecs, worker: worker ? specFor(worker) : ctx.workerDefault ?? ctx.workerSpec, context: tag });
+  const defaults = readDefaults(), worker = defaults?.worker;
+  const { ctx: next } = await ctx.hub.addRoom(ctx.cwd, { agents: defaults ? defaults.agents.map(specFor).join(',') : ctx.agentSpecs,
+    worker: worker ? specFor(worker) : ctx.workerDefault ?? ctx.workerSpec, context: tag });
   showHeader(ctx);
   return next;
 }

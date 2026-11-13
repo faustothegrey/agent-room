@@ -301,3 +301,12 @@ test('state.briefing goes with each agent\'s first prompt only', async () => {
   assert.match(a.prompts[0], /You are A[\s\S]*Write in \/x\/discussions\/d\.\n\nNew messages/);
   assert.doesNotMatch(a.prompts[1], /Write in/);
 });
+
+test('discussion agents take turns in the selected row order', async () => {
+  const { createRoom } = await import('../src/room.mjs');
+  const turns = [];
+  const agents = ['Agy', 'Claude2', 'Codex'].map((name) => ({ name, provider: 'claude', turn: async () => { turns.push(name); return 'PASS'; } }));
+  const room = createRoom(agents);
+  await room.round('Hello');
+  assert.deepEqual(turns, ['Agy', 'Claude2', 'Codex']);
+});
