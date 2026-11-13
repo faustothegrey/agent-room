@@ -161,7 +161,7 @@ process.stdin.on('end', () => {
   if (codex) {
     console.log(JSON.stringify({ type: 'thread.started', thread_id: 'saved-thread' }));
     console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'PASS' } }));
-  } else console.log(JSON.stringify({ result: args.includes('--no-session-persistence') ? 'Memory test' : args.includes('Bash') ? 'Worker reply' : 'PASS' }));
+  } else console.log(JSON.stringify({ result: args.includes('--no-session-persistence') ? 'Memory test' : args[args.indexOf('--append-system-prompt') + 1]?.includes('Read me first: for the WORKER agent only') ? 'Worker reply' : 'PASS' }));
 });
 `;
   for (const name of ['claude', 'codex']) writeFileSync(join(bin, name), fake, { mode: 0o755 });

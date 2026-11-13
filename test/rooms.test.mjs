@@ -38,7 +38,7 @@ process.stdin.on('end', () => {
   const args = process.argv.slice(2);
   const reply = (result) => console.log(JSON.stringify({ result }));
   if (args.includes('--no-session-persistence')) return reply('A topic');
-  if (args.includes('Bash') && input.includes('long task')) { const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(pids + '.tmp')}, process.pid + '\\n' + child.pid + '\\n'); fs.renameSync(${JSON.stringify(pids + '.tmp')}, ${JSON.stringify(pids)}); return setTimeout(() => reply('done'), 60000); }
+  if (args[args.indexOf('--append-system-prompt') + 1]?.includes('Read me first: for the WORKER agent only') && input.includes('long task')) { const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(pids + '.tmp')}, process.pid + '\\n' + child.pid + '\\n'); fs.renameSync(${JSON.stringify(pids + '.tmp')}, ${JSON.stringify(pids)}); return setTimeout(() => reply('done'), 60000); }
   setTimeout(() => reply('PASS'), input.includes('slow') ? 3000 : 0);
 });
 `, { mode: 0o755 });
@@ -216,7 +216,7 @@ process.stdin.on('end', () => {
   const args = process.argv.slice(2);
   const reply = (result) => console.log(JSON.stringify({ result }));
   if (args.includes('--no-session-persistence')) return reply(input.includes('alpha') ? 'Alpha topic' : 'Beta topic');
-  if (args.includes('Bash')) return reply('report on: ' + input.trim().split('\\n').at(-1));
+  if (args[args.indexOf('--append-system-prompt') + 1]?.includes('Read me first: for the WORKER agent only')) return reply('report on: ' + input.trim().split('\\n').at(-1));
   fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args, input }) + '\\n');
   reply('PASS');
 });
