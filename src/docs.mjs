@@ -1173,7 +1173,7 @@ function archiveButton(b, ref) {
   };
 }
 const expandedLines = new Set();
-const expandedDiscussions = new Set(['archive', 'deferred']);
+const expandedDiscussions = new Set();
 let openRowMenu = null; // the discussion path whose ▾ Actions menu is open
 let cachedDetail = { files: [], unviewable: new Set(), branch: null };
 
