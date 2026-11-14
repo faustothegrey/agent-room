@@ -132,3 +132,22 @@ test('agy gauges use Antigravity model windows and hide missing data', () => {
 test('agy login is unmonitored without invoking a command', async () => {
   assert.deepEqual(await checkLogin('agy', () => { throw new Error('must not run'); }), { state: 'unmonitored' });
 });
+
+test('agy grouped gauges show Gemini and Argon while summaries retain all models', () => {
+  const quota = { last_update: '2026-11-14 10:30:00', antigravity: { ok: true, parsed: {
+    groups: {
+      gemini: { windows: { '5h': { used_percent: 3, resets: '2pm' }, weekly: { used_percent: 10, resets: 'Nov 19 at 3pm' } } },
+      argon: { windows: { weekly: { used_percent: 20, resets: 'Nov 20 at 4pm' } } },
+      '3p': { windows: { weekly: { used_percent: 80, resets: 'Nov 21 at 5pm' } } },
+    },
+    models: [ { group: 'gemini', window: '5h', used_percent: 3 }, { group: 'gemini', window: 'weekly', used_percent: 10 },
+      { group: 'argon', window: 'weekly', used_percent: 20 }, { group: '3p', window: 'weekly', used_percent: 80, resets: 'Nov 21 at 5pm' } ],
+  } } };
+  assert.deepEqual(quotaGauges(quota, ['agy']), [
+    { provider: 'agy', group: 'gemini', label: '5h', used: 3, resets: '14 Nov 14:00' },
+    { provider: 'agy', group: 'gemini', label: 'week', used: 10, resets: '19 Nov 15:00' },
+    { provider: 'agy', group: 'argon', label: 'week', used: 20, resets: '20 Nov 16:00' },
+  ]);
+  assert.equal(quotaSummary(quota, ['agy']), 'agy 3% 5h / 80% week');
+  assert.match(usageReport({ totals: {}, agents: [{ name: 'A', provider: 'agy' }], quota }), /agy.*week 80% used/i);
+});

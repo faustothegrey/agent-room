@@ -1930,9 +1930,9 @@ function providerHealth(provider) {
   return { level, box };
 }
 // A provider's name, with its ⚠ and its details.
-function providerName(provider) {
-  const b = document.createElement('b'); b.textContent = provider;
-  const h = providerHealth(provider);
+function providerName(provider, display = provider, health = true) {
+  const b = document.createElement('b'); b.textContent = display;
+  const h = health ? providerHealth(provider) : null;
   if (!h) return b;
   b.tabIndex = 0;
   if (h.level) { const a = document.createElement('span'); a.className = 'alert' + (h.level === 'red' ? ' red' : ''); a.textContent = '⚠'; b.append(a); }
@@ -1953,19 +1953,19 @@ function showQuota(gauges, at) {
   if (gauges === undefined) return bare(new Set()); // not read yet
   if (gauges === null || !gauges.length) { box.textContent = 'quota meter not reachable'; box.append(' · ', quotaUpdated({ checked: at?.checked })); return bare(new Set()); }
   box.append(quotaUpdated(at));
-  let provider = null, group = null, hasWeek = false;
+  let provider = null, groupName = null, group = null, hasWeek = false;
   const finishGroup = () => {
-    if (!group || hasWeek || monitor[provider]?.running == null) return;
+    if (!group || groupName === 'argon' || hasWeek || monitor[provider]?.running == null) return;
     const row = document.createElement('span'); row.className = 'gauge'; row.style.gridRow = '2';
     row.innerHTML = '<span></span><span></span><span></span><span class="resets"></span>';
     row.children[3].textContent = monitor[provider].running; group.append(row);
   };
   for (const g of gauges) {
-    if (g.provider !== provider) {
+    if (g.provider !== provider || (g.group ?? null) !== groupName) {
       finishGroup(); hasWeek = false;
-      provider = g.provider;
+      provider = g.provider; groupName = g.group ?? null;
       group = document.createElement('span'); group.className = 'quota';
-      group.append(providerName(provider));
+      group.append(providerName(provider, groupName ?? provider, groupName !== 'argon'));
       box.append(group);
     }
     const el = document.createElement('span');
@@ -1974,12 +1974,12 @@ function showQuota(gauges, at) {
     el.className = 'gauge' + (left < 10 ? ' high' : left < 30 ? ' warn' : '');
     if (g.label === '5h') el.style.gridRow = '1';
     if (g.label === 'week') { el.style.gridRow = '2'; hasWeek = true; }
-    el.title = provider + ' ' + g.label + ': ' + g.used + '% used' + (g.resets ? ', at ' + g.resets : '');
+    el.title = provider + (groupName ? ' ' + groupName : '') + ' ' + g.label + ': ' + g.used + '% used' + (g.resets ? ', at ' + g.resets : '');
     el.innerHTML = '<span></span><span class="bar"><i></i></span><span></span>';
     el.children[0].textContent = g.label === 'week' ? 'wk' : g.label;
     el.children[1].firstChild.style.width = Math.min(100, Math.max(0, g.used)) + '%';
     el.children[2].textContent = g.used + '%';
-    if (g.label === '5h' || g.label === 'week') {
+    if (groupName !== 'argon' && (g.label === '5h' || g.label === 'week')) {
       const resets = document.createElement('span'); resets.className = 'resets';
       if (g.label === 'week' && monitor[provider]?.running != null) resets.textContent = monitor[provider].running;
       else if (g.label === '5h' && g.resets) resets.textContent = /^(?:\\d{1,2} [A-Za-z]{3} )(\\d{2}:\\d{2})(?: \\([^)]+\\))?$/.exec(g.resets)?.[1] ?? g.resets.split(' (')[0];

@@ -95,7 +95,16 @@ function resetTime(text, measured) {
 // The quota windows as gauges for the screen's header: [{ provider, label, used, resets }], in the
 // order of providers; [] if the meter had nothing for them.
 export function quotaGauges(quota, providers) {
-  return providers.flatMap((p) => windows(quota, p).map(([label, x]) => ({ provider: p, label, used: x.used_percent, resets: resetTime(x.resets, quota.last_update) })));
+  return providers.flatMap((p) => {
+    const block = quota?.antigravity;
+    const groups = p === 'agy' && block?.ok ? block.parsed?.groups : null;
+    if (groups) return [['gemini', '5h', '5h'], ['gemini', 'week', 'weekly'], ['argon', 'week', 'weekly']]
+      .flatMap(([group, label, window]) => {
+        const x = groups[group]?.windows?.[window];
+        return typeof x?.used_percent === 'number' ? [{ provider: p, group, label, used: x.used_percent, resets: resetTime(x.resets, quota.last_update) }] : [];
+      });
+    return windows(quota, p).map(([label, x]) => ({ provider: p, label, used: x.used_percent, resets: resetTime(x.resets, quota.last_update) }));
+  });
 }
 
 // The full /usage report: session totals per agent, then the quotas.
