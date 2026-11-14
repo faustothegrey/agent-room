@@ -1979,9 +1979,7 @@ function showQuota(gauges, at) {
     el.children[2].textContent = g.used + '%';
     const tip = document.createElement('span'); tip.className = 'hover-detail'; tip.setAttribute('role', 'tooltip');
     if (g.label === '5h' && g.resets) {
-      const reset = document.createElement('strong');
-      reset.textContent = 'Resets at ' + (/^(?:\\d{1,2} [A-Za-z]{3} )(\\d{2}:\\d{2})(?: \\([^)]+\\))?$/.exec(g.resets)?.[1] ?? g.resets.split(' (')[0]);
-      tip.append(reset);
+      const reset = document.createElement('strong'); reset.textContent = 'Resets at ' + g.resets; tip.append(reset);
     }
     const info = document.createElement('span');
     info.textContent = provider + (groupName ? ' ' + groupName : '') + ' ' + g.label + ': ' + g.used + '% used' + (g.label !== '5h' && g.resets ? ', at ' + g.resets : '');
