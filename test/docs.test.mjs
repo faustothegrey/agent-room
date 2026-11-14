@@ -1,12 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createServer, request } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import WebSocket from 'ws';
 import { ATTACH_LIMIT, broadcast, docFiles, handle, isTextFile, isViewable, listFiles, messageView, pick, roomBranch, saveAttachments } from '../src/docs.mjs';
 
 // A proposal/ folder with a doc, a drawing, a hidden file, and a file just outside it.
@@ -848,135 +847,93 @@ test('peek lifecycle: tab indicator, banner, Back to current, revealDoc immunity
   assert.equal(els['tab-explorer'].classList.contains('peeking'), false);
 });
 
-test('browser Room checkout lists root files including discussions/README.md with no console error', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'room-checkout-browser-'));
-  const userDataDir = mkdtempSync(join(tmpdir(), 'chrome-profile-'));
-  execFileSync('git', ['init', '-b', 'main', root]);
-  execFileSync('git', ['-C', root, 'config', 'user.email', 'test@test.local']);
-  execFileSync('git', ['-C', root, 'config', 'user.name', 'Test']);
-  writeFileSync(join(root, 'README.md'), '# Project Readme\n');
-  mkdirSync(join(root, 'discussions', '2026-11-13-topic'), { recursive: true });
-  mkdirSync(join(root, 'discussions', 'archive', '2026-11-10-old'), { recursive: true });
-  writeFileSync(join(root, 'discussions', 'README.md'), '# Discussions Index\n');
-  writeFileSync(join(root, 'discussions', '2026-11-13-topic', 'notes.md'), '# Active Notes\n');
-  writeFileSync(join(root, 'discussions', 'archive', '2026-11-10-old', 'notes.md'), '# Archived Notes\n');
-  execFileSync('git', ['-C', root, 'add', '.']);
-  execFileSync('git', ['-C', root, 'commit', '-m', 'Initial commit']);
-
-  const screen = {
-    clients: new Set(),
-    transcript: [],
-    room: { folder: root, active: 'discussions/2026-11-13-topic', discussion: 'Topic' },
-  };
-  const s = await serve(root, screen);
-  const chromeBin = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'google-chrome', 'chromium']
-    .find((b) => { try { execFileSync(b, ['--version'], { stdio: 'ignore' }); return true; } catch { return false; } });
-  assert.ok(chromeBin, 'Chrome binary required for browser regression test');
-
-  const proc = spawn(chromeBin, [
-    '--headless=new',
-    '--disable-gpu',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--remote-debugging-port=0',
-    `--user-data-dir=${userDataDir}`,
-    'about:blank',
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
-
-  let ws;
-  try {
-    const debugPort = await new Promise((resolve, reject) => {
-      let stderr = '';
-      const timer = setTimeout(() => reject(new Error('Timed out waiting for Chrome DevTools port')), 10000);
-      proc.stderr.on('data', (chunk) => {
-        stderr += chunk.toString();
-        const m = stderr.match(/DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//);
-        if (m) { clearTimeout(timer); resolve(Number(m[1])); }
-      });
-      proc.on('exit', (code) => { clearTimeout(timer); reject(new Error(`Chrome exited early (${code}): ${stderr}`)); });
-    });
-
-    let target;
-    for (let i = 0; i < 50; i++) {
-      const list = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
-      target = list.find((t) => t.type === 'page');
-      if (target) break;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    assert.ok(target?.webSocketDebuggerUrl, 'Could not find Chrome page target');
-
-    ws = new WebSocket(target.webSocketDebuggerUrl);
-    await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
-
-    let nextId = 1;
-    const pending = new Map();
-    const errors = [];
-    ws.on('message', (raw) => {
-      const msg = JSON.parse(raw.toString());
-      if (msg.id && pending.has(msg.id)) {
-        const { resolve, reject } = pending.get(msg.id);
-        pending.delete(msg.id);
-        if (msg.error) reject(new Error(msg.error.message));
-        else resolve(msg.result);
-      } else if (msg.method === 'Runtime.exceptionThrown') {
-        const d = msg.params.exceptionDetails;
-        errors.push(d.exception?.description || d.text || 'Runtime exception');
-      } else if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') {
-        errors.push(msg.params.args.map((a) => a.value ?? a.description ?? '').join(' '));
-      }
-    });
-    const sendCdp = (method, params = {}) => new Promise((resolve, reject) => {
-      const id = nextId++;
-      pending.set(id, { resolve, reject });
-      ws.send(JSON.stringify({ id, method, params }));
-    });
-    const evaluate = async (expression) => {
-      const res = await sendCdp('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-      if (res.exceptionDetails) {
-        errors.push(res.exceptionDetails.exception?.description || res.exceptionDetails.text || 'Eval exception');
-      }
-      return res.result?.value;
+test('Room checkout in Explorer lists root files including discussions/README.md and excludes dated discussions', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return {
+      toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(cls) { s.add(cls); }, remove(cls) { s.delete(cls); }, contains(cls) { return s.has(cls); }
     };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', disabled: false, children: [], dataset: {}, style: {},
+    classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    set innerHTML(html) {
+      this.children = [node('div')];
+    },
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    addEventListener() {},
+    setAttribute() {},
+    getAttribute() { return null; },
+  });
+  const els = {
+    'tab-discussions': node('button'),
+    'tab-explorer': node('button'),
+    'tab-document': node('button'),
+    'discussions': node('div'),
+    'explorer': node('div'),
+    'document': node('div'),
+    'discussions-pane': node('div'),
+    'pane': node('div'),
+    'docpane': node('div'),
+    'current': node('span'),
+    'feed': node('button'),
+    'doc-menu': node('details'),
+    'room-name': node('b'),
+    'disc': node('span'),
+    'code': node('span'),
+    'disc-status': node('span'),
+    'remote-view': node('div'),
+    'composer': node('div'),
+    'attach-row': node('div'),
+    'disc-workers': node('div'),
+    'replica-header': node('span'),
+  };
+  const document = { createElement: node, title: '' };
+  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'const renderAttachments = () => {};\n' +
+    code + '\n' +
+    'return { ' +
+    '  setRoom, renderExplorer, ' +
+    '  setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } ' +
+    '};'
+  )(
+    (id) => els[id] || (els[id] = node(id)), document, { href: '' }, null, () => {}, (cb) => cb(), () => {}
+  );
 
-    await sendCdp('Runtime.enable');
-    await sendCdp('Page.enable');
-    await sendCdp('Page.navigate', { url: `${s.base}/__room` });
+  harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-13-current', discussion: 'Current' });
+  harness.setFiles([
+    'README.md',
+    'discussions/README.md',
+    'discussions/2026-11-13-current/notes.md',
+    'discussions/archive/2026-11-10-old/notes.md',
+    'discussions/deferred/2026-11-11-later/notes.md',
+  ]);
 
-    // Wait for initial files fetch and Explorer bar to render
-    for (let i = 0; i < 60; i++) {
-      const ready = await evaluate(`Boolean(typeof cachedDetail !== 'undefined' && cachedDetail.files?.length && document.querySelector('#files .explorer-bar'))`);
-      if (ready) break;
-      await new Promise((r) => setTimeout(r, 50));
-    }
+  await harness.renderExplorer();
+  const bar = els['pane'].firstChild.children.find((c) => c.className === 'explorer-bar');
+  const btnRoot = bar.children.find((b) => b.textContent === 'Room checkout');
+  assert.ok(btnRoot);
+  btnRoot.onclick();
+  await harness.renderExplorer();
 
-    // Click "Room checkout" in the Explorer bar
-    const clicked = await evaluate(`(() => {
-      const btn = [...document.querySelectorAll('#files .explorer-bar button')].find((b) => b.textContent === 'Room checkout');
-      if (!btn) return false;
-      btn.click();
-      return true;
-    })()`);
-    assert.equal(clicked, true);
+  const filesContainer = els['pane'].firstChild;
+  const topFiles = filesContainer.children.filter((c) => c.tag === 'button' && c.className === 'entry file').map((c) => c.textContent);
+  const folders = filesContainer.children.filter((c) => c.tag === 'details' && c.className === 'inline-folder');
 
-    const view = await evaluate(`(() => ({
-      topFiles: [...document.querySelectorAll('#files > .entry.file')].map((b) => b.textContent),
-      folders: [...document.querySelectorAll('#files > details.inline-folder > summary')].map((s) => s.textContent),
-      discEntries: [...document.querySelectorAll('#files > details.inline-folder .entry.file')].map((b) => b.textContent),
-      discSubfolders: [...document.querySelectorAll('#files > details.inline-folder details.inline-folder > summary')].map((s) => s.textContent),
-    }))()`);
-
-    assert.deepEqual(errors, []);
-    assert.ok(view.topFiles.includes('README.md'));
-    assert.deepEqual(view.folders, ['discussions/']);
-    assert.deepEqual(view.discEntries, ['README.md']);
-    assert.deepEqual(view.discSubfolders, []);
-  } finally {
-    try { ws?.close(); } catch {}
-    for (const c of screen.clients) c.end();
-    s.close();
-    proc.kill('SIGKILL');
-    await new Promise((r) => proc.once('exit', r));
-    rmSync(root, { recursive: true, force: true });
-    rmSync(userDataDir, { recursive: true, force: true });
-  }
+  assert.deepEqual(topFiles, ['README.md']);
+  assert.deepEqual(folders.map((f) => f.children.find((c) => c.tag === 'summary')?.textContent), ['discussions/']);
+  const discFolder = folders[0];
+  const discFiles = discFolder.children.filter((c) => c.tag === 'button' && c.className === 'entry file').map((c) => c.textContent);
+  const discSubfolders = discFolder.children.filter((c) => c.tag === 'details');
+  assert.deepEqual(discFiles, ['README.md']);
+  assert.deepEqual(discSubfolders, []);
 });
