@@ -314,6 +314,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #files .hint { display: block; margin: 0 0 .8rem; }
 #gauges { display: contents; }
 .gauge { display: grid; grid-template-columns: 1.2rem 32px 1.8rem; gap: .2rem; align-items: center; line-height: 1.5; }
+.gauge:has(.resets) { grid-template-columns: 1.2rem 32px 1.8rem auto; }
 .quota { display: grid; grid-template-columns: auto 1fr; gap: .05rem .35rem; align-items: center; }
 .quota:not(:first-child) { border-left: 1px solid var(--line); padding-left: .5rem; }
 .gauge .bar { width: 32px; height: 6px; border-radius: 3px; background: #8883; overflow: hidden; }
@@ -331,6 +332,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .hover-detail .problem { font-weight: 600; color: light-dark(#b45309, #d6a84c); }
 .hover-detail .problem.red { color: #ef4444; }
 .hover-detail code { font-family: ui-monospace, monospace; user-select: all; }
+.gauge .resets { opacity: .8; white-space: nowrap; }
 @media (max-width: 1150px) {
   #header { grid-template-columns: fit-content(20rem) minmax(0, 1fr); gap: .4rem .8rem; }
   #server-zone { grid-column: 1 / -1; grid-row: 2; justify-content: space-between; flex-wrap: wrap; width: 100%; }
@@ -1969,6 +1971,11 @@ function showQuota(gauges, at) {
     el.children[0].textContent = g.label === 'week' ? 'wk' : g.label;
     el.children[1].firstChild.style.width = Math.min(100, Math.max(0, g.used)) + '%';
     el.children[2].textContent = g.used + '%';
+    if (g.label === '5h') {
+      const resets = document.createElement('span'); resets.className = 'resets';
+      if (g.resets) resets.textContent = 'at ' + g.resets.split(' (')[0];
+      el.append(resets);
+    }
     group.append(el);
   }
   bare(new Set(gauges.map((g) => g.provider)));
