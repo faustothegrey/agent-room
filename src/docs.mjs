@@ -280,10 +280,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 /* The gauges' own children join this grid, so "on HH:MM" sits in the first row, as in the drawing. */
 #monitor { display: grid; grid-template-rows: auto auto; align-items: center; gap: .1rem .5rem; flex: none; font-size: .65rem; color: var(--dim); }
 #gauges .quota { grid-row: 1 / span 2; }
-#gauges .updated { grid-row: 1; align-self: end; }
-#gauges .quota + .updated { grid-column: 2; }
-#gauges .quota + .quota + .updated { grid-column: 3; }
-#gauges .quota + .quota + .quota + .updated { grid-column: 4; }
+#gauges .updated { grid-row: 1; grid-column: 1; align-self: end; }
 /* Without gauges (meter not reachable), the message, its time and any provider with a warning share one line. */
 #monitor:not(:has(.gauge)) { display: flex; align-items: center; gap: .3rem .8rem; white-space: nowrap; }
 #monitor:not(:has(.gauge)) .updated { align-self: center; }
@@ -317,6 +314,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .gauge:has(.resets) { grid-template-columns: 1.2rem 32px 1.8rem auto; }
 .quota { display: grid; grid-template-columns: auto 1fr; gap: .05rem .35rem; align-items: center; }
 .quota:not(:first-child) { border-left: 1px solid var(--line); padding-left: .5rem; }
+.updated + .quota { border-left: 0; padding-left: 0; }
 .gauge .bar { width: 32px; height: 6px; border-radius: 3px; background: #8883; overflow: hidden; }
 .gauge .bar i { display: block; height: 100%; background: #10b981; }
 .gauge.warn { color: #eab308; } .gauge.warn .bar i { background: #eab308; }
@@ -1954,9 +1952,17 @@ function showQuota(gauges, at) {
   });
   if (gauges === undefined) return bare(new Set()); // not read yet
   if (gauges === null || !gauges.length) { box.textContent = 'quota meter not reachable'; box.append(' · ', quotaUpdated({ checked: at?.checked })); return bare(new Set()); }
-  let provider = null, group = null;
+  box.append(quotaUpdated(at));
+  let provider = null, group = null, hasWeek = false;
+  const finishGroup = () => {
+    if (!group || hasWeek || monitor[provider]?.running == null) return;
+    const row = document.createElement('span'); row.className = 'gauge'; row.style.gridRow = '2';
+    row.innerHTML = '<span></span><span></span><span></span><span class="resets"></span>';
+    row.children[3].textContent = monitor[provider].running; group.append(row);
+  };
   for (const g of gauges) {
     if (g.provider !== provider) {
+      finishGroup(); hasWeek = false;
       provider = g.provider;
       group = document.createElement('span'); group.className = 'quota';
       group.append(providerName(provider));
@@ -1966,20 +1972,23 @@ function showQuota(gauges, at) {
     // Highlighted by what is left: yellow under 30%, red under 10%.
     const left = 100 - g.used;
     el.className = 'gauge' + (left < 10 ? ' high' : left < 30 ? ' warn' : '');
+    if (g.label === '5h') el.style.gridRow = '1';
+    if (g.label === 'week') { el.style.gridRow = '2'; hasWeek = true; }
     el.title = provider + ' ' + g.label + ': ' + g.used + '% used' + (g.resets ? ', at ' + g.resets : '');
     el.innerHTML = '<span></span><span class="bar"><i></i></span><span></span>';
     el.children[0].textContent = g.label === 'week' ? 'wk' : g.label;
     el.children[1].firstChild.style.width = Math.min(100, Math.max(0, g.used)) + '%';
     el.children[2].textContent = g.used + '%';
-    if (g.label === '5h') {
+    if (g.label === '5h' || g.label === 'week') {
       const resets = document.createElement('span'); resets.className = 'resets';
-      if (g.resets) resets.textContent = /^(?:\\d{1,2} [A-Za-z]{3} )(\\d{2}:\\d{2})(?: \\([^)]+\\))?$/.exec(g.resets)?.[1] ?? g.resets.split(' (')[0];
+      if (g.label === 'week' && monitor[provider]?.running != null) resets.textContent = monitor[provider].running;
+      else if (g.label === '5h' && g.resets) resets.textContent = /^(?:\\d{1,2} [A-Za-z]{3} )(\\d{2}:\\d{2})(?: \\([^)]+\\))?$/.exec(g.resets)?.[1] ?? g.resets.split(' (')[0];
       el.append(resets);
     }
     group.append(el);
   }
+  finishGroup();
   bare(new Set(gauges.map((g) => g.provider)));
-  box.append(quotaUpdated(at));
 }
 // The ▾ menus (the header's and Explorer's discussion rows): one open at a time; a click outside or
 // Escape closes them. Actions that open something else close their menu; the two-click ones keep it
