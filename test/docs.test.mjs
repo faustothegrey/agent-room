@@ -937,3 +937,108 @@ test('Room checkout in Explorer lists root files including discussions/README.md
   assert.deepEqual(discFiles, ['README.md']);
   assert.deepEqual(discSubfolders, []);
 });
+
+test('Explorer marks the shown file with .shown and aria-current, and wraps levels with more than 10 files in .file-columns', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return {
+      toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(cls) { s.add(cls); }, remove(cls) { s.delete(cls); }, contains(cls) { return s.has(cls); }
+    };
+  };
+  const node = (tag = 'div') => {
+    const attrs = new Map();
+    return {
+      tag, className: '', textContent: '', title: '', disabled: false, children: [], dataset: {}, style: {},
+      classList: classListFor(),
+      get firstChild() { return this.children[0] || null; },
+      set innerHTML(html) {
+        this.children = [node('div')];
+      },
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      querySelectorAll() { return []; },
+      querySelector() { return null; },
+      addEventListener() {},
+      setAttribute(k, v) { attrs.set(k, String(v)); },
+      getAttribute(k) { return attrs.has(k) ? attrs.get(k) : null; },
+    };
+  };
+  const els = {
+    'tab-discussions': node('button'),
+    'tab-explorer': node('button'),
+    'tab-document': node('button'),
+    'discussions': node('div'),
+    'explorer': node('div'),
+    'document': node('div'),
+    'discussions-pane': node('div'),
+    'pane': node('div'),
+    'docpane': node('div'),
+    'current': node('span'),
+    'feed': node('button'),
+    'doc-menu': node('details'),
+    'room-name': node('b'),
+    'disc': node('span'),
+    'code': node('span'),
+    'disc-status': node('span'),
+    'remote-view': node('div'),
+    'composer': node('div'),
+    'attach-row': node('div'),
+    'disc-workers': node('div'),
+    'replica-header': node('span'),
+  };
+  const document = { createElement: node, title: '' };
+  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'const renderAttachments = () => {};\n' +
+    code + '\n' +
+    'return { ' +
+    '  setRoom, showDoc, renderExplorer, ' +
+    '  setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } ' +
+    '};'
+  )(
+    (id) => els[id] || (els[id] = node(id)), document, { href: '' }, null, () => {}, (cb) => cb(), () => {}
+  );
+
+  // 10 root files + 12 files in src/: root files stay direct children; src/ files wrap in .file-columns
+  const tenRootFiles = Array.from({ length: 10 }, (_, i) => `file-${String(i + 1).padStart(2, '0')}.md`);
+  const twelveSrcFiles = Array.from({ length: 12 }, (_, i) => `src/mod-${String(i + 1).padStart(2, '0')}.mjs`);
+  harness.setRoom({ folder: '/tmp/project', active: null, discussion: null });
+  harness.setFiles([...tenRootFiles, ...twelveSrcFiles]);
+  harness.showDoc('file-03.md');
+  await harness.renderExplorer();
+
+  let filesContainer = els['pane'].firstChild;
+  assert.equal(filesContainer.children.some((c) => c.className === 'file-columns'), false);
+  const rootButtons = filesContainer.children.filter((c) => c.tag === 'button');
+  assert.equal(rootButtons.length, 10);
+  const shownBtn = rootButtons.find((b) => b.textContent === 'file-03.md');
+  assert.ok(shownBtn);
+  assert.equal(shownBtn.className, 'entry file shown');
+  assert.equal(shownBtn.classList.contains('shown'), true);
+  assert.equal(shownBtn.getAttribute('aria-current'), 'true');
+  assert.equal(shownBtn.children.length, 0);
+
+  const otherBtn = rootButtons.find((b) => b.textContent === 'file-01.md');
+  assert.equal(otherBtn.className, 'entry file');
+  assert.equal(otherBtn.getAttribute('aria-current'), null);
+
+  // Inside src/ (12 files > 10), files are wrapped in .file-columns
+  const srcFolder = filesContainer.children.find((c) => c.tag === 'details' && c.className === 'inline-folder');
+  assert.ok(srcFolder);
+  const srcCols = srcFolder.children.find((c) => c.tag === 'div' && c.className === 'file-columns');
+  assert.ok(srcCols);
+  assert.equal(srcCols.children.length, 12);
+
+  // With 11 root files (> 10), root files also wrap in .file-columns after the folder
+  harness.setFiles([...tenRootFiles, 'file-11.md', ...twelveSrcFiles]);
+  await harness.renderExplorer();
+  filesContainer = els['pane'].firstChild;
+  const rootCols = filesContainer.children.find((c) => c.tag === 'div' && c.className === 'file-columns');
+  assert.ok(rootCols);
+  assert.equal(rootCols.children.length, 11);
+  assert.ok(filesContainer.children.indexOf( filesContainer.children.find((c) => c.tag === 'details')) < filesContainer.children.indexOf(rootCols));
+});

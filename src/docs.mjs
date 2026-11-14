@@ -422,8 +422,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #doc { border: 0; width: 100%; height: 100%; }
 .empty { display: grid; place-items: center; color: var(--dim); height: 100%; padding: 1rem; text-align: center; }
 #files, #disc-list { padding: 1rem; }
-. files-pane .entry, #files .entry, #disc-list .entry { display: block; width: 100%; text-align: left; margin: 0; padding: .3rem .5rem; border: 0; border-radius: 4px; background: none; font-size: .9rem; }
+#files .entry, #disc-list .entry { display: block; width: 100%; text-align: left; margin: 0; padding: .3rem .5rem; border: 0; border-radius: 4px; background: none; font-size: .9rem; break-inside: avoid; }
 #files .entry:hover, #disc-list .entry:hover { background: #8882; }
+#files .entry.file.shown, #files .entry.file.shown:hover { background: #3b82f633; box-shadow: inset 3px 0 #60a5fa; }
 #files .entry.unviewable { opacity: .5; cursor: default; }
 #files .entry.unviewable:hover { background: none; }
 #files .entry::before, #disc-list .entry::before { display: inline-block; width: 1.5em; }
@@ -462,8 +463,13 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .section-group > summary { cursor: pointer; padding: .3rem .5rem; border-radius: 4px; font-size: .9rem; }
 .section-group > summary:hover { background: #8882; }
 .section-group > summary .tag { color: var(--dim); font-size: .8rem; margin-left: .5rem; }
-.inline-folder { margin-left: 1rem; }
-.inline-folder > summary { cursor: pointer; padding: .3rem; }
+.inline-folder { position: relative; }
+.inline-folder[open]::before { content: ""; position: absolute; left: .75rem; top: 1.9rem; bottom: .2rem; border-left: 1px solid var(--line); pointer-events: none; }
+.inline-folder > summary { cursor: pointer; padding: .3rem .5rem; border-radius: 4px; font-size: .9rem; }
+.inline-folder > summary:hover { background: #8882; }
+.inline-folder > summary::before { content: '📁'; display: inline-block; width: 1.5em; }
+#files .inline-folder > :not(summary) { margin-left: 1.1rem; width: calc(100% - 1.1rem); }
+.file-columns { column-width: 14rem; column-gap: .6rem; }
 .local-label { color: var(--dim); font-size: .8rem; margin: .3rem 0; }
 .discussion-info { position: relative; display: inline-block; }
 .discussion-info > button { border: 0; background: none; color: #8fa8ee; padding: .15rem; }
@@ -828,7 +834,7 @@ async function revealDoc() {
     }
   }
   await openFiles();
-  requestAnimationFrame(() => [...pane.querySelectorAll('.entry.file')].find((b) => b.querySelector('.tag')?.textContent === 'shown')?.scrollIntoView({ block: 'center' }));
+  requestAnimationFrame(() => [...pane.querySelectorAll('.entry.file')].find((b) => b.classList.contains('shown'))?.scrollIntoView({ block: 'center' }));
 }
 $('tab-document').onclick = () => showSub('document');
 // Document's path line: names the discussion (current, peeked or received) or "Room checkout", plus the file's path inside it.
@@ -1462,13 +1468,17 @@ async function renderExplorer() {
 
   const renderFileEntry = (parent, name, fullPath, clickHandler) => {
     const cantShow = cachedDetail.unviewable?.has(fullPath) || BINARY_FILE.test(fullPath);
-    const b = el('button', 'entry file' + (cantShow ? ' unviewable' : ''), name + (cantShow ? " · can't be shown here" : ''));
+    const shown = !cantShow && fullPath === doc;
+    const b = el('button', 'entry file' + (cantShow ? ' unviewable' : shown ? ' shown' : ''), name + (cantShow ? " · can't be shown here" : ''));
     if (cantShow) {
       b.disabled = true;
       b.title = "can't be shown here";
     } else {
       b.onclick = () => clickHandler(fullPath);
-      if (fullPath === doc) b.append(el('span', 'tag', 'shown'));
+      if (shown) {
+        b.classList.add('shown');
+        b.setAttribute('aria-current', 'true');
+      }
     }
     parent.append(b);
   };
@@ -1488,10 +1498,12 @@ async function renderExplorer() {
       parent.append(details);
     }
 
+    const fileBox = files.length > 10 ? el('div', 'file-columns') : parent;
     for (const name of files) {
       const fullPath = prefix + '/' + name;
-      renderFileEntry(parent, name, fullPath, clickHandler);
+      renderFileEntry(fileBox, name, fullPath, clickHandler);
     }
+    if (fileBox !== parent) parent.append(fileBox);
   };
 
   const renderTree = (items, prefix, clickHandler) => {
@@ -1509,10 +1521,12 @@ async function renderExplorer() {
       list.append(details);
     }
 
+    const fileBox = files.length > 10 ? el('div', 'file-columns') : list;
     for (const name of files) {
       const fullPath = (prefix ? prefix + '/' : '') + name;
-      renderFileEntry(list, name, fullPath, clickHandler);
+      renderFileEntry(fileBox, name, fullPath, clickHandler);
     }
+    if (fileBox !== list) list.append(fileBox);
     if (!folders.length && !files.length) {
       list.append(el('span', 'hint', 'No files yet.'));
     }
