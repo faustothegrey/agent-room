@@ -1973,7 +1973,7 @@ function showQuota(gauges, at) {
     el.children[2].textContent = g.used + '%';
     if (g.label === '5h') {
       const resets = document.createElement('span'); resets.className = 'resets';
-      if (g.resets) resets.textContent = 'at ' + g.resets.split(' (')[0];
+      if (g.resets) resets.textContent = /^(?:\\d{1,2} [A-Za-z]{3} )(\\d{2}:\\d{2})(?: \\([^)]+\\))?$/.exec(g.resets)?.[1] ?? g.resets.split(' (')[0];
       el.append(resets);
     }
     group.append(el);
