@@ -1096,6 +1096,7 @@ setInterval(async () => { if (viewing) { try { const r = await post('__view', { 
 // itself: the index of its discussions).
 const isDiscussion = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(name);
 const SECTIONS = { archive: 'Archive', deferred: 'Deferred' };
+const inDiscussion = (f) => { const p = f.split('/'); return p[0] === 'discussions' && p.length >= 2 && (isDiscussion(p[1]) || Boolean(SECTIONS[p[1]])); };
 // The discussion a list path shows, as /resume and /move name it ("<name>" or "archive/<name>"), or null.
 function discussionOf(parts) {
   if (parts.length === 2 && isDiscussion(parts[1])) return { ref: parts[1], section: null };
