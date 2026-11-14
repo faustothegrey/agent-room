@@ -277,10 +277,10 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #peer-warning { border: 0; background: none; padding: 0 .2rem; font-size: .8rem; line-height: 1.1; color: light-dark(#92600a, #d6a84c); }
 #peer-warning[hidden] { display: none; }
 #server-details { flex-direction: column; }
-/* The gauges' own children join this grid, so "on HH:MM" sits in the first row, as in the drawing. */
+/* The gauges' own children join this grid, with "on" above "HH:MM" in the first column. */
 #monitor { display: grid; grid-template-rows: auto auto; align-items: center; gap: .1rem .5rem; flex: none; font-size: .65rem; color: var(--dim); }
 #gauges .quota { grid-row: 1 / span 2; }
-#gauges .updated { grid-row: 1; grid-column: 1; align-self: end; }
+#gauges .updated { grid-row: 1 / span 2; grid-column: 1; white-space: pre; line-height: 1.3; }
 /* Without gauges (meter not reachable), the message, its time and any provider with a warning share one line. */
 #monitor:not(:has(.gauge)) { display: flex; align-items: center; gap: .3rem .8rem; white-space: nowrap; }
 #monitor:not(:has(.gauge)) .updated { align-self: center; }
@@ -307,11 +307,9 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #beat.on { animation: beat 1.2s ease-out; } /* restarted on every answer, so each pulse is a real heartbeat */
 @keyframes beat { 0% { transform: scale(1.4); box-shadow: 0 0 0 0 #22c55eaa; } 100% { transform: scale(1); box-shadow: 0 0 0 8px #22c55e00; } }
 @media (prefers-reduced-motion: reduce) { #beat.on { animation: none; } }
-#gauges .updated { white-space: nowrap; }
 #files .hint { display: block; margin: 0 0 .8rem; }
 #gauges { display: contents; }
 .gauge { display: grid; grid-template-columns: 1.2rem 32px 1.8rem; gap: .2rem; align-items: center; line-height: 1.5; }
-.gauge:has(.resets) { grid-template-columns: 1.2rem 32px 1.8rem auto; }
 .quota { display: grid; grid-template-columns: auto 1fr; gap: .05rem .35rem; align-items: center; }
 .quota:not(:first-child) { border-left: 1px solid var(--line); padding-left: .5rem; }
 .updated + .quota { border-left: 0; padding-left: 0; }
@@ -320,17 +318,19 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .gauge.warn { color: #eab308; } .gauge.warn .bar i { background: #eab308; }
 .gauge.high { color: #ef4444; font-weight: 600; } .gauge.high .bar i { background: #ef4444; }
 .quota b { color: CanvasText; font-weight: 600; grid-column: 1; grid-row: 1 / span 2; text-transform: capitalize; font-size: .7rem; }
+.quota b:has(+ .running) { grid-row: 1; }
+.quota .running { grid-column: 1; grid-row: 2; font-size: .6rem; color: var(--dim); white-space: nowrap; }
 .quota .gauge { grid-column: 2; }
-/* A provider's name: hover or focus shows its state; a ⚠ right of it on a problem. */
-.quota b { position: relative; cursor: default; }
+/* A provider's name and each gauge: hover or focus shows details; a ⚠ right of the name on a problem. */
+.quota b, .gauge { position: relative; cursor: default; }
 .quota b .alert { margin-left: .25rem; font-weight: 700; color: light-dark(#b45309, #d6a84c); }
 .quota b .alert.red { color: #ef4444; }
-.quota b .hover-detail { left: auto; right: 0; text-transform: none; font-weight: 400; white-space: normal; }
-.quota b:is(:hover, :focus-visible) > .hover-detail { display: flex; }
+.quota b .hover-detail, .gauge .hover-detail { left: auto; right: 0; text-transform: none; font-weight: 400; white-space: normal; }
+.quota b:is(:hover, :focus-visible) > .hover-detail, .gauge:is(:hover, :focus-visible) > .hover-detail { display: flex; }
+.hover-detail strong { color: CanvasText; font-weight: 600; }
 .hover-detail .problem { font-weight: 600; color: light-dark(#b45309, #d6a84c); }
 .hover-detail .problem.red { color: #ef4444; }
 .hover-detail code { font-family: ui-monospace, monospace; user-select: all; }
-.gauge .resets { opacity: .8; white-space: nowrap; }
 @media (max-width: 1150px) {
   #header { grid-template-columns: fit-content(20rem) minmax(0, 1fr); gap: .4rem .8rem; }
   #server-zone { grid-column: 1 / -1; grid-row: 2; justify-content: space-between; flex-wrap: wrap; width: 100%; }
@@ -1880,7 +1880,7 @@ function quotaUpdated(at) {
   // The meter reports local time as "YYYY-MM-DD HH:MM:SS"; a day other than today is shown too.
   const m = /^(\\d{4}-\\d{2}-\\d{2})[ T](\\d{2}:\\d{2})/.exec(at?.measured ?? '');
   const today = new Date().toLocaleDateString('sv'); // YYYY-MM-DD
-  el.textContent = m ? 'on ' + (m[1] === today ? '' : m[1] + ' ') + m[2] : checked ? 'checked ' + hhmm(checked) : '';
+  el.textContent = m ? 'on\\n' + (m[1] === today ? '' : m[1] + ' ') + m[2] : checked ? 'checked ' + hhmm(checked) : '';
   el.title = (at?.measured ? 'Measured by the quota meter at ' + at.measured + '. ' : '') +
     (checked ? 'The room last asked the meter at ' + hhmm(checked) + ' (every minute, and after each turn).' : '');
   return el;
@@ -1953,19 +1953,17 @@ function showQuota(gauges, at) {
   if (gauges === undefined) return bare(new Set()); // not read yet
   if (gauges === null || !gauges.length) { box.textContent = 'quota meter not reachable'; box.append(' · ', quotaUpdated({ checked: at?.checked })); return bare(new Set()); }
   box.append(quotaUpdated(at));
-  let provider = null, groupName = null, group = null, hasWeek = false;
-  const finishGroup = () => {
-    if (!group || groupName === 'argon' || hasWeek || monitor[provider]?.running == null) return;
-    const row = document.createElement('span'); row.className = 'gauge'; row.style.gridRow = '2';
-    row.innerHTML = '<span></span><span></span><span></span><span class="resets"></span>';
-    row.children[3].textContent = monitor[provider].running; group.append(row);
-  };
+  let provider = null, groupName = null, group = null;
   for (const g of gauges) {
     if (g.provider !== provider || (g.group ?? null) !== groupName) {
-      finishGroup(); hasWeek = false;
       provider = g.provider; groupName = g.group ?? null;
       group = document.createElement('span'); group.className = 'quota';
       group.append(providerName(provider, groupName ?? provider, groupName !== 'argon'));
+      if (groupName !== 'argon' && monitor[provider]?.running != null) {
+        const running = document.createElement('span'); running.className = 'running';
+        running.textContent = monitor[provider].running + ' running';
+        group.append(running);
+      }
       box.append(group);
     }
     const el = document.createElement('span');
@@ -1973,21 +1971,24 @@ function showQuota(gauges, at) {
     const left = 100 - g.used;
     el.className = 'gauge' + (left < 10 ? ' high' : left < 30 ? ' warn' : '');
     if (g.label === '5h') el.style.gridRow = '1';
-    if (g.label === 'week') { el.style.gridRow = '2'; hasWeek = true; }
-    el.title = provider + (groupName ? ' ' + groupName : '') + ' ' + g.label + ': ' + g.used + '% used' + (g.resets ? ', at ' + g.resets : '');
+    if (g.label === 'week') el.style.gridRow = '2';
+    el.tabIndex = 0;
     el.innerHTML = '<span></span><span class="bar"><i></i></span><span></span>';
     el.children[0].textContent = g.label === 'week' ? 'wk' : g.label;
     el.children[1].firstChild.style.width = Math.min(100, Math.max(0, g.used)) + '%';
     el.children[2].textContent = g.used + '%';
-    if (groupName !== 'argon' && (g.label === '5h' || g.label === 'week')) {
-      const resets = document.createElement('span'); resets.className = 'resets';
-      if (g.label === 'week' && monitor[provider]?.running != null) resets.textContent = monitor[provider].running;
-      else if (g.label === '5h' && g.resets) resets.textContent = /^(?:\\d{1,2} [A-Za-z]{3} )(\\d{2}:\\d{2})(?: \\([^)]+\\))?$/.exec(g.resets)?.[1] ?? g.resets.split(' (')[0];
-      el.append(resets);
+    const tip = document.createElement('span'); tip.className = 'hover-detail'; tip.setAttribute('role', 'tooltip');
+    if (g.label === '5h' && g.resets) {
+      const reset = document.createElement('strong');
+      reset.textContent = 'Resets at ' + (/^(?:\\d{1,2} [A-Za-z]{3} )(\\d{2}:\\d{2})(?: \\([^)]+\\))?$/.exec(g.resets)?.[1] ?? g.resets.split(' (')[0]);
+      tip.append(reset);
     }
+    const info = document.createElement('span');
+    info.textContent = provider + (groupName ? ' ' + groupName : '') + ' ' + g.label + ': ' + g.used + '% used' + (g.label !== '5h' && g.resets ? ', at ' + g.resets : '');
+    tip.append(info);
+    el.append(tip);
     group.append(el);
   }
-  finishGroup();
   bare(new Set(gauges.map((g) => g.provider)));
 }
 // The ▾ menus (the header's and Explorer's discussion rows): one open at a time; a click outside or
