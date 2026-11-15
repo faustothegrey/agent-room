@@ -1276,7 +1276,7 @@ function renderDiscussions() {
       } else if (!isCurrent) {
         const b = el('button', 'reopen primary', 'Resume');
         b.title = resumeTip(d, openHere, null);
-        b.onclick = (e) => { e.stopPropagation(); send('/resume ' + d); };
+        b.onclick = (e) => { e.stopPropagation(); if (openHere) notesGuard(() => { location.href = openHere.url; }); else send('/resume ' + d); };
         row.append(b);
       }
       const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');

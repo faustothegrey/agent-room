@@ -217,7 +217,7 @@ several discussions open at once, each with its own agents' sessions, chat and a
 own worker session, worktree and queue (below): their worker tasks run at the same time, at most
 two at once. You can switch discussion while one waits for its worker task: the window shows one
 discussion, the one what you type goes to, and the task's report still goes back to its own. One window shows one of them; Discussions marks the others "open". **Resume** shows an open one as
-it is: its agents carry on, nothing is restarted. An open brainstorm, or an open discussion that
+it is, during a round too: its agents carry on, nothing is restarted. An open brainstorm, or an open discussion that
 hasn't started (no message yet), has **Go to** instead, which only shows it. **New discussion** opens
 the new one beside the discussion in use, which stays open, and ends an open brainstorm. Resume
 and Start fresh open any other discussion beside the open ones. At most one brainstorm is open per folder. **Close
@@ -268,7 +268,7 @@ separated by root folder; they are not replicated to peers.
 
 **Resume** (on a discussion's row in **Discussions** or on its page, or `/resume <folder-name>`), for
 any discussion not on screen, works between rounds:
-- open in another discussion of this folder: it is only shown, as it is;
+- open in another discussion of this folder: it is only shown, as it is (during a round too, from its row);
 - with a checkpoint: it continues there, with the same agent and worker sessions and its chat;
 - without one: no title is requested and your next message starts a fresh session from its
   handoff and notes, in a new session transcript;
