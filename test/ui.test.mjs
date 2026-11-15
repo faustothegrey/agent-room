@@ -813,6 +813,10 @@ test('the Worker tab checks each branch with work not in main: whether it contai
   assert.deepEqual(state(), before);
   assert.ok(lines().includes(`${branch} lacks 1 commit of current main (${main2.slice(0, 7)}): its worker merges main in with its next instruction. Merge it into main after that, once its tests pass on top of main.`));
   if (preview) assert.ok(lines().includes(`${advice}: would conflict in shared.txt.`));
+  // The page shows the lane collapsed under a summary of the same checks.
+  assert.equal(ctx.screen.workerInfo.lanes[0].own, true);
+  assert.deepEqual(ctx.screen.workerInfo.lanes[0].lines, lines());
+  assert.equal(ctx.screen.workerInfo.lanes[0].summary, [branch, '1 commit to review', 'lacks 1 commit of main', 'not tested on main', ...(preview ? ['would conflict in 1 file'] : [])].join(' · '));
 
   // The next task merges main, resolves, tests, and names the commits it tested.
   reply = () => {

@@ -300,7 +300,8 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #winfo .error { color: #ef4444; }
 #winfo code { font-size: .7rem; overflow-wrap: anywhere; user-select: all; }
 #winfo summary { cursor: pointer; }
-#winfo details > div { margin: .2rem 0 0 1rem; overflow-wrap: anywhere; max-height: 12rem; overflow-y: auto; }
+#winfo .lane-lines { margin: .2rem 0 .2rem 1rem; display: flex; flex-direction: column; gap: .2rem; overflow-wrap: anywhere; }
+#winfo .preview-files { margin: .2rem 0 0 1rem; max-height: 12rem; overflow-y: auto; }
 #winfo button { align-self: flex-start; font-size: .75rem; margin-top: .2rem; }
 #server { max-width: 100%; font-size: .75rem; color: light-dark(#3d5fc4, #5a7bd8); display: inline-flex; align-items: center; gap: .4rem; }
 #server[data-state="down"] { color: #ef4444; font-weight: 600; }
@@ -700,16 +701,27 @@ function showFailedAgents(agents) {
   }
 }
 // The Worker tab's line: its worktree, or why the worker is disabled.
+// Each lane (the discussion's own branch first, then every other one with something to review) is
+// shown collapsed under a one-line summary; what the User opens stays open across refreshes.
 function setWorkerInfo(info) {
   const el = $('winfo');
-  const open = new Set([...el.querySelectorAll('details[open]')].map((d) => d.dataset.key)); // kept across refreshes
+  const open = new Set([...el.querySelectorAll('details[open]')].map((d) => d.dataset.key));
   el.replaceChildren();
   if (!info) return;
-  for (const line of info.lines) {
+  const lineEl = (line) => {
     let p = mergePreviewLine(line, open);
     if (!p) { p = document.createElement('div'); p.textContent = line; }
     if (info.error || info.disabled) p.className = 'error';
-    el.append(p);
+    return p;
+  };
+  if (!info.lanes) { for (const line of info.lines) el.append(lineEl(line)); }
+  else for (const lane of info.lanes) {
+    const d = document.createElement('details'); d.dataset.key = 'lane ' + lane.summary.split(' · ')[0]; d.open = open.has(d.dataset.key);
+    const summary = document.createElement('summary'); summary.textContent = lane.summary;
+    const body = document.createElement('div'); body.className = 'lane-lines';
+    for (const line of lane.lines) body.append(lineEl(line));
+    d.append(summary, body);
+    el.append(d);
   }
   wbox.disabled = !!info.disabled;
   if (info.disabled) wbox.placeholder = info.lines[0];
@@ -722,7 +734,7 @@ function mergePreviewLine(line, open) {
   const outcome = m[3].startsWith('clean') ? 'clean' : files ? 'would conflict in ' + files.length + (files.length === 1 ? ' file' : ' files') : 'could not be computed';
   const d = document.createElement('details'); d.dataset.key = m[1]; d.open = open.has(m[1]);
   const summary = document.createElement('summary'); summary.textContent = m[1] + ': ' + outcome;
-  const body = document.createElement('div'); body.textContent = m[3] + ' (' + m[2] + ')';
+  const body = document.createElement('div'); body.className = 'preview-files'; body.textContent = m[3] + ' (' + m[2] + ')';
   d.append(summary, body);
   return d;
 }

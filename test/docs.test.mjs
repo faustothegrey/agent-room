@@ -1166,7 +1166,7 @@ test('the Worker tab shows a merge preview collapsed, its outcome in the summary
       tag, textContent: '', dataset: {}, children: [], open: false,
       append(...items) { this.children.push(...items); },
       replaceChildren(...items) { this.children = items; },
-      querySelectorAll() { return this.children.filter((c) => c.tag === 'details' && c.open); },
+      querySelectorAll() { const all = (n) => (n.children ?? []).flatMap((c) => [c, ...all(c)]); return all(this).filter((c) => c.tag === 'details' && c.open); },
     });
     const winfo = node('div'), wbox = {};
     const setWorkerInfo = new Function('$', 'document', 'wbox', code + '; return setWorkerInfo;')(() => winfo, { createElement: node }, wbox);
@@ -1184,6 +1184,22 @@ test('the Worker tab shows a merge preview collapsed, its outcome in the summary
     assert.equal(winfo.children[1].children[0].textContent, 'Merge preview of worker/x into main: would conflict in 1 file');
     setWorkerInfo({ lines: [`${advice}: clean.`] });
     assert.equal(winfo.children[0].children[0].textContent, 'Merge preview of worker/x into main: clean');
+
+    // With lanes: each is collapsed under its summary, its lines (and its preview) inside.
+    const lanes = [
+      { own: true, summary: 'worker/x · 1 commit to review · would conflict in 3 files', lines },
+      { own: false, summary: 'worker/y · nothing to review', lines: ['Worktree y'] },
+    ];
+    setWorkerInfo({ lines: [...lines, 'Worktree y'], lanes });
+    assert.deepEqual(winfo.children.map((d) => [d.tag, d.open, d.children[0].textContent]),
+      [['details', false, lanes[0].summary], ['details', false, lanes[1].summary]]);
+    const inside = winfo.children[0].children[1].children;
+    assert.equal(inside[0].textContent, 'worktree line');
+    assert.equal(inside[1].tag, 'details');
+    winfo.children[0].open = true; inside[1].open = true;
+    setWorkerInfo({ lines: [...lines, 'Worktree y'], lanes: [{ ...lanes[0], summary: 'worker/x · 2 commits to review' }, lanes[1]] });
+    assert.deepEqual(winfo.children.map((d) => d.open), [true, false]); // kept open across a refresh, by branch
+    assert.equal(winfo.children[0].children[1].children[1].open, true);
   } finally {
     s.close();
   }
