@@ -1,0 +1,33 @@
+✖ the worker is a separate claude agent with its own session, kept across reloads (25.357579ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 161.661023
+
+✖ failing tests:
+
+test at .worker-notes/stage-b/main-code-old-test.test.mjs:32:1
+✖ the worker is a separate claude agent with its own session, kept across reloads (25.357579ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      'Worker',
+  +   'codex'
+  -   'claude'
+    ]
+  
+      at TestContext.<anonymous> (file:///Users/fausto/Software/agent-room.worker/.worker-notes/stage-b/main-code-old-test.test.mjs:35:10)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'Worker', 'codex' ],
+    expected: [ 'Worker', 'claude' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Doodle background preview</title>
+<style>
+  body { margin: 0; display: grid; grid-template-columns: 1fr 1fr; height: 100vh; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+  .pane { position: relative; overflow: hidden; padding: 1rem; background: Canvas; color: CanvasText; }
+  .light { color-scheme: light; } .dark { color-scheme: dark; }
+  /* The pattern: one tile, coloured with the text colour, kept faint. */
+  .pane::before { content: ""; position: absolute; inset: 0; opacity: var(--o, .07);
+    background: url(doodle-tile.svg) 0 0 / 240px repeat; }
+  .dark::before { filter: invert(1); } /* the tile is drawn in black; white lines in dark mode */
+  .pane > * { position: relative; }
+  h2 { font-size: .8rem; font-weight: 600; margin: 0 0 .8rem; opacity: .7; }
+  /* Messages: today they are see-through (#8881); here they sit on an opaque base with the same tint on top. */
+  .msg { margin: 0 0 .9rem; padding: .5rem .75rem; border-radius: 8px; background: linear-gradient(#8881, #8881), Canvas; }
+  .msg.user { background: linear-gradient(#3b82f622, #3b82f622), Canvas; }
+  .msg.old { background: #8881; }
+  b { display: block; font-size: .8rem; }
+</style>
+<div class="pane light"><h2>Light mode — pattern at 7%</h2>
+  <div class="msg user"><b>User</b>Only to the conversation pane, and let's go for general doodles.</div>
+  <div class="msg"><b>Claude</b>Here is a sample tile: sun, cloud, paper plane, heart, coffee cup, music note, leaf, smiley, umbrella, star, moon, balloon.</div>
+  <div class="msg"><b>Codex</b>The messages sit on an opaque base, so the doodles don't show through the text.</div>
+  <div class="msg old"><b>Today's bubble (see-through)</b>For comparison: the current message background lets the doodles show through behind the text.</div>
+</div>
+<div class="pane dark" style="--o:.09"><h2>Dark mode — pattern at 9%</h2>
+  <div class="msg user"><b>User</b>Only to the conversation pane, and let's go for general doodles.</div>
+  <div class="msg"><b>Claude</b>Here is a sample tile: sun, cloud, paper plane, heart, coffee cup, music note, leaf, smiley, umbrella, star, moon, balloon.</div>
+  <div class="msg"><b>Codex</b>The messages sit on an opaque base, so the doodles don't show through the text.</div>
+  <div class="msg old"><b>Today's bubble (see-through)</b>For comparison: the current message background lets the doodles show through behind the text.</div>
+</div>

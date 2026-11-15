@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="900" height="420" fill="#fff"/>
+  <style>
+    .pane{fill:#f4f4f6;stroke:#888}
+    .tab{fill:#e2e2e8;stroke:#888}
+    .on{fill:#fff;stroke:#333;stroke-width:1.5}
+    .bar{fill:#d8dde8;stroke:#555}
+    .term{fill:#1e1e1e;stroke:#333}
+    .tt{fill:#9f9;font-family:Menlo,monospace;font-size:11}
+    .h{font-weight:bold;font-size:15}
+    .note{fill:#444;font-size:12}
+  </style>
+
+  <!-- Expanded -->
+  <text x="20" y="28" class="h">Terminal open</text>
+  <rect x="20" y="40" width="230" height="320" class="pane"/>
+  <rect x="20" y="40" width="115" height="24" class="on"/><text x="40" y="57">Discussion</text>
+  <rect x="135" y="40" width="115" height="24" class="tab"/><text x="170" y="57">Worker</text>
+  <text x="30" y="100" class="note">messages…</text>
+
+  <rect x="256" y="40" width="160" height="180" class="pane"/>
+  <rect x="256" y="40" width="80" height="24" class="tab"/><text x="268" y="57">Explorer</text>
+  <rect x="336" y="40" width="80" height="24" class="on"/><text x="344" y="57">Document</text>
+  <text x="266" y="100" class="note">notes.md</text>
+
+  <rect x="256" y="224" width="160" height="22" class="bar"/><text x="264" y="240">▾ Terminal</text>
+  <rect x="256" y="246" width="160" height="114" class="term"/>
+  <text x="264" y="264" class="tt">$ git status</text>
+  <text x="264" y="280" class="tt">On branch main</text>
+  <text x="264" y="296" class="tt">$ _</text>
+
+  <!-- Collapsed -->
+  <text x="470" y="28" class="h">Terminal collapsed (shell ended)</text>
+  <rect x="470" y="40" width="230" height="320" class="pane"/>
+  <rect x="470" y="40" width="115" height="24" class="on"/><text x="490" y="57">Discussion</text>
+  <rect x="585" y="40" width="115" height="24" class="tab"/><text x="620" y="57">Worker</text>
+  <text x="480" y="100" class="note">messages…</text>
+
+  <rect x="706" y="40" width="160" height="296" class="pane"/>
+  <rect x="706" y="40" width="80" height="24" class="tab"/><text x="718" y="57">Explorer</text>
+  <rect x="786" y="40" width="80" height="24" class="on"/><text x="794" y="57">Document</text>
+  <text x="716" y="100" class="note">notes.md</text>
+  <rect x="706" y="338" width="160" height="22" class="bar"/><text x="714" y="354">▸ Terminal</text>
+
+  <text x="20" y="390" class="note">Decided by the User: collapsible pane just below Explorer/Document; host only; collapsing or reloading ends the shell; opening starts a fresh one.</text>
+  <text x="20" y="408" class="note">Proportions illustrative; whether the pane can be resized is not decided.</text>
+</svg>

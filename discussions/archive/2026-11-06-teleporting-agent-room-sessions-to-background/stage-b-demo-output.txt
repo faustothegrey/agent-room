@@ -1,0 +1,39 @@
+Pair preview: {
+  local: {
+    node: 'Mac',
+    root: '/Users/fausto/Software/agent-room.worker/.worker-notes/stage-b/demo2/Mac',
+    roomId: null
+  },
+  peer: {
+    app: 'agent-room',
+    protocol: 1,
+    node: 'Pi',
+    roomId: null,
+    root: '/Users/fausto/Software/agent-room.worker/.worker-notes/stage-b/demo2/Pi',
+    activity: 'idle',
+    git: 'git version 2.33.0'
+  }
+}
+Paired: {
+  roomId: 'r-ed522ad41796',
+  peer: {
+    ok: true,
+    roomId: 'r-ed522ad41796',
+    node: 'Pi',
+    root: '/Users/fausto/Software/agent-room.worker/.worker-notes/stage-b/demo2/Pi'
+  }
+}
+{"round":1,"ms":925,"bundleBytes":927,"storage":{"Mac":{"gitKiB":100,"snapshotsKiB":0},"Pi":{"gitKiB":88,"snapshotsKiB":12}}}
+{"round":2,"ms":1101,"bundleBytes":1296,"storage":{"Mac":{"gitKiB":128,"snapshotsKiB":0},"Pi":{"gitKiB":96,"snapshotsKiB":16}}}
+{"round":3,"ms":979,"bundleBytes":618,"storage":{"Mac":{"gitKiB":148,"snapshotsKiB":0},"Pi":{"gitKiB":104,"snapshotsKiB":12}}}
+Deleted drawing absent: true
+{"round":4,"ms":1006,"bundleBytes":630,"storage":{"Mac":{"gitKiB":168,"snapshotsKiB":0},"Pi":{"gitKiB":112,"snapshotsKiB":12}}}
+{"round":5,"ms":1095,"bundleBytes":619,"storage":{"Mac":{"gitKiB":188,"snapshotsKiB":0},"Pi":{"gitKiB":120,"snapshotsKiB":12}}}
+{"round":6,"ms":973,"bundleBytes":623,"storage":{"Mac":{"gitKiB":208,"snapshotsKiB":0},"Pi":{"gitKiB":128,"snapshotsKiB":12}}}
+Offline round saved locally in ms: 864
+Receiver restarted; offline round received. Storage: {
+  Mac: { gitKiB: 228, snapshotsKiB: 0 },
+  Pi: { gitKiB: 136, snapshotsKiB: 12 }
+}
+Taken port stderr: ✗ Port 16471 is in use. With --peer this room must listen on its configured port, where its peers reach it: stop whatever uses 16471, or choose another --port (and tell the peers).
+Git: git version 2.33.0 Node: v24.14.1

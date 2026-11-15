@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="600" viewBox="0 0 1100 600" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="1100" height="600" fill="#111"/>
+  <text x="20" y="28" fill="#ddd" font-size="16" font-weight="bold">Explorer v2 (Claude): actions on every row, files one click away, node info on hover, local vs received</text>
+
+  <!-- TODAY -->
+  <text x="20" y="62" fill="#aaa" font-weight="bold">Today (seen on 5566)</text>
+  <rect x="20" y="72" width="420" height="400" fill="#161616" stroke="#444"/>
+  <text x="34" y="100" fill="#eee">▾ 💬 2026-11-08-new-agent-types</text><rect x="368" y="86" width="62" height="22" rx="4" fill="#2a2a2a" stroke="#666"/><text x="376" y="101" fill="#eee" font-size="12">Re-open</text>
+  <text x="50" y="124" fill="#bbb" font-size="12">● Mac (this node) · no saved round</text>
+  <text x="34" y="150" fill="#f0a060" font-size="12">↑ step 1: ▶ shows only this node line</text>
+  <text x="34" y="168" fill="#f0a060" font-size="12">  step 2: click it → a separate page with</text>
+  <text x="34" y="186" fill="#f0a060" font-size="12">  Re-open / Archive / Defer and the files</text>
+  <text x="34" y="226" fill="#eee">▾ 💬 2026-11-07-charon-to-mac-connectivity-test</text>
+  <text x="50" y="250" fill="#bbb" font-size="12">● charon · round 1 · received 18:40 · unreachable…</text><rect x="368" y="236" width="50" height="22" rx="4" fill="#2a2a2a" stroke="#666"/><text x="378" y="251" fill="#eee" font-size="12">View</text>
+  <text x="34" y="280" fill="#f0a060" font-size="12">↑ received from charon, but in the list it looks</text>
+  <text x="34" y="298" fill="#f0a060" font-size="12">  like any local discussion (only "no Re-open").</text>
+
+  <!-- PROPOSED -->
+  <text x="470" y="62" fill="#aaa" font-weight="bold">Proposed</text>
+  <rect x="470" y="72" width="610" height="500" fill="#161616" stroke="#444"/>
+  <text x="484" y="100" fill="#888" font-size="11">DISCUSSIONS ON THIS MAC</text>
+
+  <text x="484" y="128" fill="#eee">▸ 2026-11-08-redesigning-a-messy-project-ui · in use</text>
+  <text x="836" y="128" fill="#8fa8ee">ⓘ</text>
+  <g font-size="12"><rect x="868" y="114" width="60" height="22" rx="4" fill="#2a2a2a" stroke="#888"/><text x="875" y="129" fill="#eee">Re-open</text>
+  <rect x="934" y="114" width="60" height="22" rx="4" fill="#2a2a2a" stroke="#555"/><text x="942" y="129" fill="#777">Archive</text>
+  <rect x="1000" y="114" width="50" height="22" rx="4" fill="#2a2a2a" stroke="#555"/><text x="1010" y="129" fill="#777">Defer</text></g>
+  <text x="868" y="150" fill="#888" font-size="10">Archive/Defer greyed: in use can't be moved</text>
+
+  <text x="484" y="182" fill="#eee">▾ 2026-11-08-new-agent-types</text>
+  <text x="680" y="182" fill="#8fa8ee">ⓘ</text>
+  <g font-size="12"><rect x="868" y="168" width="60" height="22" rx="4" fill="#2a2a2a" stroke="#888"/><text x="875" y="183" fill="#eee">Re-open</text>
+  <rect x="934" y="168" width="60" height="22" rx="4" fill="#2a2a2a" stroke="#888"/><text x="942" y="183" fill="#eee">Archive</text>
+  <rect x="1000" y="168" width="50" height="22" rx="4" fill="#2a2a2a" stroke="#888"/><text x="1010" y="183" fill="#eee">Defer</text></g>
+  <text x="506" y="206" fill="#bbb" font-size="12">notes.md</text>
+  <text x="506" y="226" fill="#bbb" font-size="12">▸ drawings/</text>
+  <text x="506" y="246" fill="#bbb" font-size="12">▸ transcripts/</text>
+  <text x="640" y="226" fill="#7fd6a3" font-size="11">← ▸ now opens the files directly</text>
+  <!-- hover bubble -->
+  <rect x="696" y="190" width="160" height="40" rx="4" fill="#222" stroke="#8fa8ee"/>
+  <text x="704" y="207" fill="#ccc" font-size="10">hover ⓘ: Mac (this node)</text>
+  <text x="704" y="222" fill="#ccc" font-size="10">· no saved round</text>
+
+  <text x="484" y="282" fill="#eee">▸ 2026-11-07-room-citizenship-rules</text>
+  <text x="730" y="282" fill="#8fa8ee">ⓘ</text>
+  <text x="868" y="282" fill="#999" font-size="11">Re-open · Archive · Defer</text>
+  <text x="484" y="306" fill="#eee">▸ …</text>
+
+  <!-- received -->
+  <rect x="476" y="330" width="598" height="104" rx="6" fill="#1f1a28" stroke="#9b7fe0" stroke-dasharray="5 3"/>
+  <text x="484" y="350" fill="#b9a2f0" font-size="11">RECEIVED FROM PEERS (read-only)</text>
+  <text x="484" y="378" fill="#ddd">⇣ 2026-11-07-charon-to-mac-connectivity-test</text>
+  <rect x="790" y="365" width="56" height="18" rx="9" fill="#2d2440" stroke="#9b7fe0"/><text x="799" y="378" fill="#b9a2f0" font-size="11">charon</text>
+  <text x="854" y="378" fill="#b9a2f0">ⓘ</text>
+  <rect x="1000" y="364" width="50" height="22" rx="4" fill="#2a2a2a" stroke="#888"/><text x="1010" y="379" fill="#eee" font-size="12">View</text>
+  <text x="484" y="404" fill="#999" font-size="11">hover ⓘ: charon · round 1 · received 18:40 · charon unreachable since 16:56</text>
+  <text x="484" y="422" fill="#999" font-size="11">No Re-open / Archive / Defer: it isn't a folder on this Mac.</text>
+
+  <text x="484" y="462" fill="#888" font-size="11">THIS ROOM'S OWN DOCUMENTS · ARCHIVE AND DEFERRED — unchanged</text>
+  <text x="484" y="500" fill="#f0a060" font-size="12">Proposed (Codex, Claude agrees): a local discussion that also has a charon line keeps</text>
+  <text x="484" y="518" fill="#f0a060" font-size="12">one row; under ▸: "Local · Mac" files, and "Received · charon" with View.</text>
+</svg>

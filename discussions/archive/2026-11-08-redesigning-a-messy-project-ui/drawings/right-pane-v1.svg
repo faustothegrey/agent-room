@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="560" viewBox="0 0 1100 560" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="1100" height="560" fill="#111"/>
+  <text x="20" y="28" fill="#ddd" font-size="16" font-weight="bold">Right pane v1 (Claude): two subtabs, like Discussion | Worker on the left</text>
+
+  <!-- TODAY -->
+  <text x="20" y="60" fill="#aaa" font-weight="bold">Today</text>
+  <rect x="20" y="70" width="320" height="460" fill="#161616" stroke="#444"/>
+  <rect x="30" y="80" width="96" height="26" rx="4" fill="#2a2a2a" stroke="#666"/><text x="40" y="98" fill="#eee">Discussions</text>
+  <text x="134" y="92" fill="#999" font-size="10">discussions/2026-11-08-…/drawings/</text>
+  <text x="134" y="104" fill="#999" font-size="10">header-zones-v3.svg</text>
+  <text x="30" y="135" fill="#ccc" font-size="12">One button + a path. The pane shows</text>
+  <text x="30" y="152" fill="#ccc" font-size="12">either the list or the document, but</text>
+  <text x="30" y="169" fill="#ccc" font-size="12">you can't see which mode you're in,</text>
+  <text x="30" y="186" fill="#ccc" font-size="12">nor go back to the document by a tab.</text>
+  <text x="30" y="220" fill="#eee" font-weight="bold">The list mixes:</text>
+  <text x="40" y="242" fill="#bbb" font-size="12">• active discussions + Re-open</text>
+  <text x="40" y="262" fill="#bbb" font-size="12">• this room's own documents</text>
+  <text x="40" y="282" fill="#bbb" font-size="12">• archive / deferred</text>
+  <text x="40" y="302" fill="#bbb" font-size="12">• paused on this machine (when any)</text>
+  <text x="40" y="322" fill="#f0a060" font-size="12">• Peers (charon, unreachable…) ← not a document</text>
+
+  <!-- PROPOSED: Explorer -->
+  <text x="370" y="60" fill="#aaa" font-weight="bold">Proposed — Explorer tab</text>
+  <rect x="370" y="70" width="340" height="460" fill="#161616" stroke="#444"/>
+  <rect x="370" y="70" width="340" height="36" fill="#141414"/>
+  <text x="384" y="94" fill="#fff" font-weight="bold">Explorer</text>
+  <line x1="378" y1="104" x2="452" y2="104" stroke="#3b82f6" stroke-width="2"/>
+  <text x="474" y="94" fill="#999">Document</text>
+  <text x="384" y="130" fill="#888" font-size="11">DISCUSSIONS  (in use always first)</text>
+  <text x="384" y="152" fill="#eee" font-size="12">▾ 2026-11-08-redesigning-… · in use</text>
+  <text x="404" y="172" fill="#bbb" font-size="12">notes.md</text>
+  <text x="404" y="190" fill="#bbb" font-size="12">▸ drawings/</text>
+  <text x="404" y="208" fill="#bbb" font-size="12">▸ transcripts/</text>
+  <text x="384" y="232" fill="#eee" font-size="12">▸ 2026-11-08-new-agent-types</text>
+  <rect x="640" y="219" width="60" height="20" rx="3" fill="#2a2a2a" stroke="#666"/><text x="647" y="233" fill="#eee" font-size="11">Re-open</text>
+  <text x="384" y="256" fill="#eee" font-size="12">▸ …</text>
+  <text x="384" y="290" fill="#888" font-size="11">THIS ROOM'S OWN DOCUMENTS</text>
+  <text x="404" y="310" fill="#bbb" font-size="12">README.md</text>
+  <text x="384" y="342" fill="#888" font-size="11">ARCHIVE AND DEFERRED</text>
+  <text x="404" y="362" fill="#bbb" font-size="12">archive/ · deferred/</text>
+  <text x="384" y="400" fill="#f0a060" font-size="11">PEERS → moved: "Peers…" in the Room ▾ menu</text>
+  <text x="384" y="416" fill="#f0a060" font-size="11">opens a panel (received lines stay here)</text>
+  <text x="384" y="470" fill="#7fd6a3" font-size="12">Click a file → it opens in Document,</text>
+  <text x="384" y="487" fill="#7fd6a3" font-size="12">and the Document tab becomes active.</text>
+
+  <!-- PROPOSED: Document -->
+  <text x="740" y="60" fill="#aaa" font-weight="bold">Proposed — Document tab</text>
+  <rect x="740" y="70" width="340" height="460" fill="#161616" stroke="#444"/>
+  <rect x="740" y="70" width="340" height="36" fill="#141414"/>
+  <text x="754" y="94" fill="#999">Explorer</text>
+  <text x="836" y="94" fill="#fff" font-weight="bold">Document</text>
+  <line x1="830" y1="104" x2="906" y2="104" stroke="#3b82f6" stroke-width="2"/>
+  <text x="754" y="128" fill="#999" font-size="10">…/drawings/header-zones-v3.svg</text>
+  <rect x="754" y="140" width="312" height="370" fill="#1c1c1c" stroke="#333"/>
+  <text x="830" y="320" fill="#777">the document, full height</text>
+  <text x="754" y="545" fill="#999" font-size="11">Agent edits keep the same document shown (as today).</text>
+</svg>

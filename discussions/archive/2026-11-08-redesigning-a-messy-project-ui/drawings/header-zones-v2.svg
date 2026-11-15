@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="520" viewBox="0 0 1440 520" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="1440" height="520" fill="#111"/>
+  <text x="20" y="26" fill="#ddd" font-size="16" font-weight="bold">Header v2 (Claude): two lines high (~64 px, today ~137 px). Rare room/server actions behind ▾ menus. Quota gauges unchanged.</text>
+
+  <!-- Header: 64px -->
+  <rect x="10" y="40" width="1420" height="64" fill="#161616" stroke="#444"/>
+
+  <!-- ROOM -->
+  <rect x="16" y="46" width="300" height="52" rx="5" fill="#1b2130" stroke="#5a7bd8"/>
+  <text x="26" y="66" fill="#fff" font-weight="bold">agent-room ▾</text>
+  <text x="122" y="66" fill="#999" font-size="11">Mac's line, no saved round</text>
+  <text x="26" y="88" fill="#bbb" font-family="Menlo, monospace" font-size="11">/Users/fausto/Software/agent-room</text>
+
+  <!-- DISCUSSION -->
+  <rect x="324" y="46" width="420" height="52" rx="5" fill="#1b2a22" stroke="#4caf7a"/>
+  <text x="334" y="66" fill="#6aa8ff" font-size="14" font-weight="bold">Redesigning a Messy Project UI</text>
+  <g fill="#2a2a2a" stroke="#666"><rect x="334" y="74" width="62" height="20" rx="4"/><rect x="402" y="74" width="80" height="20" rx="4"/></g>
+  <g fill="#eee" font-size="12"><text x="343" y="88">Pause</text><text x="410" y="88">Summarize</text></g>
+  <rect x="490" y="79" width="11" height="11" fill="#3b82f6"/><text x="506" y="88" fill="#ccc" font-size="12">Auto-summarize</text>
+  <line x1="606" y1="74" x2="606" y2="94" stroke="#4caf7a" stroke-dasharray="3 3"/>
+  <rect x="614" y="74" width="112" height="20" rx="4" fill="none" stroke="#7fd6a3" stroke-dasharray="4 3"/>
+  <text x="622" y="88" fill="#7fd6a3" font-size="12">+ New discussion</text>
+
+  <!-- SERVER & MONITORING -->
+  <g transform="translate(-50,0)">
+  <rect x="802" y="46" width="672" height="52" rx="5" fill="#2a2418" stroke="#d6a84c"/>
+  <circle cx="816" cy="62" r="4" fill="#22c55e"/>
+  <text x="826" y="66" fill="#ddd" font-size="12">Server up 22m · 5566 ▾</text>
+  <text x="812" y="88" fill="#888" font-family="Menlo, monospace" font-size="10">01e1118 · started 16:56</text>
+  <line x1="972" y1="52" x2="972" y2="92" stroke="#555"/>
+  <!-- gauges as today -->
+  <text x="982" y="76" fill="#eee" font-weight="bold" font-size="12">Claude</text>
+  <text x="1028" y="66" fill="#aaa" font-size="10">5h</text><rect x="1050" y="59" width="30" height="5" fill="#333"/><rect x="1050" y="59" width="10" height="5" fill="#22c55e"/><text x="1084" y="66" fill="#ccc" font-size="10">32%  resets 6pm</text>
+  <text x="1028" y="86" fill="#aaa" font-size="10">week</text><rect x="1050" y="79" width="30" height="5" fill="#333"/><rect x="1050" y="79" width="12" height="5" fill="#22c55e"/><text x="1084" y="86" fill="#ccc" font-size="10">38%  resets Nov 11 8am</text>
+  <text x="1196" y="76" fill="#eee" font-weight="bold" font-size="12">Codex</text>
+  <text x="1238" y="66" fill="#aaa" font-size="10">5h</text><rect x="1260" y="59" width="30" height="5" fill="#333"/><rect x="1260" y="59" width="6" height="5" fill="#22c55e"/><text x="1294" y="66" fill="#ccc" font-size="10">19%  resets 20:46</text>
+  <text x="1238" y="86" fill="#aaa" font-size="10">week</text><rect x="1260" y="79" width="30" height="5" fill="#333"/><rect x="1260" y="79" width="14" height="5" fill="#22c55e"/><text x="1294" y="86" fill="#ccc" font-size="10">48%  resets 07:45 11 Nov</text>
+  <text x="1420" y="66" fill="#888" font-size="9">upd. 17:13</text>
+  <rect x="1420" y="74" width="40" height="18" rx="3" fill="#2a2a2a" stroke="#666"/><text x="1424" y="87" fill="#eee" font-size="10">Usage</text>
+  </g>
+
+  <!-- Menus opened -->
+  <text x="20" y="140" fill="#ccc">Click "agent-room ▾" →</text>
+  <rect x="26" y="150" width="200" height="98" rx="5" fill="#222" stroke="#5a7bd8"/>
+  <text x="38" y="174" fill="#eee">Switch room…</text>
+  <text x="38" y="198" fill="#eee">Open room in folder…</text>
+  <line x1="34" y1="210" x2="218" y2="210" stroke="#444"/>
+  <text x="38" y="234" fill="#f08080">Quit room</text>
+
+  <text x="802" y="140" fill="#ccc">Click "Server up … ▾" →</text>
+  <rect x="808" y="150" width="200" height="98" rx="5" fill="#222" stroke="#d6a84c"/>
+  <text x="820" y="174" fill="#eee">Reload</text>
+  <text x="820" y="198" fill="#eee">Restart</text>
+  <line x1="816" y1="210" x2="1000" y2="210" stroke="#444"/>
+  <text x="820" y="234" fill="#f08080">Shutdown server</text>
+
+  <!-- Body hint -->
+  <rect x="10" y="280" width="980" height="200" fill="#151515" stroke="#333"/>
+  <text x="30" y="310" fill="#777">Discussion | Worker and chat — unchanged, gains ~70 px of height</text>
+  <rect x="20" y="420" width="960" height="46" rx="5" fill="#1d1d1d" stroke="#555"/>
+  <text x="32" y="448" fill="#888">Message box — no button row under it</text>
+  <rect x="990" y="280" width="440" height="200" fill="#151515" stroke="#333"/>
+  <text x="1010" y="310" fill="#777">Discussions / document pane — unchanged</text>
+
+  <text x="20" y="505" fill="#999">Red items keep today's click-twice confirmation. Blue = room, green = current discussion, amber = server &amp; monitoring.</text>
+</svg>

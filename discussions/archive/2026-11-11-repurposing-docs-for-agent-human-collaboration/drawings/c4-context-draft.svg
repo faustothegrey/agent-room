@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 420" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#444"/></marker>
+  </defs>
+  <rect width="800" height="420" fill="#fff"/>
+  <text x="20" y="30" font-size="18" font-weight="bold">agent-room — system context (C4 level 1) · DRAFT</text>
+
+  <rect x="40" y="70" width="170" height="80" rx="40" fill="#08427b"/>
+  <text x="125" y="105" fill="#fff" text-anchor="middle" font-weight="bold">User</text>
+  <text x="125" y="123" fill="#fff" text-anchor="middle" font-size="11">discusses, decides, merges</text>
+
+  <rect x="300" y="160" width="200" height="100" fill="#1168bd"/>
+  <text x="400" y="200" fill="#fff" text-anchor="middle" font-weight="bold">agent-room</text>
+  <text x="400" y="220" fill="#fff" text-anchor="middle" font-size="11">harness: runs the conversation</text>
+  <text x="400" y="236" fill="#fff" text-anchor="middle" font-size="11">between the User and AI agents</text>
+
+  <rect x="580" y="60" width="190" height="80" fill="#999"/>
+  <text x="675" y="95" fill="#fff" text-anchor="middle" font-weight="bold">Claude Code / Codex CLIs</text>
+  <text x="675" y="113" fill="#fff" text-anchor="middle" font-size="11">the agents (User's subscriptions)</text>
+
+  <rect x="580" y="280" width="190" height="70" fill="#999"/>
+  <text x="675" y="310" fill="#fff" text-anchor="middle" font-weight="bold">Peer agent-room servers</text>
+  <text x="675" y="328" fill="#fff" text-anchor="middle" font-size="11">optional replication</text>
+
+  <rect x="40" y="280" width="190" height="70" fill="#e8e8e8" stroke="#888"/>
+  <text x="135" y="310" text-anchor="middle" font-weight="bold">The room's folder</text>
+  <text x="135" y="328" text-anchor="middle" font-size="11">any project + its discussions</text>
+
+  <line x1="190" y1="140" x2="300" y2="185" stroke="#444" marker-end="url(#a)"/>
+  <text x="200" y="185" font-size="11" fill="#444">browser</text>
+  <line x1="500" y1="190" x2="580" y2="125" stroke="#444" marker-end="url(#a)"/>
+  <text x="520" y="140" font-size="11" fill="#444">one process per turn</text>
+  <line x1="500" y1="245" x2="580" y2="300" stroke="#444" stroke-dasharray="5 3" marker-end="url(#a)"/>
+  <text x="520" y="295" font-size="11" fill="#444">HTTP</text>
+  <line x1="300" y1="245" x2="230" y2="290" stroke="#444" marker-end="url(#a)"/>
+  <line x1="640" y1="140" x2="230" y2="300" stroke="#b07a1f" stroke-dasharray="4 3" marker-end="url(#a)"/>
+  <text x="380" y="300" font-size="11" fill="#b07a1f">agents read/write files</text>
+
+  <text x="20" y="395" font-size="11" fill="#666">Domain-agnostic: the folder can hold any kind of work. Optional quota meter omitted.</text>
+</svg>

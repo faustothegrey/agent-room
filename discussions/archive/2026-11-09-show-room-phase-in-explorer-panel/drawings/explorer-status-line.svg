@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="300" font-family="-apple-system, Helvetica, sans-serif" font-size="14">
+  <rect width="640" height="300" fill="#fff"/>
+  <text x="20" y="28" font-size="16" font-weight="bold">Explorer: one status line under the title (proposed)</text>
+  <g font-size="13">
+    <text x="20" y="62" fill="#555">Nothing running</text>
+    <rect x="200" y="46" width="420" height="26" rx="4" fill="#f3f3f3" stroke="#bbb"/>
+    <text x="212" y="64">○ Idle</text>
+
+    <text x="20" y="104" fill="#555">An agent's turn</text>
+    <rect x="200" y="88" width="420" height="26" rx="4" fill="#eaf6ea" stroke="#5a5"/>
+    <text x="212" y="106">● Claude is thinking</text>
+
+    <text x="20" y="146" fill="#555">Worker instruction</text>
+    <rect x="200" y="130" width="420" height="26" rx="4" fill="#fdf3e1" stroke="#c90"/>
+    <text x="212" y="148">● Worker is working</text>
+
+    <text x="20" y="188" fill="#555">Both at once</text>
+    <rect x="200" y="172" width="420" height="26" rx="4" fill="#eef" stroke="#77a"/>
+    <text x="212" y="190">● Codex is thinking  ·  ● Worker is working</text>
+  </g>
+  <text x="20" y="236" font-size="12" fill="#555">Below the line: the discussion list as today, with "in use" on its row (unchanged).</text>
+  <text x="20" y="256" font-size="12" fill="#555">Paused / your turn / Brainstorm get no label here; activity during them still shows (header keeps them).</text>
+</svg>

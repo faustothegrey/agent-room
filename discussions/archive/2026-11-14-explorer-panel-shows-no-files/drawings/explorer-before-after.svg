@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="470" viewBox="0 0 1100 470" font-family="-apple-system, system-ui, sans-serif" font-size="14">
+  <rect width="1100" height="470" fill="#1c1d21"/>
+  <!-- titles -->
+  <text x="30" y="34" fill="#e5e7eb" font-size="17" font-weight="600">Now</text>
+  <text x="470" y="34" fill="#e5e7eb" font-size="17" font-weight="600">Proposed (1 typo fix + 2 polish)</text>
+  <line x1="450" y1="15" x2="450" y2="425" stroke="#3a3b40"/>
+
+  <!-- BEFORE -->
+  <g fill="#e5e7eb">
+    <text x="30" y="66" fill="#9ca3af" font-family="ui-monospace, monospace" font-size="12">agent-room/ · main</text>
+    <text x="48" y="98">▼ docs/</text>
+    <text x="64" y="128">▶ diagrams/</text>
+    <rect x="48" y="140" width="140" height="26" rx="4" fill="#2a2b30" stroke="#55565c"/>
+    <text x="58" y="158">📄 architecture.md</text>
+    <text x="48" y="194">▶ src/</text>
+    <text x="48" y="224">▶ test/</text>
+    <rect x="30" y="238" width="110" height="26" rx="4" fill="#2a2b30" stroke="#55565c"/>
+    <text x="40" y="256">📄 AGENT.md</text>
+    <rect x="144" y="238" width="118" height="26" rx="4" fill="#2a2b30" stroke="#55565c"/>
+    <text x="154" y="256">📄 AGENTS.md</text>
+    <rect x="266" y="238" width="118" height="26" rx="4" fill="#2a2b30" stroke="#55565c"/>
+    <text x="276" y="256">📄 CLAUDE.md</text>
+    <rect x="30" y="268" width="128" height="26" rx="4" fill="#2a2b30" stroke="#55565c"/>
+    <text x="40" y="286">📄 README.md</text>
+    <rect x="162" y="268" width="170" height="26" rx="4" fill="#2a2b30" stroke="#55565c"/>
+    <text x="172" y="286">📄 package.json</text>
+  </g>
+  <g fill="#f87171" font-size="12">
+    <text x="200" y="158">← file not indented under docs/</text>
+    <text x="110" y="208">← folders sit 1rem right of files</text>
+    <text x="30" y="318">↑ files are bordered boxes, wrapped side by side</text>
+    <text x="30" y="336">  (CSS rule dropped because of ". files-pane")</text>
+    <text x="30" y="360">"shown" is only a grey word after the name</text>
+  </g>
+
+  <!-- AFTER -->
+  <g fill="#e5e7eb">
+    <text x="470" y="66" fill="#9ca3af" font-family="ui-monospace, monospace" font-size="12">agent-room/ · main</text>
+    <text x="474" y="98">▾ 📁 docs/</text>
+    <line x1="480" y1="106" x2="480" y2="170" stroke="#4b4c52"/>
+    <text x="494" y="128">▸ 📁 diagrams/</text>
+    <rect x="490" y="140" width="170" height="26" rx="4" fill="#3b82f633"/>
+    <rect x="490" y="140" width="3" height="26" fill="#60a5fa"/>
+    <text x="500" y="158" fill="#93c5fd">📄 architecture.md</text>
+    <text x="474" y="194">▸ 📁 src/</text>
+    <text x="474" y="224">▸ 📁 test/</text>
+    <rect x="466" y="236" width="190" height="26" rx="4" fill="#8882" opacity=".35"/>
+    <text x="478" y="254">📄 AGENT.md</text>
+    <text x="478" y="282">📄 AGENTS.md</text>
+    <text x="478" y="310">📄 CLAUDE.md</text>
+    <text x="478" y="338">📄 README.md</text>
+    <text x="478" y="366">📄 package.json</text>
+  </g>
+  <g fill="#86efac" font-size="12">
+    <text x="690" y="128">children indented, faint guide</text>
+    <text x="690" y="194">folders aligned with files</text>
+    <text x="690" y="254">← hover row</text>
+    <text x="690" y="310">one full-width row per file</text>
+  </g>
+  <text x="470" y="400" fill="#93c5fd" font-size="12">Blue row with left bar = the file shown in Document</text><text x="470" y="418" fill="#93c5fd" font-size="12">(replaces the grey word "shown")</text>
+  <text x="30" y="452" fill="#9ca3af" font-size="12">Sketch, not to scale. Colours follow the existing accent (#60a5fa) used by the active Explorer button.</text>
+</svg>

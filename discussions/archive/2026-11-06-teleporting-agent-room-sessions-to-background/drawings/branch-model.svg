@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 720" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+  <rect width="1100" height="720" fill="#fff"/>
+  <text x="550" y="32" text-anchor="middle" font-size="20" font-weight="bold">Branch model: each node writes only its own line of a discussion</text>
+  <text x="550" y="54" text-anchor="middle" fill="#555">● = one round commit (made right after the summary) · blue = Mac's branch · green = Pi's branch</text>
+
+  <!-- top: replication -->
+  <rect x="40" y="80" width="460" height="170" rx="10" fill="#eef4ff" stroke="#3b6fd8" stroke-width="2"/>
+  <text x="270" y="106" text-anchor="middle" font-weight="bold">Mac</text>
+  <text x="60" y="136">writes:</text>
+  <text x="120" y="136" font-family="Menlo, monospace" fill="#3b6fd8">mac/teleporting</text>
+  <text x="60" y="166">receives (read-only):</text>
+  <text x="210" y="166" font-family="Menlo, monospace" fill="#2f9e44">pi/teleporting</text>
+  <text x="60" y="206" fill="#555" font-size="12">Discussion git storage is separate from the project's own git.</text>
+  <text x="60" y="226" fill="#555" font-size="12">Project source: the Mac's own checkout, not replicated.</text>
+
+  <rect x="600" y="80" width="460" height="170" rx="10" fill="#eefbef" stroke="#2f9e44" stroke-width="2"/>
+  <text x="830" y="106" text-anchor="middle" font-weight="bold">Pi</text>
+  <text x="620" y="136">writes:</text>
+  <text x="680" y="136" font-family="Menlo, monospace" fill="#2f9e44">pi/teleporting</text>
+  <text x="620" y="166">receives (read-only):</text>
+  <text x="770" y="166" font-family="Menlo, monospace" fill="#3b6fd8">mac/teleporting</text>
+  <text x="620" y="206" fill="#555" font-size="12">Paired with the Mac by room ID (paths may differ).</text>
+  <text x="620" y="226" fill="#555" font-size="12">Project source: the Pi's own checkout.</text>
+
+  <line x1="502" y1="150" x2="598" y2="150" stroke="#333" stroke-width="2" marker-end="url(#a)" marker-start="url(#a)"/>
+  <text x="550" y="140" text-anchor="middle" font-size="12">new rounds</text>
+  <text x="550" y="172" text-anchor="middle" font-size="12">(after each</text>
+  <text x="550" y="186" text-anchor="middle" font-size="12">round)</text>
+
+  <!-- three cases -->
+  <text x="40" y="295" font-size="16" font-weight="bold">"Continue here from Mac's last received round", clicked on the Pi: three cases</text>
+
+  <!-- case 1 -->
+  <rect x="40" y="310" width="330" height="290" rx="8" fill="#fafafa" stroke="#ccc"/>
+  <text x="205" y="336" text-anchor="middle" font-weight="bold">1. Pi is behind</text>
+  <line x1="70" y1="390" x2="330" y2="390" stroke="#3b6fd8" stroke-width="3"/>
+  <circle cx="90" cy="390" r="8" fill="#888"/><circle cx="150" cy="390" r="8" fill="#888"/>
+  <circle cx="210" cy="390" r="8" fill="#3b6fd8"/><circle cx="270" cy="390" r="8" fill="#3b6fd8"/>
+  <text x="300" y="380" font-family="Menlo, monospace" font-size="11" fill="#3b6fd8">mac</text>
+  <text x="125" y="420" font-family="Menlo, monospace" font-size="11" fill="#2f9e44">pi ↑</text>
+  <text x="60" y="470">Pi's line is part of Mac's line.</text>
+  <text x="60" y="495" font-weight="bold" fill="#2f9e44">→ fast-forward pi to Mac's commit</text>
+  <text x="60" y="520">and continue on the Pi.</text>
+  <text x="60" y="560" fill="#555" font-size="12">Also when the Pi has no branch yet.</text>
+
+  <!-- case 2 -->
+  <rect x="385" y="310" width="330" height="290" rx="8" fill="#fafafa" stroke="#ccc"/>
+  <text x="550" y="336" text-anchor="middle" font-weight="bold">2. Pi already contains it</text>
+  <line x1="415" y1="390" x2="675" y2="390" stroke="#2f9e44" stroke-width="3"/>
+  <circle cx="435" cy="390" r="8" fill="#888"/><circle cx="495" cy="390" r="8" fill="#888"/>
+  <circle cx="555" cy="390" r="8" fill="#2f9e44"/><circle cx="615" cy="390" r="8" fill="#2f9e44"/>
+  <text x="470" y="420" font-family="Menlo, monospace" font-size="11" fill="#3b6fd8">mac ↑</text>
+  <text x="645" y="380" font-family="Menlo, monospace" font-size="11" fill="#2f9e44">pi</text>
+  <text x="405" y="470">Mac's line is part of Pi's line.</text>
+  <text x="405" y="495" font-weight="bold" fill="#2f9e44">→ keep Pi's line; never rewind</text>
+  <text x="405" y="520">and continue on the Pi.</text>
+
+  <!-- case 3 -->
+  <rect x="730" y="310" width="330" height="290" rx="8" fill="#fff6f6" stroke="#e5484d"/>
+  <text x="895" y="336" text-anchor="middle" font-weight="bold">3. Both have new rounds</text>
+  <line x1="760" y1="400" x2="840" y2="400" stroke="#888" stroke-width="3"/>
+  <circle cx="780" cy="400" r="8" fill="#888"/><circle cx="830" cy="400" r="8" fill="#888"/>
+  <path d="M830,400 L880,370 L960,370" fill="none" stroke="#3b6fd8" stroke-width="3"/>
+  <circle cx="900" cy="370" r="8" fill="#3b6fd8"/><circle cx="950" cy="370" r="8" fill="#3b6fd8"/>
+  <text x="975" y="374" font-family="Menlo, monospace" font-size="11" fill="#3b6fd8">mac</text>
+  <path d="M830,400 L880,430 L960,430" fill="none" stroke="#2f9e44" stroke-width="3"/>
+  <circle cx="900" cy="430" r="8" fill="#2f9e44"/>
+  <text x="975" y="434" font-family="Menlo, monospace" font-size="11" fill="#2f9e44">pi</text>
+  <text x="750" y="470">Divergent work: neither contains the other.</text>
+  <text x="750" y="495" font-weight="bold" fill="#c0392b">→ "Reconciliation required"</text>
+  <text x="750" y="520">Nothing changes; both lines are kept</text>
+  <text x="750" y="540">and shown side by side.</text>
+  <text x="750" y="565" fill="#555" font-size="12">Reconcile by hand for now (agents later).</text>
+  <text x="750" y="583" fill="#555" font-size="12">Never a git text merge.</text>
+
+  <text x="40" y="640" font-weight="bold">Before any case:</text>
+  <text x="170" y="640">uncommitted edits on the Pi (e.g. a round cut off by a restart) are first committed as an "interrupted round".</text>
+  <text x="40" y="665" font-weight="bold">Never:</text>
+  <text x="170" y="665">Continue here stopping the Mac. If the Mac keeps going, the next Continue here will show case 3.</text>
+  <text x="40" y="690" font-weight="bold">Optional:</text>
+  <text x="170" y="690">"Fork from here" starts a new discussion from any round, to explore an alternative on purpose.</text>
+</svg>

@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="900" height="430" fill="#fff"/>
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#333"/></marker></defs>
+  <style>.box{fill:#f4f4f6;stroke:#555}.term{fill:#1e1e1e}.tt{fill:#9f9;font-family:Menlo,monospace;font-size:11}.h{font-weight:bold;font-size:15}.n{fill:#444;font-size:12}.bad{fill:#fde8e8;stroke:#c33}.q{fill:#fff4d6;stroke:#c90}</style>
+
+  <text x="20" y="28" class="h">How the terminal pane works</text>
+
+  <!-- browser -->
+  <rect x="20" y="50" width="220" height="150" class="box"/>
+  <text x="30" y="70" font-weight="bold">Your browser (the room page)</text>
+  <rect x="35" y="85" width="190" height="95" class="term"/>
+  <text x="45" y="105" class="tt">$ git status</text>
+  <text x="45" y="121" class="tt">On branch main</text>
+  <text x="45" y="190" class="n">ghostty-web draws the text</text>
+
+  <!-- server -->
+  <rect x="340" y="50" width="200" height="150" class="box"/>
+  <text x="350" y="70" font-weight="bold">agent-room server</text>
+  <text x="350" y="95" class="n">passes keystrokes in,</text>
+  <text x="350" y="112" class="n">passes text out</text>
+  <rect x="355" y="135" width="170" height="50" class="q"/>
+  <text x="363" y="155" font-weight="bold">Question 2: the gate</text>
+  <text x="363" y="173" class="n">who may talk to the shell?</text>
+
+  <!-- shell -->
+  <rect x="640" y="50" width="240" height="150" class="box"/>
+  <text x="650" y="70" font-weight="bold">A shell on your Mac (zsh)</text>
+  <text x="650" y="95" class="n">runs any command, as you</text>
+  <rect x="655" y="125" width="210" height="60" class="q"/>
+  <text x="663" y="145" font-weight="bold">Question 1: the adapter</text>
+  <text x="663" y="162" class="n">makes the shell believe it has</text>
+  <text x="663" y="177" class="n">a real screen: script or node-pty</text>
+
+  <line x1="240" y1="110" x2="338" y2="110" stroke="#333" marker-end="url(#a)"/>
+  <line x1="338" y1="140" x2="242" y2="140" stroke="#333" marker-end="url(#a)"/>
+  <text x="250" y="102" class="n">keys</text><text x="250" y="156" class="n">output</text>
+  <line x1="540" y1="110" x2="638" y2="110" stroke="#333" marker-end="url(#a)"/>
+  <line x1="638" y1="140" x2="542" y2="140" stroke="#333" marker-end="url(#a)"/>
+
+  <!-- intruders -->
+  <text x="20" y="250" class="h">Why the gate matters: the server is open to the whole network</text>
+  <rect x="20" y="265" width="250" height="60" class="bad"/>
+  <text x="30" y="285" font-weight="bold">Another device on the Wi-Fi</text>
+  <text x="30" y="303" class="n">could type commands on your Mac</text>
+  <rect x="300" y="265" width="270" height="60" class="bad"/>
+  <text x="310" y="285" font-weight="bold">Another website in your browser</text>
+  <text x="310" y="303" class="n">could secretly send requests to the server</text>
+  <rect x="600" y="265" width="280" height="60" class="bad"/>
+  <text x="610" y="285" font-weight="bold">A disguised website ("DNS rebinding")</text>
+  <text x="610" y="303" class="n">pretends to be the room itself</text>
+  <line x1="145" y1="265" x2="420" y2="202" stroke="#c33" stroke-dasharray="4 3" marker-end="url(#a)"/>
+  <line x1="435" y1="265" x2="440" y2="202" stroke="#c33" stroke-dasharray="4 3" marker-end="url(#a)"/>
+  <line x1="740" y1="265" x2="460" y2="202" stroke="#c33" stroke-dasharray="4 3" marker-end="url(#a)"/>
+
+  <text x="20" y="360" class="n">The first test's gate refused all three in the cases it tried. Still possible: another program or user account on the Mac itself.</text>
+  <text x="20" y="380" class="n">Adapter: script = built in, but fiddly and can leave a shell running on Linux. node-pty = cleaner, but an extra add-on that must be installed/compiled.</text>
+</svg>

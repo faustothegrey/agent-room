@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+  <rect width="960" height="560" fill="#fff"/>
+  <text x="480" y="32" text-anchor="middle" font-size="20" font-weight="bold">A server on every node, one owner per discussion</text>
+  <text x="480" y="54" text-anchor="middle" fill="#555">The owner runs the turns and writes the files; the other nodes keep read-only copies</text>
+
+  <!-- Mac node -->
+  <rect x="40" y="90" width="400" height="250" rx="12" fill="#eef4ff" stroke="#3b6fd8" stroke-width="2"/>
+  <text x="240" y="118" text-anchor="middle" font-size="17" font-weight="bold">Mac: agent-room server</text>
+  <rect x="60" y="135" width="360" height="80" rx="8" fill="#fff" stroke="#3b6fd8" stroke-width="3"/>
+  <text x="240" y="162" text-anchor="middle" font-weight="bold">Discussion B: OWNER</text>
+  <text x="240" y="184" text-anchor="middle" fill="#555" font-size="12">runs the turns, starts its CLIs, writes the files</text>
+  <text x="240" y="202" text-anchor="middle" fill="#555" font-size="12">(locally, or on another node via SSH or Rex)</text>
+  <rect x="60" y="235" width="360" height="80" rx="8" fill="#fff" stroke="#999" stroke-dasharray="5 4"/>
+  <text x="240" y="262" text-anchor="middle">Discussion A: read-only copy</text>
+  <text x="240" y="284" text-anchor="middle" fill="#555" font-size="12">your messages are forwarded to A's owner</text>
+
+  <!-- Pi node -->
+  <rect x="520" y="90" width="400" height="250" rx="12" fill="#eefbef" stroke="#2f9e44" stroke-width="2"/>
+  <text x="720" y="118" text-anchor="middle" font-size="17" font-weight="bold">Pi: agent-room server</text>
+  <rect x="540" y="135" width="360" height="80" rx="8" fill="#fff" stroke="#2f9e44" stroke-width="3"/>
+  <text x="720" y="162" text-anchor="middle" font-weight="bold">Discussion A: OWNER</text>
+  <text x="720" y="184" text-anchor="middle" fill="#555" font-size="12">keeps going while the Mac sleeps</text>
+  <rect x="540" y="235" width="360" height="80" rx="8" fill="#fff" stroke="#999" stroke-dasharray="5 4"/>
+  <text x="720" y="262" text-anchor="middle">Discussion B: read-only copy</text>
+  <text x="720" y="284" text-anchor="middle" fill="#555" font-size="12">out of date while the Mac is offline</text>
+
+  <!-- sync arrows -->
+  <path d="M538,175 C480,175 480,275 422,275" fill="none" stroke="#2f9e44" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M422,175 C470,175 490,275 538,275" fill="none" stroke="#3b6fd8" stroke-width="2" marker-end="url(#a)"/>
+  <text x="480" y="225" text-anchor="middle" fill="#555" font-size="12">owner → copies</text>
+
+  <!-- teleport -->
+  <text x="40" y="385" font-weight="bold">Moving a discussion ("teleport") = handing over its ownership</text>
+  <text x="40" y="408" font-size="13">1  old owner finishes the current turn and pauses   2  last files reach the new node   3  new owner confirms and starts fresh agents</text>
+
+  <text x="40" y="448" font-weight="bold" fill="#c0392b">The hard case: the owner disappears mid-round (lid closed)</text>
+  <text x="40" y="471" font-size="13">• Safe: wait, and hand over ownership when the Mac comes back. The discussion is paused until then.</text>
+  <text x="40" y="493" font-size="13">• Automatic: a time-limited ownership claim (a "lease"); when it expires, another node takes over, and the old owner's late</text>
+  <text x="52" y="512" font-size="13">writes are rejected when it wakes up. This is where the size and complexity grow.</text>
+  <text x="40" y="540" font-size="13" fill="#555">Not proposed: several nodes writing the same discussion at once (that needs consensus algorithms; far too big for agent-room).</text>
+</svg>

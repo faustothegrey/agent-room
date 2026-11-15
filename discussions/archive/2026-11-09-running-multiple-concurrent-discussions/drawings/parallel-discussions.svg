@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="420" viewBox="0 0 760 420" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#444"/></marker>
+  </defs>
+  <rect width="760" height="420" fill="#fff"/>
+  <text x="380" y="26" text-anchor="middle" font-size="16" font-weight="bold">Several open discussions, one worker (proposed)</text>
+
+  <!-- Discussion A -->
+  <rect x="30" y="50" width="250" height="130" rx="8" fill="#e8f1fb" stroke="#4a7ab8"/>
+  <text x="155" y="72" text-anchor="middle" font-weight="bold">Discussion A — you are here</text>
+  <text x="45" y="96">Claude + Codex (A's own sessions)</text>
+  <text x="45" y="116">chat, notes, auto dev of A</text>
+  <rect x="45" y="130" width="220" height="36" rx="5" fill="#fff" stroke="#999" stroke-dasharray="4 3"/>
+  <text x="155" y="145" text-anchor="middle" font-size="11">on return: "While you were away, the</text>
+  <text x="155" y="159" text-anchor="middle" font-size="11">worker did 2 tasks for B: files …"</text>
+
+  <!-- Discussion B -->
+  <rect x="30" y="230" width="250" height="130" rx="8" fill="#eef7ea" stroke="#5a9a4a"/>
+  <text x="155" y="252" text-anchor="middle" font-weight="bold">Discussion B — in background</text>
+  <text x="45" y="276">Claude + Codex (B's own sessions)</text>
+  <text x="45" y="296">review B's worker reports</text>
+  <rect x="45" y="310" width="220" height="36" rx="5" fill="#fff4d6" stroke="#c9a227"/>
+  <text x="155" y="333" text-anchor="middle" font-size="12">● needs you (marker in Explorer)</text>
+
+  <!-- Queue -->
+  <rect x="340" y="150" width="150" height="110" rx="8" fill="#f5f5f5" stroke="#666"/>
+  <text x="415" y="172" text-anchor="middle" font-weight="bold">One queue</text>
+  <rect x="355" y="184" width="120" height="24" rx="4" fill="#eef7ea" stroke="#5a9a4a"/>
+  <text x="415" y="201" text-anchor="middle" font-size="12">[B] task 2</text>
+  <rect x="355" y="216" width="120" height="24" rx="4" fill="#e8f1fb" stroke="#4a7ab8"/>
+  <text x="415" y="233" text-anchor="middle" font-size="12">[A] task 1</text>
+
+  <!-- Worker -->
+  <rect x="550" y="110" width="185" height="190" rx="8" fill="#fbeee8" stroke="#b8664a"/>
+  <text x="642" y="132" text-anchor="middle" font-weight="bold">One worker</text>
+  <text x="642" y="150" text-anchor="middle" font-size="12">one task at a time</text>
+  <rect x="565" y="162" width="155" height="26" rx="4" fill="#e8f1fb" stroke="#4a7ab8"/>
+  <text x="642" y="180" text-anchor="middle" font-size="12">A's worker session</text>
+  <rect x="565" y="196" width="155" height="26" rx="4" fill="#eef7ea" stroke="#5a9a4a"/>
+  <text x="642" y="214" text-anchor="middle" font-size="12">B's worker session</text>
+  <text x="642" y="244" text-anchor="middle" font-size="12">one checkout, worker/main</text>
+  <text x="642" y="264" text-anchor="middle" font-size="11" fill="#a33">commit per task? (your call)</text>
+  <text x="642" y="282" text-anchor="middle" font-size="11">reports conflicts, never picks</text>
+
+  <!-- arrows -->
+  <path d="M280,130 C320,150 330,200 352,228" fill="none" stroke="#4a7ab8" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M280,280 C320,260 330,220 352,198" fill="none" stroke="#5a9a4a" stroke-width="2" marker-end="url(#a)"/>
+  <line x1="490" y1="205" x2="548" y2="205" stroke="#444" stroke-width="2" marker-end="url(#a)"/>
+  <path d="M600,300 C560,380 380,380 282,330" fill="none" stroke="#5a9a4a" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#a)"/>
+  <text x="440" y="388" text-anchor="middle" font-size="12">B's report goes back to B (with its commit, if any)</text>
+  <path d="M600,110 C560,40 380,40 282,80" fill="none" stroke="#4a7ab8" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#a)"/>
+  <text x="440" y="45"text-anchor="middle" font-size="12">A's report goes back to A</text>
+</svg>

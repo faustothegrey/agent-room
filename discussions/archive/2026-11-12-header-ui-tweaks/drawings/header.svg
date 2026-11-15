@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="250" font-family="system-ui, sans-serif" font-size="13">
+<rect width="860" height="250" fill="#fff"/>
+<text x="10" y="22" font-weight="bold">Now</text>
+<rect x="10" y="32" width="840" height="64" fill="#f4f4f5" stroke="#999"/>
+<rect x="18" y="40" width="260" height="48" fill="#fff" stroke="#bbb"/>
+<text x="26" y="58" font-weight="bold">agent-room ▾</text>
+<text x="26" y="78" font-family="monospace" font-size="11">/Users/fausto/Software/agent-room</text>
+<rect x="290" y="40" width="300" height="48" fill="#fff" stroke="#bbb"/>
+<text x="298" y="58">2026-11-12-header-ui-tweaks ⋯</text>
+<text x="298" y="78" fill="#666">status</text>
+<rect x="602" y="40" width="240" height="48" fill="#fff" stroke="#bbb"/>
+<text x="610" y="58">● Server ▾  <tspan fill="#b45309">⚠</tspan></text>
+<text x="610" y="78" fill="#666">[gauges ▮▮▯]</text>
+
+<text x="10" y="132" font-weight="bold">Proposed (User's request, as Claude reads it)</text>
+<rect x="10" y="142" width="840" height="64" fill="#f4f4f5" stroke="#999"/>
+<rect x="18" y="150" width="260" height="48" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+<text x="26" y="168" font-weight="bold">agent-room ▾  <tspan font-weight="normal" fill="#b45309">⚠</tspan></text>
+<text x="26" y="188" fill="#666">[gauges ▮▮▯]</text>
+<rect x="290" y="150" width="300" height="48" fill="#fff" stroke="#bbb"/>
+<text x="298" y="168">2026-11-12-header-ui-tweaks ⋯</text>
+<text x="298" y="188" fill="#666">status</text>
+<rect x="602" y="150" width="240" height="48" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+<text x="610" y="168">● Server ▾</text>
+<text x="26" y="228" fill="#2563eb" font-size="12">Full path: tooltip on hover over "agent-room" (? or over a folder name). Room picker unchanged.</text>
+</svg>

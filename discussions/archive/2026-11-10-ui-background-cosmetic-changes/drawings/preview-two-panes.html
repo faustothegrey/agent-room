@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Two panes, two doodle sets</title>
+<style>
+  body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; height: 50vh; }
+  .pane { position: relative; overflow: hidden; padding: 1rem; background: Canvas; color: CanvasText; border-right: 1px solid #8884; }
+  .light { color-scheme: light; } .dark { color-scheme: dark; }
+  .pane::before { content: ""; position: absolute; inset: 0; opacity: .07; background: url(doodle-tile.svg) 0 0 / 240px repeat; }
+  .pane.explorer::before { background-image: url(doodle-tile-explorer.svg); }
+  .dark .pane::before { opacity: .09; filter: invert(1); }
+  .pane > * { position: relative; }
+  .msg { margin: 0 0 .9rem; padding: .5rem .75rem; border-radius: 8px; background: linear-gradient(#8881, #8881), Canvas; }
+  .msg.user { background: linear-gradient(#3b82f622, #3b82f622), Canvas; }
+  b { display: block; font-size: .8rem; }
+  h3 { color: #888; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; margin: .9rem 0 .3rem; }
+  .entry { padding: .3rem .5rem; font-size: .9rem; }
+  .entry.in-use { background: #3b82f614; box-shadow: inset 3px 0 #60a5fa; border-radius: 4px; }
+  .status { font-size: .75rem; padding: .05rem .45rem; border-radius: 9px; background: #8883; margin-left: .5rem; }
+  .status.inuse { background: #3b82f633; }
+</style>
+<div class="row light">
+  <div class="pane"><div class="msg user"><b>User</b>Draw a similar but slightly different set of doodles.</div><div class="msg"><b>Claude</b>Conversation pane: sun, cloud, heart, coffee cup…</div></div>
+  <div class="pane explorer"><h3>Discussions</h3><div class="entry in-use">2026-11-10-ui-background-cosmetic-changes <span class="status inuse">in use</span></div><div class="entry">2026-11-09-show-room-phase-in-explorer-panel</div><div class="entry">2026-11-08-new-agent-types <span class="status">deferred</span></div><h3>Files</h3><div class="entry">README.md</div><div class="entry">src/</div></div>
+</div>
+<div class="row dark">
+  <div class="pane"><div class="msg user"><b>User</b>Draw a similar but slightly different set of doodles.</div><div class="msg"><b>Claude</b>Conversation pane: sun, cloud, heart, coffee cup…</div></div>
+  <div class="pane explorer"><h3>Discussions</h3><div class="entry in-use">2026-11-10-ui-background-cosmetic-changes <span class="status inuse">in use</span></div><div class="entry">2026-11-09-show-room-phase-in-explorer-panel</div><div class="entry">2026-11-08-new-agent-types <span class="status">deferred</span></div><h3>Files</h3><div class="entry">README.md</div><div class="entry">src/</div></div>
+</div>

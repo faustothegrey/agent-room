@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" font-family="Helvetica, Arial, sans-serif" font-size="15">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="620" fill="#fff"/>
+  <text x="500" y="36" text-anchor="middle" font-size="22" font-weight="bold">The worker, simplest version</text>
+  <text x="500" y="60" text-anchor="middle" fill="#555">Two folders. The worker only ever changes its own.</text>
+
+  <!-- Room -->
+  <rect x="40" y="90" width="420" height="300" rx="14" fill="#eef4ff" stroke="#3b6fd8" stroke-width="2"/>
+  <text x="250" y="122" text-anchor="middle" font-size="18" font-weight="bold">YOUR ROOM</text>
+  <text x="250" y="144" text-anchor="middle" fill="#555" font-size="13">agent-room/ · your code · your discussions</text>
+  <rect x="65" y="165" width="370" height="90" rx="8" fill="#fff" stroke="#999"/>
+  <text x="85" y="192" font-weight="bold">discussions/</text>
+  <text x="85" y="215" font-size="13" fill="#444">proposals, decisions, drawings, transcripts</text>
+  <text x="85" y="236" font-size="13" fill="#444">→ kept, replicated later (stage B)</text>
+  <rect x="65" y="270" width="370" height="95" rx="8" fill="#fff" stroke="#999"/>
+  <text x="85" y="297" font-weight="bold">src/, README, …</text>
+  <text x="85" y="320" font-size="13" fill="#444">changes only when YOU merge the worker's branch</text>
+  <text x="85" y="341" font-size="13" fill="#444">(package-lock.json now tracked)</text>
+
+  <!-- Worker -->
+  <rect x="540" y="90" width="420" height="300" rx="14" fill="#eefbef" stroke="#2f9e44" stroke-width="2"/>
+  <text x="750" y="122" text-anchor="middle" font-size="18" font-weight="bold">WORKER'S COPY</text>
+  <text x="750" y="144" text-anchor="middle" fill="#555" font-size="13">agent-room.worker/ · branch worker/main</text>
+  <rect x="565" y="165" width="370" height="90" rx="8" fill="#fff" stroke="#999"/>
+  <text x="585" y="192" font-weight="bold">src/, README, …</text>
+  <text x="585" y="215" font-size="13" fill="#444">the worker's changes, committed when you ask</text>
+  <text x="585" y="236" font-size="13" fill="#444">"Run this room on the worker's version" to try them</text>
+  <rect x="565" y="270" width="370" height="95" rx="8" fill="#fffbe6" stroke="#d99a00" stroke-dasharray="6 4"/>
+  <text x="585" y="297" font-weight="bold">.worker-notes/   (scratch)</text>
+  <text x="585" y="320" font-size="13" fill="#444">its plans and notes · never committed</text>
+  <text x="585" y="341" font-size="13" fill="#444">deleted when you say "stage accepted"</text>
+
+  <!-- arrows -->
+  <path d="M540,210 L462,210" stroke="#333" stroke-width="2.5" marker-end="url(#a)"/>
+  <text x="500" y="200" text-anchor="middle" font-size="12">you merge</text>
+  <path d="M462,300 L540,300" stroke="#999" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a)"/>
+  <text x="500" y="290" text-anchor="middle" font-size="12" fill="#666">catches up</text>
+  <text x="500" y="320" text-anchor="middle" font-size="11" fill="#666">(only if clean)</text>
+
+  <!-- flow -->
+  <text x="40" y="430" font-size="17" font-weight="bold">The cycle</text>
+  <text x="40" y="458">1. You instruct the worker  →  2. it writes code + scratch notes in ITS copy</text>
+  <text x="40" y="484">3. Claude and Codex review by reading its copy  →  4. you try it live, then merge</text>
+  <text x="40" y="510">5. "Stage accepted": the worker deletes its scratch notes. Its branch and code stay.</text>
+
+  <text x="40" y="555" font-size="15" font-weight="bold" fill="#c0392b">Drawbacks you accept</text>
+  <text x="40" y="580" font-size="14">• The worker's notes don't appear in the room's Discussions pane; ask Claude or Codex to read them for you.</text>
+  <text x="40" y="603" font-size="14">• The worker is told, not forced, to stay in its copy (it's an agent with file access, not a sandbox).</text>
+</svg>

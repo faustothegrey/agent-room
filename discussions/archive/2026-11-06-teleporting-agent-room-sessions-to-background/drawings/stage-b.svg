@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="470" viewBox="0 0 900 470" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#444"/></marker>
+  </defs>
+  <rect width="900" height="470" fill="#fff"/>
+  <text x="450" y="30" text-anchor="middle" font-size="18" font-weight="bold">Stage B: replication slice 1 (what the demonstration shows)</text>
+
+  <!-- node 1 -->
+  <rect x="30" y="60" width="330" height="250" rx="10" fill="#eef4ff" stroke="#4a6fb5"/>
+  <text x="195" y="85" text-anchor="middle" font-weight="bold">Node 1  (--node Mac --peer Pi=…)</text>
+  <rect x="50" y="100" width="290" height="40" rx="6" fill="#fff" stroke="#888"/>
+  <text x="195" y="125" text-anchor="middle">a round ends (after the summary)</text>
+  <line x1="195" y1="140" x2="195" y2="160" stroke="#444" marker-end="url(#a)"/>
+  <rect x="50" y="160" width="290" height="55" rx="6" fill="#fff" stroke="#888"/>
+  <text x="195" y="182" text-anchor="middle">one commit on line "Mac/&lt;discussion&gt;"</text>
+  <text x="195" y="202" text-anchor="middle" font-size="12" fill="#555">in .agent-room/ (proposed), not the project's Git</text>
+  <rect x="50" y="230" width="290" height="60" rx="6" fill="#fff" stroke="#888"/>
+  <text x="195" y="252" text-anchor="middle" font-size="13">conversation shows:</text>
+  <text x="195" y="272" text-anchor="middle" font-size="13" font-family="Menlo, monospace">Round 14 saved · sent to Pi ✓</text>
+
+  <!-- arrow -->
+  <line x1="360" y1="187" x2="530" y2="187" stroke="#444" stroke-width="2" marker-end="url(#a)"/>
+  <text x="445" y="170" text-anchor="middle" font-size="12">bundle over HTTP</text>
+  <text x="445" y="208" text-anchor="middle" font-size="12">(in the background;</text>
+  <text x="445" y="224" text-anchor="middle" font-size="12">retried if Pi is off)</text>
+
+  <!-- node 2 -->
+  <rect x="530" y="60" width="340" height="250" rx="10" fill="#effaef" stroke="#3f8f4a"/>
+  <text x="700" y="85" text-anchor="middle" font-weight="bold">Node 2  (--node Pi --peer Mac=…)</text>
+  <rect x="550" y="100" width="300" height="55" rx="6" fill="#fff" stroke="#888"/>
+  <text x="700" y="122" text-anchor="middle">checked, then a read-only snapshot</text>
+  <text x="700" y="142" text-anchor="middle" font-size="12" fill="#555">(as in B0: old snapshot stays until the new one is complete)</text>
+  <rect x="550" y="170" width="300" height="55" rx="6" fill="#fff" stroke="#888"/>
+  <text x="700" y="192" text-anchor="middle" font-size="13">Discussions pane:</text>
+  <text x="700" y="212" text-anchor="middle" font-size="12" font-family="Menlo, monospace">● Mac · round 14 · received 14:32 [View]</text>
+  <rect x="550" y="240" width="300" height="55" rx="6" fill="#fff" stroke="#888"/>
+  <text x="700" y="262" text-anchor="middle" font-size="13">View: read-only, no agents start,</text>
+  <text x="700" y="282" text-anchor="middle" font-size="13">no message box</text>
+
+  <!-- bottom -->
+  <rect x="30" y="330" width="840" height="120" rx="10" fill="#fff8e6" stroke="#c9a23a"/>
+  <text x="50" y="355" font-weight="bold">Also in stage B</text>
+  <text x="50" y="378">• Pairing once (Pair with …), refused if the rooms differ · binds 0.0.0.0 · taken port with --peer → clear error</text>
+  <text x="50" y="400">• B0 prototype becomes src/replicate.mjs + tests; prototype/ removed · transcripts replicate despite .gitignore</text>
+  <text x="50" y="422" font-weight="bold">Not in stage B: Continue here, Accept as reconciled, Fork (stage C)</text>
+  <text x="50" y="442" font-size="12" fill="#555">Demonstration: two servers, two temporary roots, one Mac. charon and the real LAN come after.</text>
+</svg>

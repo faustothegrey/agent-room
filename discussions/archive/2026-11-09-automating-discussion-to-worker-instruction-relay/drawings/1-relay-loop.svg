@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="360" font-family="sans-serif" font-size="14">
+  <rect width="760" height="360" fill="#fff"/>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#333"/></marker></defs>
+  <text x="20" y="28" font-size="16" font-weight="bold">Today: the User carries messages by hand. Proposed: agent-room carries them.</text>
+  <rect x="40" y="60" width="240" height="120" rx="10" fill="#e8f0fe" stroke="#4a6fd1"/>
+  <text x="160" y="90" text-anchor="middle" font-weight="bold">Discussion tab</text>
+  <text x="160" y="115" text-anchor="middle">agents draft an instruction</text>
+  <text x="160" y="140" text-anchor="middle">agents read the worker's report</text>
+  <rect x="480" y="60" width="240" height="120" rx="10" fill="#e9f7ec" stroke="#3a9a52"/>
+  <text x="600" y="90" text-anchor="middle" font-weight="bold">Worker tab</text>
+  <text x="600" y="115" text-anchor="middle">worker does the work</text>
+  <text x="600" y="140" text-anchor="middle">worker writes a report</text>
+  <path d="M280,95 L478,95" stroke="#333" stroke-width="2" marker-end="url(#a)"/>
+  <text x="380" y="85" text-anchor="middle">1. instruction (copied)</text>
+  <path d="M480,150 L282,150" stroke="#333" stroke-width="2" marker-end="url(#a)"/>
+  <text x="380" y="170" text-anchor="middle">2. report (copied)</text>
+  <circle cx="380" cy="120" r="14" fill="#ffd966" stroke="#b08900"/>
+  <text x="380" y="125" text-anchor="middle" font-weight="bold">?</text>
+  <text x="40" y="225" font-weight="bold">The "?" is the open question: who lets each instruction through?</text>
+  <text x="40" y="250">A. User clicks "Send" on each drafted instruction (one click instead of copy-paste)</text>
+  <text x="40" y="275">B. Fully automatic, with a stop: max N cycles, or when agents say "done", or User types /stop</text>
+  <text x="40" y="310" font-weight="bold">Unchanged in both: every message appears in both tabs and in the transcripts.</text>
+  <text x="40" y="335">Merging worker/main into the room stays manual.</text>
+</svg>

@@ -1,0 +1,3143 @@
+
+> agent-room@0.1.0 test
+> HOME="$(mktemp -d)" node --test 'test/*.test.mjs'
+
+✔ claude: first turn creates the session, later turns resume it, writes anywhere and has Bash (6.227125ms)
+✔ claude: an error result throws and does not mark the session started (1.541562ms)
+✔ codex: resumes the thread it was given and runs without a sandbox every call (6.670761ms)
+✔ codex events: last agent_message wins, noise lines are ignored, turn.failed throws (0.878361ms)
+✔ a recreated agent on the same session object resumes instead of starting over (0.663119ms)
+✔ the rulebook goes in as system-level instructions on every turn, for both providers (0.622443ms)
+✔ each turn reports its usage: claude from its JSON result, codex from turn.completed (0.585244ms)
+✔ claude worker: Bash is available and pre-approved (0.410705ms)
+✔ claudeTitle: one claude call with no tools and no saved session; the first line, unquoted (1.228982ms)
+✔ selected models are passed to the provider on initial and resumed turns (0.704ms)
+✔ a working directory given as a function is read at each turn (the worker's worktree) (1.176809ms)
+✔ a recorded program: written at spawn with its start, removed when its process group ends (357.754193ms)
+✔ leftovers: not in this server's procs and group alive, with the same start; reused PIDs and gone groups dropped (19.900424ms)
+✔ leftovers: another live server's program is not one; a server PID reused by another process counts as gone (5.553159ms)
+✔ a record is written through a temporary file; a scan ignores an incomplete one and never deletes it (2.590869ms)
+✔ leftovers with real processes: a live group is found until it ends; a reused PID (other start) is not (203.830074ms)
+✔ agy turns resume and resend changed rulebooks, including after session serialization (1.661808ms)
+✔ agy errors do not record rules or leave stale usage (1.037758ms)
+✔ agy non-JSON diagnostics are short and do not echo authentication data (1.044977ms)
+✔ listFiles: every non-hidden file, recursively, sorted (7.126172ms)
+✔ Markdown is rendered with images inline, and plain links to images get a preview (98.63621ms)
+✔ files are served with their type; nothing outside proposal/ or hidden is (55.652656ms)
+✔ the mtime endpoint changes when a doc is rewritten, so open pages reload (35.482793ms)
+✔ pick: arrows move, Enter opens and stays, Esc closes (1.281711ms)
+✔ the discussion screen: a new page gets the room so far, then live events (40.784318ms)
+✔ the screen remembers "your turn" until the User speaks again (0.525374ms)
+✔ without a screen, /__room is just a missing file (28.674634ms)
+✔ messageView marks errors and passes for the page (0.604255ms)
+✔ the screen lists proposal/ files and shows the one picked, for every open page (122.226638ms)
+✔ what the User types on the screen reaches the room only from the page itself (62.997204ms)
+✔ in terminal mode the page only watches: /__say is refused and the reset says so (20.457187ms)
+✔ messageView hides summary turns and labels a summary's result (3.202736ms)
+✔ the Worker tab: instructions reach the worker only from the page, and a new page gets its chat (63.692825ms)
+✔ showing the Worker tab asks the room to recheck its branches, only from the room page (16.890852ms)
+✔ without a worker input (terminal mode), /__work is refused (11.529362ms)
+✔ a new page gets the gauges; the former auto-summarize endpoint is gone (18.06932ms)
+✔ a room serves only its sections of the root: discussions/ and proposal/, with transcripts as text (105.316066ms)
+✔ agent settings endpoint reads choices and protects saves with the same-origin check (68.790619ms)
+✔ the heartbeat: /__health says it is agent-room, with its process, root and discussion (33.451738ms)
+✔ the heartbeat counts the room pages open on it, and stops counting a closed one (27.696018ms)
+✔ a page learns its code version, so it can refresh after a reload that changed it (8.08462ms)
+✔ running rooms can be listed without changing the current conversation (51.156572ms)
+✔ Open room in folder…: the page's request reaches the room, and a refused token answers 400 (53.694981ms)
+✔ attachments never overwrite: a taken name is saved as name-2.ext, name-3.ext, … (4.408922ms)
+✔ a message with attachments: the files are saved in files/ and their paths appended to the text (66.28321ms)
+✔ attachments over 25 MB are refused, and nothing is saved or sent (2066.2728ms)
+✔ if any attachment fails to save, or the message is not taken, nothing is sent and nothing stays saved (29.476819ms)
+✔ the page keeps the text and the attachments when sending them fails, and clears them once sent (7.221295ms)
+✔ member rows lock two checked boxes and keep the selected row order (5.001078ms)
+✔ automatic member names avoid rows and worker, while typed names stay editable (2.593321ms)
+✔ member panel keeps legacy agent lists intact rather than truncating them (3.034245ms)
+✔ the room header shows the folder basename, puts the full path in #replica-header with and without replication, and places #server-box and #peer-warning in #room-zone (26.944199ms)
+[terminal] refused token: Forbidden: not from this computer (from 192.168.1.20, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+[terminal] refused token: Forbidden: not from this computer (from 192.168.1.20, Host localhost:5566, Origin none)
+[terminal] refused ws: Forbidden: not from this computer (from 192.168.1.20, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+[terminal] refused token: Forbidden: not from this computer (from 10.0.0.5, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+[terminal] refused token: Forbidden: not from this computer (from 10.0.0.5, Host localhost:5566, Origin none)
+[terminal] refused ws: Forbidden: not from this computer (from 10.0.0.5, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+[terminal] refused token: Forbidden: not from this computer (from ::ffff:192.168.1.20, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+[terminal] refused token: Forbidden: not from this computer (from ::ffff:192.168.1.20, Host localhost:5566, Origin none)
+[terminal] refused ws: Forbidden: not from this computer (from ::ffff:192.168.1.20, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+[terminal] refused token: Forbidden: not from this computer (from fe80::1, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+[terminal] refused token: Forbidden: not from this computer (from fe80::1, Host localhost:5566, Origin none)
+[terminal] refused ws: Forbidden: not from this computer (from fe80::1, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+[terminal] refused token: Forbidden: Host not allowed (from 127.0.0.1, Host rebind.example:5566, Origin none)
+[terminal] refused ws: Forbidden: Host not allowed (from 127.0.0.1, Host rebind.example:5566, Origin http://rebind.example:5566)
+[terminal] refused token: Forbidden: Host not allowed (from 127.0.0.1, Host 192.168.1.20:5566, Origin none)
+[terminal] refused ws: Forbidden: Host not allowed (from 127.0.0.1, Host 192.168.1.20:5566, Origin http://192.168.1.20:5566)
+[terminal] refused token: Forbidden: Host not allowed (from 127.0.0.1, Host localhost.evil.example:5566, Origin none)
+[terminal] refused ws: Forbidden: Host not allowed (from 127.0.0.1, Host localhost.evil.example:5566, Origin http://localhost.evil.example:5566)
+[terminal] refused token: Forbidden: Host not allowed (from 127.0.0.1, Host 127.0.0.2:5566, Origin none)
+[terminal] refused ws: Forbidden: Host not allowed (from 127.0.0.1, Host 127.0.0.2:5566, Origin http://127.0.0.2:5566)
+[terminal] refused token: Forbidden: Host not allowed (from 127.0.0.1, Host mac.local:5566, Origin none)
+[terminal] refused ws: Forbidden: Host not allowed (from 127.0.0.1, Host mac.local:5566, Origin http://mac.local:5566)
+[terminal] refused token: Bad Request (from 127.0.0.1, Host , Origin none)
+[terminal] refused token: Bad Request (from 127.0.0.1, Host  127.0.0.1:5566, Origin none)
+[terminal] refused token: Bad Request (from 127.0.0.1, Host 127.0.0.1:99999, Origin none)
+[terminal] refused token: Bad Request (from 127.0.0.1, Host 127.0.0.1:x, Origin none)
+[terminal] refused token: Bad Request (from 127.0.0.1, Host [::1, Origin none)
+[terminal] refused token: Bad Request (from 127.0.0.1, Host user@127.0.0.1, Origin none)
+[terminal] refused token: Bad Request (from 127.0.0.1, Host none, Origin none)
+[terminal] refused ws: Forbidden: no Origin (from 127.0.0.1, Host 127.0.0.1:5566, Origin none)
+[terminal] refused ws: Forbidden: Origin does not match Host (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://evil.example)
+[terminal] refused token: Forbidden: Origin does not match Host (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://evil.example)
+[terminal] refused ws: Forbidden: Origin does not match Host (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://localhost:5566)
+[terminal] refused token: Forbidden: Origin does not match Host (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://localhost:5566)
+[terminal] refused ws: Forbidden: Origin does not match Host (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://127.0.0.1:8080)
+[terminal] refused token: Forbidden: Origin does not match Host (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://127.0.0.1:8080)
+[terminal] refused ws: Forbidden: Origin does not match Host (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://127.0.0.1)
+[terminal] refused token: Forbidden: Origin does not match Host (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://127.0.0.1)
+[terminal] refused ws: Bad Request: Origin (from 127.0.0.1, Host 127.0.0.1:5566, Origin null)
+[terminal] refused ws: Bad Request: Origin (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566/path)
+[terminal] refused ws: Bad Request: Origin (from 127.0.0.1, Host 127.0.0.1:5566, Origin file://)
+[terminal] refused ws: Bad Request: Origin (from 127.0.0.1, Host 127.0.0.1:5566, Origin not a url)
+[terminal] refused ws: Unauthorized (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+[terminal] refused ws: Unauthorized (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+[terminal] refused ws: Unauthorized (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+[terminal] refused ws: Unauthorized (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+[terminal] refused ws: Unauthorized (from 127.0.0.1, Host 127.0.0.1:5566, Origin http://127.0.0.1:5566)
+✔ terminal: a non-loopback address is refused, even with a forged Host, Origin and the real token (11.460078ms)
+✔ terminal: a Host other than localhost, 127.0.0.1 or ::1 is refused (DNS rebinding, LAN name) (3.895637ms)
+✔ terminal: the WebSocket needs an Origin matching Host; the token endpoint allows none, refuses a mismatch (1.906544ms)
+✔ terminal: a missing or wrong token gets 401 on the WebSocket (0.945464ms)
+[terminal] the shell did not start: cwd must be a string (not a object)
+✔ terminal: a shell that fails to start is reported in the pane, and the server keeps answering (79.527187ms)
+[terminal] shell started (pid 24194)
+[terminal] shell ended (pid 24194)
+✔ terminal: with the token and a matching Origin, the WebSocket runs a shell (45.728442ms)
+✔ terminal: Quit room ends that room's shells; another room's shell keeps working (2516.257674ms)
+✔ notes: create, list, read, save exactly as typed, remove; stored outside the room, one set per room folder (189.767214ms)
+[notes] refused /__notes: Forbidden: not from this computer (from 192.168.1.20, Host 127.0.0.1:5566)
+[notes] refused /__notes/new: Forbidden: not from this computer (from 192.168.1.20, Host 127.0.0.1:5566)
+[notes] refused /__notes: Forbidden: not from this computer (from ::ffff:192.168.1.20, Host 127.0.0.1:5566)
+[notes] refused /__notes/new: Forbidden: not from this computer (from ::ffff:192.168.1.20, Host 127.0.0.1:5566)
+[notes] refused /__notes: Forbidden: not from this computer (from fe80::1, Host 127.0.0.1:5566)
+[notes] refused /__notes/new: Forbidden: not from this computer (from fe80::1, Host 127.0.0.1:5566)
+[notes] refused /__notes: Forbidden: Host not allowed (from 127.0.0.1, Host mac.local:5566)
+[notes] refused /__notes: Forbidden: Host not allowed (from 127.0.0.1, Host 192.168.1.20:5566)
+[notes] refused /__notes: Forbidden: Host not allowed (from 127.0.0.1, Host rebind.example:5566)
+[notes] refused /__notes/remove: Forbidden: Origin does not match Host (from 127.0.0.1, Host 127.0.0.1:5566)
+[notes] refused /__notes: Forbidden: Origin does not match Host (from 127.0.0.1, Host 127.0.0.1:5566)
+✔ notes: bad ids, bodies and methods are refused; ids never reach outside the folder (68.320588ms)
+✔ notes: only from this computer, with the terminal pane's Host and Origin checks (39.373254ms)
+Stage B0 replication prototype
+  node v24.14.1, git version 2.54.0, darwin
+  project /Users/fausto/Software/agent-room.workers/2026-11-13-worker-provider-model-fallback-on-failure at 029d71abbf
+  temporary nodes in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/agent-room-b0-Bt6Aps
+
+── 1. Round commits and transfers (full, then incremental)
+  · round 1: full, 1656 B (1.6 KiB), 534 ms
+  [PASS] round 1: transfer kind
+         expected: "full"
+         actual:   "full"
+  [PASS] round 1: node 2 acknowledged the offered commit; node 1 recorded it
+         expected: ["9e3c313d56","9e3c313d56"]
+         actual:   ["9e3c313d56","9e3c313d56"]
+  [PASS] round 1: published snapshot = offered commit, file by file (paths and bytes)
+         expected: {"files":5,"differing":[]}
+         actual:   {"files":5,"differing":[]}
+  · round 2: incremental, 1236 B (1.2 KiB), 723 ms
+  [PASS] round 2: transfer kind
+         expected: "incremental"
+         actual:   "incremental"
+  [PASS] round 2: node 2 acknowledged the offered commit; node 1 recorded it
+         expected: ["d00020e2a5","d00020e2a5"]
+         actual:   ["d00020e2a5","d00020e2a5"]
+  [PASS] round 2: published snapshot = offered commit, file by file (paths and bytes)
+         expected: {"files":6,"differing":[]}
+         actual:   {"files":6,"differing":[]}
+  · round 3: incremental, 725 B (0.7 KiB), 586 ms
+  [PASS] round 3: transfer kind
+         expected: "incremental"
+         actual:   "incremental"
+  [PASS] round 3: node 2 acknowledged the offered commit; node 1 recorded it
+         expected: ["c309ad6095","c309ad6095"]
+         actual:   ["c309ad6095","c309ad6095"]
+  [PASS] round 3: published snapshot = offered commit, file by file (paths and bytes)
+         expected: {"files":5,"differing":[]}
+         actual:   {"files":5,"differing":[]}
+  · round 4: incremental, 758 B (0.7 KiB), 452 ms
+  [PASS] round 4: transfer kind
+         expected: "incremental"
+         actual:   "incremental"
+  [PASS] round 4: node 2 acknowledged the offered commit; node 1 recorded it
+         expected: ["325ad80d46","325ad80d46"]
+         actual:   ["325ad80d46","325ad80d46"]
+  [PASS] round 4: published snapshot = offered commit, file by file (paths and bytes)
+         expected: {"files":5,"differing":[]}
+         actual:   {"files":5,"differing":[]}
+  [PASS] round 2 added drawings/b.svg; round 3 deleted drawings/a.svg (in the snapshots)
+         expected: {"r1":[true,false],"r2":[true,true],"r3":[false,true]}
+         actual:   {"r1":[true,false],"r2":[true,true],"r3":[false,true]}
+  [PASS] round 4 transcript is round 3 transcript plus an appended part
+         expected: true
+         actual:   true
+  [PASS] the folder matches the commit (plus the round metadata file)
+         expected: [".agent-room-round.json","drawings/b.svg","notes.md","proposal.md","transcripts/session-1.md"]
+         actual:   [".agent-room-round.json","drawings/b.svg","notes.md","proposal.md","transcripts/session-1.md"]
+  [PASS] earlier snapshots unchanged after later publications (content digests)
+         expected: ["978dcf62f8d97ec0","c1e37e358abf3ccd","f56793b6b5071558"]
+         actual:   ["978dcf62f8d97ec0","c1e37e358abf3ccd","f56793b6b5071558"]
+  [PASS] snapshots are read-only (file mode, folder mode)
+         expected: ["444","555"]
+         actual:   ["444","555"]
+  [PASS] round metadata of round 4
+         expected: {"schema":1,"room":"room-b0","discussion":"disc-1","node":"node-1","round":4,"outcome":"interrupted"}
+         actual:   {"schema":1,"room":"room-b0","discussion":"disc-1","node":"node-1","round":4,"outcome":"interrupted"}
+  · typical round 5 (transcript append + note edit): incremental, 646 B (0.6 KiB), 559 ms
+  · typical round 6 (transcript append + note edit): incremental, 630 B (0.6 KiB), 466 ms
+  · typical round 7 (transcript append + note edit): incremental, 628 B (0.6 KiB), 519 ms
+
+── 2. Duplicate send
+  [PASS] sending again with no new round: offer answers "have", no bundle sent
+         expected: {"kind":"already-had","bytes":0,"acked":"4a6d78dc18"}
+         actual:   {"kind":"already-had","bytes":0,"acked":"4a6d78dc18"}
+  [PASS] the same bundle POSTed twice: both acknowledged as duplicates of the published commit
+         expected: [{"status":200,"acked":"4a6d78dc18","duplicate":true},{"status":200,"acked":"4a6d78dc18","duplicate":true}]
+         actual:   [{"status":200,"acked":"4a6d78dc18","duplicate":true},{"status":200,"acked":"4a6d78dc18","duplicate":true}]
+  [PASS] receiver unchanged (pointer, history, digest)
+         expected: [{"published":"4a6d78dc18","history":7,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"4a6d78dc18"},"133600e7366c5556"]
+         actual:   [{"published":"4a6d78dc18","history":7,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"4a6d78dc18"},"133600e7366c5556"]
+
+── 3. Interrupted transfer
+  [PASS] connection dropped after half the bundle: sender sees an error
+         expected: true
+         actual:   true
+         (sender saw: {"clientError":"ECONNRESET"})
+  [PASS] receiver unchanged, partial upload deleted (state, digest)
+         expected: [{"published":"4a6d78dc18","history":7,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"4a6d78dc18"},"133600e7366c5556"]
+         actual:   [{"published":"4a6d78dc18","history":7,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"4a6d78dc18"},"133600e7366c5556"]
+  [PASS] the next send publishes the round
+         expected: {"kind":"incremental","acked":"5b89999c1d"}
+         actual:   {"kind":"incremental","acked":"5b89999c1d"}
+
+── 4. Corrupted bundle
+  [PASS] corrupted a byte in the middle of the pack: refused
+         expected: {"status":400,"error":"corrupt"}
+         actual:   {"status":400,"error":"corrupt"}
+         (detail: git fetch: error: inflate: data stream error (incorrect data check))
+  [PASS] corrupted the last byte (pack checksum): refused
+         expected: {"status":400,"error":"corrupt"}
+         actual:   {"status":400,"error":"corrupt"}
+         (detail: git fetch: fatal: pack is corrupted (SHA1 mismatch))
+  [PASS] receiver unchanged (state, digest)
+         expected: [{"published":"5b89999c1d","history":8,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"5b89999c1d"},"255529cfe6e0465b"]
+         actual:   [{"published":"5b89999c1d","history":8,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"5b89999c1d"},"255529cfe6e0465b"]
+  [PASS] the next send publishes the round
+         expected: "3a47cc0363"
+         actual:   "3a47cc0363"
+
+── 5. Lost acknowledgement, then a retry
+  [PASS] reply lost after node 2 published: node 1 sees an error and records no acknowledgement
+         expected: {"error":"ECONNRESET or socket hang up","acked":"3a47cc0363"}
+         actual:   {"error":"ECONNRESET","acked":"3a47cc0363"}
+  [PASS] node 2 did publish round 7
+         expected: "50c6e1f6d3"
+         actual:   "50c6e1f6d3"
+  [PASS] retry: same commit acknowledged, no bundle resent
+         expected: {"kind":"already-had","acked":"50c6e1f6d3"}
+         actual:   {"kind":"already-had","acked":"50c6e1f6d3"}
+  [PASS] no extra round on node 1; node 2 state and snapshot unchanged
+         expected: ["10",{"published":"50c6e1f6d3","history":10,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"50c6e1f6d3"},"9c46d9028cd375bf"]
+         actual:   ["10",{"published":"50c6e1f6d3","history":10,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"50c6e1f6d3"},"9c46d9028cd375bf"]
+
+── 6. Missing base: node 2 restored from an old copy
+  [PASS] restored node 2 shows its old round; node 1 still thinks it acknowledged round 7
+         expected: ["4a6d78dc18","50c6e1f6d3"]
+         actual:   ["4a6d78dc18","50c6e1f6d3"]
+  · round 11 after missing base: incremental→full, 6514 B (6.4 KiB), 440 ms
+  [PASS] incremental refused for a missing base, then a full bundle is sent and published
+         expected: {"attempts":[["incremental",409,"missing-base"],["full",200,null]],"acked":"fcdf09efc7"}
+         actual:   {"attempts":[["incremental",409,"missing-base"],["full",200,null]],"acked":"fcdf09efc7"}
+  [PASS] the old snapshot is still there, unchanged
+         expected: "133600e7366c5556"
+         actual:   "133600e7366c5556"
+  [PASS] published round 11 = offered commit, file by file
+         expected: {"files":5,"differing":[]}
+         actual:   {"files":5,"differing":[]}
+
+── 7. Restart in the middle of receiving (separate process, abrupt exit)
+  [PASS] after-save: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":0,"incomingRefs":0,"published":"fcdf09efc7","receivedRef":"fcdf09efc7"}
+         recovery at restart: {"tmp":1,"snapshots":0,"incomingRefs":0,"refRepaired":0}
+  [PASS] after-save: after restart the pointer names a complete snapshot (old round), no staging visible
+         expected: {"published":"fcdf09efc7","receivedRef":"fcdf09efc7","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"fcdf09efc7","receivedRef":"fcdf09efc7","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] after-save: old snapshot digest unchanged
+         expected: "4f2988d06c2d4117"
+         actual:   "4f2988d06c2d4117"
+  [PASS] after-save: a send after restart gets the round acknowledged
+         expected: {"acked":"9996760332","kind":"incremental"}
+         actual:   {"acked":"9996760332","kind":"incremental"}
+  [PASS] after-import: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":0,"incomingRefs":1,"published":"9996760332","receivedRef":"9996760332"}
+         recovery at restart: {"tmp":1,"snapshots":0,"incomingRefs":1,"refRepaired":0}
+  [PASS] after-import: after restart the pointer names a complete snapshot (old round), no staging visible
+         expected: {"published":"9996760332","receivedRef":"9996760332","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"9996760332","receivedRef":"9996760332","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] after-import: old snapshot digest unchanged
+         expected: "e51ed98e7c5b952f"
+         actual:   "e51ed98e7c5b952f"
+  [PASS] after-import: a send after restart gets the round acknowledged
+         expected: {"acked":"ee79de9947","kind":"incremental"}
+         actual:   {"acked":"ee79de9947","kind":"incremental"}
+  [PASS] mid-materialize: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":1,"incomingRefs":1,"published":"ee79de9947","receivedRef":"ee79de9947"}
+         recovery at restart: {"tmp":1,"snapshots":1,"incomingRefs":1,"refRepaired":0}
+  [PASS] mid-materialize: after restart the pointer names a complete snapshot (old round), no staging visible
+         expected: {"published":"ee79de9947","receivedRef":"ee79de9947","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"ee79de9947","receivedRef":"ee79de9947","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] mid-materialize: old snapshot digest unchanged
+         expected: "ae6aa8639dda9d56"
+         actual:   "ae6aa8639dda9d56"
+  [PASS] mid-materialize: a send after restart gets the round acknowledged
+         expected: {"acked":"ba2bb29c8e","kind":"incremental"}
+         actual:   {"acked":"ba2bb29c8e","kind":"incremental"}
+  [PASS] after-materialize: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":0,"incomingRefs":1,"published":"ba2bb29c8e","receivedRef":"ba2bb29c8e"}
+         recovery at restart: {"tmp":1,"snapshots":1,"incomingRefs":1,"refRepaired":0}
+  [PASS] after-materialize: after restart the pointer names a complete snapshot (old round), no staging visible
+         expected: {"published":"ba2bb29c8e","receivedRef":"ba2bb29c8e","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"ba2bb29c8e","receivedRef":"ba2bb29c8e","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] after-materialize: old snapshot digest unchanged
+         expected: "94e6e3baabecfb98"
+         actual:   "94e6e3baabecfb98"
+  [PASS] after-materialize: a send after restart gets the round acknowledged
+         expected: {"acked":"6d69f69d0a","kind":"incremental"}
+         actual:   {"acked":"6d69f69d0a","kind":"incremental"}
+  [PASS] after-publish: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":0,"incomingRefs":1,"published":"cdb2f0c9d4","receivedRef":"cdb2f0c9d4"}
+         recovery at restart: {"tmp":1,"snapshots":1,"incomingRefs":1,"refRepaired":0}
+  [PASS] after-publish: after restart the pointer names a complete snapshot (new round), no staging visible
+         expected: {"published":"cdb2f0c9d4","receivedRef":"cdb2f0c9d4","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"cdb2f0c9d4","receivedRef":"cdb2f0c9d4","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] after-publish: a send after restart gets the round acknowledged
+         expected: {"acked":"cdb2f0c9d4","kind":"already-had"}
+         actual:   {"acked":"cdb2f0c9d4","kind":"already-had"}
+
+── 8. Rejected inputs (each leaves node 2 unchanged)
+  [PASS] symlink entry: refused
+         expected: {"status":422,"error":"unsafe-tree"}
+         actual:   {"status":422,"error":"unsafe-tree"}
+         (detail: symlink link.md)
+  [PASS] submodule (gitlink) entry: refused
+         expected: {"status":422,"error":"unsafe-tree"}
+         actual:   {"status":422,"error":"unsafe-tree"}
+         (detail: submodule sub)
+  [PASS] ".." entry: refused (by Git's fsck at import, or by the tree check)
+         expected: "refused (400 corrupt or 422 unsafe-tree)"
+         actual:   "400 corrupt"
+         (detail: error: index-pack died)
+  [PASS] ".git" entry: refused (by Git's fsck at import, or by the tree check)
+         expected: "refused (400 corrupt or 422 unsafe-tree)"
+         actual:   "400 corrupt"
+         (detail: error: index-pack died)
+  [PASS] "." entry: refused (by Git's fsck at import, or by the tree check)
+         expected: "refused (400 corrupt or 422 unsafe-tree)"
+         actual:   "400 corrupt"
+         (detail: error: index-pack died)
+  [PASS] "NOTES.md" next to "notes.md" (collide on macOS): refused
+         expected: {"status":422,"error":"unsafe-tree"}
+         actual:   {"status":422,"error":"unsafe-tree"}
+         (detail: names collide on this disk: notes.md)
+  [PASS] bundle head for another discussion: refused
+         expected: {"status":422,"error":"wrong-identity"}
+         actual:   {"status":422,"error":"wrong-identity"}
+         (detail: bundle carries refs/lines/disc-2/node-1, expected refs/lines/disc-1/node-1)
+  [PASS] round metadata from another node: refused
+         expected: {"status":422,"error":"wrong-identity"}
+         actual:   {"status":422,"error":"wrong-identity"}
+         (detail: commit says room-b0/disc-1/node-3, offer is room-b0/disc-1/node-1)
+  [PASS] round metadata from another room: refused
+         expected: {"status":422,"error":"wrong-identity"}
+         actual:   {"status":422,"error":"wrong-identity"}
+         (detail: commit says room-zz/disc-1/node-1, offer is room-b0/disc-1/node-1)
+  [PASS] round metadata missing: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: no .agent-room-round.json)
+  [PASS] round metadata not JSON: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: .agent-room-round.json is not JSON)
+  [PASS] schema 2: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: schema 2)
+  [PASS] round is a string: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: round "17")
+  [PASS] unknown outcome: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: kind "round", outcome "done")
+  [PASS] extra metadata key: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: round metadata keys agents,at,conversation,discussion,ending,kind,name,node,outcome,room,round,schema,session,summary,title)
+  [PASS] round number not after the published one: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: round 16 after published round 16)
+  [PASS] offer from another room: refused
+         expected: 403
+         actual:   403
+  [PASS] offer claiming to be node 2 itself: refused
+         expected: 403
+         actual:   403
+  [PASS] offer from an unpaired node: refused
+         expected: 403
+         actual:   403
+  [PASS] offer with an unsafe discussion ID: refused
+         expected: 400
+         actual:   400
+  [PASS] offer with protocol 2: refused
+         expected: 400
+         actual:   400
+  [PASS] bundle over the size limit (8747 B > 1024 B): refused before reading it
+         expected: true
+         actual:   true
+         (sender saw: {"status":413,"ok":false,"error":"too-large","detail":"8747 bytes (limit 1024)"})
+  [PASS] tree check alone, absolute path "/etc/passwd" (Git trees can't carry it): refused
+         expected: "unsafe-tree"
+         actual:   "unsafe-tree"
+  [PASS] tree check alone, backslash "a\\..\\b" (Git trees can't carry it): refused
+         expected: "unsafe-tree"
+         actual:   "unsafe-tree"
+  [PASS] tree check alone, traversal inside a path "a/../b" (Git trees can't carry it): refused
+         expected: "unsafe-tree"
+         actual:   "unsafe-tree"
+  [PASS] tree check alone, empty component "a//b" (Git trees can't carry it): refused
+         expected: "unsafe-tree"
+         actual:   "unsafe-tree"
+  [PASS] node 2 unchanged after all rejected inputs (state, digest)
+         expected: [{"published":"cdb2f0c9d4","history":16,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"cdb2f0c9d4"},"21d7fb94c434f47a"]
+         actual:   [{"published":"cdb2f0c9d4","history":16,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"cdb2f0c9d4"},"21d7fb94c434f47a"]
+
+── 9. Rewritten history
+  [PASS] node 1 rewinds its line and sends a different commit: refused
+         expected: {"status":409,"error":"rewrite"}
+         actual:   {"status":409,"error":"rewrite"}
+  [PASS] node 2 unchanged (state, digest); node 1 still holds the rewritten tip
+         expected: [{"published":"cdb2f0c9d4","history":16,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"cdb2f0c9d4"},"21d7fb94c434f47a","eedba59cc8"]
+         actual:   [{"published":"cdb2f0c9d4","history":16,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"cdb2f0c9d4"},"21d7fb94c434f47a","eedba59cc8"]
+
+── 10. Isolation from the project repository
+  [PASS] project HEAD and `git status` unchanged by the run
+         expected: {"head":"029d71abbf","status":" M README.md\n M src/docs.mjs\n M src/room.mjs\n M src/ui.mjs\n M test/ui.test.mjs\n"}
+         actual:   {"head":"029d71abbf","status":" M README.md\n M src/docs.mjs\n M src/room.mjs\n M src/ui.mjs\n M test/ui.test.mjs\n"}
+
+── Git commands used
+  git init -q --bare  (once per node)
+
+── Measurements (this machine)
+  round 1                                          full                  1656 B   534 ms   16 git runs
+  round 2                                          incremental           1236 B   723 ms   20 git runs
+  round 3                                          incremental            725 B   586 ms   20 git runs
+  round 4                                          incremental            758 B   452 ms   20 git runs
+  typical round 5 (transcript append + note edit)  incremental            646 B   559 ms   20 git runs
+  typical round 6 (transcript append + note edit)  incremental            630 B   466 ms   20 git runs
+  typical round 7 (transcript append + note edit)  incremental            628 B   519 ms   20 git runs
+  round 11 after missing base                      incremental→full      6514 B   440 ms   21 git runs
+
+ALL PASSED: 85 passed, 0 failed
+✔ replication protocol: B0 scenarios, immutable publication and recovery (23525.872247ms)
+Room: A (claude) · worker W (claude) · root /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-qBSWuN/Mac
+Transcript: in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-qBSWuN/Mac/discussions/, once the first message starts a discussion
+agent-room on Mac, listening on 0.0.0.0:53594 · git version 2.54.0
+  open:  http://192.168.178.112:53594/__room
+  peers: none
+Room screen: http://127.0.0.1:53594/r/mac-4a4a01/__room
+Discussion screen: http://127.0.0.1:53594/__room
+Use the rooms from the browser. This terminal only shows a log; Shutdown server there, or Ctrl-C here, ends them all.
+
+Room: A (claude) · worker W (claude) · root /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-qBSWuN/Pi
+Transcript: in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-qBSWuN/Pi/discussions/, once the first message starts a discussion
+agent-room on Pi, listening on 0.0.0.0:53624 · git version 2.54.0
+  open:  http://192.168.178.112:53624/__room
+  peers: none
+Room screen: http://127.0.0.1:53624/r/pi-256ef4/__room
+Discussion screen: http://127.0.0.1:53624/__room
+Use the rooms from the browser. This terminal only shows a log; Shutdown server there, or Ctrl-C here, ends them all.
+
+Paired with Pi (/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-qBSWuN/Pi). Its rounds will arrive here, and this room's rounds will be sent there.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-qBSWuN/Mac/discussions/2026-11-13-replication-test
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-qBSWuN/Mac/discussions/2026-11-13-replication-test/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+── your turn · all passed · 1 agent turn · 0s ──
+Peer Pi: reachable, paired
+Received Mac's round 1 of "Replication test".
+  … A is thinking
+── your turn · all passed · 1 agent turn · 0s ──
+Round 1 saved · sent to Pi ✓
+Received Mac's round 2 of "Replication test".
+Round 2 saved · sent to Pi ✓
+  … A is thinking
+── your turn · all passed · 1 agent turn · 0s ──
+  … A is thinking
+
+✗ A failed (0s): provider failed
+
+── your turn · A failed · 1 agent turn · 0s ──
+Received Mac's round 3 of "Replication test".
+Round 3 saved · sent to Pi ✓
+  … A is thinking
+
+A (0s) › an idea
+
+  … A is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … A (summary, turn 1 of at most 3) is thinking
+✗ A failed: summary failed
+The summary stopped because a turn failed.
+── your turn · auto-summary stopped · 1 agent turn · 0s ──
+Round 4 saved as failed (error: A failed) · Pi refused it (not sent yet)
+Round 5 saved as failed (error: all passed) · Pi refused it (not sent yet)
+✔ two rooms: pairing, round hooks, independent browser pins, deletion and read-only guards (9284.200186ms)
+Room: A (claude) · worker W (claude) · root /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ctx-AdRgbm/Mac
+Transcript: in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ctx-AdRgbm/Mac/discussions/, once the first message starts a discussion
+agent-room on Mac, listening on 0.0.0.0:53814 · git version 2.54.0
+  open:  http://192.168.178.112:53814/__room
+  peers: none
+Room screen: http://127.0.0.1:53814/r/mac-ada45e/__room
+Discussion screen: http://127.0.0.1:53814/__room
+Use the rooms from the browser. This terminal only shows a log; Shutdown server there, or Ctrl-C here, ends them all.
+
+Room: A (claude) · worker W (claude) · root /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ctx-AdRgbm/Pi
+Transcript: in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ctx-AdRgbm/Pi/discussions/, once the first message starts a discussion
+agent-room on Pi, listening on 0.0.0.0:53818 · git version 2.54.0
+  open:  http://192.168.178.112:53818/__room
+  peers: none
+Room screen: http://127.0.0.1:53818/r/pi-931c3b/__room
+Discussion screen: http://127.0.0.1:53818/__room
+Use the rooms from the browser. This terminal only shows a log; Shutdown server there, or Ctrl-C here, ends them all.
+
+Paired with Pi (/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ctx-AdRgbm/Pi). Its rounds will arrive here, and this room's rounds will be sent there.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ctx-AdRgbm/Mac/discussions/2026-11-13-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ctx-AdRgbm/Mac/discussions/2026-11-13-first-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+── your turn · all passed · 1 agent turn · 0s ──
+Peer Pi: reachable, paired
+Room: A (claude) · worker W (claude) · root /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ctx-AdRgbm/Mac
+Transcript: in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ctx-AdRgbm/Mac/discussions/, once the first message starts a discussion
+Received Mac's round 1 of "First topic".
+Peer Pi: reachable, paired
+Round 1 saved · sent to Pi ✓
+Room screen: http://127.0.0.1:53814/r/mac-d1-73f586/__room
+Discussion screen: http://127.0.0.1:53814/__room
+Use the rooms from the browser. This terminal only shows a log; Shutdown server there, or Ctrl-C here, ends them all.
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ctx-AdRgbm/Mac/discussions/2026-11-13-second-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ctx-AdRgbm/Mac/discussions/2026-11-13-second-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+── your turn · all passed · 1 agent turn · 0s ──
+  … A is thinking
+── your turn · all passed · 1 agent turn · 0s ──
+Received Mac's round 1 of "Second topic".
+Round 1 saved · sent to Pi ✓
+Received Mac's round 2 of "First topic".
+Round 2 saved · sent to Pi ✓
+✔ every open discussion of a --node launch room replicates, through the launch room's replica (6637.063921ms)
+✔ storage ignores project filters/transcripts rules, preserves Git state and stable identity (448.374816ms)
+✔ concurrent bootstrap pairings cannot replace an established room identity (128.68842ms)
+✔ a round is: user, then agents in order until all of them pass in a row (5.408443ms)
+✔ the first prompt carries the introduction; later prompts do not (1.949508ms)
+✔ each agent sees exactly what it has not seen, never its own replies (1.011475ms)
+✔ a failing agent is recorded and ends the round; it gets what it missed next time (2.199815ms)
+✔ duplicate agent names are refused (0.915378ms)
+✔ a pass is exactly PASS, whitespace trimmed, optional trailing period (0.442367ms)
+✔ all selected agents passing in a row ends the round, without a notice (1.593784ms)
+✔ a real reply resets the pass count (0.50658ms)
+✔ the turn cap ends the round with a notice (0.492917ms)
+✔ no cap notice when the 8th turn completes the all-pass condition (0.483986ms)
+✔ the pass count resets for each user message (0.542724ms)
+✔ an error mid-round ends the round (0.419925ms)
+✔ passes are flagged for the screen to hide, and shown to other agents as (passed) (0.379298ms)
+✔ @name addresses only that agent, case-insensitively, and keeps the text as typed (0.315889ms)
+✔ a single PASS ends an addressed round (0.663057ms)
+✔ an unknown @name sends nothing to any agent and records nothing (0.570145ms)
+✔ an @mention later in the message is ordinary text (0.265135ms)
+✔ an agent left out of a round receives that exchange when next selected (1.161498ms)
+✔ a room recreated on the same state continues the conversation (0.589398ms)
+✔ a reply carries the usage its agent reported for that turn (0.420898ms)
+✔ summary: the draft is agreed when the other agent passes on it (1.010577ms)
+✔ summary in a brainstorm: the same format and agreement, without the sentence about pending-instructions.md (0.442366ms)
+✔ summary: a revision counts as its author's acceptance (1.204076ms)
+✔ summary: three turns each without agreement fail, and the last revision stands (0.365753ms)
+✔ summary: the drafter rotates, and agents see the result in later rounds (0.4739ms)
+✔ summary: nothing to summarize, or a failed turn, records no result (0.555262ms)
+✔ summary: with a single agent, its draft is the summary (0.23431ms)
+✔ state.briefing goes with each agent's first prompt only (0.924134ms)
+✔ discussion agents take turns in the selected row order (0.69048ms)
+✔ one server, two rooms: separate state and files, independent rounds, Quit room ends only one (7281.246242ms)
+✔ two open discussions in one room: switching keeps their sessions, and a worker report returns to its origin (3564.147583ms)
+✔ Shutdown server, from the server's own address, ends every room; with --node only the launch room replicates (828.188093ms)
+✔ Restart with two rooms: both come back at the same addresses, with their current agents, worker and discussion (1844.129279ms)
+✔ ending refuses room creation, including a delayed folder choice; busy warnings name all rooms (10.309595ms)
+✗ 1 agent program was stopped mid-turn.
+✗ 1 agent program was stopped mid-turn.
+✔ stopping a room kills provider child commands even after the provider exits (448.665588ms)
+✔ UI mode: the screen is the room's input, its replies come back as events, Quit ends the room (1332.615546ms)
+✔ saved provider/model choices survive CLI restarts and explicit CLI flags override them (2587.978397ms)
+✔ Restart: a new server process on the same port, resuming the discussion in use (1355.878555ms)
+✔ Quit room, then start again in the discussion: its checkpoint restores the discussion and worker provider sessions (6036.349535ms)
+✔ CLI accepts agy for discussion and worker and exposes both in settings (648.998093ms)
+✔ CLI flags remain the defaults for a new brainstorm and a beside discussion (1626.678862ms)
+  … A is thinking
+
+A (0s) › an idea
+
+  … B is thinking
+  … A is thinking
+── round over · all passed · 3 agent turns · 0s · summarizing ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+- the idea
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-o50BcT/discussions/2026-11-13-about-pendulums
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-o50BcT/discussions/2026-11-13-about-pendulums/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✗ Unknown agent "@nobody". Known: A, B
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-RCHBQp/discussions/2026-11-13-2152
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-RCHBQp/discussions/2026-11-13-2152/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✗ No discussion "nosuch" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-8DtZM0/discussions (discussions are folders named <date>-<title>).
+✗ No discussion "../x" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-8DtZM0/discussions (discussions are folders named <date>-<title>).
+Resumed the discussion 2026-11-01-old: it has no saved session, so your next message starts a fresh one there, from its handoff and notes.
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-8DtZM0/discussions/2026-11-01-old
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-8DtZM0/discussions/2026-11-01-old/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-cUEnTs/discussions/2026-11-13-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-cUEnTs/discussions/2026-11-13-first-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Resumed the discussion 2026-11-01-old: it has no saved session, so your next message starts a fresh one there, from its handoff and notes.
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-cUEnTs/discussions/2026-11-01-old
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-cUEnTs/discussions/2026-11-01-old/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✗ No discussion "../x" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-cUEnTs/discussions (discussions are folders named <date>-<title>).
+✗ No discussion "archive" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-cUEnTs/discussions (discussions are folders named <date>-<title>).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-ROMR2j/discussions/2026-11-13-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-ROMR2j/discussions/2026-11-13-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ each load builds a new room on the same conversation state and CLI sessions (219.812927ms)
+✔ a failing load leaves ctx as it was (144.208856ms)
+✔ the worker is a separate claude agent with its own session, kept across reloads (81.876451ms)
+✔ auto-summarize: on by default, a summary follows a round in which an agent spoke (424.929024ms)
+✔ auto-summarize: no summary after a round of passes (7.937608ms)
+✔ discussion folders: date + title, date and time without a title, -2 when taken (59.165ms)
+✔ session transcripts: session-<date>-<time>.md, -2 when taken, never overwritten (4.433687ms)
+✔ the first message creates the discussion (titled by Claude) and its transcript before the agents see it (146.900078ms)
+✔ if the title fails, the folder is named after the date and time; an unknown @name creates nothing (9.109793ms)
+✔ /resume without a checkpoint, before the first message: no title asked, the transcript goes in that discussion (25.376943ms)
+✔ /resume, after the session started, of a discussion without a checkpoint: a fresh session there, from its handoff (135.812936ms)
+
+You → W › fix the bug
+
+
+W (worker, 1s) › done
+
+
+You → W › and the test
+
+
+W (worker, 1s) › done
+
+✔ the worker is told the active discussion's folder with its first instruction there (3747.001711ms)
+✔ agent settings persist, apply before startup, and switch only the active worker after startup (15.189286ms)
+Moved the discussion 2026-11-01-old to archive/.
+Moved the discussion 2026-11-01-old to deferred/.
+Moved the discussion 2026-11-01-old to the active discussions.
+✗ Move it to active, archive or deferred.
+✗ No discussion "nosuch" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-DWGdxL/discussions.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-DWGdxL/discussions/2026-11-13-in-use
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-DWGdxL/discussions/2026-11-13-in-use/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✗ 2026-11-13-in-use is the discussion in use in this room: it can't move now.
+✔ /move: a whole discussion into archive/ or deferred/ and back; never the one in use (87.244738ms)
+Moved the discussion 2026-11-01-old to the active discussions.
+Resumed the discussion 2026-11-01-old: it has no saved session, so your next message starts a fresh one there, from its handoff and notes.
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.
+  … A is thinking
+
+A (0s) › an idea
+
+  … B is thinking
+  … A is thinking
+── round over · all passed · 3 agent turns · 0s · summarizing ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+- the idea
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-1NH4RR/discussions/2026-11-13-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-1NH4RR/discussions/2026-11-13-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it. To go back, /resume 2026-11-13-topic.
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: your next message names it and starts it.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-sXyAjT/discussions/2026-11-13-real-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-sXyAjT/discussions/2026-11-13-real-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it. To go back, /resume 2026-11-13-real-topic.
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Resumed the discussion 2026-11-01-old: it has no saved session, so your next message starts a fresh one there, from its handoff and notes.
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-sXyAjT/discussions/2026-11-01-old
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-sXyAjT/discussions/2026-11-01-old/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Reloaded the code and the agents' rulebook; the conversation continues.
+
+  … A is thinking
+  … B is thinking
+✔ /resume of an archived discussion makes it active first; new names skip archived ones (19.475235ms)
+✔ Restart keeps the launch flags that matter: the same port, agents, worker and dev mode, in the discussion in use (0.893021ms)
+✔ /brainstorm: no title, folder or transcript is created; the agents are told it is a brainstorm (4.353607ms)
+✔ New brainstorm replaces the current one, and ends a discussion session keeping its folder and transcript (9.343503ms)
+✔ New discussion or Resume ends the brainstorm; the next message then starts a discussion (19.757094ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week ──
+No discussion started yet: your next message starts a new one.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-ppRiwh/discussions/2026-11-13-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-ppRiwh/discussions/2026-11-13-first-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: your next message names it and starts it. To go back, /resume 2026-11-13-first-topic.
+  … Claude (choosing the discussion's title) is thinking
+✗ Couldn't create the discussion's folder or transcript: EACCES: permission denied, mkdir '/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-ppRiwh/discussions/2026-11-13-second-topic'
+Your message was not sent to the agents. Here it is, to send again:
+
+second
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-ppRiwh/discussions/2026-11-13-second-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-ppRiwh/discussions/2026-11-13-second-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Resumed the discussion 2026-11-13-first-topic: it has no saved session, so your next message starts a fresh one there, from its handoff and notes.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-60O9X0/discussions/2026-11-13-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-60O9X0/discussions/2026-11-13-first-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ Reload keeps the brainstorm's messages and its mode: the next message still creates no discussion (126.093064ms)
+✔ /new: nothing to end before the first message; it creates nothing and changes nothing (2.127734ms)
+✔ /new after a round: the session ends as with Resume; the next message starts a new titled discussion (28.244069ms)
+
+You → W › one
+
+
+W (worker, 1s) › ok
+
+
+You → W › long task
+
+New discussion: your next message names it and starts it. To go back, /resume 2026-11-13-first-topic.
+
+W (worker, 0s) › long done
+
+
+You → W › before the folder exists
+
+
+W (worker, 1s) › ok
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-60O9X0/discussions/2026-11-13-second-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-60O9X0/discussions/2026-11-13-second-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › after
+
+
+W (worker, 1s) › ok
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-C99VGy/discussions/2026-11-13-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-C99VGy/discussions/2026-11-13-first-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ /new in the terminal doesn't wait: a running task finishes in the old discussion's worker session and transcript, its log stays, and the new discussion's worker starts fresh (6817.745543ms)
+
+You → W › long task
+
+New discussion: your next message names it and starts it. To go back, /resume 2026-11-13-first-topic.
+✗ A worker task is still writing to 2026-11-13-first-topic; try again when it finishes.
+
+W (worker, 1s) › done
+
+Moved the discussion 2026-11-13-first-topic to archive/.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-0VhUZC/discussions/2026-11-13-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-0VhUZC/discussions/2026-11-13-first-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ after New discussion, the previous one can't move while its worker task runs; it can once the task ends (1414.776134ms)
+
+You → W › task
+
+
+W (worker, 0s) › the reply
+
+✗ W: couldn't save to the transcript: ENOENT: no such file or directory, open '/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-0VhUZC/discussions/2026-11-13-first-topic/transcripts/session-2026-11-13-2152.md'
+✔ a transcript that can't be written keeps the worker's reply visible, reports the error and ends the busy state (872.029174ms)
+✗ Worker requires a source Git repository for its isolated worktree. The instruction was not sent.
+✔ without a Git repository, or without a commit, the worker is disabled with an explanation (62.627511ms)
+
+You → W › do it
+
+
+W (worker, 0s) › ok
+
+
+You → W › again
+
+
+W (worker, 0s) › ok
+
+✔ the first instruction creates the worktree beside the repository, on worker/main from HEAD; the worker runs there (1661.001783ms)
+
+You → W › do it
+
+
+W (worker, 1s) › ok
+
+✔ a dirty room is left exactly as it was; the worker doesn't see its uncommitted changes, and the tab says so (1219.862331ms)
+
+You → W › do it
+
+
+W (worker, 0s) › ok
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-AY5W8R.worker (worker/main) has uncommitted edits from an unknown origin: its queue holds until the folder is clean (commit or remove those edits yourself); other lanes go on.
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-AY5W8R.worker is clean again: its queue resumes.
+
+You → W › more
+
+
+W (worker, 0s) › ok
+
+
+You → W › do it
+
+
+W (worker, 0s) › ok
+
+✔ after a restart the worktree is reused; an existing worker/main without a worktree is reattached; nothing is deleted (5022.323138ms)
+
+You → W › do it
+
+
+✗ W (worker) failed: /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-DJIcI6.worker already exists and isn't the worker's worktree: nothing was changed.
+
+✔ a folder already at the worktree's place is refused and left alone; the worker doesn't run (287.283785ms)
+
+You → W › start
+
+
+W (worker, 0s) › ok
+
+
+You → W › next
+
+
+W (worker, 0s) › ok
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-Jx1RIE.worker (worker/main) has uncommitted edits from an unknown origin: its queue holds until the folder is clean (commit or remove those edits yourself); other lanes go on.
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-Jx1RIE.worker is clean again: its queue resumes.
+
+You → W › dirty
+
+
+W (worker, 0s) › ok
+
+
+You → W › own commits
+
+
+W (worker, 0s) › ok
+
+✔ worker/main catches up with the room only when strictly behind with a clean worktree; otherwise it is left as it is (5454.831243ms)
+
+You → W › before the first message
+
+
+W (worker, 0s) › ok
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-kmkKAh/discussions/2026-11-13-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-kmkKAh/discussions/2026-11-13-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › in the discussion
+
+
+W (worker, 1s) › ok
+
+
+You → W › again
+
+
+W (worker, 0s) › ok
+
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it. To go back, /resume 2026-11-13-topic.
+
+You → W › brainstorm task
+
+
+W (worker, 0s) › ok
+
+✔ each discussion works in its own lane, <repo>.workers/<name>/ on worker/<name>; before the first message and in a brainstorm, worker/main; a saved session is told its worktree changed (3877.014193ms)
+
+You → W › first
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-bFmHxF/discussions/2026-11-13-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-bFmHxF/discussions/2026-11-13-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+W (worker, 0s) › done
+
+
+You → W › queued before the message
+
+
+W (worker, 0s) › ok
+
+
+You → W › after the message
+
+
+W (worker, 1s) › ok
+
+✔ a task queued before the discussion's first message stays on worker/main, even if it runs after the message created the discussion (2690.481006ms)
+
+You → W › before lanes
+
+
+W (worker, 0s) › ok
+
+✗ 2026-11-12-old-topic can't be deferred: commits on worker/main are not merged into main: d1e9e3ef7f1f67be0b940271aba98caa8c2da211.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-hrz35c/discussions/2026-11-13-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-hrz35c/discussions/2026-11-13-topic/transcripts/session-2026-11-13-2152.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ migration: a discussion's lane waits while worker/main has uncommitted edits or that discussion's commits not in main, which are left where they are; Defer counts those commits too (1677.907107ms)
+
+You → W › change it
+
+
+W (worker, 0s) › committed
+
+
+You → W › next
+
+
+W (worker, 1s) › npm test: 3 passed
+Tested: 17d6c4c18e64a482205b3c0483ee1bbd0e6b2247 with main 54257b251a65bd23b51644a8665d91706287a786: tests passed
+
+
+You → W › claim
+
+✗ The worker's "Tested:" line was not recorded: 5b12f8a is not on worker/2026-11-13-topic.
+
+W (worker, 0s) › Tested: 5b12f8abdf4293598ada13255893907007181aba with main 54257b251a65bd23b51644a8665d91706287a786: tests passed
+
+✔ the Worker tab checks each branch with work not in main: whether it contains main, the commits its worker last reported testing, and an advisory merge preview that changes no branch, worktree or index (3520.122278ms)
+
+You → W › on the old code
+
+
+W (worker, 0s) › ok
+
+
+You → W › first, wait
+
+
+W (worker, 0s) › done
+
+
+You → W › second, wait
+
+
+W (worker, 0s) › done
+
+✔ Reload from the code before lanes is refused, before anything changes, idle or busy; the tasks then go on under that code (2323.558542ms)
+
+You → W › leave edits
+
+
+W (worker, 0s) › ok
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/before-lanes-room-IQahb9.worker (worker/main) has uncommitted edits from [no discussion] ("leave edits"): the queue holds until [no discussion] resolves them (its own instructions still go through).
+✗ The worker left uncommitted edits from "leave edits": other discussions' worker tasks wait. Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+The worker's folder is clean again: the queue resumes.
+The worker's folder is clean again: other worker tasks resume.
+
+You → W › after the edits
+
+
+W (worker, 0s) › ok
+
+✗ Worker worktree inspection failed: git status: fatal: /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/before-lanes-room-IQahb9/.git/worktrees/before-lanes-room-IQahb9.worker/index: index file smaller than expected. All worker dispatch, including recovery, waits until inspection succeeds.
+✗ Worker worktree inspection failed: git status: fatal: /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/before-lanes-room-IQahb9/.git/worktrees/before-lanes-room-IQahb9.worker/index: index file smaller than expected. All worker dispatch, including recovery, waits until inspection succeeds.
+
+You → W › while unreadable
+
+
+W (worker, 0s) › ok
+
+✔ Reload from the code before lanes is refused with a hold over uncommitted edits, or after a failed worktree inspection; the hold and the wait go on under that code (6886.605618ms)
+
+You → W › from d1
+
+
+W (worker, 0s) › done
+
+
+You → W › after Restart
+
+
+W (worker, 0s) › new code
+
+
+You → W › from d1
+
+
+W (worker, 0s) › done
+
+
+You → W › from d2
+
+
+W (worker, 0s) › done
+
+
+You → W › after Restart
+
+
+W (worker, 0s) › new code
+
+✔ Reload from the code before lanes with two or three open discussions is refused in each, and a discussion opened beside is refused too; their tasks run one at a time in 1a's worktree, and a fresh start loads the new code (3842.202705ms)
+Reloaded the code and the agents' rulebook; the conversation continues.
+
+✔ the header's version: the checkout's commit and uncommitted changes, outside discussions/, as a snapshot (198.048778ms)
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-8E1wCv/discussions/2026-11-13-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-8E1wCv/discussions/2026-11-13-topic/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ Reload adds its own snapshot of the checkout to the header, keeping the start's (54.65281ms)
+
+You → W › the task
+
+New discussion: your next message names it and starts it. To go back, /resume 2026-11-13-topic.
+✗ A worker task is still writing to 2026-11-13-topic; try again when it finishes.
+
+W (worker, 0s) › done
+
+Moved the discussion 2026-11-13-topic to archive/.
+✔ a worker task keeps the discussion it started in, even if New discussion comes while it prepares its worktree (1049.82494ms)
+
+You → W › do it
+
+
+W (worker, 0s) › ok
+
+
+You → W › again
+
+
+W (worker, 0s) › ok
+
+✔ the worker is told about its scratch notes; .worker-notes is ignored by Git in its worktree (1510.1531ms)
+
+You → W › implement the feature
+
+
+✗ W (worker) failed: quota exhausted
+
+
+You → W › retry the feature
+
+
+W (worker, 0s) › completed
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/own-session-lqqKgI/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/own-session-lqqKgI/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+✔ worker switches after a running failure, carries history, and retains its session on model changes (1503.669918ms)
+✔ Switch room lists this server's rooms, with the pages open on each and which one is asking (1.538315ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+
+You → W › task in A
+
+New discussion: your next message names it and starts it. To go back, /resume 2026-11-13-topic-a.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/own-session-lqqKgI/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/own-session-lqqKgI/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+
+W (worker, 0s) › A report
+
+
+You → W › task in B
+
+
+W (worker, 1s) › B report
+
+Resumed the discussion 2026-11-13-topic-a: the same agent and worker sessions continue, with its chat.
+✗ The transcript grew after the checkpoint of 13 Nov 2026, 21:53. What was written after it is not in the restored chat; it is in the transcript file (from line 27). The agents may remember some of it. Send your last message again if needed.
+
+You → W › more in A
+
+
+W (worker, 0s) › A again report
+
+Resumed the discussion 2026-11-13-topic-b: the same agent and worker sessions continue, with its chat.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/own-hold-QlLqw7/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/own-hold-QlLqw7/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+✔ terminal: /new while a worker task runs, a task in the new discussion, then Resume of the first: each report reaches its own discussion, and each continues its own worker session (2833.766151ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+
+You → W › edit things in A
+
+New discussion: your next message names it and starts it. To go back, /resume 2026-11-13-topic-a.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/own-hold-QlLqw7/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/own-hold-QlLqw7/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+
+W (worker, 0s · 100 in · 7 out) › A report
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/own-hold-QlLqw7.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("edit things in A"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "edit things in A": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+
+You → W › task in B
+
+
+W (worker, 1s) › B report
+
+Resumed the discussion 2026-11-13-topic-a: the same agent and worker sessions continue, with its chat.
+✗ The transcript grew after the checkpoint of 13 Nov 2026, 21:53. What was written after it is not in the restored chat; it is in the transcript file (from line 27). The agents may remember some of it. Send your last message again if needed.
+
+You → W › finish it
+
+
+W (worker, 0s) › resolved
+
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/own-hold-QlLqw7.workers/2026-11-13-topic-a is clean again: its queue resumes.
+The worker's folder is clean again: this discussion's worker tasks resume.
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.
+✔ terminal: a task that leaves edits after the room switched holds its own discussion's worktree, named for it; only that discussion's instructions resolve it; and its usage counts for it (2981.106036ms)
+
+You → W › brainstorm edits
+
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.
+
+W (worker, 1s) › left edits
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-qmoiYY.worker (worker/main) has uncommitted edits from [brainstorm] ("brainstorm edits"): its queue holds until [brainstorm] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "brainstorm edits": the worker lane of [brainstorm] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-qmoiYY.worker is clean again: its queue resumes.
+The worker's folder is clean again: this discussion's worker tasks resume.
+
+You → W › second brainstorm task
+
+
+W (worker, 0s) › ok
+
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.
+New discussion: your next message names it and starts it.
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.
+Resumed the discussion 2026-11-01-old: it has no saved session, so your next message starts a fresh one there, from its handoff and notes.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/fresh-session-pRn9s5/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/fresh-session-pRn9s5/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+✔ one terminal context, two brainstorms in turn: the first one's leftover edits in worker/main hold the second's task, which is never sent as their recovery (3956.405764ms)
+✔ terminal: a brainstorm's worker session is never carried into a discussion, by New discussion or Resume (2.146324ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+
+You → W › old task
+
+Started 2026-11-13-saved-context afresh: your next message starts a new session there, from its handoff and notes. Its saved sessions and chat were discarded.
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/fresh-session-pRn9s5/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/fresh-session-pRn9s5/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2153-2.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+
+W (worker, 0s) › old report
+
+
+You → W › new task
+
+
+W (worker, 0s) › new report
+
+New discussion: your next message names it and starts it. To go back, /resume 2026-11-13-saved-context.
+Resumed the discussion 2026-11-13-saved-context: the same agent and worker sessions continue, with its chat.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/checkpoint-test-fnYl7x/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/checkpoint-test-fnYl7x/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+✔ terminal: Start fresh while the discussion's old worker task still runs: its report goes to the old session's transcript, and neither its report nor its checkpoint update replaces the new worker session (1586.302204ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+Closed 2026-11-13-saved-context; its checkpoint is kept. To go back, Resume it in Explorer.
+Resumed the discussion 2026-11-13-saved-context: the same agent and worker sessions continue, with its chat.
+✗ The transcript grew after the checkpoint of 13 Nov 2026, 21:53. What was written after it is not in the restored chat; it is in the transcript file (from line 33). The agents may remember some of it. Send your last message again if needed.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/brainstorm-resume-test-Xj0L54/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/brainstorm-resume-test-Xj0L54/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+✔ every round saves a checkpoint; Close keeps it; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions (43.27699ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it. To go back, /resume 2026-11-13-saved-context.
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+Resumed the discussion 2026-11-13-saved-context: the same agent and worker sessions continue, with its chat.
+✗ The transcript grew after the checkpoint of 13 Nov 2026, 21:53. What was written after it is not in the restored chat; it is in the transcript file (from line 21). The agents may remember some of it. Send your last message again if needed.
+  … A is thinking
+
+✗ A failed (1s): claude exited with code 1: Error: --resume requires a valid session ID or session title when used with --print. Usage: claude -p --resume <session-id|title>. Provided value "claude-original" is not a UUID and does not match any session title.
+
+── your turn · A failed · 1 agent turn · 1s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+2026-11-13-saved-context is the discussion in use here.
+Started 2026-11-13-saved-context afresh: your next message starts a new session there, from its handoff and notes. Its saved sessions and chat were discarded.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/fresh-summary-test-Xavgig/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/fresh-summary-test-Xavgig/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+
+A (0s) › an idea
+
+  … B is thinking
+  … A is thinking
+✔ Resume replaces a brainstorm only with a valid checkpoint; on the discussion in use it changes nothing; Start fresh asks twice and keeps only the latest summary (801.033063ms)
+── round over · all passed · 3 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week · summarizing ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+- the idea
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+Started 2026-11-13-saved-context afresh: your next message starts a new session there, from its handoff and notes, with its latest summary. Its saved sessions and chat were discarded.
+Resumed the discussion 2026-11-13-saved-context: it has no saved session, so your next message starts a fresh one there, from its handoff and notes and the summary chosen at Start fresh.
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/fresh-summary-test-Xavgig/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/fresh-summary-test-Xavgig/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2153-2.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+Closed 2026-11-13-saved-context; its checkpoint is kept. To go back, Resume it in Explorer.
+Started 2026-11-13-saved-context afresh: your next message starts a new session there, from its handoff and notes, with its latest summary (not agreed). Its saved sessions and chat were discarded.
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/fresh-summary-test-Xavgig/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/fresh-summary-test-Xavgig/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2153-3.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+Started 2026-11-01-none afresh: your next message starts a new session there, from its handoff and notes. Its saved sessions and chat were discarded.
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/fresh-summary-test-Xavgig/discussions/2026-11-01-none
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/fresh-summary-test-Xavgig/discussions/2026-11-01-none/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+Pause is gone: every discussion saves itself after each round, and Resume continues it where it stopped.
+/reopen is now /resume 2026-11-01-x (it continues where the discussion stopped, or starts from its handoff if it was never saved), or /fresh 2026-11-01-x to start new sessions from its handoff.
+/continue is now /resume <name> (it continues where the discussion stopped, or starts from its handoff if it was never saved), or /fresh <name> to start new sessions from its handoff.
+Auto-summarize is always on now: a summary follows every round in which an agent spoke.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-FnmK32/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-FnmK32/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "Do "step" 1"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+  … B (summary, turn 1 of at most 6) is thinking
+  … A (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by B) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "Merely quoted"
+
+**Later**
+- review it
+
+Outcome: SEND
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+✔ Start fresh briefs with the latest summary, marked if not agreed, or none; a Restart before the first message keeps it; the first round replaces it (57.670526ms)
+✔ removed commands answer with a hint and reach no agent (1.212317ms)
+✔ Explorer's Resume says what it will do: show an open one, continue a saved one, or start from the handoff (0.98418ms)
+✔ auto dev: reading the instruction only from Next step, and the Outcome line (1.593796ms)
+
+Relayed → W › Do "step" 1
+
+
+W (worker, 0s) › did step 1
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "Do step 2"
+
+**Later**
+- review it
+
+Outcome: SEND
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+
+Relayed → W › Do step 2
+
+
+W (worker, 0s) › did step 2
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … B (summary, turn 1 of at most 6) is thinking
+  … A (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by B) ›
+**Agreed**
+- all done
+
+Outcome: FINISH
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+Auto dev finished. Review and merge worker/2026-11-13-relay yourself.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-ZOarJv/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-ZOarJv/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "Step 1"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+✔ auto dev: Start relays the instruction; the report starts a round; one SEND per report; FINISH ends it (1593.14981ms)
+
+Relayed → W › Step 1
+
+
+W (worker, 0s) › done
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … B (summary, turn 1 of at most 6) is thinking
+  … A (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by B) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "Step 2"
+
+**Later**
+- review it
+
+Outcome: SEND
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+
+Relayed → W › Step 2
+
+
+W (worker, 0s) › done
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "Step 3"
+
+**Later**
+- review it
+
+Outcome: SEND
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+
+Relayed → W › Step 3
+
+
+W (worker, 0s) › done
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … B (summary, turn 1 of at most 6) is thinking
+  … A (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by B) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "Step 4"
+
+**Later**
+- review it
+
+Outcome: SEND
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+
+Relayed → W › Step 4
+
+
+W (worker, 0s) › done
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "Step 5"
+
+**Later**
+- review it
+
+Outcome: SEND
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+
+Relayed → W › Step 5
+
+
+W (worker, 0s) › done
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … B (summary, turn 1 of at most 6) is thinking
+  … A (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by B) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "Step 6"
+
+**Later**
+- review it
+
+Outcome: SEND
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+Auto dev paused: 5 cycles used.
+Auto dev started: up to 5 worker cycles.
+✗ Auto dev can't start: it is already running.
+
+Relayed → W › Step 6
+
+
+W (worker, 0s) › done
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "Step 7"
+
+**Later**
+- review it
+
+Outcome: SEND
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+
+Relayed → W › Step 7
+
+
+W (worker, 0s) › done
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … B (summary, turn 1 of at most 6) is thinking
+── your turn · auto-summary empty · 1 agent turn · 0s ──
+Auto dev paused: the summary was empty.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-YtZNM0/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-YtZNM0/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "A"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+✔ auto dev: at most 5 worker cycles per start; the 5th report is still reviewed; Restart grants 5 more (5182.888996ms)
+
+Relayed → W › A
+
+
+W (worker, 0s) › did A
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … B (summary, turn 1 of at most 6) is thinking
+  … A (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by B) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "B"
+
+**Later**
+- review it
+
+Outcome: SEND
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+
+Relayed → W › B
+
+
+✗ W (worker) failed: timed out
+
+Auto dev paused: the worker failed: Retry or Retry with….
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-t8puOk/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-t8puOk/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "A"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+
+Relayed → W › A
+
+
+W (worker, 0s) › done
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … B (summary, turn 1 of at most 6) is thinking
+  … A (summary, turn 2 of at most 6) is thinking
+  … B (summary, turn 3 of at most 6) is thinking
+  … A (summary, turn 4 of at most 6) is thinking
+  … B (summary, turn 5 of at most 6) is thinking
+  … A (summary, turn 6 of at most 6) is thinking
+
+Summary (not agreed: the last version, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "B5"
+
+**Later**
+- review it
+
+Outcome: SEND
+
+── your turn · auto-summary not agreed · 6 agent turns · 0s ──
+Auto dev paused: the summary was not agreed.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-r5LLh4/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-r5LLh4/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "A"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+
+Relayed → W › A
+
+
+W (worker, 1s) › done
+
+  … A is thinking
+  … B is thinking
+
+✗ B failed (0s): crashed
+
+Auto dev paused: B failed.
+── your turn · B failed · 2 agent turns · 0s ──
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-Vrqb6W/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-Vrqb6W/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "A"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+Auto dev paused: you sent a message.
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+Relayed → W › A
+
+
+W (worker, 0s) › did A
+
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-yBKnSY/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-yBKnSY/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "A"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+✔ auto dev pauses on WAIT FOR USER, an unagreed summary, a failed turn, or a User message; a failed worker counts as a cycle (4467.150333ms)
+
+Relayed → W › A
+
+
+W (worker, 0s) › done
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … B (summary, turn 1 of at most 6) is thinking
+  … A (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by B) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "B"
+
+**Later**
+- review it
+
+Outcome: WAIT FOR USER
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+Auto dev paused: the discussion waits for you (WAIT FOR USER).
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "C"
+
+**Later**
+- review it
+
+Outcome: WAIT FOR USER
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+  … B (summary, turn 1 of at most 6) is thinking
+  … A (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by B) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "D"
+
+**Later**
+- review it
+
+Outcome: SEND
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+  … A is thinking
+
+A (0s) › Yes, it is done.
+
+  … B is thinking
+  … A is thinking
+── round over · all passed · 3 agent turns · 0s · summarizing ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- The work is done and reviewed.
+
+Outcome: FINISH
+
+Auto dev finished. Review and merge worker/2026-11-13-relay yourself.
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+  … B (summary, turn 1 of at most 6) is thinking
+  … A (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by B) ›
+**Agreed**
+- Nothing more.
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.
+✗ Auto dev can't start: auto dev is for discussions; a brainstorm keeps no saved record.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-pv7usw/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-pv7usw/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "A"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+Reloaded the code and the agents' rulebook; the conversation continues.
+
+New discussion: your next message names it and starts it. To go back, /resume 2026-11-13-relay.
+✔ auto dev: while paused, any agreed summary ending in Outcome: FINISH finishes the run, and none sends anything (885.867557ms)
+✔ auto dev: while a run is active, the status under the title says so instead of "your turn" (3.058188ms)
+
+Relayed → W › A
+
+
+W (worker, 0s) › did A
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-9Mkan0/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-9Mkan0/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "A"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+
+Relayed → W › A
+
+
+W (worker, 0s) › done
+
+Auto dev paused: the worker's result was lost in the Reload.
+Reloaded the code and the agents' rulebook; the conversation continues.
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-iYjUcg/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-iYjUcg/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-iYjUcg/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-iYjUcg/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6xGKFd/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6xGKFd/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6xGKFd/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6xGKFd/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ auto dev: never in a brainstorm; New discussion ends a run; Reload keeps it, and a lost worker result pauses it (1834.395903ms)
+✔ on the screen, New discussion keeps the discussion open with its sessions; Resume of an open one goes there; New discussion ends an open brainstorm (76.696661ms)
+
+You → W › task for a
+
+
+You → W › task for b
+
+
+W (worker, 1s) › committed
+
+
+W (worker, 1s) › committed
+
+✗ Commits without the [2026-11-13-topic-b] label: cef9c51 no label.
+Reloaded the code and the agents' rulebook; the conversation continues.
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-PX6qb3/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-PX6qb3/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-PX6qb3/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-PX6qb3/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-b stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-PX6qb3/discussions/2026-11-13-topic-c
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-PX6qb3/discussions/2026-11-13-topic-c/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ one workshop per folder: tasks labelled by origin, one worker session, lane and queue each, reports back there; Close discussion; Quit room closes them all (1413.564178ms)
+
+You → W › a: leave edits
+
+
+You → W › b: one
+
+[2026-11-13-topic-c] "c: waits" waits for a free place: 2 worker tasks running, at most 2 at once.
+
+W (worker, 1s) › left edits behind
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-PX6qb3.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("a: leave edits"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "a: leave edits": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+
+You → W › c: waits
+
+
+W (worker, 2s) › ok
+
+
+You → W › b: two
+
+
+W (worker, 1s) › ok
+
+
+W (worker, 2s) › ok
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-B7eopY/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-B7eopY/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-B7eopY/discussions/2026-11-13-observer
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-B7eopY/discussions/2026-11-13-observer/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ lanes run at the same time: two discussions' tasks overlap with separate queues, holds, worker sessions and worktrees; a hold in one doesn't stop the other; a third waits for a free place (3679.901507ms)
+
+You → W › first in A
+
+New discussion: your next message names it and starts it. To go back, /resume 2026-11-13-topic-a.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-B7eopY/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-B7eopY/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+W (worker, 0s) › done
+
+
+You → W › queued in A
+
+
+W (worker, 0s) › done
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-yzrl2L/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-yzrl2L/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-yzrl2L/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-yzrl2L/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ a queued task starting after its context switches does not mark the new discussion working (1775.168391ms)
+
+You → W › a long task
+
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+W (worker, 0s) › the long task's report
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6Wl0Kj/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6Wl0Kj/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6Wl0Kj/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6Wl0Kj/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ switching discussion while one waits for its worker task: the message typed in the other and the worker's later report each reach their own discussion (888.023709ms)
+
+You → W › make wip
+
+
+W (worker, 0s) › ok
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6Wl0Kj.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("make wip"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "make wip": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+
+You → W › other work
+
+
+W (worker, 1s) › ok
+
+✗ This can't be closed yet: its worker edits from "make wip" are unresolved: ask the worker to finish and commit them, or to abandon them.
+✗ 2026-11-13-topic-a can't move: its worker edits from "make wip" are unresolved: ask the worker to finish and commit them, or to abandon them.
+✗ 2026-11-13-topic-a can't move: its worker edits from "make wip" are unresolved: ask the worker to finish and commit them, or to abandon them.
+
+You → W › finish it
+
+
+W (worker, 0s) › ok
+
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6Wl0Kj.workers/2026-11-13-topic-a is clean again: its queue resumes.
+The worker's folder is clean again: this discussion's worker tasks resume.
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6Wl0Kj.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from an unknown origin: its queue holds until the folder is clean (commit or remove those edits yourself); other lanes go on.
+
+You → W › meanwhile
+
+
+W (worker, 0s) › ok
+
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6Wl0Kj.workers/2026-11-13-topic-a is clean again: its queue resumes.
+
+You → W › next
+
+
+W (worker, 0s) › ok
+
+
+You → W › after
+
+
+W (worker, 0s) › ok
+
+Room: A (claude), B (claude) · worker W (claude) · root /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6Wl0Kj
+Transcript: in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6Wl0Kj/discussions/, once the first message starts a discussion
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-6Wl0Kj.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from an unknown origin: its queue holds until the folder is clean (commit or remove those edits yourself); other lanes go on.
+Type a message, /docs to browse the discussions, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.
+
+
+You → W › do it
+
+
+W (worker, 1s) › ok
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-MMGHEN/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-MMGHEN/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+✔ leftover edits hold their own lane for their origin, which can recover them; other lanes go on; they block Close, Archive and Defer; unknown leftovers hold their lane (8325.137802ms)
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-MMGHEN/discussions/2026-11-13-2153
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-MMGHEN/discussions/2026-11-13-2153/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week ──
+Closed 2026-11-13-2153; its checkpoint is kept. To go back, Resume it in Explorer.
+Resumed the discussion 2026-11-13-2153: the same agent and worker sessions continue, with its chat.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/quit-round-GKcByB/discussions/2026-11-13-quit-test
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/quit-round-GKcByB/discussions/2026-11-13-quit-test/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+✔ worker changes stay in their discussion and only unstarted changes update defaults (951.936488ms)
+✔ Restart brings back every open discussion of a folder, each in its own context (0.72362ms)
+
+✗ A failed (1s): claude was stopped (SIGTERM)
+
+── your turn · A failed · 1 agent turn · 1s ──
+  … A is thinking
+
+✗ A failed (0s): not started: the room is quitting
+
+── your turn · A failed · 1 agent turn · 0s ──
+New room in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/open-fresh-bTxlYa: /r/made-1/__room
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-8xnGnx/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-8xnGnx/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-8xnGnx/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-8xnGnx/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ Quit room during a round: after the grace period the agent mid-turn is stopped, and no new one starts (1085.855279ms)
+✔ Open room in folder… opens an existing room, says when it is open elsewhere, and creates one only with its one-time token (5.41007ms)
+✗ Quitting: the round in progress didn't end within 0s, so the room's agents were stopped.
+✗ 1 agent program was stopped mid-turn.
+
+You → W › work b
+
+
+W (worker, 1s) › done
+
+
+You → W › more work b
+
+
+W (worker, 0s) › done
+
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › more b
+
+
+W (worker, 0s) › done
+
+
+Relayed → W › work a
+
+
+W (worker, 1s) › done
+
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-vhBNkt/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-vhBNkt/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-vhBNkt/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-vhBNkt/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ Stage 2: completed work is reported once before a round, including Worker report rounds, never just by switching (4273.422862ms)
+
+You → W › work
+
+
+W (worker, 1s) › done
+
+✗ 2026-11-13-topic-a can't be deferred: commits on worker/2026-11-13-topic-a are not merged into main: b9da495927033419a512ec84a0f4d10ba7eb6170.
+Moved the discussion 2026-11-13-topic-a to deferred/.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2153.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ Stage 2: Defer refuses labelled commits absent from main and permits them after a normal merge (1553.08951ms)
+
+You → W › leave edits
+
+
+W (worker, 0s) › ok
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("leave edits"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave edits": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("leave edits"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave edits": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from an unknown origin: its queue holds until the folder is clean (commit or remove those edits yourself); other lanes go on.
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from an unknown origin: its queue holds until the folder is clean (commit or remove those edits yourself); other lanes go on.
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from an unknown origin: its queue holds until the folder is clean (commit or remove those edits yourself); other lanes go on.
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from an unknown origin: its queue holds until the folder is clean (commit or remove those edits yourself); other lanes go on.
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("leave edits"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave edits": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+
+You → W › recover
+
+
+W (worker, 0s) › ok
+
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.workers/2026-11-13-topic-a is clean again: its queue resumes.
+The worker's folder is clean again: this discussion's worker tasks resume.
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.
+
+You → W › leave edits
+
+
+W (worker, 1s) › ok
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.worker (worker/main) has uncommitted edits from [brainstorm] ("leave edits"): its queue holds until [brainstorm] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave edits": the worker lane of [brainstorm] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.worker (worker/main) has uncommitted edits from [brainstorm] ("leave edits"): its queue holds until [brainstorm] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave edits": the worker lane of [brainstorm] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.worker (worker/main) has uncommitted edits from an unknown origin: its queue holds until the folder is clean (commit or remove those edits yourself); other lanes go on.
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.worker (worker/main) has uncommitted edits from [brainstorm] ("leave edits"): its queue holds until [brainstorm] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave edits": the worker lane of [brainstorm] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+
+You → W › recover
+
+
+W (worker, 1s) › ok
+
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-F6xXYS.worker is clean again: its queue resumes.
+The worker's folder is clean again: this discussion's worker tasks resume.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-8UYyKd/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-8UYyKd/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ Stage 2: private owner records survive restart and recovery, invalid records block as unknown, and brainstorms need no folder (6599.748106ms)
+
+You → W › start
+
+
+W (worker, 0s) › stopped
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-8UYyKd.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("start"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "start": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-8UYyKd.workers/2026-11-13-topic-a is clean again: its queue resumes.
+The worker's folder is clean again: this discussion's worker tasks resume.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-9yt1nb/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-9yt1nb/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ Stage 2: cleaning held edits by hand clears the private record and hold without another task (3007.30571ms)
+
+You → W › prepare
+
+
+W (worker, 0s) › done
+
+
+You → W › catch up task
+
+
+W (worker, 0s) › done
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-Sg2v05/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-Sg2v05/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-Sg2v05/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-Sg2v05/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ Stage 3: a diverged clean worker is instructed to merge main normally before its task (1887.184022ms)
+
+You → W › prepare
+
+
+W (worker, 0s) › done
+
+
+You → W › conflicting task
+
+
+W (worker, 0s) › Merge conflicts in shared.txt; task not attempted.
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-Sg2v05.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("conflicting task"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "conflicting task": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+
+You → W › other task
+
+
+W (worker, 1s) › done
+
+
+You → W › recover conflict
+
+
+W (worker, 1s) › done
+
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-Sg2v05.workers/2026-11-13-topic-a is clean again: its queue resumes.
+The worker's folder is clean again: this discussion's worker tasks resume.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-ZSKKFz/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-ZSKKFz/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-ZSKKFz/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-ZSKKFz/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ Stage 3: a worker merge conflict holds its own lane, not other discussions', and recovery keeps the original ownership (4266.767698ms)
+
+You → W › leave operation
+
+
+W (worker, 0s) › done
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-ZSKKFz.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("leave operation"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave operation": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-ZSKKFz.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("leave operation"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave operation": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+
+You → W › later
+
+
+W (worker, 1s) › done
+
+
+You → W › resolve operation
+
+
+W (worker, 0s) › done
+
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-ZSKKFz.workers/2026-11-13-topic-a is clean again: its queue resumes.
+The worker's folder is clean again: this discussion's worker tasks resume.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-A1T8cS/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-A1T8cS/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-A1T8cS/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-A1T8cS/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › leave operation
+
+
+W (worker, 0s) › done
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-A1T8cS.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("leave operation"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave operation": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-A1T8cS.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("leave operation"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave operation": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+
+You → W › later
+
+
+W (worker, 1s) › done
+
+
+You → W › resolve operation
+
+
+W (worker, 0s) › done
+
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-A1T8cS.workers/2026-11-13-topic-a is clean again: its queue resumes.
+The worker's folder is clean again: this discussion's worker tasks resume.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-7dhTHe/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-7dhTHe/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-7dhTHe/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-7dhTHe/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › leave operation
+
+
+W (worker, 0s) › done
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-7dhTHe.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("leave operation"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave operation": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-7dhTHe.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("leave operation"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave operation": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+
+You → W › later
+
+
+W (worker, 1s) › done
+
+
+You → W › resolve operation
+
+
+W (worker, 0s) › done
+
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-7dhTHe.workers/2026-11-13-topic-a is clean again: its queue resumes.
+The worker's folder is clean again: this discussion's worker tasks resume.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-gYagry/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-gYagry/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-gYagry/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-gYagry/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ Stage 3: clean merge, revert and sequencer states hold their lane's dispatch and survive ownership restoration (9319.882879ms)
+
+You → W › implement
+
+
+W (worker, 1s) › implemented
+
+Rollback queued for [2026-11-13-topic-a]. Review its Worker report before confirming archive.
+
+You → W › Archive with rollback for [2026-11-13-topic-a]. Work only on worker/2026-11-13-topic-a, this discussion's own branch; never merge into main or push, reset, rebase or clean the worktree.
+Before changing any file (including a preliminary merge), inspect the complete history of worker/2026-11-13-topic-a, main and worker/main (the branch every discussion shared before each had its own: older [2026-11-13-topic-a] commits may be there), commit messages, parents and diffs. Find this discussion's [2026-11-13-topic-a]-labelled implementation commits, INCLUDING those already merged into main (do not restrict the search to main..worker/2026-11-13-topic-a).
+Distinguish implementation commits from catch-up merges and earlier rollback/revert commits. Inspect Agent-Room-Rollback-Origin and Agent-Room-Reverted trailers, standard "This reverts commit" records, and any later reverts of those reverts. Exclude catch-up merges, earlier rollback commits, and implementation changes already undone: never revert a rollback and restore changes already removed. Do not infer the set from labels alone. If the intended set or an earlier rollback's coverage is unclear, stop and report the ambiguity BEFORE changing any file. Do not guess a merge mainline.
+Identify later work by other origins that may depend on the changes, in main and in other discussions' unmerged branches (git branch --list 'worker/*'), using history, overlapping files and affected symbols/callers; report the origins, commit IDs and dependency evidence. A clean revert or passing tests do not prove there are no semantic dependencies. If dependencies make a safe rollback unclear, stop and report before changing files.
+Once the set is clear, if main has commits worker/2026-11-13-topic-a lacks and the worktree has no unresolved edits or Git operation, first merge main into worker/2026-11-13-topic-a with a normal merge. Label any merge commit [2026-11-13-topic-a] catch up with main. If it clashes, do not force it or continue the rollback: leave the state intact and report the conflict for recovery by this origin. Recheck the intended set after the merge; report any new ambiguity before reverting.
+Revert the intended implementation commits newest first. If a revert conflicts, stop and report it; do not force or silently abandon changes. Run npm test and read its real output. Commit the rollback on worker/2026-11-13-topic-a with a message starting "[2026-11-13-topic-a] rollback" and the trailer "Agent-Room-Rollback-Origin: 2026-11-13-topic-a", plus one "Agent-Room-Reverted: <full implementation commit ID>" trailer per commit undone. If everything was already undone, do not restore it: explain that and make a labelled empty rollback commit with the origin trailer and no reverted IDs.
+Report the commit ID, the exact set undone or already undone, npm test's real output, dependencies found on other origins' work and what you could not check. Only if rollback and tests succeeded and the worktree is clean with no Git operation in progress, end the report with "Rollback ready: <full rollback commit ID>". Otherwise omit that line. Do not archive the discussion: the User must review this report and explicitly confirm archiving; the User retains the final merge into main.
+
+
+W (worker, 2s) › Reverted or already undone: 59982e0978d7659b64a95e4de984590d2cc3c16e
+
+> test
+> node -e "console.log('fixture tests passed')"
+
+fixture tests passed
+
+Dependencies: no other origin in this fixture uses feature.txt. Semantic dependencies require review.
+Not checked: real provider or deployed state.
+Rollback ready: 7e3a2a9cc15b5bcb2a3d82bf8ed0381d669b159d
+
+Review the rollback report for [2026-11-13-topic-a]; then confirm archive in Explorer (switch away from it first), or /archive-rollback 2026-11-13-topic-a. Main is still yours to merge.
+✗ Review the rollback report and use its explicit archive confirmation; the discussion has not been archived.
+Moved the discussion 2026-11-13-topic-a to archive/.
+Moved the discussion 2026-11-13-topic-a to the active discussions.
+Rollback queued for [2026-11-13-topic-a]. Review its Worker report before confirming archive.
+
+You → W › Archive with rollback for [2026-11-13-topic-a]. Work only on worker/2026-11-13-topic-a, this discussion's own branch; never merge into main or push, reset, rebase or clean the worktree.
+Before changing any file (including a preliminary merge), inspect the complete history of worker/2026-11-13-topic-a, main and worker/main (the branch every discussion shared before each had its own: older [2026-11-13-topic-a] commits may be there), commit messages, parents and diffs. Find this discussion's [2026-11-13-topic-a]-labelled implementation commits, INCLUDING those already merged into main (do not restrict the search to main..worker/2026-11-13-topic-a).
+Distinguish implementation commits from catch-up merges and earlier rollback/revert commits. Inspect Agent-Room-Rollback-Origin and Agent-Room-Reverted trailers, standard "This reverts commit" records, and any later reverts of those reverts. Exclude catch-up merges, earlier rollback commits, and implementation changes already undone: never revert a rollback and restore changes already removed. Do not infer the set from labels alone. If the intended set or an earlier rollback's coverage is unclear, stop and report the ambiguity BEFORE changing any file. Do not guess a merge mainline.
+Identify later work by other origins that may depend on the changes, in main and in other discussions' unmerged branches (git branch --list 'worker/*'), using history, overlapping files and affected symbols/callers; report the origins, commit IDs and dependency evidence. A clean revert or passing tests do not prove there are no semantic dependencies. If dependencies make a safe rollback unclear, stop and report before changing files.
+Once the set is clear, if main has commits worker/2026-11-13-topic-a lacks and the worktree has no unresolved edits or Git operation, first merge main into worker/2026-11-13-topic-a with a normal merge. Label any merge commit [2026-11-13-topic-a] catch up with main. If it clashes, do not force it or continue the rollback: leave the state intact and report the conflict for recovery by this origin. Recheck the intended set after the merge; report any new ambiguity before reverting.
+Revert the intended implementation commits newest first. If a revert conflicts, stop and report it; do not force or silently abandon changes. Run npm test and read its real output. Commit the rollback on worker/2026-11-13-topic-a with a message starting "[2026-11-13-topic-a] rollback" and the trailer "Agent-Room-Rollback-Origin: 2026-11-13-topic-a", plus one "Agent-Room-Reverted: <full implementation commit ID>" trailer per commit undone. If everything was already undone, do not restore it: explain that and make a labelled empty rollback commit with the origin trailer and no reverted IDs.
+Report the commit ID, the exact set undone or already undone, npm test's real output, dependencies found on other origins' work and what you could not check. Only if rollback and tests succeeded and the worktree is clean with no Git operation in progress, end the report with "Rollback ready: <full rollback commit ID>". Otherwise omit that line. Do not archive the discussion: the User must review this report and explicitly confirm archiving; the User retains the final merge into main.
+
+
+W (worker, 1s) › Reverted or already undone: 59982e0978d7659b64a95e4de984590d2cc3c16e
+
+> test
+> node -e "console.log('fixture tests passed')"
+
+fixture tests passed
+
+Dependencies: no other origin in this fixture uses feature.txt. Semantic dependencies require review.
+Not checked: real provider or deployed state.
+Rollback ready: 6395f0d196fb6d09fe39c080ac4d861ffce20455
+
+Review the rollback report for [2026-11-13-topic-a]; then confirm archive in Explorer (switch away from it first), or /archive-rollback 2026-11-13-topic-a. Main is still yours to merge.
+✗ The worker state changed since the rollback report. Resolve it and request a fresh rollback report before archiving.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-QWq5W3/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-QWq5W3/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-QWq5W3/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-QWq5W3/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Rollback queued for [2026-11-13-topic-a]. Review its Worker report before confirming archive.
+✔ Stage 3: rollback includes merged implementation, never restores prior rollback, and archives only on explicit confirmation (10483.192415ms)
+
+You → W › Archive with rollback for [2026-11-13-topic-a]. Work only on worker/2026-11-13-topic-a, this discussion's own branch; never merge into main or push, reset, rebase or clean the worktree.
+Before changing any file (including a preliminary merge), inspect the complete history of worker/2026-11-13-topic-a, main and worker/main (the branch every discussion shared before each had its own: older [2026-11-13-topic-a] commits may be there), commit messages, parents and diffs. Find this discussion's [2026-11-13-topic-a]-labelled implementation commits, INCLUDING those already merged into main (do not restrict the search to main..worker/2026-11-13-topic-a).
+Distinguish implementation commits from catch-up merges and earlier rollback/revert commits. Inspect Agent-Room-Rollback-Origin and Agent-Room-Reverted trailers, standard "This reverts commit" records, and any later reverts of those reverts. Exclude catch-up merges, earlier rollback commits, and implementation changes already undone: never revert a rollback and restore changes already removed. Do not infer the set from labels alone. If the intended set or an earlier rollback's coverage is unclear, stop and report the ambiguity BEFORE changing any file. Do not guess a merge mainline.
+Identify later work by other origins that may depend on the changes, in main and in other discussions' unmerged branches (git branch --list 'worker/*'), using history, overlapping files and affected symbols/callers; report the origins, commit IDs and dependency evidence. A clean revert or passing tests do not prove there are no semantic dependencies. If dependencies make a safe rollback unclear, stop and report before changing files.
+Once the set is clear, if main has commits worker/2026-11-13-topic-a lacks and the worktree has no unresolved edits or Git operation, first merge main into worker/2026-11-13-topic-a with a normal merge. Label any merge commit [2026-11-13-topic-a] catch up with main. If it clashes, do not force it or continue the rollback: leave the state intact and report the conflict for recovery by this origin. Recheck the intended set after the merge; report any new ambiguity before reverting.
+Revert the intended implementation commits newest first. If a revert conflicts, stop and report it; do not force or silently abandon changes. Run npm test and read its real output. Commit the rollback on worker/2026-11-13-topic-a with a message starting "[2026-11-13-topic-a] rollback" and the trailer "Agent-Room-Rollback-Origin: 2026-11-13-topic-a", plus one "Agent-Room-Reverted: <full implementation commit ID>" trailer per commit undone. If everything was already undone, do not restore it: explain that and make a labelled empty rollback commit with the origin trailer and no reverted IDs.
+Report the commit ID, the exact set undone or already undone, npm test's real output, dependencies found on other origins' work and what you could not check. Only if rollback and tests succeeded and the worktree is clean with no Git operation in progress, end the report with "Rollback ready: <full rollback commit ID>". Otherwise omit that line. Do not archive the discussion: the User must review this report and explicitly confirm archiving; the User retains the final merge into main.
+
+
+W (worker, 1s) › Ambiguous earlier revert: no files changed.
+Rollback ready: 39d618879f6862cb5f837b4f8303b81ce8aee29f
+
+Rollback for [2026-11-13-topic-a] needs review: no verified successful report yet; archiving was not done.
+✗ No successful rollback report awaiting archive confirmation.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-qaXl26/discussions/2026-11-13-topic-a
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-qaXl26/discussions/2026-11-13-topic-a/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic-a stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-qaXl26/discussions/2026-11-13-topic-b
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-qaXl26/discussions/2026-11-13-topic-b/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ Stage 3: an ambiguous or failed rollback report cannot authorize archiving (2360.858852ms)
+✔ Stage 3: Explorer queues rollback separately from two-click archive confirmation after a report (5.42142ms)
+
+You → W › leave edits
+
+
+W (worker, 1s) › done
+
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-qaXl26.workers/2026-11-13-topic-a (worker/2026-11-13-topic-a) has uncommitted edits from [2026-11-13-topic-a] ("leave edits"): its queue holds until [2026-11-13-topic-a] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "leave edits": the worker lane of [2026-11-13-topic-a] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+
+You → W › other work
+
+✗ Worker worktree inspection failed: git status: fatal: /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-qaXl26/.git/worktrees/2026-11-13-topic-a/index: index file smaller than expected (worker/2026-11-13-topic-a). This lane's dispatch, including recovery, waits until inspection succeeds; other lanes go on.
+✗ Worker worktree inspection failed: git status: fatal: /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-qaXl26/.git/worktrees/2026-11-13-topic-a/index: index file smaller than expected (worker/2026-11-13-topic-a). This lane's dispatch, including recovery, waits until inspection succeeds; other lanes go on.
+
+W (worker, 2s) › done
+
+
+You → W › repair
+
+
+W (worker, 1s) › done
+
+The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-qaXl26.workers/2026-11-13-topic-a is clean again: its queue resumes.
+The worker's folder is clean again: this discussion's worker tasks resume.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/work-crash-CgRD7w/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/work-crash-CgRD7w/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+✔ failed worktree inspection blocks even the holding origin recovery in its lane, preserves ownership and retries; other lanes go on (6898.131572ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+
+You → W › first task
+with details
+
+Resumed the discussion 2026-11-13-saved-context: the same agent and worker sessions continue, with its chat.
+✗ Interrupted: [2026-11-13-saved-context] "first task" (started 21:54) left no commits or edits in the worktree. It may still have written notes elsewhere, such as the discussion's folder. Send it again if still wanted.
+✗ Not started: [2026-11-13-saved-context] "second task" was still queued when the room stopped. Nothing was re-sent; send it again if still wanted.
+
+You → W › next task
+
+
+W (worker, 1s) › ok
+
+
+You → W › another task
+
+
+W (worker, 1s) › ok
+
+Resumed the discussion 2026-11-13-saved-context: the same agent and worker sessions continue, with its chat.
+✗ The transcript grew after the checkpoint of 13 Nov 2026, 21:54. What was written after it is not in the restored chat; it is in the transcript file (from line 26). The agents may remember some of it. Send your last message again if needed.
+✗ Result unknown: [2026-11-13-saved-context] "first task" (started 21:54) was interrupted before its starting point was recorded. Check the worktree (it is clean).
+✗ Not started: [2026-11-13-saved-context] "second task" was still queued when the room stopped. Nothing was re-sent; send it again if still wanted.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/work-edit-3kXPJy/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/work-edit-3kXPJy/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+✔ a worker task cut off with a clean worktree: Resume reports it and the task never started; the worker is told once; "Result unknown" without a starting commit (4601.4209ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+
+You → W › edit things
+
+Resumed the discussion 2026-11-13-saved-context: the same agent and worker sessions continue, with its chat.
+✗ Interrupted by Restart, Quit or a crash: [2026-11-13-saved-context] "edit things" (started 21:54) left uncommitted edits in the worktree. Ask the worker to finish and commit them, or to abandon them.
+✗ The worker's folder /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/work-edit-3kXPJy.workers/2026-11-13-saved-context (worker/2026-11-13-saved-context) has uncommitted edits from [2026-11-13-saved-context] ("edit things"): its queue holds until [2026-11-13-saved-context] resolves them (its own instructions still go through); other lanes go on.
+✗ The worker left uncommitted edits from "edit things": the worker lane of [2026-11-13-saved-context] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/round-crash-T1frf1/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/round-crash-T1frf1/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+✔ a worker task cut off after an edit: Resume reports the uncommitted edits, and the queue holds for that discussion (1354.611372ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+  … A is thinking
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+Closed 2026-11-13-saved-context; its checkpoint is kept. To go back, Resume it in Explorer.
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/work-quit-fPmzQ5/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/work-quit-fPmzQ5/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+✔ an interrupted round: Resume says the transcript grew after the checkpoint; every restore tells the agents once; an unstarted Claude session gets a new ID (106.981271ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+
+You → W › long task
+
+
+✗ W (worker) failed: claude was stopped (SIGTERM)
+
+✗ 1 queued worker instruction was not started.
+Resumed the discussion 2026-11-13-saved-context: the same agent and worker sessions continue, with its chat.
+✗ Interrupted: [2026-11-13-saved-context] "long task" (started 21:54) left no commits or edits in the worktree. It may still have written notes elsewhere, such as the discussion's folder. Send it again if still wanted.
+✗ Not started: [2026-11-13-saved-context] "waiting task" was still queued when the room stopped. Nothing was re-sent; send it again if still wanted.
+Resumed the discussion 2026-11-01-old: it has no saved session, so your next message starts a fresh one there, from its handoff and notes.
+✔ Quit room during a worker task: the stopped task is kept as interrupted, the queued one as not started, and Resume reports both (1318.545357ms)
+
+You → W › early task
+
+Resumed the discussion 2026-11-01-old: it has no saved session, so your next message starts a fresh one there, from its handoff and notes.
+✗ Interrupted: [2026-11-01-old] "early task" (started 21:54) left no commits or edits in the worktree. It may still have written notes elsewhere, such as the discussion's folder. Send it again if still wanted.
+alpha note
+beta note
+late note
+all workers
+first brainstorm
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/agy-checkpoint-6D6LE5/discussions/2026-11-13-agy-checkpoint
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/agy-checkpoint-6D6LE5/discussions/2026-11-13-agy-checkpoint/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+✔ a worker task from a discussion with no full checkpoint yet is recorded too, and reported on the next Resume (660.35786ms)
+✔ worker notes follow their captured owner, including brainstorms and room-wide events (1.291153ms)
+✔ agy is accepted for discussion and worker settings, and its catalog is read with a fallback (10.840975ms)
+── your turn · all passed · 1 agent turn · 0s · agy 3% 5h / 1% week ──
+Closed 2026-11-13-agy-checkpoint; its checkpoint is kept. To go back, Resume it in Explorer.
+Resumed the discussion 2026-11-13-agy-checkpoint: the same agent and worker sessions continue, with its chat.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-1GkpKQ/discussions/2026-11-13-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/multi-test-1GkpKQ/discussions/2026-11-13-topic/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: 2026-11-13-topic stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/worker-default-terminal-OLIoSn/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/worker-default-terminal-OLIoSn/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+✔ agy rulebook delivery state survives a saved checkpoint for both roles (33.573203ms)
+✔ agy model lookup failure keeps the initial fallback and is throttled (0.369756ms)
+✔ started discussion settings preserve the local worker and permit names from future agent defaults (12.548807ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+New discussion: your next message names it and starts it. To go back, /resume 2026-11-13-saved-context.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/members-room-NgOLhh/discussions/2026-11-13-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/members-room-NgOLhh/discussions/2026-11-13-first-topic/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+✔ new screen discussions and terminal sessions use the saved worker default (93.406735ms)
+✔ a started worker-only change leaves an absent defaults file absent (9.253659ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week ──
+New discussion: 2026-11-13-first-topic stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/members-room-NgOLhh/discussions/2026-11-13-second-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/members-room-NgOLhh/discussions/2026-11-13-second-topic/transcripts/session-2026-11-13-2154.md
+  … C is thinking
+  … D is thinking
+  … E is thinking
+── your turn · all passed · 3 agent turns · 0s · claude 28% 5h / 43% week ──
+Closed 2026-11-13-second-topic; its checkpoint is kept. To go back, Resume it in Explorer.
+Resumed the discussion 2026-11-13-second-topic: the same agent and worker sessions continue, with its chat.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/launch-room-a-fxCbjM/discussions/2026-11-13-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/launch-room-a-fxCbjM/discussions/2026-11-13-topic/transcripts/session-2026-11-13-2154.md
+  … FlagA is thinking
+  … FlagB is thinking
+✔ open discussions keep their members and sessions; new and resumed discussions use their own sets (67.395937ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+New discussion: your next message names it and starts it. To go back, /resume 2026-11-13-topic.
+New brainstorm: agent-room keeps no record of it, and Restart or Quit room loses it.
+New discussion: the brainstorm ended; your next message names the new discussion and starts it.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/launch-room-a-fxCbjM/discussions/2026-11-13-topic-2
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/launch-room-a-fxCbjM/discussions/2026-11-13-topic-2/transcripts/session-2026-11-13-2154.md
+  … FlagA is thinking
+  … FlagB is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+New discussion: 2026-11-13-topic-2 stays open (Explorer: Resume shows it again).
+New discussion: 2026-11-13-topic-2 stays open (Explorer: Resume shows it again).
+New discussion: 2026-11-13-topic-2 stays open (Explorer: Resume shows it again).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-d6xL9t/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-d6xL9t/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "A"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+✔ launch defaults follow flags and panel changes per folder, without changing other rooms (76.302811ms)
+
+Relayed → W › A
+
+
+✗ W (worker) failed: quota
+
+Auto dev paused: the worker failed: Retry or Retry with….
+Reloaded the code and the agents' rulebook; the conversation continues.
+
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+Relayed → W › A
+
+
+W (worker, 0s) › fixed
+
+  … A is thinking
+  … B is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … B (summary, turn 1 of at most 6) is thinking
+  … A (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by B) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "B"
+
+**Later**
+- review it
+
+Outcome: WAIT FOR USER
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+Auto dev paused: the discussion waits for you (WAIT FOR USER).
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-0LJNB4/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-0LJNB4/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "A"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+✔ auto dev: retry keeps the failure pause through discussion and resumes the same cycle (1819.1412ms)
+
+Relayed → W › A
+
+
+✗ W (worker) failed: quota
+
+Auto dev paused: the worker failed: Retry or Retry with….
+
+Relayed → W › A
+
+
+W (worker, 0s) › fixed
+
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-VlWuPS/discussions/2026-11-13-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-VlWuPS/discussions/2026-11-13-topic/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✔ auto dev: a retry cannot resume a run that ended while it was working (1610.169053ms)
+
+You → W › original
+
+
+✗ W (worker) failed: failed once
+
+
+You → W › in progress
+
+
+W (worker, 0s) › done
+
+
+You → W › original
+
+
+W (worker, 0s) › ok
+
+
+You → W › later
+
+
+W (worker, 0s) › ok
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/retry-settings-q49ONO/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/retry-settings-q49ONO/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2154.md
+  … A is thinking
+  … B is thinking
+✔ retry runs before later queued instructions and reports commits made since the failure (3471.499173ms)
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+
+You → W › original
+
+
+✗ W (worker) failed: quota
+
+
+You → W › original
+
+
+W (worker, 0s) › ok
+
+
+You → W › later
+
+
+W (worker, 0s) › ok
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-0EHhZS/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-0EHhZS/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2155.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "A"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+✔ Retry with applies worker settings for later instructions (2418.330769ms)
+
+Relayed → W › A
+
+
+✗ W (worker) failed: quota
+
+Auto dev paused: the worker failed: Retry or Retry with….
+Auto dev started: up to 5 worker cycles.
+
+Relayed → W › A
+
+
+W (worker, 0s) › fixed
+
+
+Relayed → W › new task
+
+
+W (worker, 0s) › fixed
+
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-nyYqYi/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-nyYqYi/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2155.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "A"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+✔ auto dev: restarting while a retry runs cannot resume the old run (2412.697066ms)
+
+Relayed → W › A
+
+
+✗ W (worker) failed: failure 1
+
+Auto dev paused: the worker failed: Retry or Retry with….
+
+Relayed → W › A
+
+
+✗ W (worker) failed: failure 2
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-xGz07o/discussions/2026-11-13-relay
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-xGz07o/discussions/2026-11-13-relay/transcripts/session-2026-11-13-2155.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+**Agreed**
+- ok
+
+**Next step**
+- Send to the Worker: "A"
+
+**Later**
+- review it
+
+── your turn · summary agreed · 2 agent turns · 0s ──
+Auto dev started: up to 5 worker cycles.
+Auto dev paused: you sent a message.
+  … A is thinking
+✔ a failed retry offers another retry and keeps the auto dev failure pause (1677.645491ms)
+
+Relayed → W › A
+
+
+✗ W (worker) failed: quota
+
+  … B is thinking
+── your turn · all passed · 2 agent turns · 1s ──
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/disabled-agent-zOTOkn/discussions/2026-11-13-saved-context
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/disabled-agent-zOTOkn/discussions/2026-11-13-saved-context/transcripts/session-2026-11-13-2155.md
+  … A is thinking
+
+✗ A failed (0s): quota
+
+✔ auto dev: a failure during an agent turn reaches that agent with the next message (939.322002ms)
+── your turn · A failed · 1 agent turn · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+  … B is thinking
+── your turn · all passed · 1 agent turn · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+✗ Unknown agent "@A". Known: A, B
+  … B (summary, turn 1 of at most 3) is thinking
+Nothing to summarize yet.
+── your turn · summary empty · 1 agent turn · 0s ──
+Reloaded the code and the agents' rulebook; the conversation continues.
+
+Closed 2026-11-13-saved-context; its checkpoint is kept. To go back, Resume it in Explorer.
+Resumed the discussion 2026-11-13-saved-context: the same agent and worker sessions continue, with its chat.
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s · claude 28% 5h / 43% week · codex 24% 5h / 49% week ──
+✔ a failed discussion agent can be disabled across Reload and Resume, and enabled again (108.039776ms)
+✔ totals add up turn by turn; cost only when some turn had one (4.102657ms)
+✔ quota summary covers only the room's providers, and skips unavailable ones (0.799842ms)
+✔ the /usage report lists each agent and the quotas, or says the meter is unreachable (2.763449ms)
+✔ fetchQuota reads the meter, and returns null when it is down (86.597692ms)
+✔ quota gauges: one per window, for the room's providers only, in their order (1.081354ms)
+✔ reset dates share a local 24-hour format without changing the clock or zone (1.333049ms)
+✔ claude login: from loginExpiresAt in claude auth status; ending in 2 days or less, expired, logged out, unreadable (0.963793ms)
+✔ codex login: logged in with no expiry, logged out, or unknown (0.758068ms)
+✔ checkLogin: a command that fails or times out is unknown, with its error; a logged-out exit code still reads (1.796217ms)
+✔ agy gauges use Antigravity model windows and hide missing data (1.103036ms)
+✔ agy login is unmonitored without invoking a command (0.338648ms)
+ℹ tests 223
+ℹ suites 0
+ℹ pass 223
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 176633.325928
