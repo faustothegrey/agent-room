@@ -299,6 +299,8 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #winfo:empty { display: none; }
 #winfo .error { color: #ef4444; }
 #winfo code { font-size: .7rem; overflow-wrap: anywhere; user-select: all; }
+#winfo summary { cursor: pointer; }
+#winfo details > div { margin: .2rem 0 0 1rem; overflow-wrap: anywhere; max-height: 12rem; overflow-y: auto; }
 #winfo button { align-self: flex-start; font-size: .75rem; margin-top: .2rem; }
 #server { max-width: 100%; font-size: .75rem; color: light-dark(#3d5fc4, #5a7bd8); display: inline-flex; align-items: center; gap: .4rem; }
 #server[data-state="down"] { color: #ef4444; font-weight: 600; }
@@ -700,11 +702,29 @@ function showFailedAgents(agents) {
 // The Worker tab's line: its worktree, or why the worker is disabled.
 function setWorkerInfo(info) {
   const el = $('winfo');
+  const open = new Set([...el.querySelectorAll('details[open]')].map((d) => d.dataset.key)); // kept across refreshes
   el.replaceChildren();
   if (!info) return;
-  for (const line of info.lines) { const p = document.createElement('div'); p.textContent = line; if (info.error || info.disabled) p.className = 'error'; el.append(p); }
+  for (const line of info.lines) {
+    let p = mergePreviewLine(line, open);
+    if (!p) { p = document.createElement('div'); p.textContent = line; }
+    if (info.error || info.disabled) p.className = 'error';
+    el.append(p);
+  }
   wbox.disabled = !!info.disabled;
   if (info.disabled) wbox.placeholder = info.lines[0];
+}
+// A merge preview line can name many conflicting files: shown collapsed, its outcome in the summary.
+function mergePreviewLine(line, open) {
+  const m = /^(Merge preview of \\S+ into \\S+) \\((.+?)\\): (.*)$/.exec(line);
+  if (!m) return null;
+  const files = /^would conflict in (.*)\\.$/.exec(m[3])?.[1].split(', ');
+  const outcome = m[3].startsWith('clean') ? 'clean' : files ? 'would conflict in ' + files.length + (files.length === 1 ? ' file' : ' files') : 'could not be computed';
+  const d = document.createElement('details'); d.dataset.key = m[1]; d.open = open.has(m[1]);
+  const summary = document.createElement('summary'); summary.textContent = m[1] + ': ' + outcome;
+  const body = document.createElement('div'); body.textContent = m[3] + ' (' + m[2] + ')';
+  d.append(summary, body);
+  return d;
 }
 function setWorking(name) {
   localWorking = name; updateReplicaView();

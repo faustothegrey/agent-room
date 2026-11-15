@@ -1155,3 +1155,36 @@ test('Discussions tab: active discussions keep the User\'s order in localStorage
   assert.deepEqual(names(), ['2026-11-14-d', '2026-11-13-c', '2026-11-12-a', '2026-11-10-b', '2026-11-09-e']);
   assert.ok(store.has('agent-room.discussion-order:/tmp/other'));
 });
+
+test('the Worker tab shows a merge preview collapsed, its outcome in the summary, and keeps it open across refreshes', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'html-test-'));
+  const s = await serve(root, { clients: new Set(), transcript: [] });
+  try {
+    const html = await (await s.get('/__room')).text(); // the page as served, escapes resolved
+    const code = html.slice(html.indexOf('function setWorkerInfo('), html.indexOf('function setWorking('));
+    const node = (tag) => ({
+      tag, textContent: '', dataset: {}, children: [], open: false,
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      querySelectorAll() { return this.children.filter((c) => c.tag === 'details' && c.open); },
+    });
+    const winfo = node('div'), wbox = {};
+    const setWorkerInfo = new Function('$', 'document', 'wbox', code + '; return setWorkerInfo;')(() => winfo, { createElement: node }, wbox);
+    const advice = 'Merge preview of worker/x into main (advice only: it can go stale, and a clean merge doesn\'t prove the combined code works)';
+    const lines = ['worktree line', `${advice}: would conflict in a.txt, b.txt, c.txt.`];
+    setWorkerInfo({ lines });
+    const [plain, preview] = winfo.children;
+    assert.equal(plain.tag, 'div'); assert.equal(plain.textContent, 'worktree line');
+    assert.equal(preview.tag, 'details'); assert.equal(preview.open, false);
+    assert.equal(preview.children[0].textContent, 'Merge preview of worker/x into main: would conflict in 3 files');
+    assert.match(preview.children[1].textContent, /^would conflict in a\.txt, b\.txt, c\.txt\. \(advice only: /);
+    preview.open = true;
+    setWorkerInfo({ lines: [lines[0], `${advice}: would conflict in a.txt.`] });
+    assert.equal(winfo.children[1].open, true);
+    assert.equal(winfo.children[1].children[0].textContent, 'Merge preview of worker/x into main: would conflict in 1 file');
+    setWorkerInfo({ lines: [`${advice}: clean.`] });
+    assert.equal(winfo.children[0].children[0].textContent, 'Merge preview of worker/x into main: clean');
+  } finally {
+    s.close();
+  }
+});
