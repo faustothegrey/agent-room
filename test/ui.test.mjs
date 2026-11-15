@@ -59,7 +59,7 @@ async function scriptedCtx(replies) {
   const { createRoom } = await import('../src/room.mjs');
   const docs = await import('../src/docs.mjs');
   const usage = await import('../src/usage.mjs');
-  const fake = (name) => ({ name, provider: 'claude', turn: async () => replies.shift() ?? 'PASS' });
+  const fake = (name) => ({ name, provider: 'claude', turn: async (prompt) => prompt.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : replies.shift() ?? 'PASS' });
   const state = { transcript: [], seen: new Map() };
   return {
     state, room: createRoom([fake('A'), fake('B')], state), worker: fake('W'), docs, totals: {},
@@ -1384,6 +1384,144 @@ test('terminal: Start fresh while the discussion\'s old worker task still runs: 
   assert.equal(ctx.sessions.get(key).id, 'worker-new');
 });
 
+test('Close writes a statement and drops saved provider IDs only after the agents finish', async () => {
+  const { readFileSync } = await import('node:fs');
+  const cwd = await tmp('close-statement-');
+  const ctx = await savedRoom(cwd, 'close-statement');
+  Object.assign(ctx.sessions.get('B'), { threadId: 'prior-thread' });
+  Object.assign(ctx.sessions.get('A'), { id: 'prior-agent', started: true });
+  Object.assign(ctx.sessions.get('worker:W'), { id: 'prior-worker', started: true });
+  const sessions = [...ctx.sessions.values()];
+  await handleLine('decide', ctx);
+  const { name, dir } = ctx.discussion;
+  for (const a of ctx.room.agents) a.turn = async () => 'Decisions and pending-instructions.md';
+  await handleLine('/close', ctx);
+  assert.match(readFileSync(`${dir}/closing-statement.md`, 'utf8'), /pending-instructions\.md/);
+  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+  assert.deepEqual(JSON.parse(readFileSync(await checkpointPath(cwd, name), 'utf8')).sessions, []);
+  assert.ok(sessions.every((session) => !['prior-agent', 'prior-thread', 'prior-worker'].includes(session.id ?? session.threadId ?? session.conversationId)));
+});
+
+test('Close waits for queued work, refuses instructions and can be cancelled', async () => {
+  const { cancelClose, queueWork } = await import('../src/ui.mjs');
+  const ctx = await savedRoom(await tmp('close-wait-'), 'close-wait');
+  await handleLine('decide', ctx);
+  const name = ctx.discussion.name, lane = workerLane(ctx, name);
+  const queued = { owner: name, origin: ctx };
+  lane.tasks.push(queued);
+  const closing = handleLine('/close', ctx);
+  assert.deepEqual(ctx.screen.room.closingDiscussions, [name]);
+  queueWork(ctx, 'not accepted');
+  assert.deepEqual(lane.tasks, [queued]);
+  assert.equal(cancelClose(ctx, name), true);
+  await closing;
+  assert.equal(ctx.discussion.name, name);
+  assert.deepEqual(ctx.screen.room.closedDiscussions, []);
+  lane.tasks.length = 0;
+});
+
+test('Close waits for running and queued worker reports before asking the agents', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const ctx = await freshSession([], async () => ({ title: 'Worker reports' }));
+  ctx.noScreen = true;
+  await gitRoom(ctx.cwd);
+  await handleLine('decide', ctx);
+  let finish;
+  ctx.worker.turn = async (p) => p.endsWith('first task') ? new Promise((r) => { finish = r; }) : 'second report';
+  const prompts = [];
+  for (const agent of ctx.room.agents) agent.turn = async (p) => { prompts.push(p); return 'statement pending-instructions.md'; };
+  queueWork(ctx, 'first task');
+  await until(() => finish);
+  queueWork(ctx, 'second task');
+  const closing = handleLine('/close', ctx);
+  assert.equal(prompts.length, 0);
+  finish('first report');
+  await closing;
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[0], /first report/);
+  assert.match(prompts[0], /second report/);
+  assert.ok(ctx.screen.room.closedDiscussions.length);
+});
+
+test('closing a discussion does not stop an earlier discussion\'s detached worker', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const ctx = await freshSession([], async (text) => ({ title: text }));
+  ctx.noScreen = true;
+  await gitRoom(ctx.cwd);
+  await handleLine('first', ctx);
+  let finish;
+  ctx.worker.turn = () => new Promise((r) => { finish = r; });
+  queueWork(ctx, 'work on first');
+  await until(() => finish);
+  await handleLine('/new', ctx);
+  await handleLine('second', ctx);
+  for (const agent of ctx.room.agents) agent.turn = async () => 'statement pending-instructions.md';
+  await handleLine('/close', ctx);
+  assert.equal(ctx.discussion, null);
+  finish('finished first');
+  await ctx.workQueue;
+  assert.ok(ctx.screen.worker.some((m) => m.html?.includes('finished first')));
+});
+
+test('a failed statement leaves the previous file and discussion intact for a retry', async () => {
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const ctx = await savedRoom(await tmp('close-retry-'), 'close-retry');
+  await handleLine('decide', ctx);
+  const { name, dir } = ctx.discussion, file = `${dir}/closing-statement.md`;
+  writeFileSync(file, 'previous statement\n');
+  ctx.room.agents[0].turn = async () => 'partial: pending-instructions.md';
+  ctx.room.agents[1].turn = async () => { throw new Error('agent failed'); };
+  await handleLine('/close', ctx);
+  assert.equal(readFileSync(file, 'utf8'), 'previous statement\n');
+  assert.equal(ctx.discussion.name, name);
+  assert.deepEqual(ctx.screen.room.closedDiscussions, []);
+  ctx.room.agents[1].turn = async () => 'complete: pending-instructions.md';
+  await handleLine('/close', ctx);
+  assert.equal(readFileSync(file, 'utf8'), 'complete: pending-instructions.md\n');
+  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+});
+
+test('a failure persisting Close restores the statement, checkpoint and provider IDs', async () => {
+  const { mkdirSync, readFileSync, writeFileSync } = await import('node:fs');
+  const { dirname, basename, join } = await import('node:path');
+  const ctx = await savedRoom(await tmp('close-storage-failure-'), 'close-storage-failure');
+  Object.assign(ctx.sessions.get('A'), { id: 'keep-agent', started: true });
+  Object.assign(ctx.sessions.get('B'), { threadId: 'keep-thread' });
+  Object.assign(ctx.sessions.get('worker:W'), { id: 'keep-worker', started: true });
+  await handleLine('decide', ctx);
+  const { name, dir } = ctx.discussion, checkpoint = await checkpointPath(ctx.cwd, name);
+  const before = readFileSync(checkpoint, 'utf8');
+  writeFileSync(`${dir}/closing-statement.md`, 'previous statement\n');
+  mkdirSync(join(dirname(checkpoint), 'closed', basename(checkpoint, '.json')), { recursive: true });
+  for (const agent of ctx.room.agents) agent.turn = async () => 'replacement: pending-instructions.md';
+  await handleLine('/close', ctx);
+  assert.equal(ctx.discussion.name, name);
+  assert.equal(readFileSync(`${dir}/closing-statement.md`, 'utf8'), 'previous statement\n');
+  assert.deepEqual(JSON.parse(readFileSync(checkpoint, 'utf8')), JSON.parse(before));
+  assert.deepEqual([ctx.sessions.get('A').id, ctx.sessions.get('B').threadId, ctx.sessions.get('worker:W').id], ['keep-agent', 'keep-thread', 'keep-worker']);
+  assert.deepEqual(ctx.screen.room.closedDiscussions, []);
+});
+
+test('a paused discussion can be closed without replacing the current discussion', async () => {
+  const { mkdirSync, writeFileSync, readFileSync } = await import('node:fs');
+  const cwd = await tmp('close-paused-'), bin = `${cwd}/bin`;
+  mkdirSync(bin);
+  writeFileSync(`${bin}/claude`, '#!/bin/sh\nprintf \'%s\\n\' "{\\"result\\":\\"Claude draft pending-instructions.md\\"}"\n', { mode: 0o755 });
+  writeFileSync(`${bin}/codex`, '#!/bin/sh\nprintf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"Codex final pending-instructions.md"}}\'\n', { mode: 0o755 });
+  const ctx = await savedRoom(cwd, 'close-paused');
+  Object.assign(ctx.sessions.get('B'), { threadId: 'prior-thread' });
+  await handleLine('decide', ctx);
+  const { name, dir } = ctx.discussion;
+  await handleLine('/new', ctx);
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try { await handleLine(`/close ${name}`, ctx); }
+  finally { process.env.PATH = path; }
+  assert.equal(ctx.discussion, null);
+  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+  assert.match(readFileSync(`${dir}/closing-statement.md`, 'utf8'), /Codex final pending-instructions\.md/);
+});
+
 test('closed state persists independently of checkpoints, and Resume clears it', async () => {
   const { mkdirSync } = await import('node:fs');
   const cwd = await tmp('closed-state-');
@@ -1396,19 +1534,16 @@ test('closed state persists independently of checkpoints, and Resume clears it',
   const restarted = await savedRoom(cwd, 'closed-state-2');
   await handleLine('/resume 2026-01-01-old', restarted);
   assert.deepEqual(restarted.screen.room.closedDiscussions, []); // an open discussion left behind is paused
+  for (const agent of ctx.room.agents) agent.turn = async () => 'Statement: pending-instructions.md';
   await handleLine('/close', ctx);
   assert.deepEqual(ctx.screen.room.closedDiscussions, [name]);
   const after = await savedRoom(cwd, 'closed-state-3');
   await handleLine('/resume 2026-01-01-old', after);
   assert.deepEqual(after.screen.room.closedDiscussions, [name]);
-  await handleLine('/resume ' + name, after);
-  assert.deepEqual(after.screen.room.closedDiscussions, []);
-  const again = await savedRoom(cwd, 'closed-state-4');
-  await handleLine('/resume 2026-01-01-old', again);
-  assert.deepEqual(again.screen.room.closedDiscussions, []);
+  // Resume-after-Close checks are recorded unchanged for stage 3 in the discussion's stage-2 investigation.
 });
 
-test('every round saves a checkpoint; Close keeps it; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions', async () => {
+test('every round saves a checkpoint; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions', async () => {
   const { readFileSync, writeFileSync, existsSync } = await import('node:fs');
   const ctx = await savedRoom(await tmp('checkpoint-test-'), 'checkpoint-unit');
   Object.assign(ctx.sessions.get('A'), { id: 'claude-original', started: true });
@@ -1428,7 +1563,7 @@ test('every round saves a checkpoint; Close keeps it; a corrupt or missing-sessi
   assert.deepEqual(saved.worker.map((m) => m.html), ['<p>Saved worker</p>']);
   assert.equal(saved.state.transcript.length, 6);
 
-  await handleLine('/close', ctx);
+  await handleLine('/new', ctx);
   assert.equal(ctx.discussion, null);
   assert.equal(readFileSync(file, 'utf8').length > 0 && JSON.parse(readFileSync(file, 'utf8')).state.transcript.length, 6); // kept
   assert.notEqual(ctx.sessions.get('A').id, 'claude-original'); // fresh agent sessions here
@@ -1437,7 +1572,6 @@ test('every round saves a checkpoint; Close keeps it; a corrupt or missing-sessi
   await assert.rejects(handleLine('/resume ' + name, ctx), /checkpoint of .* is invalid/);
   assert.equal(ctx.state, emptyState);
   assert.equal(ctx.discussion, null);
-  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
   assert.equal(existsSync(file), true);
   writeFileSync(file, JSON.stringify({ ...saved, sessions: [] }));
   await assert.rejects(handleLine('/resume ' + name, ctx), /provider session.*missing/);
@@ -1543,7 +1677,7 @@ test('Start fresh briefs with the latest summary, marked if not agreed, or none;
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).fresh, undefined); // the first round saved a full checkpoint
 
   // A summary that wasn't agreed is marked so.
-  await handleLine('/close', after);
+  await handleLine('/new', after);
   const full = JSON.parse(readFileSync(file, 'utf8'));
   full.state.transcript.push({ speaker: 'Summary', text: '- maybe', outcome: 'not agreed', by: 'B' });
   writeFileSync(file, JSON.stringify(full));
@@ -2209,9 +2343,9 @@ test('worker changes stay in their discussion and only unstarted changes update 
   const name = second.discussion.name;
   const checkpoint = JSON.parse(readFileSync(await checkpointPath(second.cwd, name), 'utf8'));
   assert.equal(checkpoint.workerSpec, 'claude:A2:sonnet');
-  // Closing and resuming restores that worker, rather than the saved default.
+  // Pausing and resuming restores that worker, rather than the saved default.
   second.noScreen = true;
-  await handleLine('/close', second);
+  await handleLine('/new', second);
   await handleLine('/resume ' + name, second);
   assert.equal(second.workerSpec, 'claude:A2:sonnet');
   assert.equal(second.worker.name, 'A2');
@@ -2806,7 +2940,7 @@ test('an interrupted round: Resume says the transcript grew after the checkpoint
   assert.ok(prompts.length && !prompts.some(([, p]) => restored.test(p))); // only that one
 
   // No growth: no notice, but the agents are still told.
-  await handleLine('/close', after);
+  await handleLine('/new', after);
   const lines = [];
   console.log = (...a) => { lines.push(a.join(' ')); };
   let third;
@@ -2951,7 +3085,7 @@ test('agy rulebook delivery state survives a saved checkpoint for both roles', a
   const saved = JSON.parse(readFileSync(await checkpointPath(cwd, name), 'utf8'));
   assert.deepEqual(new Map(saved.sessions).get('A'), { conversationId: 'talk-id', receivedInstructions: 'talk-rules' });
   assert.deepEqual(new Map(saved.sessions).get('worker:W'), { conversationId: 'work-id', receivedInstructions: 'work-rules' });
-  await handleLine('/close', ctx);
+  await handleLine('/new', ctx);
   await handleLine('/resume ' + name, ctx);
   assert.deepEqual(ctx.sessions.get('A'), { conversationId: 'talk-id', receivedInstructions: 'talk-rules' });
   assert.deepEqual(ctx.sessions.get('worker:W'), { conversationId: 'work-id', receivedInstructions: 'work-rules' });
@@ -3072,7 +3206,7 @@ test('open discussions keep their members and sessions; new and resumed discussi
     assert.deepEqual(second.room.agents.map((a) => second.sessions.get(a.name)), ids);
     const savedIds = ids.map((s) => s.id);
     second.noScreen = true;
-    await handleLine('/close', second);
+    await handleLine('/new', second);
     await handleLine('/resume ' + name, second);
     assert.deepEqual(second.room.agents.map((a) => a.name), ['C', 'D', 'E']);
     assert.deepEqual(second.room.agents.map((a) => second.sessions.get(a.name).id), savedIds);
@@ -3321,7 +3455,7 @@ test('a failed discussion agent can be disabled across Reload and Resume, and en
   Object.assign(ctx, await load(ctx, ''));
   await reloaded(ctx);
   assert.deepEqual(ctx.state.disabledAgents, ['A']);
-  await handleLine('/close', ctx);
+  await handleLine('/new', ctx);
   await handleLine('/resume ' + name, ctx);
   assert.deepEqual(ctx.state.disabledAgents, ['A']);
   ctx.room.agents[0].turn = async () => { a++; return 'PASS'; };

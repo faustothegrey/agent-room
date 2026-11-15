@@ -310,6 +310,7 @@ function wire(ctx) {
   };
   ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
   ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
+  ctx.screen.cancelClose = (name) => cancelClose(ctx, name);
   ctx.screen.setAgentEnabled = (name, enabled, member) => setAgentEnabled(ctx, name, enabled, { member });
 }
 
@@ -332,6 +333,7 @@ function header(ctx) {
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
     checkpoints: checkpoints(ctx), // the saved discussions, for Explorer's Resume (see "Checkpoints")
     closedDiscussions: closedDiscussions(ctx),
+    closingDiscussions: [...(shopOf(ctx).closing?.entries() ?? [])].filter(([, c]) => c.waiting).map(([name]) => name),
     back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
     code: ctx.code ?? null, // the version this process runs (see codeInfo)
     rollbacks: [...(shopOf(ctx).rollbacks?.values() ?? [])].map(({ name, status, report, commit }) => ({ name, status, report, commit })),
@@ -420,6 +422,7 @@ async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) 
   const parent = join(ctx.cwd, 'discussions');
   const d = discussionRef(parent, ref ?? '');
   if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent}.`, true), null;
+  if (shopOf(ctx).closing?.has(d.name)) return note(ctx, `✗ ${d.name} is closing.`, true), null;
   const target = to === 'active' ? null : to;
   if (to !== 'active' && !SECTIONS.includes(to)) return note(ctx, '✗ Move it to active, archive or deferred.', true), null;
   if (d.section === target) return { name: d.name }; // already there
@@ -860,7 +863,7 @@ function checkpointSummary(saved) {
 // Checks a full checkpoint and builds its room, changing nothing; resolves to the function that
 // puts it in ctx. A checkpoint that can't be used is kept, and the room stays as it is. A
 // brainstorm's (brainstorm: true) has no worker part: its context keeps its own worker settings.
-async function loadCheckpoint(ctx, saved, name, brainstorm = false) {
+async function loadCheckpoint(ctx, saved, name, brainstorm = false, directory = null) {
   const what = brainstorm ? 'brainstorm' : 'discussion';
   const fallback = brainstorm ? 'Start fresh starts the brainstorm from its latest summary or transcripts instead' : 'Start fresh starts the discussion from its handoff instead';
   const invalid = () => new Error(`The checkpoint of ${name} is invalid. It was kept; ${fallback}.`);
@@ -884,7 +887,7 @@ async function loadCheckpoint(ctx, saved, name, brainstorm = false) {
     if (spec.provider === 'claude' && !session.started) session.id = randomUUID();
   }
   // Its folder as it is now (it may have moved while open elsewhere), and the transcript in it.
-  const dir = join(ctx.cwd, brainstorm ? BRAINSTORMS : 'discussions', name), was = saved.discussion.dir;
+  const dir = directory ?? join(ctx.cwd, brainstorm ? BRAINSTORMS : 'discussions', name), was = saved.discussion.dir;
   const logPath = typeof was === 'string' && saved.logPath.startsWith(was + sep) ? dir + saved.logPath.slice(was.length) : saved.logPath;
   if (!existsSync(logPath)) throw new Error(`The transcript of ${name}'s checkpoint is missing (${logPath}). The checkpoint was kept.`);
   // Every agent's next prompt says it was restored (room.mjs): its own session may remember more.
@@ -1003,6 +1006,7 @@ async function resumeDiscussion(ctx, ref) {
   // A discussion is a folder named <date>-<title>; other folders there are the room's own material.
   const d = discussionRef(parent, ref);
   if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent} (discussions are folders named <date>-<title>).`, true);
+  if (shopOf(ctx).closing?.has(d.name)) return note(ctx, `✗ ${d.name} is closing.`, true);
   const open = siblings(ctx).find((c) => c !== ctx && isDiscussion(c, d.name));
   if (open) return goto(ctx, open);
   if (isDiscussion(ctx, d.name)) return note(ctx, `${d.name} is the discussion in use here.`);
@@ -1085,6 +1089,7 @@ async function startFresh(ctx, ref) {
   if (ref.startsWith(`${BRAINSTORMS}/`)) return freshBrainstorm(ctx, ref);
   const d = discussionRef(parent, ref);
   if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent} (discussions are folders named <date>-<title>).`, true);
+  if (shopOf(ctx).closing?.has(d.name)) return note(ctx, `✗ ${d.name} is closing.`, true);
   const open = siblings(ctx).find((c) => c !== ctx && isDiscussion(c, d.name));
   if (open) { open.say?.(`/fresh ${d.name}`); return goto(ctx, open); } // it starts afresh there
   if (multi(ctx) && !fresh(ctx) && !isDiscussion(ctx, d.name)) return besideWith(ctx, (next) => startFresh(next, ref));
@@ -1205,13 +1210,13 @@ async function besideWith(ctx, run) {
 // is saved, a last line goes in its transcript, which is then closed; the chat clears and the
 // discussion agents get fresh CLI sessions. The worker session goes with the session that ends
 // (detachWorker): the context's next worker task starts a fresh one, or Resume's own.
-function endSession(ctx, why) {
+function endSession(ctx, why, onReset = null) {
   log(ctx, `_(session ended: ${why})_\n\n`);
   saveCheckpoint(ctx); // the latest checkpoint stays: Resume continues from it
   detachWorker(ctx); // its worker session goes with it; this context's worker starts a fresh one
   ctx.lastRound = null;
   ctx.freshSummary = null;
-  for (const a of ctx.room.agents) a.reset?.();
+  for (const a of ctx.room.agents) if (a.reset) { a.reset(); onReset?.(a); }
   const { state, screen } = ctx;
   state.transcript.length = 0; // emptied in place: the room and the screen hold this array
   for (const a of ctx.room.agents) state.seen.set(a.name, 0);
@@ -1415,6 +1420,7 @@ async function newBrainstormBeside(ctx) {
 // /close (Close discussion): this discussion (or brainstorm) closes; the others stay open. The last
 // one open ends its session instead, leaving an empty room, as New discussion does in the terminal.
 function closeDiscussion(ctx) {
+  if (!ctx.state.brainstorm && ctx.discussion) return closeNamedDiscussion(ctx, ctx.discussion.name);
   const hold = workerHold(ctx);
   if (hold) return note(ctx, `✗ This can't be closed yet: ${hold}.`, true);
   const others = siblings(ctx).filter((c) => c !== ctx);
@@ -1432,6 +1438,105 @@ function closeDiscussion(ctx) {
     return note(ctx, was ? `Closed ${was.name}; its checkpoint is kept. To go back, Resume it in ${brain ? 'Brainstorms' : 'Explorer'}.` : 'Closed the brainstorm.');
   }
   closeContext(ctx, others[0]);
+}
+
+export function cancelClose(ctx, name) {
+  const c = shopOf(ctx).closing?.get(name);
+  if (!c?.waiting) return false;
+  c.cancelled = true;
+  c.wake?.();
+  return true;
+}
+
+// Restore a paused discussion in an isolated context, without switching any visible page to it.
+async function closingContext(ctx, d) {
+  const dir = join(ctx.cwd, 'discussions', d.section ?? '', d.name);
+  const state = { transcript: [], seen: new Map() };
+  const shadow = { ...ctx, state, discussion: null, sessions: new Map(), programs: { running: new Set(), stopping: false },
+    screen: { clients: new Set(), transcript: state.transcript, worker: shopOf(ctx).log }, lastRound: null, logPath: null, checkpointError: null };
+  const saved = readCheckpoint(ctx, d.name);
+  if (saved && !saved.fresh) {
+    const apply = await loadCheckpoint(shadow, saved, d.name, false, dir);
+    apply();
+  } else {
+    Object.assign(shadow, await load(shadow, `?close=${Date.now()}`));
+    shadow.discussion = { name: d.name, title: d.name, dir, continued: true };
+    shadow.state.briefing = briefing(shadow);
+  }
+  return shadow;
+}
+
+async function closeNamedDiscussion(ctx, name) {
+  const d = discussionRef(join(ctx.cwd, 'discussions'), name);
+  if (!d) return note(ctx, `✗ No discussion "${name}".`, true);
+  const shop = shopOf(ctx), closing = shop.closing ??= new Map();
+  if (closing.has(d.name)) return note(ctx, `✗ ${d.name} is already closing.`, true);
+  if (closedDiscussions(ctx).includes(d.name)) return note(ctx, `✗ ${d.name} is already closed.`, true);
+  const opened = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, d.name));
+  const c = { waiting: true, cancelled: false, wake: null };
+  closing.set(d.name, c);
+  showHeader(ctx);
+  try {
+    const tasks = [...runningTasks(shop), ...queuedTasks(shop)].filter((t) => t.owner === d.name && t.finished);
+    let finished = !tasks.length;
+    Promise.all(tasks.map((t) => t.finished)).then(() => { finished = true; c.wake?.(); });
+    const pending = () => [...runningTasks(shop), ...queuedTasks(shop)].some((t) => t.owner === d.name);
+    while ((!finished || pending()) && !c.cancelled) await new Promise((resolve) => { c.wake = resolve; setTimeout(resolve, 100); });
+    c.wake = null;
+    if (c.cancelled) return note(ctx, `Close cancelled for ${d.name}.`);
+    if (ctx.stopped || opened?.stopped) throw new Error('The room stopped while Close was waiting.');
+    c.waiting = false;
+    showHeader(ctx);
+    const target = opened ?? await closingContext(ctx, d);
+    const hold = workerHold(target);
+    if (hold) throw new Error(`This can't be closed yet: ${hold}.`);
+    if (target.checkpointError) throw new Error(`The latest checkpoint could not be saved: ${target.checkpointError}`);
+    const reports = shop.log.filter((m) => m.owner === d.name && m.speaker).map((m) => `${m.speaker}: ${m.html ?? m.text ?? ''}`).join('\n\n');
+    let statement;
+    try { statement = await target.room.closingStatement({ dir: target.discussion.dir, workerReports: reports,
+      onReset: (agent, err) => note(ctx, `✗ ${agent.name}'s session could not be used (${err.message}); it was reset for a retry.`, true) }); }
+    catch (err) { captureRound(target); throw err; }
+    const file = join(target.discussion.dir, 'closing-statement.md');
+    const temp = `${file}.${process.pid}.tmp`;
+    const previous = existsSync(file) ? readFileSync(file) : null;
+    const checkpoint = readCheckpoint(ctx, d.name);
+    const sessions = [...(target.sessions?.values() ?? [])].map((s) => [s, { ...s }]);
+    try {
+      writeFileSync(temp, statement + '\n');
+      // CLI calls run one process per turn; the worker and closing turns have returned. Drop their
+      // provider IDs without stopping another discussion's detached worker in this context.
+      for (const [session] of sessions) for (const key of Object.keys(session)) delete session[key];
+      if (checkpoint?.invalid) throw new Error('The discussion checkpoint is invalid.');
+      if (checkpoint) writeCheckpoint(ctx, d.name, { ...checkpoint, sessions: [], closedSessions: true });
+      renameSync(temp, file);
+      setClosed(ctx, d.name, true);
+    } catch (err) {
+      for (const [session, old] of sessions) { for (const key of Object.keys(session)) delete session[key]; Object.assign(session, old); }
+      if (checkpoint && !checkpoint.invalid) writeCheckpoint(ctx, d.name, checkpoint);
+      if (previous === null) { if (existsSync(file)) unlinkSync(file); }
+      else writeFileSync(file, previous);
+      throw err;
+    } finally {
+      if (existsSync(temp)) unlinkSync(temp);
+    }
+    if (opened) {
+      target.lastRound = null;
+      const others = siblings(target).filter((x) => x !== target);
+      const foreignWork = [...runningTasks(shop), ...queuedTasks(shop)].some((t) => t.origin === target && t.owner !== d.name);
+      if (others.length && multi(target) && !target.replicaOwner && !foreignWork) closeContext(target, others[0]);
+      else {
+        if (others.length && multi(target)) goto(target, others[0]);
+        endSession(target, 'closing the discussion', (agent) => note(ctx, `${agent.name}'s ended session was reset for a new discussion.`));
+        switchTo(target, null);
+      }
+    }
+    note(ctx, `Closed ${d.name}.`);
+  } catch (err) {
+    note(ctx, `✗ Could not close ${d.name}: ${err.message}`, true);
+  } finally {
+    closing.delete(d.name);
+    showHeader(ctx);
+  }
 }
 
 // ── The worker queues ─────────────────────────────────────────────────
@@ -2213,6 +2318,7 @@ export async function handleLine(line, ctx) {
   const closeRef = /^\/close\s+(\S+)$/.exec(line);
   if (closeRef) {
     const target = siblings(ctx).find((c) => !c.stopped && c.discussion && refOf(c) === closeRef[1]);
+    if (!target && !closeRef[1].startsWith(`${BRAINSTORMS}/`)) return closeNamedDiscussion(ctx, closeRef[1]);
     if (!target) return note(ctx, `✗ ${closeRef[1]} is not open.`, true);
     return target === ctx ? closeDiscussion(ctx) : void target.say?.('/close');
   }
@@ -2734,6 +2840,7 @@ export async function retryWork(ctx, id, settings = null) {
 export const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a discussion to send work.';
 export function queueWork(ctx, text, run = null, rollback = null, retry = null) {
   if (ctx.state.brainstorm) return note(ctx, `✗ ${BRAINSTORM_NO_WORK} The instruction was not sent.`, true);
+  if (ctx.discussion && shopOf(ctx).closing?.has(ctx.discussion.name)) return note(ctx, '✗ This discussion is closing; the instruction was not sent.', true);
   if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
   if (ctx.stopped) return note(ctx, 'This room is ending: the instruction was not sent.', true);
   ctx.agentsStarted = true;
@@ -2744,7 +2851,7 @@ export function queueWork(ctx, text, run = null, rollback = null, retry = null) 
   const workName = ctx.discussion && !ctx.state.brainstorm ? ctx.discussion.name : null;
   const record = workName ? { id: randomBytes(6).toString('hex'), task: text, at: new Date().toISOString() } : null;
   shop.sent = (shop.sent ?? 0) + 1; // the order sent, across lanes: one worker session's tasks keep it
-  const task = { origin: ctx, text, run, cycle: retry?.cycle ?? run?.cycle, done, rollback, retry, record, workName, lane: workName, sent: retry?.sent ?? shop.sent, worker: ctx.worker, owner: ownerOf(ctx), label: originLabel(ctx) };
+  const task = { origin: ctx, text, run, cycle: retry?.cycle ?? run?.cycle, done, finished, rollback, retry, record, workName, lane: workName, sent: retry?.sent ?? shop.sent, worker: ctx.worker, owner: ownerOf(ctx), label: originLabel(ctx) };
   const tasks = laneState(shop, workName).tasks;
   if (retry) { const i = tasks.findIndex((t) => t.sent > retry.sent); tasks.splice(i < 0 ? tasks.length : i, 0, task); }
   else tasks.push(task);

@@ -18,6 +18,44 @@ function fakeAgent(name, replies = []) {
   };
 }
 
+test('agents draft and revise a closing statement with worker reports, without changing the chat', async () => {
+  const a = fakeAgent('A', ['Draft: pending-instructions.md']);
+  const b = fakeAgent('B', ['Final: pending-instructions.md']);
+  const room = createRoom([a, b]);
+  const result = await room.closingStatement({ dir: '/project/discussions/topic', workerReports: 'worker finished' });
+  assert.equal(result, 'Final: pending-instructions.md');
+  assert.match(a.prompts[0], /worker finished/);
+  assert.match(b.prompts[0], /Draft: pending-instructions\.md/);
+  assert.deepEqual(room.transcript, []);
+  const failing = createRoom([fakeAgent('A', ['PASS'])]);
+  await assert.rejects(failing.closingStatement({ dir: '/topic' }), /did not provide a complete closing statement/);
+});
+
+test('a closing turn that loses its provider session retries with the full chat', async () => {
+  const agent = fakeAgent('A', [new Error('session ended'), 'recovered: pending-instructions.md']);
+  let resets = 0;
+  agent.reset = () => { resets++; };
+  const state = { transcript: [{ speaker: 'User', text: 'a later decision' }], seen: new Map([['A', 1]]) };
+  const room = createRoom([agent], state);
+  const reported = [];
+  await assert.rejects(room.closingStatement({ dir: '/topic', onReset: (a, err) => reported.push([a.name, err.message]) }), /session ended/);
+  assert.equal(resets, 1);
+  assert.deepEqual(reported, [['A', 'session ended']]);
+  assert.equal(await room.closingStatement({ dir: '/topic' }), 'recovered: pending-instructions.md');
+  assert.match(agent.prompts[1], /\[User\]: a later decision/);
+  assert.deepEqual(state.transcript, [{ speaker: 'User', text: 'a later decision' }]);
+});
+
+test('a transient closing turn failure keeps the usable provider session', async () => {
+  const agent = fakeAgent('A', [new Error('quota')]);
+  let resets = 0;
+  agent.reset = () => { resets++; };
+  const state = { transcript: [], seen: new Map([['A', 2]]) };
+  await assert.rejects(createRoom([agent], state).closingStatement({ dir: '/topic' }), /quota/);
+  assert.equal(resets, 0);
+  assert.equal(state.seen.get('A'), 2);
+});
+
 test('a round is: user, then agents in order until all of them pass in a row', async () => {
   const a = fakeAgent('A', ['a1', 'PASS', 'PASS']);
   const b = fakeAgent('B', ['PASS', 'PASS']);
