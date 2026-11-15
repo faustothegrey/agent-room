@@ -703,39 +703,44 @@ function showFailedAgents(agents) {
   }
 }
 // The Worker tab's line: its worktree, or why the worker is disabled.
-// A brainstorm sends no work: its Worker tab says so, whatever the worker's own state.
+// A brainstorm sends no work: its Worker tab says so, whatever the worker's own state. Every
+// update goes through here, which keeps the latest info for when the window shows a discussion.
 const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a discussion to send work.';
 let workerInfoShown = null, workPlaceholder = null;
+function showWorkerInfo(info) {
+  workerInfoShown = info;
+  workPlaceholder ??= wbox.placeholder;
+  if (room?.brainstorm) setWorkerInfo({ lines: [BRAINSTORM_NO_WORK], disabled: true });
+  else {
+    setWorkerInfo(info);
+    if (!info?.disabled) { wbox.disabled = false; wbox.placeholder = workPlaceholder; }
+  }
+  if (ended || restarting) wbox.disabled = true;
+}
 // Each lane (the discussion's own branch first, then every other one with something to review) is
 // shown collapsed under a one-line summary; what the User opens stays open across refreshes.
 function setWorkerInfo(info) {
-  workerInfoShown = info;
   const el = $('winfo');
   const open = new Set([...el.querySelectorAll('details[open]')].map((d) => d.dataset.key));
   el.replaceChildren();
-  workPlaceholder ??= wbox.placeholder;
-  const brainstorm = !!room?.brainstorm;
-  if (brainstorm) { const p = document.createElement('div'); p.textContent = BRAINSTORM_NO_WORK; p.className = 'error'; el.append(p); }
-  else if (info) {
-    const lineEl = (line) => {
-      let p = mergePreviewLine(line, open);
-      if (!p) { p = document.createElement('div'); p.textContent = line; }
-      if (info.error || info.disabled) p.className = 'error';
-      return p;
-    };
-    if (!info.lanes) { for (const line of info.lines) el.append(lineEl(line)); }
-    else for (const lane of info.lanes) {
-      const d = document.createElement('details'); d.dataset.key = 'lane ' + lane.summary.split(' · ')[0]; d.open = open.has(d.dataset.key);
-      const summary = document.createElement('summary'); summary.textContent = lane.summary;
-      const body = document.createElement('div'); body.className = 'lane-lines';
-      for (const line of lane.lines) body.append(lineEl(line));
-      d.append(summary, body);
-      el.append(d);
-    }
+  if (!info) return;
+  const lineEl = (line) => {
+    let p = mergePreviewLine(line, open);
+    if (!p) { p = document.createElement('div'); p.textContent = line; }
+    if (info.error || info.disabled) p.className = 'error';
+    return p;
+  };
+  if (!info.lanes) { for (const line of info.lines) el.append(lineEl(line)); }
+  else for (const lane of info.lanes) {
+    const d = document.createElement('details'); d.dataset.key = 'lane ' + lane.summary.split(' · ')[0]; d.open = open.has(d.dataset.key);
+    const summary = document.createElement('summary'); summary.textContent = lane.summary;
+    const body = document.createElement('div'); body.className = 'lane-lines';
+    for (const line of lane.lines) body.append(lineEl(line));
+    d.append(summary, body);
+    el.append(d);
   }
-  if (ended || restarting) return;
-  wbox.disabled = brainstorm || !!info?.disabled;
-  wbox.placeholder = brainstorm ? BRAINSTORM_NO_WORK : info?.disabled ? info.lines[0] : workPlaceholder;
+  wbox.disabled = !!info.disabled;
+  if (info.disabled) wbox.placeholder = info.lines[0];
 }
 // A merge preview line can name many conflicting files: shown collapsed, its outcome in the summary.
 function mergePreviewLine(line, open) {
@@ -2382,21 +2387,21 @@ events.onmessage = (e) => {
     if (ev.status) status(ev.status);
     setWorking(ev.working);
     if (!ev.workInput) { $('wcomposer').hidden = true; }
-    setWorkerInfo(ev.workerInfo);
+    showWorkerInfo(ev.workerInfo);
     monitor = ev.monitor ?? {};
     showQuota(ev.quota, ev.quotaAt);
-    if (ev.room) { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); setWorkerInfo(workerInfoShown); }
+    if (ev.room) { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); showWorkerInfo(workerInfoShown); }
     $('newroom').hidden = !ev.newRoom;
     replicaOff = ev.replicaOff ?? null;
     showReplica(ev.replica);
   }
   if (ev.type === 'replica') showReplica(ev.replica);
-  if (ev.type === 'room') { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); setWorkerInfo(workerInfoShown); openFiles(); } // its buttons and "in use" follow (a brainstorm: no work)
+  if (ev.type === 'room') { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); showWorkerInfo(workerInfoShown); openFiles(); } // its buttons and "in use" follow (a brainstorm: no work)
   if (ev.type === 'work') workMessage(ev.message, true);
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
   if (ev.type === 'monitor') showMonitor(ev.monitor);
   if (ev.type === 'working') setWorking(ev.name);
-  if (ev.type === 'workerinfo') setWorkerInfo(ev.info);
+  if (ev.type === 'workerinfo') showWorkerInfo(ev.info);
   if (ev.type === 'message') message(ev.message);
   if (ev.type === 'thinking') setThinking(ev.name);
   if (ev.type === 'turn') { yourTurn = true; status(ev.text); updateReplicaView(); }
