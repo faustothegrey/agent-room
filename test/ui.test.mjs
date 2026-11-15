@@ -1612,6 +1612,56 @@ test('auto dev: reading the instruction only from Next step, and the Outcome lin
   assert.equal(summaryOutcome('Outcome: FINISH\nmore'), null);
 });
 
+test('auto dev: step metadata is only before the Outcome and outside the instruction', async () => {
+  const { summarySteps, summaryInstruction } = await import('../src/ui.mjs');
+  const quoted = '**Next step**\nSend to the Worker: "Do it"\n\n**Steps left: 3**\n\n**Outcome: SEND**';
+  const block = '**Next step**\nSend to the Worker:\n> Do it\n\nSteps left: 3\nOutcome: SEND';
+  for (const summary of [quoted, block]) {
+    assert.equal(summarySteps(summary), 3);
+    assert.deepEqual(summaryInstruction(summary), { text: 'Do it' });
+  }
+  const inside = '**Next step**\nSend to the Worker: "Say \"hello\"\nSteps left: 8\nthen finish"\nOutcome: SEND';
+  assert.equal(summarySteps(inside), null);
+  assert.deepEqual(summaryInstruction(inside), { text: 'Say "hello"\nSteps left: 8\nthen finish' });
+  const boundary = '**Next step**\nSend to the Worker: "Do it\nSteps left: 3"\nOutcome: SEND';
+  assert.equal(summarySteps(boundary), null);
+  assert.deepEqual(summaryInstruction(boundary), { text: 'Do it\nSteps left: 3' });
+  for (const text of ['Steps left: 0', 'Steps left: -1', 'Steps left: 1.5', 'Steps left: 2 extra', 'Steps left: 3\nother']) {
+    assert.equal(summarySteps(`**Next step**\nSend to the Worker: "x"\n${text}\nOutcome: SEND`), null);
+  }
+  assert.equal(summarySteps('Steps left: 3\nOutcome: SEND\nother'), null);
+});
+
+test('auto dev: step counts adjust the limit and fix rounds consume slack', async () => {
+  const withSteps = (instruction, steps, outcome = 'SEND') => summaryWith(instruction, outcome).replace('Outcome:', `${steps}\nOutcome:`);
+  const summaries = [withSteps('A', 'Steps left: 2'), withSteps('B', 'Steps left: 4'),
+    withSteps('C', 'Steps left: 4'), withSteps('D', 'Steps left: 1'),
+    withSteps('E', 'Steps left: nope'), summaryWith('F', 'SEND'), summaryWith('G', 'SEND')];
+  const seen = [];
+  let room;
+  room = await autoDevRoom({ summaries, worker: async () => { seen.push([room.ctx.autoDev.cycle, room.ctx.autoDev.limit, room.ctx.autoDev.lastSteps]); return 'done'; } });
+  await handleLine('/autodev', room.ctx);
+  assert.equal(room.ctx.screen.room.autoDev.max, 4);
+  assert.match(room.ctx.notes.at(-1), /up to 4 worker cycles/);
+  await room.settle();
+  assert.deepEqual(seen, [[1, 4, 2], [2, 7, 4], [3, 7, 4], [4, 6, 1], [5, 6, 1], [6, 6, 1]]);
+  assert.deepEqual([room.ctx.autoDev.status, room.ctx.autoDev.reason], ['paused', '6 cycles used']);
+  assert.equal(room.ctx.screen.room.autoDev.max, 6);
+  assert.match(room.ctx.state.transcript.find((m) => m.speaker === 'Auto dev').text, /cycle 1 of 4/);
+  await handleLine('/autodev', room.ctx);
+  assert.deepEqual([room.ctx.autoDev.limit, room.ctx.autoDev.lastSteps], [5, null]);
+  await room.settle();
+});
+
+test('auto dev: the step limit is capped at 15 at start and when raised', async () => {
+  const withSteps = (name, n) => summaryWith(name, 'SEND').replace('Outcome:', `Steps left: ${n}\nOutcome:`);
+  const room = await autoDevRoom({ summaries: [withSteps('A', 30), withSteps('B', 40), '**Agreed**\nOutcome: FINISH'] });
+  await handleLine('/autodev', room.ctx);
+  assert.deepEqual([room.ctx.autoDev.limit, room.ctx.autoDev.lastSteps], [15, 30]);
+  await room.settle();
+  assert.deepEqual([room.ctx.autoDev.limit, room.ctx.autoDev.lastSteps], [15, 40]);
+});
+
 test('auto dev: Start relays the instruction; the report starts a round; one SEND per report; FINISH ends it', async () => {
   const { readFileSync } = await import('node:fs');
   let release;

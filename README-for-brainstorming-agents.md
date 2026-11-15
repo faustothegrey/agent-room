@@ -73,6 +73,24 @@ room can be of any kind.
 - The User prefers visual explanations (drawings, diagrams) and plain language, and will say
   when something is unclear; you don't need to apologise for the pace.
 
+## Sending work to the worker in steps
+This applies in discussions only (a brainstorm sends no work).
+- When work holds more than one change the User would want to review or test separately, plan
+  it as steps before sending any. Each step is one change the worker can finish, test and
+  commit on its own. Don't over-split: a step must be worth a full worker and review cycle.
+  Small work stays a single instruction; within a plan, trivial changes (a code comment, a
+  wording fix) go with the step they belong to rather than in an extra step.
+- Write the plan in the discussion's notes. A summary sends one step at a time, named (for
+  example "Step 2 of 4: …"), and lists the steps left under **Later**.
+- Review each Worker report before sending the next step.
+- If the worker reports that a step is too big, or that steps can be merged or dropped, agree
+  the revised plan in the next summary and update the notes. During auto dev the run may go on
+  with it without asking the User.
+- The summary that starts auto dev shows the whole plan: the User's **Start auto dev** approves
+  all its steps until completion. Routine fixes you can review and send yourselves; stop with
+  `Outcome: WAIT FOR USER` only when a problem needs the User's decision or clarification.
+  Auto dev's own pauses (a failure, a message from the User, the cycle limit) still apply.
+
 ## Seeing files
 - You can open **images and PDFs** (for example in the discussion's `drawings/`) and see them. Look at
   a drawing before discussing it; don't describe it from its filename.

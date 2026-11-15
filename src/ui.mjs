@@ -1615,8 +1615,8 @@ function dropTask(shop, t) {
 // Start auto dev (/autodev) sends the latest agreed summary's instruction to the worker; its reply
 // comes back as a "Worker report" that starts a round, always followed by an auto-summary whose last
 // line decides: SEND (the next instruction, once per report), FINISH or WAIT FOR USER. At most
-// AUTO_DEV_CYCLES worker cycles per start. ctx.autoDev: { status: 'running' | 'paused' | 'finished',
-// cycle, reason, waiting (a relay at the worker), report (its reply, until its round) }, in ctx so
+// a plan-based limit (default AUTO_DEV_CYCLES). ctx.autoDev: { status: 'running' | 'paused' | 'finished',
+// cycle, limit, lastSteps, reason, waiting (a relay at the worker), report (its reply, until its round) }, in ctx so
 // it survives a Reload; ctx.autoDevSent: the summaries already sent (transcript indexes) this session.
 export const AUTO_DEV_CYCLES = 5;
 const AUTO_DEV_REPORT = '/autodev report';
@@ -1624,10 +1624,11 @@ const AUTO_DEV_FAILURE = '/autodev failure';
 const AUTO_DEV_MEANS = 'FINISH: development is complete and reviewed; only the User\'s merge, Reload or live trial may remain. '
   + 'WAIT FOR USER: the User must answer or act before development can continue.';
 const autoDevTask = (run) => [
-  `Auto dev is running (worker cycle ${run.cycle} of at most ${AUTO_DEV_CYCLES}): an agreed summary can send its Next step instruction to the Worker by itself.`,
+  `Auto dev is running (worker cycle ${run.cycle} of at most ${run.limit ?? AUTO_DEV_CYCLES}): an agreed summary can send its Next step instruction to the Worker by itself.`,
   'Passing on a version accepts its quoted instruction for the worker exactly as it stands.',
   'End the summary with one last line: Outcome: SEND, Outcome: FINISH or Outcome: WAIT FOR USER.',
   'SEND sends the Next step\'s "Send to the Worker" instruction now: say it only when you mean to send it (repeating earlier text is a deliberate retry).',
+  'When the Next step sends one step of a planned series, put a line Steps left: N just before the Outcome line, outside the instruction, counting the step being sent. When N is higher than the last one given, the cycle limit becomes cycles used + N + 2 (at most 15); otherwise it stays or falls, so fix rounds use up its slack.',
   AUTO_DEV_MEANS,
 ].join('\n');
 // While a run is paused, any summary may end it: it can only say FINISH or WAIT FOR USER, and sends nothing.
@@ -1684,9 +1685,21 @@ export function summaryOutcome(summary) {
   const last = String(summary ?? '').trim().split('\n').at(-1).replace(/[*_`]/g, '').trim();
   return /^Outcome:\s*(SEND|FINISH|WAIT FOR USER)\.?$/i.exec(last)?.[1].toUpperCase() ?? null;
 }
+// Metadata is only the last non-empty line before a valid final Outcome, outside a quoted instruction.
+export function summarySteps(summary) {
+  if (!summaryOutcome(summary)) return null;
+  const lines = String(summary).trim().split('\n');
+  let i = lines.length - 2;
+  while (i >= 0 && !lines[i].trim()) i--;
+  const match = /^Steps left:\s*(\d+)$/i.exec((lines[i] ?? '').replace(/[*_`]/g, '').trim());
+  if (!match) return null;
+  const n = Number(match[1]);
+  if (!Number.isSafeInteger(n) || n < 1) return null;
+  return n;
+}
 function latestAgreed(ctx) {
   const t = ctx.state.transcript;
-  for (let i = t.length - 1; i >= 0; i--) if (t[i].outcome === 'agreed') return { index: i, instruction: summaryInstruction(t[i].text) };
+  for (let i = t.length - 1; i >= 0; i--) if (t[i].outcome === 'agreed') return { index: i, instruction: summaryInstruction(t[i].text), steps: summarySteps(t[i].text) };
   return null;
 }
 // What the page offers: the latest agreed summary's instruction, unless it was sent (or a run is
@@ -1698,10 +1711,10 @@ function autoDevOffer(ctx) {
 }
 function autoDevView(ctx) {
   const run = ctx.autoDev;
-  return { status: run?.status ?? null, cycle: run?.cycle ?? 0, max: AUTO_DEV_CYCLES, reason: run?.reason ?? null, waiting: !!run?.waiting, offer: autoDevOffer(ctx) };
+  return { status: run?.status ?? null, cycle: run?.cycle ?? 0, max: run?.limit ?? AUTO_DEV_CYCLES, reason: run?.reason ?? null, waiting: !!run?.waiting, offer: autoDevOffer(ctx) };
 }
 
-// /autodev: Start auto dev, or Restart it (another AUTO_DEV_CYCLES cycles), from the latest agreed summary.
+// /autodev: Start or Restart from the latest agreed summary.
 function startAutoDev(ctx) {
   const s = latestAgreed(ctx);
   const why = ctx.state.brainstorm ? 'auto dev is for discussions; a brainstorm keeps no saved record'
@@ -1714,9 +1727,9 @@ function startAutoDev(ctx) {
     : !s.instruction ? 'the latest agreed summary has no instruction for the worker'
     : s.instruction.error ?? null;
   if (why) return note(ctx, `✗ Auto dev can't start: ${why}.`, true);
-  ctx.autoDev = { status: 'running', cycle: 0, reason: null, waiting: false, report: null };
-  log(ctx, `_(auto dev started: up to ${AUTO_DEV_CYCLES} worker cycles)_\n\n`);
-  note(ctx, `Auto dev started: up to ${AUTO_DEV_CYCLES} worker cycles.`);
+  ctx.autoDev = { status: 'running', cycle: 0, limit: s.steps === null ? AUTO_DEV_CYCLES : Math.min(15, s.steps + 2), lastSteps: s.steps, reason: null, waiting: false, report: null };
+  log(ctx, `_(auto dev started: up to ${ctx.autoDev.limit} worker cycles)_\n\n`);
+  note(ctx, `Auto dev started: up to ${ctx.autoDev.limit} worker cycles.`);
   relay(ctx, s);
 }
 function relay(ctx, s) {
@@ -1727,7 +1740,7 @@ function relay(ctx, s) {
   // The agents learn it was sent (it is no longer "sending unconfirmed"): a notice in the
   // conversation, which they receive, the transcript keeps and the page shows. relay() runs between
   // rounds (from the room's input), so the notice never lands in the middle of one.
-  const notice = { speaker: 'Auto dev', text: `Auto dev sent the instruction "${s.instruction.text.split('\n')[0].trim()}" to the Worker (cycle ${run.cycle} of ${AUTO_DEV_CYCLES}).` };
+  const notice = { speaker: 'Auto dev', text: `Auto dev sent the instruction "${s.instruction.text.split('\n')[0].trim()}" to the Worker (cycle ${run.cycle} of ${run.limit ?? AUTO_DEV_CYCLES}).` };
   ctx.state.transcript.push(notice);
   log(ctx, `**${notice.speaker}**\n\n${notice.text}\n\n`);
   toScreen(ctx, { type: 'message', message: ctx.docs.messageView(notice) });
@@ -1799,7 +1812,13 @@ function decide(ctx, run, status) {
   const s = { index: ctx.state.transcript.length - 1, instruction: summaryInstruction(result.text) };
   if (!s.instruction) return pauseAutoDev(ctx, 'the summary says SEND, but its Next step has no instruction for the worker');
   if (s.instruction.error) return pauseAutoDev(ctx, `the instruction can't be sent: ${s.instruction.error}`);
-  if (run.cycle >= AUTO_DEV_CYCLES) return pauseAutoDev(ctx, `${AUTO_DEV_CYCLES} cycles used`);
+  const steps = summarySteps(result.text);
+  if (steps !== null) {
+    const proposed = Math.min(15, run.cycle + steps + 2);
+    run.limit = run.lastSteps == null || steps > run.lastSteps ? proposed : Math.min(run.limit ?? AUTO_DEV_CYCLES, proposed);
+    run.lastSteps = steps;
+  }
+  if (run.cycle >= (run.limit ?? AUTO_DEV_CYCLES)) return pauseAutoDev(ctx, `${run.limit ?? AUTO_DEV_CYCLES} cycles used`);
   relay(ctx, s);
 }
 
@@ -2747,7 +2766,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   if (ctx.workingIn) shop.writing.add(ctx.workingIn);
   try {
     const from = run ? 'Relayed from discussion' : 'User';
-    workLog(`**${from} → ${worker.name}** (worker${run ? `, auto dev cycle ${cycle} of ${AUTO_DEV_CYCLES}` : ''})\n\n${text}\n\n`);
+    workLog(`**${from} → ${worker.name}** (worker${run ? `, auto dev cycle ${cycle} of ${run.limit ?? AUTO_DEV_CYCLES}` : ''})\n\n${text}\n\n`);
     out(ctx, `\n${bold(`${run ? 'Relayed' : 'You'} → ${worker.name}`)} › ${text}\n`);
     show({ speaker: from, text });
     working(worker.name);
