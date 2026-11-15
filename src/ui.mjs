@@ -321,6 +321,7 @@ function header(ctx) {
     cliSessions: sessionView(ctx),
     discussion: d ? d.title : ctx.state.brainstorm ? 'New brainstorm' : 'No discussion started',
     active: folderOf(ctx), started: !!ctx.logPath || !!ctx.state.brainstorm,
+    fresh: !settingsStarted(ctx), // its members can still be chosen: the page opens their panel
     brainstorm: !!ctx.state.brainstorm, // a brainstorm, in brainstorms/<name>/ once started (see newBrainstorm)
     // The agents this discussion started with, for the members panel once it has started.
     members: ctx.room.agents.map((a) => ({ provider: a.provider, name: a.name,

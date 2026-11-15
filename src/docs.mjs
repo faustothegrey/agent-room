@@ -1834,6 +1834,7 @@ async function openFiles() {
 let room = null;
 function setRoom(r) {
   const changed = room && r && room.active !== r.active;
+  const fresh = r?.fresh && !room?.fresh; // a new discussion or brainstorm, or a page on one: its members are chosen first
   room = r;
   for (const [target, sessions] of [['talk-sessions', r.cliSessions?.agents ?? []], ['work-sessions', r.cliSessions?.worker ? [r.cliSessions.worker] : []]]) {
     const el = $(target); if (!el) continue; el.replaceChildren();
@@ -1845,7 +1846,8 @@ function setRoom(r) {
   }
   if (changed) { peek = null; updateTabs(); }
   // The members panel follows the room: each agent's state, or the usual panel once a new discussion begins.
-  if (membersModels && $('talk-settings').open) { if (r?.started) renderMembers(); else $('talk-settings').ontoggle(); }
+  if (membersModels && $('talk-settings').open) { if (!r?.fresh) renderMembers(); else $('talk-settings').ontoggle(); }
+  if (fresh) $('talk-settings').open = true;
   renderAutoDev();
   $('room-name').textContent = r.folder?.replace(/[/]+$/, '').split('/').pop() || r.folder || 'agent-room';
   $('disc').textContent = r.discussion || '';
