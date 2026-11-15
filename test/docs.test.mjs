@@ -1204,3 +1204,50 @@ test('the Worker tab shows a merge preview collapsed, its outcome in the summary
     s.close();
   }
 });
+
+test('a started discussion\'s members panel lists the agents it started with, locked but for On, which enables or disables each', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'html-test-'));
+  const s = await serve(root, { clients: new Set(), transcript: [] });
+  try {
+    const html = await (await s.get('/__room')).text();
+    const code = html.slice(html.indexOf('function agentRow('), html.indexOf('function selectedSettings('));
+    class El {
+      constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.classList = { toggle() {} }; this.value = ''; this.disabled = false; this.hidden = false; this.textContent = ''; }
+      append(...c) { for (const x of c) { if (typeof x === 'object') x.parentElement = this; this.children.push(x); } }
+      add(o) { this.children.push(o); }
+      replaceChildren(...c) { this.children = c; }
+      get options() { return this.children; }
+      querySelectorAll() { const all = (n) => n.children.flatMap((c) => typeof c === 'object' && c.tag ? [c, ...all(c)] : []); return all(this).filter((e) => e.tag === 'select' || (e.tag === 'input' && e.type !== 'checkbox')); }
+    }
+    const els = { 'talk-agent-rows': new El('div'), 'talk-settings-status': new El('p'), 'talk-member-note': new El('p') };
+    const posted = [];
+    let answer = { ok: true };
+    const room = { started: true, members: [{ provider: 'claude', name: 'Claude', model: 'opus', enabled: true }, { provider: 'codex', name: 'Codex', model: '', enabled: false }] };
+    const { renderMembers, setModels } = new Function('$', 'document', 'Option', 'room', 'settingsRows', 'post',
+      'let membersModels = null;\n' + code + '; return { renderMembers, setModels: (m) => { membersModels = m; } };')(
+      (id) => els[id], { createElement: (t) => new El(t) }, function (label, value) { this.label = label; this.value = value; }, room, { talk: [] },
+      async (path, body) => { posted.push([path, body]); return answer; });
+    setModels({ claude: [{ id: 'opus', label: 'Opus' }], codex: [], agy: [] });
+    renderMembers();
+    const rows = els['talk-agent-rows'].children;
+    const parts = (row) => { const inputs = []; const walk = (n) => n.children.forEach((c) => { if (c.tag) { if (c.tag === 'input' || c.tag === 'select') inputs.push(c); walk(c); } }); walk(row); return inputs; };
+    assert.equal(rows.length, 2);
+    const [on1, provider1, name1, model1] = parts(rows[0]), [on2] = parts(rows[1]);
+    assert.equal(on1.type, 'checkbox'); assert.equal(on1.checked, true); assert.equal(on2.checked, false);
+    assert.equal(on1.disabled, true); // the only one enabled: can't be unticked
+    assert.deepEqual([provider1.disabled, name1.disabled, model1.disabled], [true, true, true]);
+    assert.equal(name1.value, 'Claude'); assert.equal(model1.value, 'opus');
+    on2.checked = true; on2.onchange();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(posted, [['__agent-enabled', { name: 'Codex', enabled: true, member: true }]]);
+    // A refused change puts the box back and says why.
+    answer = { ok: false, text: async () => 'Wait.' };
+    const again = parts(els['talk-agent-rows'].children[1])[0];
+    again.checked = false; again.onchange();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(room.members[1].enabled, true);
+    assert.match(els['talk-settings-status'].textContent, /Could not change Codex: Wait\./);
+  } finally {
+    s.close();
+  }
+});
