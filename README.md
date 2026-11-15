@@ -87,7 +87,8 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
 
 - **Discussion:** send messages to the brainstorming agents. Enter sends; Shift+Enter adds
   a line. Start with `@name` to address one agent. Agents take turns in the configured order,
-  stopping when everyone passes consecutively, a turn fails, or eight agent turns are reached.
+  stopping when everyone passes consecutively, a turn fails, or the lap cap is reached (10 laps in a
+  discussion, 20 in a brainstorm; one lap is each selected agent speaking once).
   Passes are hidden in the chat and retained in the transcript. Replies appear when complete.
   **📎 Attach** (under the message box, in discussions only, not brainstorms; a new discussion
   allows it after its first message) adds files of any type to your next message; each waits
@@ -411,9 +412,10 @@ Each agent gets at most three turns. Without agreement, the last revision is sho
 In a brainstorm, summaries work the same way, but their prompt leaves out the sentence about
 `pending-instructions.md`: a worker instruction lives only in the chat, and nothing is retained.
 
-**Auto-summarize** is always on. After a round where an agent spoke and none failed, it runs the
-same summary process, adding up to three turns per agent. It does not run after a round of only
-passes.
+**Auto-summarize** is always on in discussions (not in brainstorms, where you can still run
+**Summarize** or `/summary` yourself). After a discussion round where an agent spoke and none
+failed, it runs the same summary process, adding up to three turns per agent. It does not run after
+a round of only passes.
 
 **Auto dev** relays instructions between the Discussion and the Worker, so you don't copy and
 paste them. When the latest agreed summary's **Next step** is `Send to the Worker: "…"`, a

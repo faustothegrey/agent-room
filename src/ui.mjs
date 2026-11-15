@@ -1855,7 +1855,7 @@ export function ended(ctx, restarting = false) {
 
 // How long Quit room (and Shutdown, Restart) waits for the room's round in progress, or other
 // queued lines, before stopping its agents mid-turn. Without it a round could hold Quit for up to
-// 8 turns of 5 minutes, plus its summary's turns, plus every line queued before Quit.
+// 10 laps (20 in a brainstorm) of 5-minute turns, plus its summary's turns, plus every line queued before Quit.
 export const QUIT_GRACE_MS = 30_000;
 
 // Stops every agent and worker program the room runs (SIGTERM, then SIGKILL after 5s); from then on
@@ -1951,7 +1951,7 @@ export async function restart(hub, rooms, values) {
 function removedHint(command, name) {
   const n = name || '<name>';
   if (command === 'pause') return 'Pause is gone: every discussion saves itself after each round, and Resume continues it where it stopped.';
-  if (command === 'autosummary') return 'Auto-summarize is always on now: a summary follows every round in which an agent spoke.';
+  if (command === 'autosummary') return 'Auto-summarize is always on now (in discussions, not brainstorms): a summary follows every round in which an agent spoke.';
   return `/${command} is now /resume ${n} (it continues where the discussion stopped, or starts from its handoff if it was never saved), or /fresh ${n} to start new sessions from its handoff.`;
 }
 
@@ -2117,7 +2117,7 @@ async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
         log(ctx, `_${text}_\n\n`);
         out(ctx, `${text}\n`);
         toScreen(ctx, { type: 'turn', text });
-        ending = 'turn cap reached';
+        ending = 'lap cap reached';
       },
     }).finally(() => { ctx.busy = false; });
     const secs = Math.round((Date.now() - roundStart) / 1000);
@@ -2127,9 +2127,9 @@ async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
     // A failed turn pauses auto dev; otherwise its round is always summarized, to decide what's next.
     const deciding = run && ctx.autoDev === run && run.status === 'running';
     if (deciding && ending.endsWith('failed')) pauseAutoDev(ctx, ending);
-    // Auto-summarize (always on): after a round in which an agent spoke and none failed. Its own end
-    // line is then the "your turn" one; this round's line is just a note.
-    if ((spoke || deciding) && !ending.endsWith('failed')) {
+    // Auto-summarize (always on in discussions, not in brainstorms): after a round in which an agent
+    // spoke and none failed. Its own end line is then the "your turn" one; this round's line is just a note.
+    if (!ctx.state.brainstorm && (spoke || deciding) && !ending.endsWith('failed')) {
       out(ctx, dim(`── round over · ${parts.filter(Boolean).join(' · ')} · summarizing ──`));
       toScreen(ctx, { type: 'note', text: `round over · ${parts.filter(Boolean).join(' · ')} · summarizing` });
       const summary = await runSummary(ctx, true, deciding ? autoDevTask(run) : undefined);

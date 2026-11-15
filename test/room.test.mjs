@@ -106,26 +106,37 @@ test('a real reply resets the pass count', async () => {
   assert.deepEqual(speakers, ['User', 'A', 'B', 'A', 'B']);
 });
 
-test('the turn cap ends the round with a notice', async () => {
+test('the lap cap ends the round with a notice (10 laps in a discussion, 20 in a brainstorm)', async () => {
   const room = createRoom([fakeAgent('A'), fakeAgent('B')]);
   const { speakers, notices } = await roundOf(room, 'u1');
-  assert.equal(speakers.length, 1 + 8);
-  assert.deepEqual(notices, ['(turn cap reached)']);
+  assert.equal(speakers.length, 1 + 10 * 2);
+  assert.deepEqual(notices, ['(lap cap reached)']);
+  const addressed = await roundOf(room, '@A u2');
+  assert.equal(addressed.speakers.length, 1 + 10);
+  assert.deepEqual(addressed.notices, ['(lap cap reached)']);
+
+  const brainstorm = createRoom([fakeAgent('A'), fakeAgent('B')], { transcript: [], seen: new Map(), brainstorm: true });
+  const bRound = await roundOf(brainstorm, 'u1');
+  assert.equal(bRound.speakers.length, 1 + 20 * 2);
+  assert.deepEqual(bRound.notices, ['(lap cap reached)']);
+  const bAddressed = await roundOf(brainstorm, '@A u2');
+  assert.equal(bAddressed.speakers.length, 1 + 20);
+  assert.deepEqual(bAddressed.notices, ['(lap cap reached)']);
 });
 
-test('no cap notice when the 8th turn completes the all-pass condition', async () => {
-  const room = createRoom([fakeAgent('A', ['a1', 'a2', 'a3', 'PASS']), fakeAgent('B', ['b1', 'b2', 'b3', 'PASS'])]);
+test('no cap notice when the 10th lap completes the all-pass condition', async () => {
+  const room = createRoom([fakeAgent('A', [...Array(9).fill('a'), 'PASS']), fakeAgent('B', [...Array(9).fill('b'), 'PASS'])]);
   const { speakers, notices } = await roundOf(room, 'u1');
-  assert.equal(speakers.length, 1 + 8);
+  assert.equal(speakers.length, 1 + 10 * 2);
   assert.deepEqual(notices, []);
 });
 
 test('the pass count resets for each user message', async () => {
   // Round 1 hits the cap with B's pass pending; if it carried over, A's pass alone would end round 2.
-  const a = fakeAgent('A', ['a1', 'a2', 'a3', 'a4', 'PASS']);
-  const b = fakeAgent('B', ['b1', 'b2', 'b3', 'PASS', 'PASS']);
+  const a = fakeAgent('A', [...Array(10).fill('a'), 'PASS']);
+  const b = fakeAgent('B', [...Array(9).fill('b'), 'PASS', 'PASS']);
   const room = createRoom([a, b]);
-  assert.deepEqual((await roundOf(room, 'u1')).notices, ['(turn cap reached)']);
+  assert.deepEqual((await roundOf(room, 'u1')).notices, ['(lap cap reached)']);
   assert.deepEqual((await roundOf(room, 'u2')).speakers, ['User', 'A', 'B']);
 });
 

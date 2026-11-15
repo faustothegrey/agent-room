@@ -1,11 +1,12 @@
 // The round loop: the user speaks, then the selected agents take turns in order until every one
-// of them has passed in a row (or the turn cap is hit, or a turn fails). And /summary: the agents
+// of them has passed in a row (or the lap cap is hit, or a turn fails). And /summary: the agents
 // agree a short summary by points, in a few turns each.
 // Each agent is sent only what it has not yet seen; its own CLI session holds the rest.
 // The transcript and `seen` live in `state`, owned by the caller, so they survive a code reload;
 // so does state.briefing, read when an agent gets its first prompt.
 
-export const MAX_TURNS = 8;
+export const MAX_LAPS = 10;
+export const BRAINSTORM_MAX_LAPS = 20;
 export const SUMMARY_TURNS_EACH = 3;
 
 // A brainstorm (state.brainstorm) has no folder: its summary leaves out the sentence about
@@ -126,8 +127,9 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
       const user = { speaker, text: userText };
       transcript.push(user);
       onMessage?.(user);
+      const maxTurns = (state.brainstorm ? BRAINSTORM_MAX_LAPS : MAX_LAPS) * selected.length;
       let passes = 0;
-      for (let turn = 0; turn < MAX_TURNS; turn++) {
+      for (let turn = 0; turn < maxTurns; turn++) {
         const agent = selected[turn % selected.length];
         onTurnStart?.(agent);
         const entry = await takeTurn(agent);
@@ -136,7 +138,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
         passes = entry.pass ? passes + 1 : 0;
         if (passes === selected.length) return;
       }
-      onNotice?.('(turn cap reached)');
+      onNotice?.('(lap cap reached)');
     },
 
     // /summary. The drafter rotates from one summary to the next. Writing or revising a version

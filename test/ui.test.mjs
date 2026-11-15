@@ -310,15 +310,23 @@ test('/brainstorm: no title, folder or transcript is created; the agents are tol
   ctx.room.agents[0].turn = async (p) => { prompts.push(p); return turn(p); };
   await handleLine('/brainstorm', ctx);
   assert.deepEqual([ctx.screen.room.discussion, ctx.screen.room.brainstorm, ctx.screen.room.started, ctx.screen.room.active], ['Brainstorm', true, true, null]);
-  await handleLine('hello', ctx); // a round, then its automatic summary
+  await handleLine('hello', ctx); // a round, with no automatic summary
   assert.deepEqual(readdirSync(ctx.cwd), []); // nothing written in the root
   assert.equal(ctx.logPath, undefined);
   assert.equal(ctx.pendingLog, ''); // nothing kept for a later transcript either
   assert.equal(ctx.discussion, null);
-  assert.deepEqual(ctx.state.transcript.filter((m) => !m.summary).map((m) => m.speaker), ['User', 'A', 'B', 'A', 'Summary']);
+  assert.deepEqual(ctx.state.transcript.map((m) => m.speaker), ['User', 'A', 'B', 'A']);
+  assert.equal(prompts.length, 2);
   assert.match(prompts[0], /This is a brainstorm, not a discussion: it has no folder/);
   assert.doesNotMatch(prompts[0], /Its folder is|discussions\//);
+  await handleLine('/summary', ctx); // manual /summary still works in a brainstorm
+  assert.deepEqual(ctx.state.transcript.filter((m) => !m.summary).map((m) => m.speaker), ['User', 'A', 'B', 'A', 'Summary']);
+  assert.equal(ctx.state.transcript.at(-1).text, '- the idea');
+  assert.match(prompts.at(-1), /asked for a summary/);
   assert.doesNotMatch(prompts.at(-1), /pending-instructions/); // the summary prompt
+  assert.deepEqual(readdirSync(ctx.cwd), []);
+  assert.equal(ctx.logPath, undefined);
+  assert.equal(ctx.pendingLog, '');
 });
 
 test('New brainstorm replaces the current one, and ends a discussion session keeping its folder and transcript', async () => {
