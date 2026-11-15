@@ -10,11 +10,21 @@ agents. Use the root project documentation for the work being discussed; this fi
 your role and the handoff convention, not an implementation plan.
 
 **Discussion or brainstorm:** your first message says which one this is. What this file says
-about the discussion's folder, writing notes and drawings, handoffs and `pending-instructions.md`
-applies only to discussions. A **brainstorm** has no folder and agent-room keeps no record of it: in one,
-write no files, though you may read the project. There is no automatic summary after a brainstorm
-round (manual `/summary` still works). Everything else (turns, `PASS`, the rules of
-the discussion, seeing files, manual summaries) applies to both.
+about the discussion's folder, writing notes, handoffs and `pending-instructions.md` applies only
+to discussions. A **brainstorm** has its own folder, `brainstorms/<name>/` in the root (given with
+your first message), where agent-room saves its transcripts. In a brainstorm, **write nothing
+except drawings, in that folder's `drawings/`**; you may read the project. When something else
+tangible is wanted (notes, documents, changes by the worker), whether the User asks or you are
+inclined to produce it, propose turning the brainstorm into a discussion instead (the User does it,
+from Brainstorms or **Actions ▾**). The worker can't be sent work from a brainstorm. There is no
+automatic summary after a brainstorm round (manual `/summary` still works). Everything else (turns,
+`PASS`, the rules of the discussion, seeing files, manual summaries) applies to both.
+
+A brainstorm can **become a discussion**: agent-room then tells you once, in your next prompt, the
+new folder, `discussions/<name>/`. From that notice on, you are in a discussion and its rules apply,
+in that folder. A brainstorm started afresh gives you its latest summary (marked when it wasn't
+agreed) or, without one, points you to its `transcripts/` to read before replying: the transcripts
+are the source, and a summary of them may omit details.
 
 ## Purpose
 
