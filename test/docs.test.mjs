@@ -1204,3 +1204,111 @@ test('the Worker tab shows a merge preview collapsed, its outcome in the summary
     s.close();
   }
 });
+
+test('Discussions tab Resume: navigates directly to openHere.url via notesGuard when open, or sends /resume when closed', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const notesCode = source.slice(source.indexOf('function notesAsk('), source.indexOf('function setEditor('));
+  const classListFor = () => {
+    const s = new Set();
+    return {
+      toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(cls) { s.add(cls); }, remove(cls) { s.delete(cls); }, contains(cls) { return s.has(cls); }
+    };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', value: '', hidden: false, disabled: false, children: [], dataset: {}, style: {},
+    classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    get lastChild() { return this.children.at(-1) || null; },
+    set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    addEventListener() {},
+    setAttribute() {},
+    getAttribute() { return null; },
+    focus() {},
+  });
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const document = { createElement: node, title: '' };
+  const location = { href: '/r/current-id/__room' };
+  const sent = [];
+  const notes = { open: false, list: [], id: null, base: '', editing: false, session: 0 };
+  const noteText = $('notes-text');
+  let openedNotes = 0;
+
+  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'send', 'notes', 'noteText', 'openNotes',
+    'let tab = "talk", replica = null, localThinking = "Claude", yourTurn = false, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'const renderAttachments = () => {};\n' +
+    'const notesDirty = () => notes.editing && noteText.value !== notes.base;\n' +
+    code + '\n' +
+    notesCode + '\n' +
+    'return { setRoom, renderDiscussions, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
+  )($, document, location, null, () => {}, (cb) => cb(), () => {}, (cmd) => sent.push(cmd), notes, noteText, () => { notes.open = true; openedNotes++; });
+
+  harness.setFiles([
+    'discussions/2026-11-15-current/notes.md',
+    'discussions/2026-11-15-open/notes.md',
+    'discussions/2026-11-14-closed/notes.md',
+  ]);
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-15-current',
+    discussion: 'Current',
+    started: true,
+    open: [
+      { active: 'discussions/2026-11-15-current', title: 'Current', started: true, current: true, url: '/r/current-id/__room' },
+      { active: 'discussions/2026-11-15-open', title: 'Open', started: true, current: false, url: '/r/open-id/__room' },
+    ],
+  });
+  harness.renderDiscussions();
+
+  const list = els['discussions-pane'].firstChild;
+  const rows = list.children.filter((c) => c.tag === 'div' && c.className.includes('discussion-row'));
+  const rowFor = (name) => rows.find((r) => r.children.find((c) => c.className !== 'drag-handle')?.children?.[0]?.textContent === name); // active rows start with the drag handle
+  const resumeBtn = (name) => rowFor(name).children.find((c) => c.tag === 'button' && c.textContent === 'Resume');
+
+  // 1. Open discussion, clean notes: navigates straight to openHere.url during a round without sending /resume.
+  let stopped = 0;
+  resumeBtn('2026-11-15-open').onclick({ stopPropagation() { stopped++; } });
+  assert.equal(stopped, 1);
+  assert.equal(location.href, '/r/open-id/__room');
+  assert.deepEqual(sent, []);
+
+  // 2. Open discussion, unsaved note in Notes: notesGuard asks before navigating.
+  location.href = '/r/current-id/__room';
+  notes.editing = true;
+  notes.base = 'saved body';
+  noteText.value = 'My draft';
+  resumeBtn('2026-11-15-open').onclick({ stopPropagation() {} });
+  assert.equal(location.href, '/r/current-id/__room');
+  assert.equal(openedNotes, 1);
+  assert.equal(els['notes-ask'].hidden, false);
+  assert.equal(els['notes-ask-text'].textContent, '"My draft" has unsaved changes.');
+
+  // Keep editing cancels the navigation and leaves the unsaved note intact.
+  const keepBtn = els['notes-ask-buttons'].children.find((b) => b.textContent === 'Keep editing');
+  keepBtn.onclick();
+  assert.equal(els['notes-ask'].hidden, true);
+  assert.equal(location.href, '/r/current-id/__room');
+  assert.equal(noteText.value, 'My draft');
+
+  // Discard changes resets the note and completes the navigation to openHere.url.
+  resumeBtn('2026-11-15-open').onclick({ stopPropagation() {} });
+  const discardBtn = els['notes-ask-buttons'].children.find((b) => b.textContent === 'Discard changes');
+  discardBtn.onclick();
+  assert.equal(els['notes-ask'].hidden, true);
+  assert.equal(noteText.value, 'saved body');
+  assert.equal(location.href, '/r/open-id/__room');
+  assert.deepEqual(sent, []);
+
+  // 3. Discussion that is not open: Resume still sends /resume <name>.
+  location.href = '/r/current-id/__room';
+  resumeBtn('2026-11-14-closed').onclick({ stopPropagation() {} });
+  assert.equal(location.href, '/r/current-id/__room');
+  assert.deepEqual(sent, ['/resume 2026-11-14-closed']);
+});
