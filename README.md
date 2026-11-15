@@ -446,16 +446,16 @@ a round of only passes.
 **Auto dev** relays instructions between the Discussion and the Worker, so you don't copy and
 paste them. When the latest agreed summary's **Next step** is `Send to the Worker: "…"`, a
 **Start auto dev** button appears beside it (`/autodev`). It sends that instruction to the worker as
-cycle 1 of up to 5, shown in the Worker tab as **Relayed from discussion**; each instruction sent is
-also announced in the Discussion ("Auto dev sent the instruction "…" to the Worker (cycle n of 5)."),
+cycle 1 of the run’s limit (5 by default), shown in the Worker tab as **Relayed from discussion**; each instruction sent is
+also announced in the Discussion ("Auto dev sent the instruction "…" to the Worker (cycle n of the limit)."),
 which the agents receive and the transcript keeps. The worker's full reply comes back to the Discussion as a **Worker report** and starts a round. If the worker fails, auto dev pauses with **Retry** and **Retry with…** in the Worker tab; the failure appears in the Discussion without starting a round, and the agents receive it with your next message. You can discuss it without ending that pause. A successful retry reports at the same cycle and resumes the run, unless it was restarted or ended meanwhile; another failure leaves it paused. That round is always summarized, and the summary must end with `Outcome: SEND`, `FINISH` or
 `WAIT FOR USER`; passing on it accepts its quoted instruction exactly as it stands. Only an agreed
 SEND summary written after the latest report sends its instruction, once; repeating earlier text
 there is a deliberate retry. The run pauses, with its reason above the message box, on `WAIT FOR
 USER`, an unagreed summary, a failed discussion turn, a message you type in either tab (a running
-worker still reports, but nothing more is sent), or after 5 worker cycles (failed attempts count;
-the 5th report is still reviewed). When paused, the next agreed instruction is shown with **Restart
-auto dev**, which grants another 5 cycles. While paused, any summary asks for `Outcome: FINISH`
+worker still reports, but nothing more is sent), or when the cycle limit is reached (failed attempts count;
+the last report is still reviewed). When paused, the next agreed instruction is shown with **Restart
+auto dev**, which starts a new run. A summary can put `Steps left: N` immediately before its Outcome line to set the limit from the plan, including the step being sent; the limit adjusts as the count changes, up to 15 cycles. This is a guardrail, not a cost cap: a corrected count can grant more cycles. While paused, any summary asks for `Outcome: FINISH`
 or `WAIT FOR USER` instead, and sends nothing. An agreed `FINISH`, running or paused, ends the run:
 review and merge the discussion's branch (`worker/<name>`) yourself, as ever. An instruction that can't be read reliably from Next step (two of them, no
 closing quotation mark…) is never sent, and the page says why. Reload keeps a run, its cycle count, a failure pause and its retry buttons,
