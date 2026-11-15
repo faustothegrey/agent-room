@@ -455,7 +455,7 @@ there is a deliberate retry. The run pauses, with its reason above the message b
 USER`, an unagreed summary, a failed discussion turn, a message you type in either tab (a running
 worker still reports, but nothing more is sent), or when the cycle limit is reached (failed attempts count;
 the last report is still reviewed). When paused, the next agreed instruction is shown with **Restart
-auto dev**, which starts a new run. A summary can put `Steps left: N` immediately before its Outcome line to set the limit from the plan, including the step being sent; the limit adjusts as the count changes, up to 15 cycles. This is a guardrail, not a cost cap: a corrected count can grant more cycles. While paused, any summary asks for `Outcome: FINISH`
+auto dev**, which starts a new run. A summary can put `Steps left: N` immediately before its Outcome line to set the limit from the plan, including the step being sent; the limit rises only when the count rises (to cycles used + N + 2, at most 15); otherwise it stays or falls, so fix rounds use up its slack. This is a guardrail, not a cost cap: a corrected count can grant more cycles. While paused, any summary asks for `Outcome: FINISH`
 or `WAIT FOR USER` instead, and sends nothing. An agreed `FINISH`, running or paused, ends the run:
 review and merge the discussion's branch (`worker/<name>`) yourself, as ever. An instruction that can't be read reliably from Next step (two of them, no
 closing quotation mark…) is never sent, and the page says why. Reload keeps a run, its cycle count, a failure pause and its retry buttons,

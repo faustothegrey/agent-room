@@ -1695,22 +1695,6 @@ export function summarySteps(summary) {
   if (!match) return null;
   const n = Number(match[1]);
   if (!Number.isSafeInteger(n) || n < 1) return null;
-  const next = lines.findIndex((line) => /^[\s*_#-]*Next step[\s*_:]*$/i.test(line));
-  if (next >= 0 && next < i) {
-    let end = lines.findIndex((line, j) => j > next && (/^\s*\*\*[^*]+\*\*[\s:]*$/.test(line) || /^[\s*_]*Outcome:/i.test(line)));
-    if (end < 0) end = lines.length;
-    if (i < end) {
-      const before = lines.slice(next + 1, i).join('\n');
-      const start = before.search(/Send to the Worker:\s*["“]/);
-      if (start >= 0) {
-        const section = lines.slice(next + 1, end).join('\n');
-        const after = section.slice(start).replace(/^Send to the Worker:\s*["“]/, '');
-        const closing = Math.max(after.lastIndexOf('"'), after.lastIndexOf('”'));
-        const prefix = before.slice(start).replace(/^Send to the Worker:\s*["“]/, '');
-        if (closing < 0 || closing >= prefix.length) return null;
-      }
-    }
-  }
   return n;
 }
 function latestAgreed(ctx) {

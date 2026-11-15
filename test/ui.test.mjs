@@ -1623,6 +1623,9 @@ test('auto dev: step metadata is only before the Outcome and outside the instruc
   const inside = '**Next step**\nSend to the Worker: "Say \"hello\"\nSteps left: 8\nthen finish"\nOutcome: SEND';
   assert.equal(summarySteps(inside), null);
   assert.deepEqual(summaryInstruction(inside), { text: 'Say "hello"\nSteps left: 8\nthen finish' });
+  const boundary = '**Next step**\nSend to the Worker: "Do it\nSteps left: 3"\nOutcome: SEND';
+  assert.equal(summarySteps(boundary), null);
+  assert.deepEqual(summaryInstruction(boundary), { text: 'Do it\nSteps left: 3' });
   for (const text of ['Steps left: 0', 'Steps left: -1', 'Steps left: 1.5', 'Steps left: 2 extra', 'Steps left: 3\nother']) {
     assert.equal(summarySteps(`**Next step**\nSend to the Worker: "x"\n${text}\nOutcome: SEND`), null);
   }
