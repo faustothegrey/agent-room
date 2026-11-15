@@ -1155,3 +1155,207 @@ test('Discussions tab: active discussions keep the User\'s order in localStorage
   assert.deepEqual(names(), ['2026-11-14-d', '2026-11-13-c', '2026-11-12-a', '2026-11-10-b', '2026-11-09-e']);
   assert.ok(store.has('agent-room.discussion-order:/tmp/other'));
 });
+
+test('the Worker tab shows a merge preview collapsed, its outcome in the summary, and keeps it open across refreshes', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'html-test-'));
+  const s = await serve(root, { clients: new Set(), transcript: [] });
+  try {
+    const html = await (await s.get('/__room')).text(); // the page as served, escapes resolved
+    const code = html.slice(html.indexOf('function setWorkerInfo('), html.indexOf('function setWorking('));
+    const node = (tag) => ({
+      tag, textContent: '', dataset: {}, children: [], open: false,
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      querySelectorAll() { const all = (n) => (n.children ?? []).flatMap((c) => [c, ...all(c)]); return all(this).filter((c) => c.tag === 'details' && c.open); },
+    });
+    const winfo = node('div'), wbox = {};
+    const setWorkerInfo = new Function('$', 'document', 'wbox', code + '; return setWorkerInfo;')(() => winfo, { createElement: node }, wbox);
+    const advice = 'Merge preview of worker/x into main (advice only: it can go stale, and a clean merge doesn\'t prove the combined code works)';
+    const lines = ['worktree line', `${advice}: would conflict in a.txt, b.txt, c.txt.`];
+    setWorkerInfo({ lines });
+    const [plain, preview] = winfo.children;
+    assert.equal(plain.tag, 'div'); assert.equal(plain.textContent, 'worktree line');
+    assert.equal(preview.tag, 'details'); assert.equal(preview.open, false);
+    assert.equal(preview.children[0].textContent, 'Merge preview of worker/x into main: would conflict in 3 files');
+    assert.match(preview.children[1].textContent, /^would conflict in a\.txt, b\.txt, c\.txt\. \(advice only: /);
+    preview.open = true;
+    setWorkerInfo({ lines: [lines[0], `${advice}: would conflict in a.txt.`] });
+    assert.equal(winfo.children[1].open, true);
+    assert.equal(winfo.children[1].children[0].textContent, 'Merge preview of worker/x into main: would conflict in 1 file');
+    setWorkerInfo({ lines: [`${advice}: clean.`] });
+    assert.equal(winfo.children[0].children[0].textContent, 'Merge preview of worker/x into main: clean');
+
+    // With lanes: each is collapsed under its summary, its lines (and its preview) inside.
+    const lanes = [
+      { own: true, summary: 'worker/x · 1 commit to review · would conflict in 3 files', lines },
+      { own: false, summary: 'worker/y · nothing to review', lines: ['Worktree y'] },
+    ];
+    setWorkerInfo({ lines: [...lines, 'Worktree y'], lanes });
+    assert.deepEqual(winfo.children.map((d) => [d.tag, d.open, d.children[0].textContent]),
+      [['details', false, lanes[0].summary], ['details', false, lanes[1].summary]]);
+    const inside = winfo.children[0].children[1].children;
+    assert.equal(inside[0].textContent, 'worktree line');
+    assert.equal(inside[1].tag, 'details');
+    winfo.children[0].open = true; inside[1].open = true;
+    setWorkerInfo({ lines: [...lines, 'Worktree y'], lanes: [{ ...lanes[0], summary: 'worker/x · 2 commits to review' }, lanes[1]] });
+    assert.deepEqual(winfo.children.map((d) => d.open), [true, false]); // kept open across a refresh, by branch
+    assert.equal(winfo.children[0].children[1].children[1].open, true);
+  } finally {
+    s.close();
+  }
+});
+
+test('Discussions tab Resume: navigates directly to openHere.url via notesGuard when open, or sends /resume when closed', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const notesCode = source.slice(source.indexOf('function notesAsk('), source.indexOf('function setEditor('));
+  const classListFor = () => {
+    const s = new Set();
+    return {
+      toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(cls) { s.add(cls); }, remove(cls) { s.delete(cls); }, contains(cls) { return s.has(cls); }
+    };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', value: '', hidden: false, disabled: false, children: [], dataset: {}, style: {},
+    classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    get lastChild() { return this.children.at(-1) || null; },
+    set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    addEventListener() {},
+    setAttribute() {},
+    getAttribute() { return null; },
+    focus() {},
+  });
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const document = { createElement: node, title: '' };
+  const location = { href: '/r/current-id/__room' };
+  const sent = [];
+  const notes = { open: false, list: [], id: null, base: '', editing: false, session: 0 };
+  const noteText = $('notes-text');
+  let openedNotes = 0;
+
+  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'send', 'notes', 'noteText', 'openNotes',
+    'let tab = "talk", replica = null, localThinking = "Claude", yourTurn = false, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'const renderAttachments = () => {};\n' +
+    'const notesDirty = () => notes.editing && noteText.value !== notes.base;\n' +
+    code + '\n' +
+    notesCode + '\n' +
+    'return { setRoom, renderDiscussions, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
+  )($, document, location, null, () => {}, (cb) => cb(), () => {}, (cmd) => sent.push(cmd), notes, noteText, () => { notes.open = true; openedNotes++; });
+
+  harness.setFiles([
+    'discussions/2026-11-15-current/notes.md',
+    'discussions/2026-11-15-open/notes.md',
+    'discussions/2026-11-14-closed/notes.md',
+  ]);
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-15-current',
+    discussion: 'Current',
+    started: true,
+    open: [
+      { active: 'discussions/2026-11-15-current', title: 'Current', started: true, current: true, url: '/r/current-id/__room' },
+      { active: 'discussions/2026-11-15-open', title: 'Open', started: true, current: false, url: '/r/open-id/__room' },
+    ],
+  });
+  harness.renderDiscussions();
+
+  const list = els['discussions-pane'].firstChild;
+  const rows = list.children.filter((c) => c.tag === 'div' && c.className.includes('discussion-row'));
+  const rowFor = (name) => rows.find((r) => r.children.find((c) => c.className !== 'drag-handle')?.children?.[0]?.textContent === name); // active rows start with the drag handle
+  const resumeBtn = (name) => rowFor(name).children.find((c) => c.tag === 'button' && c.textContent === 'Resume');
+
+  // 1. Open discussion, clean notes: navigates straight to openHere.url during a round without sending /resume.
+  let stopped = 0;
+  resumeBtn('2026-11-15-open').onclick({ stopPropagation() { stopped++; } });
+  assert.equal(stopped, 1);
+  assert.equal(location.href, '/r/open-id/__room');
+  assert.deepEqual(sent, []);
+
+  // 2. Open discussion, unsaved note in Notes: notesGuard asks before navigating.
+  location.href = '/r/current-id/__room';
+  notes.editing = true;
+  notes.base = 'saved body';
+  noteText.value = 'My draft';
+  resumeBtn('2026-11-15-open').onclick({ stopPropagation() {} });
+  assert.equal(location.href, '/r/current-id/__room');
+  assert.equal(openedNotes, 1);
+  assert.equal(els['notes-ask'].hidden, false);
+  assert.equal(els['notes-ask-text'].textContent, '"My draft" has unsaved changes.');
+
+  // Keep editing cancels the navigation and leaves the unsaved note intact.
+  const keepBtn = els['notes-ask-buttons'].children.find((b) => b.textContent === 'Keep editing');
+  keepBtn.onclick();
+  assert.equal(els['notes-ask'].hidden, true);
+  assert.equal(location.href, '/r/current-id/__room');
+  assert.equal(noteText.value, 'My draft');
+
+  // Discard changes resets the note and completes the navigation to openHere.url.
+  resumeBtn('2026-11-15-open').onclick({ stopPropagation() {} });
+  const discardBtn = els['notes-ask-buttons'].children.find((b) => b.textContent === 'Discard changes');
+  discardBtn.onclick();
+  assert.equal(els['notes-ask'].hidden, true);
+  assert.equal(noteText.value, 'saved body');
+  assert.equal(location.href, '/r/open-id/__room');
+  assert.deepEqual(sent, []);
+
+  // 3. Discussion that is not open: Resume still sends /resume <name>.
+  location.href = '/r/current-id/__room';
+  resumeBtn('2026-11-14-closed').onclick({ stopPropagation() {} });
+  assert.equal(location.href, '/r/current-id/__room');
+  assert.deepEqual(sent, ['/resume 2026-11-14-closed']);
+});
+
+test('a started discussion\'s members panel lists the agents it started with, locked but for On, which enables or disables each', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'html-test-'));
+  const s = await serve(root, { clients: new Set(), transcript: [] });
+  try {
+    const html = await (await s.get('/__room')).text();
+    const code = html.slice(html.indexOf('function agentRow('), html.indexOf('function selectedSettings('));
+    class El {
+      constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.classList = { toggle() {} }; this.value = ''; this.disabled = false; this.hidden = false; this.textContent = ''; }
+      append(...c) { for (const x of c) { if (typeof x === 'object') x.parentElement = this; this.children.push(x); } }
+      add(o) { this.children.push(o); }
+      replaceChildren(...c) { this.children = c; }
+      get options() { return this.children; }
+      querySelectorAll() { const all = (n) => n.children.flatMap((c) => typeof c === 'object' && c.tag ? [c, ...all(c)] : []); return all(this).filter((e) => e.tag === 'select' || (e.tag === 'input' && e.type !== 'checkbox')); }
+    }
+    const els = { 'talk-agent-rows': new El('div'), 'talk-settings-status': new El('p'), 'talk-member-note': new El('p') };
+    const posted = [];
+    let answer = { ok: true };
+    const room = { started: true, members: [{ provider: 'claude', name: 'Claude', model: 'opus', enabled: true }, { provider: 'codex', name: 'Codex', model: '', enabled: false }] };
+    const { renderMembers, setModels } = new Function('$', 'document', 'Option', 'room', 'settingsRows', 'post',
+      'let membersModels = null;\n' + code + '; return { renderMembers, setModels: (m) => { membersModels = m; } };')(
+      (id) => els[id], { createElement: (t) => new El(t) }, function (label, value) { this.label = label; this.value = value; }, room, { talk: [] },
+      async (path, body) => { posted.push([path, body]); return answer; });
+    setModels({ claude: [{ id: 'opus', label: 'Opus' }], codex: [], agy: [] });
+    renderMembers();
+    const rows = els['talk-agent-rows'].children;
+    const parts = (row) => { const inputs = []; const walk = (n) => n.children.forEach((c) => { if (c.tag) { if (c.tag === 'input' || c.tag === 'select') inputs.push(c); walk(c); } }); walk(row); return inputs; };
+    assert.equal(rows.length, 2);
+    const [on1, provider1, name1, model1] = parts(rows[0]), [on2] = parts(rows[1]);
+    assert.equal(on1.type, 'checkbox'); assert.equal(on1.checked, true); assert.equal(on2.checked, false);
+    assert.equal(on1.disabled, true); // the only one enabled: can't be unticked
+    assert.deepEqual([provider1.disabled, name1.disabled, model1.disabled], [true, true, true]);
+    assert.equal(name1.value, 'Claude'); assert.equal(model1.value, 'opus');
+    on2.checked = true; on2.onchange();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(posted, [['__agent-enabled', { name: 'Codex', enabled: true, member: true }]]);
+    // A refused change puts the box back and says why.
+    answer = { ok: false, text: async () => 'Wait.' };
+    const again = parts(els['talk-agent-rows'].children[1])[0];
+    again.checked = false; again.onchange();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(room.members[1].enabled, true);
+    assert.match(els['talk-settings-status'].textContent, /Could not change Codex: Wait\./);
+  } finally {
+    s.close();
+  }
+});

@@ -300,6 +300,9 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #winfo:empty { display: none; }
 #winfo .error { color: #ef4444; }
 #winfo code { font-size: .7rem; overflow-wrap: anywhere; user-select: all; }
+#winfo summary { cursor: pointer; }
+#winfo .lane-lines { margin: .2rem 0 .2rem 1rem; display: flex; flex-direction: column; gap: .2rem; overflow-wrap: anywhere; }
+#winfo .preview-files { margin: .2rem 0 0 1rem; max-height: 12rem; overflow-y: auto; }
 #winfo button { align-self: flex-start; font-size: .75rem; margin-top: .2rem; }
 #server { max-width: 100%; font-size: .75rem; color: light-dark(#3d5fc4, #5a7bd8); display: inline-flex; align-items: center; gap: .4rem; }
 #server[data-state="down"] { color: #ef4444; font-weight: 600; }
@@ -703,17 +706,48 @@ function showFailedAgents(agents) {
 // A brainstorm sends no work: its Worker tab says so, whatever the worker's own state.
 const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a discussion to send work.';
 let workerInfoShown = null, workPlaceholder = null;
+// Each lane (the discussion's own branch first, then every other one with something to review) is
+// shown collapsed under a one-line summary; what the User opens stays open across refreshes.
 function setWorkerInfo(info) {
   workerInfoShown = info;
   const el = $('winfo');
+  const open = new Set([...el.querySelectorAll('details[open]')].map((d) => d.dataset.key));
   el.replaceChildren();
   workPlaceholder ??= wbox.placeholder;
   const brainstorm = !!room?.brainstorm;
-  const lines = brainstorm ? [BRAINSTORM_NO_WORK] : info?.lines ?? [];
-  for (const line of lines) { const p = document.createElement('div'); p.textContent = line; if (brainstorm || info.error || info.disabled) p.className = 'error'; el.append(p); }
+  if (brainstorm) { const p = document.createElement('div'); p.textContent = BRAINSTORM_NO_WORK; p.className = 'error'; el.append(p); }
+  else if (info) {
+    const lineEl = (line) => {
+      let p = mergePreviewLine(line, open);
+      if (!p) { p = document.createElement('div'); p.textContent = line; }
+      if (info.error || info.disabled) p.className = 'error';
+      return p;
+    };
+    if (!info.lanes) { for (const line of info.lines) el.append(lineEl(line)); }
+    else for (const lane of info.lanes) {
+      const d = document.createElement('details'); d.dataset.key = 'lane ' + lane.summary.split(' · ')[0]; d.open = open.has(d.dataset.key);
+      const summary = document.createElement('summary'); summary.textContent = lane.summary;
+      const body = document.createElement('div'); body.className = 'lane-lines';
+      for (const line of lane.lines) body.append(lineEl(line));
+      d.append(summary, body);
+      el.append(d);
+    }
+  }
   if (ended || restarting) return;
   wbox.disabled = brainstorm || !!info?.disabled;
   wbox.placeholder = brainstorm ? BRAINSTORM_NO_WORK : info?.disabled ? info.lines[0] : workPlaceholder;
+}
+// A merge preview line can name many conflicting files: shown collapsed, its outcome in the summary.
+function mergePreviewLine(line, open) {
+  const m = /^(Merge preview of \\S+ into \\S+) \\((.+?)\\): (.*)$/.exec(line);
+  if (!m) return null;
+  const files = /^would conflict in (.*)\\.$/.exec(m[3])?.[1].split(', ');
+  const outcome = m[3].startsWith('clean') ? 'clean' : files ? 'would conflict in ' + files.length + (files.length === 1 ? ' file' : ' files') : 'could not be computed';
+  const d = document.createElement('details'); d.dataset.key = m[1]; d.open = open.has(m[1]);
+  const summary = document.createElement('summary'); summary.textContent = m[1] + ': ' + outcome;
+  const body = document.createElement('div'); body.className = 'preview-files'; body.textContent = m[3] + ' (' + m[2] + ')';
+  d.append(summary, body);
+  return d;
 }
 function setWorking(name) {
   localWorking = name; updateReplicaView();
@@ -1398,7 +1432,7 @@ function renderDiscussions() {
       } else if (!isCurrent) {
         const b = el('button', 'reopen primary', 'Resume');
         b.title = resumeTip(d, openHere, null);
-        b.onclick = (e) => { e.stopPropagation(); send('/resume ' + d); };
+        b.onclick = (e) => { e.stopPropagation(); if (openHere) notesGuard(() => { location.href = openHere.url; }); else send('/resume ' + d); };
         row.append(b);
       }
       const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
@@ -1579,7 +1613,7 @@ function renderBrainstorms() {
       if (openHere) {
         const g = el('button', 'reopen', 'Go to');
         g.title = 'Show this open brainstorm: its agents carry on';
-        g.onclick = () => { location.href = openHere.url; };
+        g.onclick = (e) => { e.stopPropagation(); notesGuard(() => { location.href = openHere.url; }); };
         row.append(g);
       } else if (!isCurrent) {
         const r = el('button', 'reopen primary', 'Resume');
@@ -1795,6 +1829,8 @@ function setRoom(r) {
   const changed = room && r && room.active !== r.active;
   room = r;
   if (changed) { peek = null; updateTabs(); }
+  // The members panel follows the room: each agent's state, or the usual panel once a new discussion begins.
+  if (membersModels && $('talk-settings').open) { if (r?.started) renderMembers(); else $('talk-settings').ontoggle(); }
   renderAutoDev();
   $('room-name').textContent = r.folder?.replace(/[/]+$/, '').split('/').pop() || r.folder || 'agent-room';
   $('disc').textContent = r.discussion || '';
@@ -1820,6 +1856,7 @@ function showVersion(c) {
     '\\n+ means uncommitted changes (outside discussions/). These are snapshots of the checkout, taken at start and at the last Reload: after a Reload the process may run a mix of files from both.';
   el.textContent = text; el.title = title;
 }
+let membersModels = null; // the model lists, while the members panel shows a started discussion's agents (renderMembers)
 // Settings stay outside the conversation; saving never changes an active CLI session.
 const settingsRows = {};
 let settingsSave = Promise.resolve();
@@ -1883,6 +1920,31 @@ function agentRow(parent, a, models, title, member = null) {
   return { row, refresh, get: () => ({ name: name.value.trim(), provider: provider.value, model: model.value === '__custom' ? custom.value.trim() : model.value }),
     active: () => !member || checked.checked, incomplete: () => (!member || checked.checked) && model.value === '__custom' && !custom.value.trim() };
 }
+// Once the discussion has started, the members panel lists the agents it started with (room.members):
+// each one's On box leaves it out of this discussion or brings it back, from its next round. Their
+// provider, name and model are fixed; new discussions get theirs before their first message.
+function renderMembers() {
+  const parent = $('talk-agent-rows'), result = $('talk-settings-status'), members = room?.members ?? [];
+  parent.replaceChildren();
+  delete settingsRows.talk; // nothing here saves settings
+  const on = () => members.filter((m) => m.enabled).length;
+  members.forEach((m, i) => {
+    const a = { ...m, active: m.enabled, automatic: false };
+    const { row } = agentRow(parent, a, membersModels, 'Agent ' + (i + 1), {
+      provider() {}, name() {}, refresh() {},
+      locked: () => a.active && on() <= 1,
+      toggle(enabled) {
+        a.active = m.enabled = enabled;
+        result.textContent = '';
+        post('__agent-enabled', { name: m.name, enabled, member: true })
+          .then(async (res) => { if (!res.ok) throw new Error(await res.text()); })
+          .catch((err) => { m.enabled = !enabled; renderMembers(); result.textContent = 'Could not change ' + m.name + ': ' + err.message; });
+      },
+    });
+    for (const el of row.querySelectorAll('select, input:not([type="checkbox"])')) el.disabled = true;
+  });
+  $('talk-member-note').hidden = true;
+}
 function selectedSettings(data) {
   return data.started ? data.launchDefaults ?? data.defaults ?? data.settings : data.settings;
 }
@@ -1903,6 +1965,12 @@ for (const scope of ['talk', 'work']) {
       const res = await fetch('__settings');
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(), selected = selectedSettings(data);
+      if (scope === 'talk') membersModels = data.started && room?.members ? data.models : null;
+      if (scope === 'talk' && membersModels) {
+        renderMembers();
+        hint.textContent = 'This discussion’s members. Untick one to leave it out of this discussion from its next round; tick it to bring it back. Their provider and model stay as they started: choose those for a new discussion before its first message.';
+        return;
+      }
       if (scope === 'talk') selected.agents = memberPanelAgents(data);
       if (scope === 'work') selected.worker = data.settings.worker;
       const parent = $(scope + '-agent-rows'); parent.replaceChildren();
@@ -2672,7 +2740,7 @@ function handleScreen(req, res, url, dir, screen) {
       if (url.pathname === '/__agent-enabled') {
         if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before changing discussion agents.');
         if (!screen.setAgentEnabled) return send(409, 'text/plain', 'Discussion agent controls are unavailable.');
-        return Promise.resolve().then(() => screen.setAgentEnabled(body?.name, body?.enabled)).then(() => send(204, 'text/plain', ''), (err) => send(400, 'text/plain', err.message));
+        return Promise.resolve().then(() => screen.setAgentEnabled(body?.name, body?.enabled, body?.member === true)).then(() => send(204, 'text/plain', ''), (err) => send(400, 'text/plain', err.message));
       }
       if (url.pathname === '/__retry') {
         if (!screen.retryWork) return send(409, 'text/plain', 'Retry is unavailable.');

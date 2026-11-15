@@ -141,14 +141,23 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, r
     reset() { session.id = randomUUID(); session.started = false; },
     async turn(prompt) {
       agent.lastUsage = null;
-      const args = ['-p', '--output-format', 'json'];
-      args.push(session.started ? '--resume' : '--session-id', session.id);
-      if (model) args.push('--model', model);
-      if (instructions) args.push('--append-system-prompt', instructions);
-      args.push('--chrome', '--strict-mcp-config', '--allowedTools', ...CLAUDE_ALLOWED);
-      // --tools is variadic, so it must come last: the prompt goes on stdin.
-      args.push('--tools', ...CLAUDE_TOOLS);
-      const out = await runner('claude', args, { input: prompt, cwd: at(cwd), timeoutMs, agent: name });
+      const call = () => {
+        const args = ['-p', '--output-format', 'json'];
+        args.push(session.started ? '--resume' : '--session-id', session.id);
+        if (model) args.push('--model', model);
+        if (instructions) args.push('--append-system-prompt', instructions);
+        args.push('--chrome', '--strict-mcp-config', '--allowedTools', ...CLAUDE_ALLOWED);
+        // --tools is variadic, so it must come last: the prompt goes on stdin.
+        args.push('--tools', ...CLAUDE_TOOLS);
+        return runner('claude', args, { input: prompt, cwd: at(cwd), timeoutMs, agent: name });
+      };
+      // A first turn that never completed (stopped, timed out, failed) may still have created the
+      // session, with its work so far: claude then refuses the same --session-id, and it is resumed.
+      const out = await call().catch((err) => {
+        if (session.started || !String(err?.message).includes(`Session ID ${session.id} is already in use`)) throw err;
+        session.started = true;
+        return call();
+      });
       const result = JSON.parse(out);
       if (result.is_error) throw new Error(`claude: ${result.result || 'turn failed'}`);
       session.started = true;

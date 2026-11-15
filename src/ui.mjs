@@ -310,7 +310,7 @@ function wire(ctx) {
   };
   ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
   ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
-  ctx.screen.setAgentEnabled = (name, enabled) => setAgentEnabled(ctx, name, enabled);
+  ctx.screen.setAgentEnabled = (name, enabled, member) => setAgentEnabled(ctx, name, enabled, { member });
 }
 
 // The screen's header: the full root path, the active discussion (active: its folder, under the
@@ -321,6 +321,8 @@ function header(ctx) {
     discussion: d ? d.title : ctx.state.brainstorm ? 'New brainstorm' : 'No discussion started',
     active: folderOf(ctx), started: !!ctx.logPath || !!ctx.state.brainstorm,
     brainstorm: !!ctx.state.brainstorm, // a brainstorm, in brainstorms/<name>/ once started (see newBrainstorm)
+    // The agents this discussion started with, for the members panel once it has started.
+    members: ctx.agentSpecs.split(',').map((s) => parseSpec(s)).map((a) => ({ ...a, enabled: !(ctx.state.disabledAgents ?? []).includes(a.name) })),
     failedAgents: ctx.room.agents.filter((a) => ctx.state.transcript.some((m) => m.error && m.speaker === a.name) || (ctx.state.disabledAgents ?? []).includes(a.name)).map((a) => ({ name: a.name, disabled: (ctx.state.disabledAgents ?? []).includes(a.name) })),
     autoDev: autoDevView(ctx), retryId: ctx.retryFailure?.available ? ctx.retryFailure.id : null,
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
@@ -339,19 +341,23 @@ function showHeader(ctx) {
   }
 }
 
-// A failed participant can be disabled in this discussion without changing future-room defaults.
-export function setAgentEnabled(ctx, name, enabled) {
+// A participant can be disabled in this discussion without changing future-room defaults: a failed
+// one from its notice, any one of a started discussion from the members panel (`member`). During a
+// round, the change counts from the next round (a round keeps the speakers it started with) and is
+// checkpointed with that round; between rounds, at once.
+export function setAgentEnabled(ctx, name, enabled, { member = false } = {}) {
   const agent = ctx.room.agents.find((a) => a.name === name);
   if (!agent || typeof enabled !== 'boolean') throw new Error('Unknown discussion agent.');
-  if (ctx.busy || ctx.stopped) throw new Error('Wait for the current discussion turn to end.');
+  if (ctx.stopped || (ctx.busy && !member)) throw new Error('Wait for the current discussion turn to end.');
+  if (member && !settingsStarted(ctx)) throw new Error('Before the discussion starts, choose its members in the panel.');
   const disabled = new Set(ctx.state.disabledAgents ?? []);
   if (!enabled) {
-    if (!ctx.state.transcript.some((m) => m.speaker === name && m.error)) throw new Error('Only a failed agent can be disabled here.');
+    if (!member && !ctx.state.transcript.some((m) => m.speaker === name && m.error)) throw new Error('Only a failed agent can be disabled here.');
     if (!disabled.has(name) && ctx.room.agents.length - disabled.size <= 1) throw new Error('At least one discussion agent must stay enabled.');
     disabled.add(name);
   } else disabled.delete(name);
   ctx.state.disabledAgents = [...disabled];
-  captureRound(ctx);
+  if (!ctx.busy) captureRound(ctx);
   showHeader(ctx);
 }
 
@@ -2485,6 +2491,13 @@ function worktreeLines(place, s) {
   }
   return lines;
 }
+// The Worker tab shows each lane collapsible, under this line: its branch and its state in brief.
+function laneSummary(place, s, brief) {
+  if (!s.exists) return `${place.branch} · worktree not created yet`;
+  const parts = [s.operation && `${s.operation} in progress`, s.ahead && `${plural(s.ahead, 'commit')} to review`,
+    s.treeDirty && 'uncommitted changes', ...brief].filter(Boolean);
+  return [place.branch, ...(parts.length ? parts : ['nothing to review'])].join(' · ');
+}
 
 // The checkout this process's code comes from, as it is now: its Git top folder, branch, commit and
 // whether it has uncommitted changes (outside discussions/, which hold no code). A snapshot, taken
@@ -2531,23 +2544,26 @@ const laneOf = (ctx) => (ctx.discussion && !ctx.state?.brainstorm ? ctx.discussi
 async function workerInfo(ctx, seen = new Map(), own = null) {
   own ??= await lanePlace(ctx, laneOf(ctx));
   if (own.disabled) return { lines: [own.disabled], disabled: true };
-  // A lane's lines, and whether it has something to review: { lines, review }.
+  // A lane's lines, a one-line summary for the page, and whether it has something to review:
+  // { lines, summary, review }.
   const of = (place) => {
     if (!seen.has(place.path)) seen.set(place.path, (async () => {
       const s = await worktreeStatus(place);
-      return { lines: [...worktreeLines(place, s), ...(s.exists ? await laneChecks(place) : [])], review: !!(s.ahead || s.treeDirty) };
+      const checks = s.exists ? await laneChecks(place) : { lines: [], brief: [] };
+      return { lines: [...worktreeLines(place, s), ...checks.lines], summary: laneSummary(place, s, checks.brief), review: !!(s.ahead || s.treeDirty) };
     })());
     return seen.get(place.path);
   };
   try {
-    const lines = [...(await of(own)).lines];
+    const mine = await of(own);
+    const lines = [...mine.lines], lanes = [{ ...mine, own: true }];
     if (!seen.has('lanes')) seen.set('lanes', existingLanes(ctx));
     for (const other of await seen.get('lanes')) {
       if (other.path === own.path) continue;
       const o = await of(other);
-      if (o.review) lines.push(...o.lines);
+      if (o.review) { lines.push(...o.lines); lanes.push(o); }
     }
-    return { lines };
+    return { lines, lanes: lanes.map(({ lines, summary, own }) => ({ lines, summary, own: !!own })) };
   } catch (err) { return { lines: [`✗ ${err.message}`], error: true }; }
 }
 
@@ -2559,22 +2575,24 @@ async function workerInfo(ctx, seen = new Map(), own = null) {
 async function laneChecks(place) {
   const main = await mainRef(place.top);
   const [mainId, tip] = await Promise.all([git(place.top, 'rev-parse', main), git(place.top, 'rev-parse', place.branch)]);
-  if (!Number(await git(place.top, 'rev-list', '--count', `${main}..${place.branch}`))) return [];
-  const lines = [];
+  if (!Number(await git(place.top, 'rev-list', '--count', `${main}..${place.branch}`))) return { lines: [], brief: [] };
+  const lines = [], brief = [];
   if (await gitOk(place.top, 'merge-base', '--is-ancestor', mainId, tip)) lines.push(`${place.branch} contains current ${main} (${mainId.slice(0, 7)}).`);
   else {
     const missing = Number(await git(place.top, 'rev-list', '--count', `${place.branch}..${main}`));
+    brief.push(`lacks ${plural(missing, 'commit')} of ${main}`);
     lines.push(`${place.branch} lacks ${plural(missing, 'commit')} of current ${main} (${mainId.slice(0, 7)}): its worker merges ${main} in with its next instruction. Merge it into ${main} after that, once its tests pass on top of ${main}.`);
   }
   const t = await readTested(place);
-  if (!t) lines.push(`${place.branch}: no test report on top of ${main} from its worker yet.`);
+  if (!t) { lines.push(`${place.branch}: no test report on top of ${main} from its worker yet.`); brief.push('not tested on ' + main); }
   else {
     const moved = [t.branch !== tip && `${place.branch} is now at ${tip.slice(0, 7)}`, t.main !== mainId && `${main} is now at ${mainId.slice(0, 7)}`].filter(Boolean);
+    brief.push(moved.length ? 'test report out of date' : `tests ${t.result}`);
     lines.push(`Last tested (the worker's report): ${place.branch} ${t.branch.slice(0, 7)} with ${main} ${t.main.slice(0, 7)}, tests ${t.result}, ${clock(t.at)}. ${moved.length ? `Out of date: ${moved.join(' and ')}.` : 'Still current.'}`);
   }
   const preview = await mergePreview(place, main);
-  if (preview) lines.push(preview);
-  return lines;
+  if (preview) { lines.push(preview.line); brief.push(preview.brief); }
+  return { lines, brief };
 }
 const testedFile = async (place) => join(await git(place.path, 'rev-parse', '--absolute-git-dir'), 'agent-room-tested.json');
 async function readTested(place) {
@@ -2614,9 +2632,12 @@ async function mergePreview(place, main) {
   if (!await hasMergeTree()) return null;
   const advice = `Merge preview of ${place.branch} into ${main} (advice only: it can go stale, and a clean merge doesn't prove the combined code works)`;
   const r = await gitStatus(place.top, 'merge-tree', '--write-tree', '--name-only', '--no-messages', main, place.branch);
-  if (r.code === 0) return `${advice}: clean.`;
-  if (r.code === 1) return `${advice}: would conflict in ${[...new Set(r.out.split('\n').slice(1).filter(Boolean))].join(', ') || 'files Git did not name'}.`;
-  return `${advice}: it could not be computed (${r.err || `git exited with ${r.code}`}).`;
+  if (r.code === 0) return { line: `${advice}: clean.`, brief: 'merges cleanly' };
+  if (r.code === 1) {
+    const files = [...new Set(r.out.split('\n').slice(1).filter(Boolean))];
+    return { line: `${advice}: would conflict in ${files.join(', ') || 'files Git did not name'}.`, brief: files.length ? `would conflict in ${plural(files.length, 'file')}` : 'would conflict' };
+  }
+  return { line: `${advice}: it could not be computed (${r.err || `git exited with ${r.code}`}).`, brief: 'merge preview failed' };
 }
 
 // The worker: instructions from the Worker tab run one at a time, in the order sent, alongside the

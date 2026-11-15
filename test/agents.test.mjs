@@ -49,6 +49,28 @@ test('claude: an error result throws and does not mark the session started', asy
   assert.ok(calls[1].args.includes('--session-id'));
 });
 
+test('claude: a session that a turn left behind ("already in use") is resumed, keeping its work', async () => {
+  const calls = [];
+  const session = { id: 'dbf385e1-cf7b-44eb-82b1-e2e868fcc74d' };
+  const runner = async (command, args) => {
+    calls.push(args);
+    if (args.includes('--session-id')) throw new Error(`claude exited with code 1: Error: Session ID ${session.id} is already in use.`);
+    return JSON.stringify({ result: 'resumed', is_error: false });
+  };
+  const agent = createClaudeAgent({ name: 'W', runner, session });
+  assert.equal(await agent.turn('p1'), 'resumed');
+  assert.equal(calls[0][calls[0].indexOf('--session-id') + 1], session.id);
+  assert.equal(calls[1][calls[1].indexOf('--resume') + 1], session.id);
+  assert.equal(session.started, true);
+  // Any other failure, or one on a started session, is not retried.
+  const other = createClaudeAgent({ name: 'X', runner: async () => { throw new Error('claude exited with code 1: boom'); } });
+  await assert.rejects(other.turn('p'), /boom/);
+  let n = 0;
+  const started = createClaudeAgent({ name: 'Y', session: { id: 's', started: true }, runner: async () => { n++; throw new Error('Session ID s is already in use.'); } });
+  await assert.rejects(started.turn('p'), /already in use/);
+  assert.equal(n, 1);
+});
+
 test('codex: resumes the thread it was given and runs without a sandbox every call', async () => {
   const first = [
     '{"type":"thread.started","thread_id":"t-1"}',
