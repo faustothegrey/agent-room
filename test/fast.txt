@@ -1,0 +1,181 @@
+claude: first turn creates the session, later turns resume it, writes anywhere and has Bash
+claude: an error result throws and does not mark the session started
+claude: a session that a turn left behind ("already in use") is resumed, keeping its work
+codex: resumes the thread it was given and runs without a sandbox every call
+codex events: last agent_message wins, noise lines are ignored, turn.failed throws
+a recreated agent on the same session object resumes instead of starting over
+the rulebook goes in as system-level instructions on every turn, for both providers
+each turn reports its usage: claude from its JSON result, codex from turn.completed
+claude worker: Bash is available and pre-approved
+claudeTitle: one claude call with no tools and no saved session; the first line, unquoted
+selected models are passed to the provider on initial and resumed turns
+a working directory given as a function is read at each turn (the worker's worktree)
+a recorded program: written at spawn with its start, removed when its process group ends
+leftovers: not in this server's procs and group alive, with the same start; reused PIDs and gone groups dropped
+leftovers: another live server's program is not one; a server PID reused by another process counts as gone
+a record is written through a temporary file; a scan ignores an incomplete one and never deletes it
+leftovers with real processes: a live group is found until it ends; a reused PID (other start) is not
+agy turns resume and resend changed rulebooks, including after session serialization
+agy errors do not record rules or leave stale usage
+agy non-JSON diagnostics are short and do not echo authentication data
+listFiles: every non-hidden file, recursively, sorted
+Markdown is rendered with images inline, and plain links to images get a preview
+files are served with their type; nothing outside proposal/ or hidden is
+the mtime endpoint changes when a doc is rewritten, so open pages reload
+pick: arrows move, Enter opens and stays, Esc closes
+the discussion screen: a new page gets the room so far, then live events
+the screen remembers "your turn" until the User speaks again
+without a screen, /__room is just a missing file
+messageView marks errors and passes for the page
+the screen lists proposal/ files and shows the one picked, for every open page
+what the User types on the screen reaches the room only from the page itself
+in terminal mode the page only watches: /__say is refused and the reset says so
+messageView hides summary turns and labels a summary's result
+the Worker tab: instructions reach the worker only from the page, and a new page gets its chat
+showing the Worker tab asks the room to recheck its branches, only from the room page
+without a worker input (terminal mode), /__work is refused
+a new page gets the gauges; the former auto-summarize endpoint is gone
+a room serves only its sections of the root: discussions/ and proposal/, with transcripts as text
+agent settings endpoint reads choices and protects saves with the same-origin check
+the heartbeat: /__health says it is agent-room, with its process, root and discussion
+the heartbeat counts the room pages open on it, and stops counting a closed one
+a page learns its code version, so it can refresh after a reload that changed it
+running rooms can be listed without changing the current conversation
+Open room in folder…: the page's request reaches the room, and a refused token answers 400
+attachments never overwrite: a taken name is saved as name-2.ext, name-3.ext, …
+a message with attachments: the files are saved in files/ and their paths appended to the text
+if any attachment fails to save, or the message is not taken, nothing is sent and nothing stays saved
+the page keeps the text and the attachments when sending them fails, and clears them once sent
+member rows lock two checked boxes and keep the selected row order
+automatic member names avoid rows and worker, while typed names stay editable
+member panel keeps legacy agent lists intact rather than truncating them
+the room header shows the folder basename, puts the full path in #replica-header with and without replication, and places #server-box and #peer-warning in #room-zone
+room checkout: docFiles, servable, unknown text files as plain text, gitignored/binary files handling
+right pane three tabs, header disc-workers, and docLabel behavior
+peek lifecycle: tab indicator, banner, Back to current, revealDoc immunity, and active discussion change
+Room checkout in Explorer lists root files including discussions/README.md and excludes dated discussions
+Explorer marks the shown file with .shown and aria-current, and wraps levels with more than 10 files in .file-columns
+Discussions tab: active discussions keep the User's order in localStorage, new ones on top, Move up / Move down
+the Worker tab shows a merge preview collapsed, its outcome in the summary, and keeps it open across refreshes
+Discussions tab Resume: navigates directly to openHere.url via notesGuard when open, or sends /resume when closed
+a started discussion's members panel lists the agents it started with, locked but for On, which enables or disables each
+Brainstorms tab: rows by title with their actions, and an order of their own (agent-room.brainstorm-order:<folder>), apart from the Discussions order
+terminal: a non-loopback address is refused, even with a forged Host, Origin and the real token
+terminal: a Host other than localhost, 127.0.0.1 or ::1 is refused (DNS rebinding, LAN name)
+terminal: the WebSocket needs an Origin matching Host; the token endpoint allows none, refuses a mismatch
+terminal: a missing or wrong token gets 401 on the WebSocket
+notes: create, list, read, save exactly as typed, remove; stored outside the room, one set per room folder
+notes: bad ids, bodies and methods are refused; ids never reach outside the folder
+notes: only from this computer, with the terminal pane's Host and Origin checks
+storage ignores project filters/transcripts rules, preserves Git state and stable identity
+concurrent bootstrap pairings cannot replace an established room identity
+a round is: user, then agents in order until all of them pass in a row
+the first prompt carries the introduction; later prompts do not
+each agent sees exactly what it has not seen, never its own replies
+a failing agent is recorded and ends the round; it gets what it missed next time
+duplicate agent names are refused
+a pass is exactly PASS, whitespace trimmed, optional trailing period
+all selected agents passing in a row ends the round, without a notice
+a real reply resets the pass count
+the lap cap ends the round with a notice (10 laps in a discussion, 20 in a brainstorm)
+no cap notice when the 10th lap completes the all-pass condition
+the pass count resets for each user message
+an error mid-round ends the round
+passes are flagged for the screen to hide, and shown to other agents as (passed)
+@name addresses only that agent, case-insensitively, and keeps the text as typed
+a single PASS ends an addressed round
+an unknown @name sends nothing to any agent and records nothing
+an @mention later in the message is ordinary text
+an agent left out of a round receives that exchange when next selected
+a room recreated on the same state continues the conversation
+a reply carries the usage its agent reported for that turn
+summary: the draft is agreed when the other agent passes on it
+summary in a brainstorm: the same format and agreement, without the sentence about pending-instructions.md
+summary: a revision counts as its author's acceptance
+summary: three turns each without agreement fail, and the last revision stands
+summary: the drafter rotates, and agents see the result in later rounds
+summary: nothing to summarize, or a failed turn, records no result
+summary: with a single agent, its draft is the summary
+state.briefing goes with each agent's first prompt only
+discussion agents take turns in the selected row order
+Shutdown server, from the server's own address, ends every room; with --node only the launch room replicates
+ending refuses room creation, including a delayed folder choice; busy warnings name all rooms
+stopping a room kills provider child commands even after the provider exits
+CLI accepts agy for discussion and worker and exposes both in settings
+session IDs identify each current agent and the separate worker
+each load builds a new room on the same conversation state and CLI sessions
+a failing load leaves ctx as it was
+the worker is a separate claude agent with its own session, kept across reloads
+auto-summarize: on by default, a summary follows a round in which an agent spoke
+auto-summarize: no summary after a round of passes
+discussion folders: date + title, date and time without a title, -2 when taken
+session transcripts: session-<date>-<time>.md, -2 when taken, never overwritten
+the first message creates the discussion (titled by Claude) and its transcript before the agents see it
+if the title fails, the folder is named after the date and time; an unknown @name creates nothing
+/resume without a checkpoint, before the first message: no title asked, the transcript goes in that discussion
+/resume, after the session started, of a discussion without a checkpoint: a fresh session there, from its handoff
+agent settings persist, apply before startup, and switch only the active worker after startup
+/move: a whole discussion into archive/ or deferred/ and back; never the one in use
+/resume of an archived discussion makes it active first; new names skip archived ones
+Restart keeps the launch flags that matter: the same port, agents, worker and dev mode, in the discussion in use
+/brainstorm: its first message names it in brainstorms/<date>-<title>/ with a transcript; the agents are told it is a brainstorm, and its folder
+brainstorm and discussion names never clash: each skips the names the other kind (and archive/, deferred/) has taken
+terminal: New brainstorm ends the session in use (a discussion, or a brainstorm), which keeps its folder and transcript
+terminal: New discussion or Resume ends the brainstorm session (its folder stays); the next message then starts a discussion
+Reload keeps the brainstorm's messages and its mode: the next message goes on in its folder, creating no discussion
+/new: nothing to end before the first message; it creates nothing and changes nothing
+/new after a round: the session ends as with Resume; the next message starts a new titled discussion
+a transcript that can't be written keeps the worker's reply visible, reports the error and ends the busy state
+without a Git repository, or without a commit, the worker is disabled with an explanation
+a folder already at the worktree's place is refused and left alone; the worker doesn't run
+the header's version: the checkout's commit and uncommitted changes, outside discussions/, as a snapshot
+Reload adds its own snapshot of the checkout to the header, keeping the start's
+Switch room lists this server's rooms, with the pages open on each and which one is asking
+no worker sends from a brainstorm, before or after its first message, on the screen or in the terminal; once turned into a discussion, its work goes to its own lane
+terminal: a brainstorm's worker session is never carried into a discussion, by New discussion or Resume
+every round saves a checkpoint; Close keeps it; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions
+Resume replaces a brainstorm only with a valid checkpoint; on the discussion in use it changes nothing; Start fresh asks twice and keeps only the latest summary
+Start fresh briefs with the latest summary, marked if not agreed, or none; a Restart before the first message keeps it; the first round replaces it
+removed commands answer with a hint and reach no agent
+Explorer's Resume says what it will do: show an open one, continue a saved one, or start from the handoff
+auto dev: reading the instruction only from Next step, and the Outcome line
+auto dev: while paused, any agreed summary ending in Outcome: FINISH finishes the run, and none sends anything
+auto dev: while a run is active, the status under the title says so instead of "your turn"
+on the screen, New discussion keeps the discussion open with its sessions; Resume of an open one goes there; brainstorms open beside them, several at once
+switching discussion while one waits for its worker task: the message typed in the other and the worker's later report each reach their own discussion
+Restart brings back every open discussion and started brainstorm of a folder, each in its own context
+Quit room during a round: after the grace period the agent mid-turn is stopped, and no new one starts
+Open room in folder… opens an existing room, says when it is open elsewhere, and creates one only with its one-time token
+Stage 3: Explorer queues rollback separately from two-click archive confirmation after a report
+a worker task cut off after an edit: Resume reports the uncommitted edits, and the queue holds for that discussion
+an interrupted round: Resume says the transcript grew after the checkpoint; every restore tells the agents once; an unstarted Claude session gets a new ID
+a worker task from a discussion with no full checkpoint yet is recorded too, and reported on the next Resume
+worker notes follow their captured owner, including brainstorms and room-wide events
+agy is accepted for discussion and worker settings, and its catalog is read with a fallback
+agy rulebook delivery state survives a saved checkpoint for both roles
+agy model lookup failure keeps the initial fallback and is throttled
+started discussion settings preserve the local worker and permit names from future agent defaults
+new screen discussions and terminal sessions use the saved worker default
+a started worker-only change leaves an absent defaults file absent
+open discussions keep their members and sessions; new and resumed discussions use their own sets
+launch defaults follow flags and panel changes per folder, without changing other rooms
+auto dev: a failure during an agent turn reaches that agent with the next message
+a failed discussion agent can be disabled across Reload and Resume, and enabled again
+a brainstorm saves its checkpoint under brainstorms/<name>, without a worker part; Resume and Restart bring it back with its sessions and chat
+an existing discussion checkpoint, saved before brainstorms had their own, still loads under its name
+Turn into a discussion, closed: the folder and checkpoint move, never over an existing folder; Resume keeps each provider's session and tells each agent once
+Turn into a discussion, open: its session goes on in discussions/<name>/ with the same sessions, each agent told once; then the worker can be sent work
+Delete: refused while the brainstorm is open (here or beside), otherwise its folder and checkpoint are removed
+the members panel leaves any agent of a started discussion out, from its next round, and brings it back
+totals add up turn by turn; cost only when some turn had one
+quota summary covers only the room's providers, and skips unavailable ones
+the /usage report lists each agent and the quotas, or says the meter is unreachable
+fetchQuota reads the meter, and returns null when it is down
+quota gauges: one per window, for the room's providers only, in their order
+reset dates share a local 24-hour format without changing the clock or zone
+claude login: from loginExpiresAt in claude auth status; ending in 2 days or less, expired, logged out, unreadable
+codex login: logged in with no expiry, logged out, or unknown
+checkLogin: a command that fails or times out is unknown, with its error; a logged-out exit code still reads
+agy gauges use Antigravity model windows and hide missing data
+agy login is unmonitored without invoking a command
+agy grouped gauges show Gemini and Argon while summaries retain all models

@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test } from './helpers/test.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtempSync, readdirSync, readFileSync, realpathSync } from 'node:fs';

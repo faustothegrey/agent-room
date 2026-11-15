@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test } from './helpers/test.mjs';
 import assert from 'node:assert/strict';
 import { createRoom, isPass } from '../src/room.mjs';
 

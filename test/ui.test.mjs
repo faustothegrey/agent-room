@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test } from './helpers/test.mjs';
 import assert from 'node:assert/strict';
 import { handleLine, load, restartArgs, sessionView, workerLane, workNote } from '../src/ui.mjs';
 
