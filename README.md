@@ -510,9 +510,10 @@ Drag the app into the Dock. The app serves nothing itself: the server is one age
 (`node src/cli.mjs`), which is the web server and every room's conversation and agents' sessions.
 If such a process already answers on port 5566 (wherever it was started, and in whatever folder),
 the app opens its first room's page. Otherwise it runs
-`npm start -- --open --node Mac --peer charon=http://192.168.178.70:5566` in the fixed project
-path `/Users/fausto/Software/agent-room`, enabling replication with charon and reusing the saved
-pairing. Edit the script and rebuild the app if the checkout or peer address changes.
+`npm start -- --open` in the fixed project path `/Users/fausto/Software/agent-room`, without
+replication. To replicate with charon again (reusing the saved pairing), add
+`--node Mac --peer charon=http://192.168.178.70:5566` to that command in the script and rebuild the
+app; rebuild it too if the checkout changes.
 Only the app reuses a running process: `npm start` in a terminal still moves to a free port when
 5566 is taken.
 
