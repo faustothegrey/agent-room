@@ -450,6 +450,10 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #files .discussion-row, #disc-list .discussion-row { align-items: baseline; flex-wrap: wrap; }
 #files .discussion-row > .discussion-lines, #disc-list .discussion-row > .discussion-lines, #disc-list .discussion-row > .discussion-block { flex-basis: 14rem; flex: 1; min-width: 0; }
 #files .discussion-row.in-use, #disc-list .discussion-row.in-use { background: linear-gradient(#3b82f614, #3b82f614), Canvas; box-shadow: inset 3px 0 #60a5fa; border-radius: 4px; padding-left: .5rem; }
+#disc-list .drag-handle { cursor: grab; color: var(--dim); padding: 0 .2rem; user-select: none; }
+#disc-list .discussion-row.dragging { opacity: .5; }
+#disc-list .discussion-row.drop-before { box-shadow: inset 0 2px #60a5fa; }
+#disc-list .discussion-row.drop-after { box-shadow: inset 0 -2px #60a5fa; }
 #disc-list .discussion-row.peeking { background: linear-gradient(#f59e0b18, #f59e0b18), Canvas; box-shadow: inset 3px 0 #f59e0b; border-radius: 4px; padding-left: .5rem; }
 .peek-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem; margin: 0 0 .6rem; padding: .35rem .6rem; border: 1px solid #f59e0b; border-radius: 6px; background: #f59e0b1f; color: light-dark(#92400e, #fcd34d); font-size: .82rem; }
 .peek-banner button { font-size: .78rem; padding: .1rem .5rem; border-color: #f59e0b88; color: inherit; background: #f59e0b22; }
@@ -1182,7 +1186,44 @@ function archiveButton(b, ref) {
 const expandedLines = new Set();
 const expandedDiscussions = new Set();
 let openRowMenu = null; // the discussion path whose ▾ Actions menu is open
-let cachedDetail = { files: [], unviewable: new Set(), branch: null };
+let cachedDetail = { files: null, unviewable: new Set(), branch: null }; // files: null until the list loads
+
+// The User's order of active discussions, kept in this browser per room (room.folder) as a JSON
+// array of names. Discussions it does not list go on top, newest first; names gone are dropped.
+const ORDER_KEY = 'agent-room.discussion-order:';
+let dragging = false, renderAfterDrag = false; // the list is not replaced while a row is dragged
+function readOrder(folder) {
+  let raw = null;
+  try { raw = localStorage.getItem(ORDER_KEY + folder); } catch {}
+  let list = [];
+  try { const v = JSON.parse(raw); if (Array.isArray(v)) list = v.filter((x) => typeof x === 'string'); } catch {}
+  return { raw, list };
+}
+function saveOrder(folder, order) {
+  try { localStorage.setItem(ORDER_KEY + folder, JSON.stringify(order)); } catch {}
+}
+function orderDiscussions(found, saved) {
+  const here = new Set(found);
+  const kept = [...new Set(saved)].filter((d) => here.has(d));
+  const known = new Set(kept);
+  return [...found.filter((d) => !known.has(d)), ...kept];
+}
+// Moves name to index in order, saves it and redraws (Move up / Move down, and a drop).
+function moveDiscussion(order, name, index) {
+  const next = order.filter((d) => d !== name);
+  next.splice(Math.max(0, Math.min(index, next.length)), 0, name);
+  if (room?.folder) saveOrder(room.folder, next);
+  renderDiscussions();
+}
+// A discussion moved out of or back into discussions/ loses its place: it returns on top.
+function forgetOrder(name) {
+  if (!room?.folder || !name) return;
+  const { raw, list } = readOrder(room.folder);
+  if (raw !== null && list.includes(name)) saveOrder(room.folder, list.filter((d) => d !== name));
+}
+if (typeof addEventListener === 'function') {
+  addEventListener('storage', (e) => { if (room?.folder && e.key === ORDER_KEY + room.folder) renderDiscussions(); });
+}
 
 function updateTabs() {
   const tabExp = $('tab-explorer');
@@ -1199,6 +1240,7 @@ function discussionsIn(prefix) {
 function renderDiscussions() {
   const container = $('discussions-pane');
   if (!container) return;
+  if (dragging) { renderAfterDrag = true; return; }
   const scroll = container.scrollTop;
   container.innerHTML = '<div id="disc-list"></div>';
   const list = container.firstChild;
@@ -1207,8 +1249,13 @@ function renderDiscussions() {
   const heading = (text) => list.append(el('h3', '', text));
   const canAct = room && localInput && !viewing;
 
-  const activeName = room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
-  const discussions = discussionsIn('discussions').sort((a, b) => (b === activeName) - (a === activeName));
+  let discussions = discussionsIn('discussions');
+  const ordered = !!room?.folder && Array.isArray(cachedDetail?.files);
+  if (ordered) {
+    const saved = readOrder(room.folder);
+    discussions = orderDiscussions(discussions, saved.list);
+    if (JSON.stringify(discussions) !== saved.raw) saveOrder(room.folder, discussions);
+  }
 
   for (const o of (room?.open ?? []).filter((x) => !x.current && !x.active)) {
     const r = el('div', 'row discussion-row');
@@ -1232,12 +1279,53 @@ function renderDiscussions() {
   }
 
   heading('Discussions');
-  for (const d of discussions) {
+  const canOrder = canAct && ordered && discussions.length > 1;
+  for (const [i, d] of discussions.entries()) {
     const path = 'discussions/' + d;
     const isCurrent = path === room?.active;
     const isPeeking = peek?.kind === 'local' && peek.path === path;
     const row = el('div', 'row discussion-row' + (isCurrent ? ' in-use' : '') + (isPeeking ? ' peeking' : ''));
     const block = el('div', 'discussion-block');
+    if (canOrder) {
+      const handle = el('span', 'drag-handle', '⠿');
+      handle.title = 'Drag to reorder';
+      handle.draggable = true;
+      handle.addEventListener('dragstart', (e) => {
+        dragging = true;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', d);
+        e.dataTransfer.setDragImage?.(row, 0, 0);
+        row.classList.add('dragging');
+      });
+      handle.addEventListener('dragend', () => {
+        dragging = false;
+        row.classList.remove('dragging');
+        if (renderAfterDrag) { renderAfterDrag = false; renderDiscussions(); }
+      });
+      row.append(handle);
+    }
+    if (canOrder) {
+      const after = (e) => { const r = row.getBoundingClientRect(); return e.clientY > r.top + r.height / 2; };
+      const clear = () => row.classList.remove('drop-before', 'drop-after');
+      row.addEventListener('dragover', (e) => {
+        if (!dragging) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        row.classList.toggle('drop-after', after(e));
+        row.classList.toggle('drop-before', !after(e));
+      });
+      row.addEventListener('dragleave', clear);
+      row.addEventListener('drop', (e) => {
+        clear();
+        const name = e.dataTransfer.getData('text/plain');
+        if (!dragging || !discussions.includes(name)) return;
+        e.preventDefault();
+        const rest = discussions.filter((x) => x !== name);
+        const next = rest.indexOf(d) + (after(e) ? 1 : 0);
+        if (name !== d) { rest.splice(next, 0, name); saveOrder(room.folder, rest); }
+        renderAfterDrag = true; // drawn on dragend, which follows the drop
+      });
+    }
 
     const nameBtn = el('button', 'entry discussion', d);
     nameBtn.onclick = () => {
@@ -1293,6 +1381,15 @@ function renderDiscussions() {
       }
       if (!(isCurrent && !room.started)) {
         const f = el('button', '', 'Start fresh'); freshButton(f, d); items.append(f);
+      }
+      if (ordered) {
+        items.append(el('hr'));
+        for (const [label, to, off] of [['Move up', i - 1, i === 0], ['Move down', i + 1, i === discussions.length - 1]]) {
+          const b = el('button', '', label);
+          b.disabled = off;
+          b.onclick = () => { openRowMenu = null; closeMenus(); moveDiscussion(discussions, d, to); };
+          items.append(b);
+        }
       }
       items.append(el('hr'));
       rollbackButtons(items, block, d, d, isCurrent);
@@ -1562,9 +1659,10 @@ async function renderExplorer() {
 
 async function openFiles() {
   try {
-    const raw = await (await fetch('__files?detail=1')).json();
+    const res = await fetch('__files?detail=1');
+    const raw = res.ok ? await res.json() : null;
     if (Array.isArray(raw)) cachedDetail = { files: raw, unviewable: new Set(), branch: null };
-    else cachedDetail = { files: raw.files || [], unviewable: new Set(raw.unviewable || []), branch: raw.branch || null };
+    else if (Array.isArray(raw?.files)) cachedDetail = { files: raw.files, unviewable: new Set(raw.unviewable || []), branch: raw.branch || null };
   } catch {}
   updateTabs();
   renderDiscussions();
@@ -2124,6 +2222,7 @@ events.onmessage = (e) => {
   if (ev.type === 'files') { showSub('explorer'); openFiles(); }
   if (ev.type === 'moved') {
     pendingArchives.delete(ev.from);
+    forgetOrder(ev.from?.split('/').pop());
     openFiles();
   }
   if (ev.type === 'goto') { location.href = ev.url; return; } // this window switches discussion

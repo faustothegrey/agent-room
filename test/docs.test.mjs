@@ -1042,3 +1042,116 @@ test('Explorer marks the shown file with .shown and aria-current, and wraps leve
   assert.equal(rootCols.children.length, 11);
   assert.ok(filesContainer.children.indexOf( filesContainer.children.find((c) => c.tag === 'details')) < filesContainer.children.indexOf(rootCols));
 });
+
+test('Discussions tab: active discussions keep the User\'s order in localStorage, new ones on top, Move up / Move down', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return {
+      toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(...c) { c.forEach((x) => s.add(x)); }, remove(...c) { c.forEach((x) => s.delete(x)); }, contains(cls) { return s.has(cls); }
+    };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', disabled: false, children: [], dataset: {}, style: {},
+    classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    addEventListener() {},
+    setAttribute() {},
+    getAttribute() { return null; },
+  });
+  const els = {};
+  const store = new Map();
+  const localStorage = { getItem: (k) => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)) };
+  let fetchAnswer = null;
+  const fetch = async () => fetchAnswer();
+  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'localStorage', 'fetch',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, send = () => {};\n' +
+    code + '\n' +
+    'return { setRoom, renderDiscussions, openFiles, forgetOrder, ' +
+    '  setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
+  )((id) => els[id] || (els[id] = node(id)), { createElement: node, title: '' }, { href: '' }, null, () => {}, (cb) => cb(), () => {}, localStorage, fetch);
+
+  const KEY = 'agent-room.discussion-order:/tmp/project';
+  const filesFor = (names) => ['discussions/README.md', ...names.map((n) => 'discussions/' + n + '/notes.md'), 'discussions/archive/2026-11-01-old/notes.md'];
+  const rows = () => {
+    const list = els['discussions-pane'].firstChild.children;
+    const heading = list.findIndex((c) => c.tag === 'h3' && c.textContent === 'Discussions');
+    const end = list.findIndex((c, i) => i > heading && c.tag === 'h3');
+    return list.slice(heading + 1, end).filter((c) => c.className.includes('discussion-row'));
+  };
+  const names = () => rows().map((r) => r.children.find((c) => c.className === 'discussion-block').children[0].textContent);
+  const menuButton = (name, label) => {
+    const row = rows().find((r) => r.children.find((c) => c.className === 'discussion-block').children[0].textContent === name);
+    return row.children.find((c) => c.tag === 'details').children[1].children.find((b) => b.textContent === label);
+  };
+
+  // An unloaded file list neither shows nor prunes the saved order.
+  store.set(KEY, JSON.stringify(['2026-11-10-b', '2026-11-12-a']));
+  harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-12-a', discussion: 'A', started: true });
+  harness.renderDiscussions();
+  assert.deepEqual(names(), []);
+  assert.equal(store.get(KEY), JSON.stringify(['2026-11-10-b', '2026-11-12-a']));
+
+  // A failed or malformed answer leaves the list unloaded and the order untouched.
+  fetchAnswer = () => ({ ok: false, json: async () => ({ error: 'nope' }) });
+  await harness.openFiles();
+  fetchAnswer = () => ({ ok: true, json: async () => ({ files: 'nope' }) });
+  await harness.openFiles();
+  fetchAnswer = () => { throw new Error('offline'); };
+  await harness.openFiles();
+  assert.deepEqual(names(), []);
+  assert.equal(store.get(KEY), JSON.stringify(['2026-11-10-b', '2026-11-12-a']));
+
+  // Loaded: new discussions on top newest first, then the saved order; the current one keeps its place.
+  fetchAnswer = () => ({ ok: true, json: async () => ({ files: filesFor(['2026-11-12-a', '2026-11-10-b', '2026-11-13-c', '2026-11-14-d']), branch: 'main' }) });
+  await harness.openFiles();
+  assert.deepEqual(names(), ['2026-11-14-d', '2026-11-13-c', '2026-11-10-b', '2026-11-12-a']);
+  assert.equal(store.get(KEY), JSON.stringify(names()));
+  assert.ok(rows()[3].className.includes('in-use'));
+
+  // A later failure keeps the list shown and the order saved.
+  fetchAnswer = () => ({ ok: false, json: async () => [] });
+  await harness.openFiles();
+  assert.deepEqual(names(), ['2026-11-14-d', '2026-11-13-c', '2026-11-10-b', '2026-11-12-a']);
+
+  // Move up / Move down, disabled at the ends.
+  assert.equal(menuButton('2026-11-14-d', 'Move up').disabled, true);
+  assert.equal(menuButton('2026-11-14-d', 'Move down').disabled, false);
+  assert.equal(menuButton('2026-11-12-a', 'Move down').disabled, true);
+  menuButton('2026-11-12-a', 'Move up').onclick();
+  assert.deepEqual(names(), ['2026-11-14-d', '2026-11-13-c', '2026-11-12-a', '2026-11-10-b']);
+  menuButton('2026-11-14-d', 'Move down').onclick();
+  assert.deepEqual(names(), ['2026-11-13-c', '2026-11-14-d', '2026-11-12-a', '2026-11-10-b']);
+  assert.equal(store.get(KEY), JSON.stringify(names()));
+  assert.ok(rows()[2].className.includes('in-use'));
+
+  // A name gone from discussions/ is pruned; when it was moved out while open, it returns on top.
+  harness.setFiles(filesFor(['2026-11-12-a', '2026-11-10-b', '2026-11-13-c']));
+  harness.forgetOrder('2026-11-14-d');
+  harness.renderDiscussions();
+  assert.deepEqual(names(), ['2026-11-13-c', '2026-11-12-a', '2026-11-10-b']);
+  assert.equal(store.get(KEY), JSON.stringify(names()));
+  harness.setFiles(filesFor(['2026-11-12-a', '2026-11-10-b', '2026-11-13-c', '2026-11-14-d', '2026-11-09-e']));
+  harness.renderDiscussions();
+  assert.deepEqual(names(), ['2026-11-14-d', '2026-11-09-e', '2026-11-13-c', '2026-11-12-a', '2026-11-10-b']);
+
+  // A moved discussion still in the saved list (moved and back before the list reloaded) also goes on top.
+  harness.forgetOrder('2026-11-10-b');
+  harness.renderDiscussions();
+  assert.deepEqual(names(), ['2026-11-10-b', '2026-11-14-d', '2026-11-09-e', '2026-11-13-c', '2026-11-12-a']);
+
+  // Archive and deferred stay newest first; the order is per room.
+  harness.setRoom({ folder: '/tmp/other', active: null, discussion: null, started: true });
+  harness.renderDiscussions();
+  assert.deepEqual(names(), ['2026-11-14-d', '2026-11-13-c', '2026-11-12-a', '2026-11-10-b', '2026-11-09-e']);
+  assert.ok(store.has('agent-room.discussion-order:/tmp/other'));
+});
