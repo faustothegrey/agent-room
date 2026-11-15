@@ -1,0 +1,371 @@
+Stage B0 replication prototype
+  node v24.14.1, git version 2.33.0, darwin
+  project /Users/fausto/Software/agent-room.worker at 44bf6b163a
+  temporary nodes in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/agent-room-b0-cBXArI
+
+── 1. Round commits and transfers (full, then incremental)
+  · round 1: full, 1564 B (1.5 KiB), 264 ms
+  [PASS] round 1: transfer kind
+         expected: "full"
+         actual:   "full"
+  [PASS] round 1: node 2 acknowledged the offered commit; node 1 recorded it
+         expected: ["11cdcfcaa8","11cdcfcaa8"]
+         actual:   ["11cdcfcaa8","11cdcfcaa8"]
+  [PASS] round 1: published snapshot = offered commit, file by file (paths and bytes)
+         expected: {"files":5,"differing":[]}
+         actual:   {"files":5,"differing":[]}
+  · round 2: incremental, 1225 B (1.2 KiB), 262 ms
+  [PASS] round 2: transfer kind
+         expected: "incremental"
+         actual:   "incremental"
+  [PASS] round 2: node 2 acknowledged the offered commit; node 1 recorded it
+         expected: ["8fd73940ae","8fd73940ae"]
+         actual:   ["8fd73940ae","8fd73940ae"]
+  [PASS] round 2: published snapshot = offered commit, file by file (paths and bytes)
+         expected: {"files":6,"differing":[]}
+         actual:   {"files":6,"differing":[]}
+  · round 3: incremental, 712 B (0.7 KiB), 258 ms
+  [PASS] round 3: transfer kind
+         expected: "incremental"
+         actual:   "incremental"
+  [PASS] round 3: node 2 acknowledged the offered commit; node 1 recorded it
+         expected: ["bcbbe82eca","bcbbe82eca"]
+         actual:   ["bcbbe82eca","bcbbe82eca"]
+  [PASS] round 3: published snapshot = offered commit, file by file (paths and bytes)
+         expected: {"files":5,"differing":[]}
+         actual:   {"files":5,"differing":[]}
+  · round 4: incremental, 760 B (0.7 KiB), 254 ms
+  [PASS] round 4: transfer kind
+         expected: "incremental"
+         actual:   "incremental"
+  [PASS] round 4: node 2 acknowledged the offered commit; node 1 recorded it
+         expected: ["882481b801","882481b801"]
+         actual:   ["882481b801","882481b801"]
+  [PASS] round 4: published snapshot = offered commit, file by file (paths and bytes)
+         expected: {"files":5,"differing":[]}
+         actual:   {"files":5,"differing":[]}
+  [PASS] round 2 added drawings/b.svg; round 3 deleted drawings/a.svg (in the snapshots)
+         expected: {"r1":[true,false],"r2":[true,true],"r3":[false,true]}
+         actual:   {"r1":[true,false],"r2":[true,true],"r3":[false,true]}
+  [PASS] round 4 transcript is round 3 transcript plus an appended part
+         expected: true
+         actual:   true
+  [PASS] the folder matches the commit (plus the round metadata file)
+         expected: [".agent-room-round.json","drawings/b.svg","notes.md","proposal.md","transcripts/session-1.md"]
+         actual:   [".agent-room-round.json","drawings/b.svg","notes.md","proposal.md","transcripts/session-1.md"]
+  [PASS] earlier snapshots unchanged after later publications (content digests)
+         expected: ["ffc76a3b6368eb33","9cdaa434096ba8cf","8f59110870eb31f2"]
+         actual:   ["ffc76a3b6368eb33","9cdaa434096ba8cf","8f59110870eb31f2"]
+  [PASS] snapshots are read-only (file mode, folder mode)
+         expected: ["444","555"]
+         actual:   ["444","555"]
+  [PASS] round metadata of round 4
+         expected: {"schema":1,"room":"room-b0","discussion":"disc-1","node":"node-1","round":4,"outcome":"interrupted"}
+         actual:   {"schema":1,"room":"room-b0","discussion":"disc-1","node":"node-1","round":4,"outcome":"interrupted"}
+  · typical round 5 (transcript append + note edit): incremental, 651 B (0.6 KiB), 256 ms
+  · typical round 6 (transcript append + note edit): incremental, 619 B (0.6 KiB), 255 ms
+  · typical round 7 (transcript append + note edit): incremental, 614 B (0.6 KiB), 270 ms
+
+── 2. Duplicate send
+  [PASS] sending again with no new round: offer answers "have", no bundle sent
+         expected: {"kind":"already-had","bytes":0,"acked":"b95002c879"}
+         actual:   {"kind":"already-had","bytes":0,"acked":"b95002c879"}
+  [PASS] the same bundle POSTed twice: both acknowledged as duplicates of the published commit
+         expected: [{"status":200,"acked":"b95002c879","duplicate":true},{"status":200,"acked":"b95002c879","duplicate":true}]
+         actual:   [{"status":200,"acked":"b95002c879","duplicate":true},{"status":200,"acked":"b95002c879","duplicate":true}]
+  [PASS] receiver unchanged (pointer, history, digest)
+         expected: [{"published":"b95002c879","history":7,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"b95002c879"},"5b2de9c05575c48d"]
+         actual:   [{"published":"b95002c879","history":7,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"b95002c879"},"5b2de9c05575c48d"]
+
+── 3. Interrupted transfer
+  [PASS] connection dropped after half the bundle: sender sees an error
+         expected: true
+         actual:   true
+         (sender saw: {"clientError":"ECONNRESET"})
+  [PASS] receiver unchanged, partial upload deleted (state, digest)
+         expected: [{"published":"b95002c879","history":7,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"b95002c879"},"5b2de9c05575c48d"]
+         actual:   [{"published":"b95002c879","history":7,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"b95002c879"},"5b2de9c05575c48d"]
+  [PASS] the next send publishes the round
+         expected: {"kind":"incremental","acked":"64f0590ac7"}
+         actual:   {"kind":"incremental","acked":"64f0590ac7"}
+
+── 4. Corrupted bundle
+  [PASS] corrupted a byte in the middle of the pack: refused
+         expected: {"status":400,"error":"corrupt"}
+         actual:   {"status":400,"error":"corrupt"}
+         (detail: git -c fetch.fsckObjects=true fetch -q --no-tags --no-write-fetch-head: error: inflate: data stream error (incorrect data check))
+  [PASS] corrupted the last byte (pack checksum): refused
+         expected: {"status":400,"error":"corrupt"}
+         actual:   {"status":400,"error":"corrupt"}
+         (detail: git -c fetch.fsckObjects=true fetch -q --no-tags --no-write-fetch-head: fatal: pack is corrupted (SHA1 mismatch))
+  [PASS] receiver unchanged (state, digest)
+         expected: [{"published":"64f0590ac7","history":8,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"64f0590ac7"},"2d7dc634d9d88ab9"]
+         actual:   [{"published":"64f0590ac7","history":8,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"64f0590ac7"},"2d7dc634d9d88ab9"]
+  [PASS] the next send publishes the round
+         expected: "7ba83288d8"
+         actual:   "7ba83288d8"
+
+── 5. Lost acknowledgement, then a retry
+  [PASS] reply lost after node 2 published: node 1 sees an error and records no acknowledgement
+         expected: {"error":"ECONNRESET or socket hang up","acked":"7ba83288d8"}
+         actual:   {"error":"ECONNRESET","acked":"7ba83288d8"}
+  [PASS] node 2 did publish round 7
+         expected: "03f36d2dbf"
+         actual:   "03f36d2dbf"
+  [PASS] retry: same commit acknowledged, no bundle resent
+         expected: {"kind":"already-had","acked":"03f36d2dbf"}
+         actual:   {"kind":"already-had","acked":"03f36d2dbf"}
+  [PASS] no extra round on node 1; node 2 state and snapshot unchanged
+         expected: ["10",{"published":"03f36d2dbf","history":10,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"03f36d2dbf"},"364d70b5e11f083c"]
+         actual:   ["10",{"published":"03f36d2dbf","history":10,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"03f36d2dbf"},"364d70b5e11f083c"]
+
+── 6. Missing base: node 2 restored from an old copy
+  [PASS] restored node 2 shows its old round; node 1 still thinks it acknowledged round 7
+         expected: ["b95002c879","03f36d2dbf"]
+         actual:   ["b95002c879","03f36d2dbf"]
+  · round 11 after missing base: incremental→full, 6211 B (6.1 KiB), 297 ms
+  [PASS] incremental refused for a missing base, then a full bundle is sent and published
+         expected: {"attempts":[["incremental",409,"missing-base"],["full",200,null]],"acked":"8eb35bcad7"}
+         actual:   {"attempts":[["incremental",409,"missing-base"],["full",200,null]],"acked":"8eb35bcad7"}
+  [PASS] the old snapshot is still there, unchanged
+         expected: "5b2de9c05575c48d"
+         actual:   "5b2de9c05575c48d"
+  [PASS] published round 11 = offered commit, file by file
+         expected: {"files":5,"differing":[]}
+         actual:   {"files":5,"differing":[]}
+
+── 7. Restart in the middle of receiving (separate process, abrupt exit)
+  [PASS] after-save: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":0,"incomingRefs":0,"published":"8eb35bcad7","receivedRef":"8eb35bcad7"}
+         recovery at restart: {"tmp":1,"staging":0,"unpublished":0,"incomingRefs":0,"refRepaired":0}
+  [PASS] after-save: after restart the pointer names a complete snapshot (old round), no staging visible
+         expected: {"published":"8eb35bcad7","receivedRef":"8eb35bcad7","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"8eb35bcad7","receivedRef":"8eb35bcad7","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] after-save: old snapshot digest unchanged
+         expected: "eef47ba0449ea3e6"
+         actual:   "eef47ba0449ea3e6"
+  [PASS] after-save: a send after restart gets the round acknowledged
+         expected: {"acked":"b01e41829a","kind":"incremental"}
+         actual:   {"acked":"b01e41829a","kind":"incremental"}
+  [PASS] after-import: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":0,"incomingRefs":1,"published":"b01e41829a","receivedRef":"b01e41829a"}
+         recovery at restart: {"tmp":1,"staging":0,"unpublished":0,"incomingRefs":1,"refRepaired":0}
+  [PASS] after-import: after restart the pointer names a complete snapshot (old round), no staging visible
+         expected: {"published":"b01e41829a","receivedRef":"b01e41829a","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"b01e41829a","receivedRef":"b01e41829a","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] after-import: old snapshot digest unchanged
+         expected: "b7d1c71c609acd87"
+         actual:   "b7d1c71c609acd87"
+  [PASS] after-import: a send after restart gets the round acknowledged
+         expected: {"acked":"581d851871","kind":"incremental"}
+         actual:   {"acked":"581d851871","kind":"incremental"}
+  [PASS] mid-materialize: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":1,"incomingRefs":1,"published":"581d851871","receivedRef":"581d851871"}
+         recovery at restart: {"tmp":1,"staging":1,"unpublished":0,"incomingRefs":1,"refRepaired":0}
+  [PASS] mid-materialize: after restart the pointer names a complete snapshot (old round), no staging visible
+         expected: {"published":"581d851871","receivedRef":"581d851871","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"581d851871","receivedRef":"581d851871","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] mid-materialize: old snapshot digest unchanged
+         expected: "b6648d8984248bd7"
+         actual:   "b6648d8984248bd7"
+  [PASS] mid-materialize: a send after restart gets the round acknowledged
+         expected: {"acked":"89559277bd","kind":"incremental"}
+         actual:   {"acked":"89559277bd","kind":"incremental"}
+  [PASS] after-materialize: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":0,"incomingRefs":1,"published":"89559277bd","receivedRef":"89559277bd"}
+         recovery at restart: {"tmp":1,"staging":0,"unpublished":1,"incomingRefs":1,"refRepaired":0}
+  [PASS] after-materialize: after restart the pointer names a complete snapshot (old round), no staging visible
+         expected: {"published":"89559277bd","receivedRef":"89559277bd","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"89559277bd","receivedRef":"89559277bd","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] after-materialize: old snapshot digest unchanged
+         expected: "bd634cff1772ec94"
+         actual:   "bd634cff1772ec94"
+  [PASS] after-materialize: a send after restart gets the round acknowledged
+         expected: {"acked":"535ad500ce","kind":"incremental"}
+         actual:   {"acked":"535ad500ce","kind":"incremental"}
+  [PASS] after-publish: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":0,"incomingRefs":1,"published":"2c4e58743a","receivedRef":"2c4e58743a"}
+         recovery at restart: {"tmp":1,"staging":0,"unpublished":0,"incomingRefs":1,"refRepaired":0}
+  [PASS] after-publish: after restart the pointer names a complete snapshot (new round), no staging visible
+         expected: {"published":"2c4e58743a","receivedRef":"2c4e58743a","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"2c4e58743a","receivedRef":"2c4e58743a","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] after-publish: a send after restart gets the round acknowledged
+         expected: {"acked":"2c4e58743a","kind":"already-had"}
+         actual:   {"acked":"2c4e58743a","kind":"already-had"}
+
+── 8. Rejected inputs (each leaves node 2 unchanged)
+  [PASS] symlink entry: refused
+         expected: {"status":422,"error":"unsafe-tree"}
+         actual:   {"status":422,"error":"unsafe-tree"}
+         (detail: symlink link.md)
+  [PASS] submodule (gitlink) entry: refused
+         expected: {"status":422,"error":"unsafe-tree"}
+         actual:   {"status":422,"error":"unsafe-tree"}
+         (detail: submodule sub)
+  [PASS] ".." entry: refused (by Git's fsck at import, or by the tree check)
+         expected: "refused (400 corrupt or 422 unsafe-tree)"
+         actual:   "422 unsafe-tree"
+         (detail: unsafe path "..")
+  [PASS] ".git" entry: refused (by Git's fsck at import, or by the tree check)
+         expected: "refused (400 corrupt or 422 unsafe-tree)"
+         actual:   "422 unsafe-tree"
+         (detail: unsafe path ".git")
+  [PASS] "." entry: refused (by Git's fsck at import, or by the tree check)
+         expected: "refused (400 corrupt or 422 unsafe-tree)"
+         actual:   "422 unsafe-tree"
+         (detail: unsafe path ".")
+  [PASS] "NOTES.md" next to "notes.md" (collide on macOS): refused
+         expected: {"status":422,"error":"unsafe-tree"}
+         actual:   {"status":422,"error":"unsafe-tree"}
+         (detail: names collide on this disk: notes.md)
+  [PASS] bundle head for another discussion: refused
+         expected: {"status":422,"error":"wrong-identity"}
+         actual:   {"status":422,"error":"wrong-identity"}
+         (detail: bundle carries refs/lines/disc-2/node-1, expected refs/lines/disc-1/node-1)
+  [PASS] round metadata from another node: refused
+         expected: {"status":422,"error":"wrong-identity"}
+         actual:   {"status":422,"error":"wrong-identity"}
+         (detail: commit says room-b0/disc-1/node-3, offer is room-b0/disc-1/node-1)
+  [PASS] round metadata from another room: refused
+         expected: {"status":422,"error":"wrong-identity"}
+         actual:   {"status":422,"error":"wrong-identity"}
+         (detail: commit says room-zz/disc-1/node-1, offer is room-b0/disc-1/node-1)
+  [PASS] round metadata missing: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: no .agent-room-round.json (or too big))
+  [PASS] round metadata not JSON: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: .agent-room-round.json is not JSON)
+  [PASS] schema 2: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: schema 2)
+  [PASS] round is a string: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: round "17")
+  [PASS] unknown outcome: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: outcome "done")
+  [PASS] extra metadata key: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: round metadata keys discussion,node,outcome,room,round,schema,session)
+  [PASS] round number not after the published one: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: round 16 after published round 16)
+  [PASS] offer from another room: refused
+         expected: 403
+         actual:   403
+  [PASS] offer claiming to be node 2 itself: refused
+         expected: 403
+         actual:   403
+  [PASS] offer from an unpaired node: refused
+         expected: 403
+         actual:   403
+  [PASS] offer with an unsafe discussion ID: refused
+         expected: 400
+         actual:   400
+  [PASS] offer with protocol 2: refused
+         expected: 400
+         actual:   400
+  [PASS] bundle over the size limit (8311 B > 1024 B): refused before reading it
+         expected: true
+         actual:   true
+         (sender saw: {"status":413,"ok":false,"error":"too-large","detail":"8311 bytes (limit 1024)"})
+  [PASS] tree check alone, absolute path "/etc/passwd" (Git trees can't carry it): refused
+         expected: "unsafe-tree"
+         actual:   "unsafe-tree"
+  [PASS] tree check alone, backslash "a\\..\\b" (Git trees can't carry it): refused
+         expected: "unsafe-tree"
+         actual:   "unsafe-tree"
+  [PASS] tree check alone, traversal inside a path "a/../b" (Git trees can't carry it): refused
+         expected: "unsafe-tree"
+         actual:   "unsafe-tree"
+  [PASS] tree check alone, empty component "a//b" (Git trees can't carry it): refused
+         expected: "unsafe-tree"
+         actual:   "unsafe-tree"
+  [PASS] node 2 unchanged after all rejected inputs (state, digest)
+         expected: [{"published":"2c4e58743a","history":13,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"2c4e58743a"},"5bc58ea6054e98ec"]
+         actual:   [{"published":"2c4e58743a","history":13,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"2c4e58743a"},"5bc58ea6054e98ec"]
+
+── 9. Rewritten history
+  [PASS] node 1 rewinds its line and sends a different commit: refused
+         expected: {"status":409,"error":"rewrite"}
+         actual:   {"status":409,"error":"rewrite"}
+  [PASS] node 2 unchanged (state, digest); node 1 still holds the rewritten tip
+         expected: [{"published":"2c4e58743a","history":13,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"2c4e58743a"},"5bc58ea6054e98ec","28d320e06d"]
+         actual:   [{"published":"2c4e58743a","history":13,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"2c4e58743a"},"5bc58ea6054e98ec","28d320e06d"]
+
+── 10. Isolation from the project repository
+  [PASS] project HEAD and `git status` unchanged by the run
+         expected: {"head":"44bf6b163a","status":"?? prototype/replication/README.md\n?? prototype/replication/crash-child.mjs\n?? prototype/replication/replica.mjs\n?? prototype/replication/run.mjs\n"}
+         actual:   {"head":"44bf6b163a","status":"?? prototype/replication/README.md\n?? prototype/replication/crash-child.mjs\n?? prototype/replication/replica.mjs\n?? prototype/replication/run.mjs\n"}
+
+── 11. Measurement on a copy of /Users/fausto/Software/agent-room/discussions/2026-11-06-teleporting-agent-room-sessions-to-background
+  copied 24 files, 622209 B (607.6 KiB)
+  · real folder, first send: full, 178076 B (173.9 KiB), 488 ms
+  · real folder, round 2 (append ~3.8 KB): incremental, 822 B (0.8 KiB), 440 ms
+  · real folder, round 3 (append ~3.8 KB): incremental, 584 B (0.6 KiB), 442 ms
+  · real folder, round 4 (append ~3.8 KB): incremental, 570 B (0.6 KiB), 445 ms
+  · real folder, round 5 (append ~3.8 KB): incremental, 566 B (0.6 KiB), 495 ms
+  · real folder, round 6 (append ~3.8 KB): incremental, 562 B (0.5 KiB), 508 ms
+  [PASS] real folder: published snapshot = offered commit
+         expected: []
+         actual:   []
+
+── Git commands used
+  git init -q --bare  (once per node)
+  git -c fetch.fsckObjects=true fetch -q --no-tags --no-write-fetch-head
+  git bundle create -q
+  git bundle verify -q
+  git cat-file
+  git cat-file -e
+  git commit-tree -m
+  git commit-tree -p -m
+  git for-each-ref --format=%(refname)
+  git hash-object -w --no-filters --stdin-paths
+  git hash-object -w --stdin
+  git ls-tree -r -z -l --full-tree
+  git ls-tree -z
+  git merge-base --is-ancestor
+  git mktree -z --missing
+  git rev-list --count
+  git rev-parse
+  git rev-parse --verify -q
+  git update-index --add -z --index-info
+  git update-ref
+  git update-ref -d
+  git write-tree
+
+── Measurements (this machine)
+  round 1                                          full                  1564 B   264 ms   23 git runs
+  round 2                                          incremental           1225 B   262 ms   27 git runs
+  round 3                                          incremental            712 B   258 ms   26 git runs
+  round 4                                          incremental            760 B   254 ms   26 git runs
+  typical round 5 (transcript append + note edit)  incremental            651 B   256 ms   26 git runs
+  typical round 6 (transcript append + note edit)  incremental            619 B   255 ms   26 git runs
+  typical round 7 (transcript append + note edit)  incremental            614 B   270 ms   26 git runs
+  round 11 after missing base                      incremental→full      6211 B   297 ms   27 git runs
+  real folder, first send                          full                178076 B   488 ms   43 git runs
+  real folder, round 2 (append ~3.8 KB)            incremental            822 B   440 ms   46 git runs
+  real folder, round 3 (append ~3.8 KB)            incremental            584 B   442 ms   46 git runs
+  real folder, round 4 (append ~3.8 KB)            incremental            570 B   445 ms   46 git runs
+  real folder, round 5 (append ~3.8 KB)            incremental            566 B   495 ms   46 git runs
+  real folder, round 6 (append ~3.8 KB)            incremental            562 B   508 ms   46 git runs
+
+ALL PASSED: 86 passed, 0 failed

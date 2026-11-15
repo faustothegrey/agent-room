@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="640" font-family="sans-serif" font-size="13">
+  <rect width="820" height="640" fill="#fff"/>
+  <text x="20" y="28" font-size="16" font-weight="bold">Mock-up (Claude): where "Start auto dev" would sit in the Discussion tab</text>
+
+  <!-- 1. agreed summary -->
+  <text x="20" y="60" font-weight="bold">1. An agreed summary whose Next step is "Send to the Worker"</text>
+  <rect x="20" y="70" width="780" height="200" rx="8" fill="#f6f8fa" stroke="#999"/>
+  <text x="36" y="94" font-weight="bold">[Summary, agreed]</text>
+  <text x="36" y="116">Agreed</text>
+  <text x="50" y="134" fill="#555">- …</text>
+  <text x="36" y="158" font-weight="bold">Next step</text>
+  <text x="50" y="178">- Send to the Worker: "Implement auto dev: agent-room relays instructions …"</text>
+  <rect x="50" y="196" width="170" height="32" rx="6" fill="#2f6fde"/>
+  <text x="135" y="217" text-anchor="middle" fill="#fff" font-weight="bold">Start auto dev</text>
+  <text x="235" y="210" fill="#555">Sends this instruction as cycle 1 of up to 5.</text>
+  <text x="235" y="227" fill="#555">Auto-summarize is on for this run; your saved setting is unchanged.</text>
+  <text x="36" y="258" fill="#999">(The button appears only on an agreed summary with "Send to the Worker", in a discussion, never in a brainstorm.)</text>
+
+  <!-- 2. running -->
+  <text x="20" y="300" font-weight="bold">2. While it runs: a status line above the message box</text>
+  <rect x="20" y="310" width="780" height="40" rx="8" fill="#e9f7ec" stroke="#3a9a52"/>
+  <text x="36" y="335">Auto dev running · cycle 2 of 5 · worker is working</text>
+  <text x="784" y="335" text-anchor="end" fill="#555">(typing a message pauses it)</text>
+  <rect x="20" y="360" width="780" height="54" rx="8" fill="#fff" stroke="#ccc"/>
+  <text x="36" y="382" font-weight="bold" fill="#3a9a52">Worker report</text>
+  <text x="36" y="402" fill="#555">the worker's full reply, as a normal message; the agents then discuss it</text>
+
+  <!-- 3. paused -->
+  <text x="20" y="446" font-weight="bold">3. When it stops or pauses</text>
+  <rect x="20" y="456" width="780" height="100" rx="8" fill="#fff8e1" stroke="#b08900"/>
+  <text x="36" y="480">Auto dev paused · reason: 5 cycles used  (or: you sent a message / not agreed / WAIT FOR USER)</text>
+  <text x="36" y="502" fill="#555">Next agreed instruction: "Fix the failing test in …"</text>
+  <rect x="36" y="514" width="200" height="30" rx="6" fill="#2f6fde"/>
+  <text x="136" y="534" text-anchor="middle" fill="#fff" font-weight="bold">Restart auto dev (5 more)</text>
+  <text x="250" y="534" fill="#555">On FINISH: "Auto dev finished. Review and merge worker/main yourself."</text>
+
+  <text x="20" y="590" fill="#555">Every relayed instruction also appears in the Worker tab as "Relayed from discussion", and everything is saved in the transcripts.</text>
+  <text x="20" y="612" fill="#555">No separate "Send once" button in this version.</text>
+</svg>

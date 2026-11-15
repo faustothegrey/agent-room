@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="380" font-family="sans-serif" font-size="14">
+  <rect width="640" height="380" fill="#fff"/>
+  <text x="20" y="30" font-size="16" font-weight="bold">Discussion tab: members (proposed, example with Claude twice)</text>
+  <rect x="20" y="45" width="600" height="190" fill="none" stroke="#999" rx="6"/>
+  <!-- header -->
+  <text x="36" y="70" fill="#666">On</text><text x="80" y="70" fill="#666">Provider</text>
+  <text x="230" y="70" fill="#666">Name</text><text x="400" y="70" fill="#666">Model</text>
+
+  <!-- row 1: ticked, locked -->
+  <rect x="38" y="85" width="16" height="16" fill="#8bc" stroke="#8bc"/><text x="41" y="99" fill="#fff">✓</text>
+  <rect x="80" y="83" width="130" height="22" fill="none" stroke="#bbb"/><text x="88" y="99">Claude ▾</text>
+  <rect x="230" y="83" width="150" height="22" fill="none" stroke="#bbb"/><text x="238" y="99">Claude</text>
+  <rect x="400" y="83" width="200" height="22" fill="none" stroke="#bbb"/><text x="408" y="99">opus ▾</text>
+
+  <!-- row 2: ticked, locked, auto-named -->
+  <rect x="38" y="125" width="16" height="16" fill="#8bc" stroke="#8bc"/><text x="41" y="139" fill="#fff">✓</text>
+  <rect x="80" y="123" width="130" height="22" fill="none" stroke="#bbb"/><text x="88" y="139">Claude ▾</text>
+  <rect x="230" y="123" width="150" height="22" fill="#fffbe6" stroke="#d9b500"/><text x="238" y="139">Claude2</text>
+  <rect x="400" y="123" width="200" height="22" fill="none" stroke="#bbb"/><text x="408" y="139">sonnet ▾</text>
+
+  <!-- row 3: unticked -->
+  <rect x="38" y="165" width="16" height="16" fill="#fff" stroke="#2a7" stroke-width="2"/>
+  <rect x="80" y="163" width="130" height="22" fill="none" stroke="#ddd"/><text x="88" y="179" fill="#999">agy ▾</text>
+  <rect x="230" y="163" width="150" height="22" fill="none" stroke="#ddd"/><text x="238" y="179" fill="#999">Agy</text>
+  <rect x="400" y="163" width="200" height="22" fill="none" stroke="#ddd"/><text x="408" y="179" fill="#999">(model) ▾</text>
+
+  <!-- note for locked boxes -->
+  <text x="36" y="218" fill="#a60" font-size="13">ⓘ At least two members. To swap one, tick the new row first, then untick the old one.</text>
+
+  <!-- callouts -->
+  <text x="20" y="262" font-weight="bold">How to read it</text>
+  <text x="20" y="284">• Grey-blue ticks are locked: only two are ticked, so neither can be removed.</text>
+  <text x="20" y="306">• Any row can be Claude, Codex or agy (provider selector).</text>
+  <text x="20" y="328">• Yellow name: filled in automatically ("Claude2") because "Claude" is taken; editable.</text>
+  <text x="20" y="350">• Agents speak in row order, top to bottom.</text>
+  <text x="20" y="372">• Locked once work starts in that discussion, kept per discussion.</text>
+</svg>

@@ -15,6 +15,19 @@ remaining decisions, historical designs and deferred research; they are not the 
 **Remaining decisions:** [Discussions and document browsing](2026-11-02-discussions-and-folders/discussions.md).
 This is the short list of unfinished or deferred items, not authorization to implement them.
 
+## Follow-ups not started
+
+From [2026-11-11-repurposing-docs-for-agent-human-collaboration](2026-11-11-repurposing-docs-for-agent-human-collaboration/notes.md)
+(its "Left open" section). Not authorization to implement them.
+
+- Rename `AGENT.md` to `AGENTS.md`, after checking how each tool finds the file.
+- Before role instructions become Agent Skills packages: verify how both CLIs can reliably
+  receive instructions that must apply on every turn.
+- Decide whether the Bash restriction for Claude discussion agents, or the worker's Git
+  requirement, should change (see [docs/architecture.md](../docs/architecture.md)).
+- Optional: the auto dev notice quotes only an instruction's first line (`src/ui.mjs:1289`)
+  without saying it was shortened.
+
 ## Active
 
 - **[2026-11-02-discussions-and-folders](2026-11-02-discussions-and-folders/)** — discussions as
@@ -23,6 +36,14 @@ This is the short list of unfinished or deferred items, not authorization to imp
   [original discussions design](2026-11-02-discussions-and-folders/discussions-original.md) and the
   [original folder-opening design](2026-11-02-discussions-and-folders/document-folders.md), both
   mostly implemented, and drawing 6 in `drawings/`.
+- **[2026-11-06-teleporting-agent-room-sessions-to-background](2026-11-06-teleporting-agent-room-sessions-to-background/)**
+  — continuing a discussion on another machine (Mac and a Raspberry Pi), and the worker's own
+  worktree. *Current:* the [rollout](2026-11-06-teleporting-agent-room-sessions-to-background/rollout.md)
+  (stages and what each needs before it starts); the design is in `proposal.md`, `ui-design.md`
+  and `implementation-plan.md`.
+- **[2026-11-07-room-citizenship-rules](2026-11-07-room-citizenship-rules/)** — shared rules for
+  every agent role in the room, and who may edit them. *Current:* the
+  [notes](2026-11-07-room-citizenship-rules/notes.md); not started yet.
 
 ## Archive
 

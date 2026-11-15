@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <rect width="900" height="560" fill="#fff"/>
+  <text x="20" y="30" font-size="18" font-weight="bold">Today: one server = one room</text>
+  <g>
+    <rect x="20" y="45" width="250" height="120" rx="8" fill="#eef3fb" stroke="#4a6fa5"/>
+    <text x="35" y="68" font-weight="bold">server :5566</text>
+    <text x="35" y="90">room agent-room</text>
+    <text x="35" y="110" fill="#555">agents, worker, discussion,</text>
+    <text x="35" y="128" fill="#555">page connections, Quit</text>
+    <rect x="300" y="45" width="250" height="120" rx="8" fill="#eef3fb" stroke="#4a6fa5"/>
+    <text x="315" y="68" font-weight="bold">server :50278</text>
+    <text x="315" y="90">room MyPorfolio</text>
+    <rect x="580" y="45" width="250" height="120" rx="8" fill="#eef3fb" stroke="#4a6fa5"/>
+    <text x="595" y="68" font-weight="bold">server :53513</text>
+    <text x="595" y="90">room MyPorfolio (again!)</text>
+  </g>
+
+  <text x="20" y="215" font-size="18" font-weight="bold">Proposed: one server, several rooms (one per folder)</text>
+  <rect x="20" y="230" width="860" height="250" rx="10" fill="#f6f6f6" stroke="#333"/>
+  <text x="35" y="255" font-weight="bold">server :5566 — shared by all rooms</text>
+  <text x="35" y="277" fill="#333">the port and address · the code (Reload) · the room list · usage gauges · "Shutdown server"</text>
+
+  <rect x="40" y="295" width="250" height="165" rx="8" fill="#e9f6ec" stroke="#3a8a4f"/>
+  <text x="55" y="318" font-weight="bold">room agent-room</text>
+  <text x="55" y="340" fill="#555">…/__room?room=agent-room</text>
+  <text x="55" y="364">own: folder, agents, worker,</text>
+  <text x="55" y="384">discussion, transcript,</text>
+  <text x="55" y="404">pause, page connections</text>
+  <text x="55" y="430" font-weight="bold" fill="#3a8a4f">"Quit room" stops only this</text>
+
+  <rect x="320" y="295" width="250" height="165" rx="8" fill="#e9f6ec" stroke="#3a8a4f"/>
+  <text x="335" y="318" font-weight="bold">room MyPorfolio</text>
+  <text x="335" y="364">same, its own copy</text>
+
+  <rect x="600" y="295" width="250" height="165" rx="8" fill="#fff" stroke="#3a8a4f" stroke-dasharray="6 4"/>
+  <text x="615" y="318" font-weight="bold">New room in folder…</text>
+  <text x="615" y="342">adds a room here,</text>
+  <text x="615" y="362">or opens the existing one</text>
+  <text x="615" y="382">if that folder already has it</text>
+
+  <text x="20" y="510" fill="#555">Windows: each browser window shows one room, chosen by its address. Several windows, one server.</text>
+  <text x="20" y="532" fill="#a33">Shutdown server (or Restart, or a crash) ends every room at once.</text>
+</svg>

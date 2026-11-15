@@ -1,0 +1,804 @@
+
+> agent-room@0.1.0 test
+> node --test 'test/*.test.mjs'
+
+✔ claude: first turn creates the session, later turns resume it, writes anywhere but no shell (13.663216ms)
+✔ claude: an error result throws and does not mark the session started (1.085864ms)
+✔ codex: resumes the thread it was given and runs without a sandbox every call (3.419364ms)
+✔ codex events: last agent_message wins, noise lines are ignored, turn.failed throws (0.523469ms)
+✔ a recreated agent on the same session object resumes instead of starting over (1.401296ms)
+✔ the rulebook goes in as system-level instructions on every turn, for both providers (0.581801ms)
+✔ each turn reports its usage: claude from its JSON result, codex from turn.completed (2.058666ms)
+✔ claude with shell (the worker): Bash is added to the tools and pre-approved (0.388687ms)
+✔ claudeTitle: one claude call with no tools and no saved session; the first line, unquoted (2.787844ms)
+✔ selected models are passed to the provider on initial and resumed turns (0.809704ms)
+✔ a working directory given as a function is read at each turn (the worker's worktree) (2.044192ms)
+✔ listFiles: every non-hidden file, recursively, sorted (9.773149ms)
+✔ Markdown is rendered with images inline, and plain links to images get a preview (148.474282ms)
+✔ files are served with their type; nothing outside proposal/ or hidden is (124.823851ms)
+✔ the mtime endpoint changes when a doc is rewritten, so open pages reload (25.582314ms)
+✔ pick: arrows move, Enter opens and stays, Esc closes (1.736452ms)
+✔ the discussion screen: a new page gets the room so far, then live events (65.023174ms)
+✔ the screen remembers "your turn" until the User speaks again (0.441615ms)
+✔ without a screen, /__room is just a missing file (43.116843ms)
+✔ messageView marks errors and passes for the page (0.570727ms)
+✔ the screen lists proposal/ files and shows the one picked, for every open page (44.985914ms)
+✔ what the User types on the screen reaches the room only from the page itself (143.037931ms)
+✔ in terminal mode the page only watches: /__say is refused and the reset says so (67.496888ms)
+✔ messageView hides summary turns and labels a summary's result (2.224642ms)
+✔ the Worker tab: instructions reach the worker only from the page, and a new page gets its chat (62.014789ms)
+✔ without a worker input (terminal mode), /__work is refused (16.453383ms)
+✔ the auto-summarize checkbox reaches the room only from the page, and a new page gets its state and the gauges (57.672567ms)
+✔ a room serves only its sections of the root: discussions/ and proposal/, with transcripts as text (29.464632ms)
+✔ agent settings endpoint reads choices and protects saves with the same-origin check (38.959291ms)
+✔ the heartbeat: /__health says it is agent-room, with its process, root and discussion (22.632245ms)
+✔ a page learns its code version, so it can refresh after a reload that changed it (8.464191ms)
+Stage B0 replication prototype
+  node v24.14.1, git version 2.33.0, darwin
+  project /Users/fausto/Software/agent-room.worker at 5153ce1ef5
+  temporary nodes in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/agent-room-b0-lwPrRS
+
+── 1. Round commits and transfers (full, then incremental)
+  · round 1: full, 1655 B (1.6 KiB), 416 ms
+  [PASS] round 1: transfer kind
+         expected: "full"
+         actual:   "full"
+  [PASS] round 1: node 2 acknowledged the offered commit; node 1 recorded it
+         expected: ["c214becb84","c214becb84"]
+         actual:   ["c214becb84","c214becb84"]
+  [PASS] round 1: published snapshot = offered commit, file by file (paths and bytes)
+         expected: {"files":5,"differing":[]}
+         actual:   {"files":5,"differing":[]}
+  · round 2: incremental, 1236 B (1.2 KiB), 360 ms
+  [PASS] round 2: transfer kind
+         expected: "incremental"
+         actual:   "incremental"
+  [PASS] round 2: node 2 acknowledged the offered commit; node 1 recorded it
+         expected: ["d0b8b63b79","d0b8b63b79"]
+         actual:   ["d0b8b63b79","d0b8b63b79"]
+  [PASS] round 2: published snapshot = offered commit, file by file (paths and bytes)
+         expected: {"files":6,"differing":[]}
+         actual:   {"files":6,"differing":[]}
+  · round 3: incremental, 726 B (0.7 KiB), 358 ms
+  [PASS] round 3: transfer kind
+         expected: "incremental"
+         actual:   "incremental"
+  [PASS] round 3: node 2 acknowledged the offered commit; node 1 recorded it
+         expected: ["1c421d256b","1c421d256b"]
+         actual:   ["1c421d256b","1c421d256b"]
+  [PASS] round 3: published snapshot = offered commit, file by file (paths and bytes)
+         expected: {"files":5,"differing":[]}
+         actual:   {"files":5,"differing":[]}
+  · round 4: incremental, 756 B (0.7 KiB), 325 ms
+  [PASS] round 4: transfer kind
+         expected: "incremental"
+         actual:   "incremental"
+  [PASS] round 4: node 2 acknowledged the offered commit; node 1 recorded it
+         expected: ["150a62921f","150a62921f"]
+         actual:   ["150a62921f","150a62921f"]
+  [PASS] round 4: published snapshot = offered commit, file by file (paths and bytes)
+         expected: {"files":5,"differing":[]}
+         actual:   {"files":5,"differing":[]}
+  [PASS] round 2 added drawings/b.svg; round 3 deleted drawings/a.svg (in the snapshots)
+         expected: {"r1":[true,false],"r2":[true,true],"r3":[false,true]}
+         actual:   {"r1":[true,false],"r2":[true,true],"r3":[false,true]}
+  [PASS] round 4 transcript is round 3 transcript plus an appended part
+         expected: true
+         actual:   true
+  [PASS] the folder matches the commit (plus the round metadata file)
+         expected: [".agent-room-round.json","drawings/b.svg","notes.md","proposal.md","transcripts/session-1.md"]
+         actual:   [".agent-room-round.json","drawings/b.svg","notes.md","proposal.md","transcripts/session-1.md"]
+  [PASS] earlier snapshots unchanged after later publications (content digests)
+         expected: ["cf368c97f181e3d9","7393527b1abc9cde","98aedee07138f6ad"]
+         actual:   ["cf368c97f181e3d9","7393527b1abc9cde","98aedee07138f6ad"]
+  [PASS] snapshots are read-only (file mode, folder mode)
+         expected: ["444","555"]
+         actual:   ["444","555"]
+  [PASS] round metadata of round 4
+         expected: {"schema":1,"room":"room-b0","discussion":"disc-1","node":"node-1","round":4,"outcome":"interrupted"}
+         actual:   {"schema":1,"room":"room-b0","discussion":"disc-1","node":"node-1","round":4,"outcome":"interrupted"}
+  · typical round 5 (transcript append + note edit): incremental, 648 B (0.6 KiB), 250 ms
+  · typical round 6 (transcript append + note edit): incremental, 631 B (0.6 KiB), 252 ms
+  · typical round 7 (transcript append + note edit): incremental, 628 B (0.6 KiB), 246 ms
+
+── 2. Duplicate send
+  [PASS] sending again with no new round: offer answers "have", no bundle sent
+         expected: {"kind":"already-had","bytes":0,"acked":"3c5a8d9e7a"}
+         actual:   {"kind":"already-had","bytes":0,"acked":"3c5a8d9e7a"}
+  [PASS] the same bundle POSTed twice: both acknowledged as duplicates of the published commit
+         expected: [{"status":200,"acked":"3c5a8d9e7a","duplicate":true},{"status":200,"acked":"3c5a8d9e7a","duplicate":true}]
+         actual:   [{"status":200,"acked":"3c5a8d9e7a","duplicate":true},{"status":200,"acked":"3c5a8d9e7a","duplicate":true}]
+  [PASS] receiver unchanged (pointer, history, digest)
+         expected: [{"published":"3c5a8d9e7a","history":7,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"3c5a8d9e7a"},"bafc80b02633d7d0"]
+         actual:   [{"published":"3c5a8d9e7a","history":7,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"3c5a8d9e7a"},"bafc80b02633d7d0"]
+
+── 3. Interrupted transfer
+  [PASS] connection dropped after half the bundle: sender sees an error
+         expected: true
+         actual:   true
+         (sender saw: {"clientError":"ECONNRESET"})
+  [PASS] receiver unchanged, partial upload deleted (state, digest)
+         expected: [{"published":"3c5a8d9e7a","history":7,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"3c5a8d9e7a"},"bafc80b02633d7d0"]
+         actual:   [{"published":"3c5a8d9e7a","history":7,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"3c5a8d9e7a"},"bafc80b02633d7d0"]
+  [PASS] the next send publishes the round
+         expected: {"kind":"incremental","acked":"ceed89179a"}
+         actual:   {"kind":"incremental","acked":"ceed89179a"}
+
+── 4. Corrupted bundle
+  [PASS] corrupted a byte in the middle of the pack: refused
+         expected: {"status":400,"error":"corrupt"}
+         actual:   {"status":400,"error":"corrupt"}
+         (detail: git fetch: error: inflate: data stream error (incorrect data check))
+  [PASS] corrupted the last byte (pack checksum): refused
+         expected: {"status":400,"error":"corrupt"}
+         actual:   {"status":400,"error":"corrupt"}
+         (detail: git fetch: fatal: pack is corrupted (SHA1 mismatch))
+  [PASS] receiver unchanged (state, digest)
+         expected: [{"published":"ceed89179a","history":8,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"ceed89179a"},"5964920220ae8ca8"]
+         actual:   [{"published":"ceed89179a","history":8,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"ceed89179a"},"5964920220ae8ca8"]
+  [PASS] the next send publishes the round
+         expected: "6666e0875a"
+         actual:   "6666e0875a"
+
+── 5. Lost acknowledgement, then a retry
+  [PASS] reply lost after node 2 published: node 1 sees an error and records no acknowledgement
+         expected: {"error":"ECONNRESET or socket hang up","acked":"6666e0875a"}
+         actual:   {"error":"ECONNRESET","acked":"6666e0875a"}
+  [PASS] node 2 did publish round 7
+         expected: "472b735259"
+         actual:   "472b735259"
+  [PASS] retry: same commit acknowledged, no bundle resent
+         expected: {"kind":"already-had","acked":"472b735259"}
+         actual:   {"kind":"already-had","acked":"472b735259"}
+  [PASS] no extra round on node 1; node 2 state and snapshot unchanged
+         expected: ["10",{"published":"472b735259","history":10,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"472b735259"},"79ae45b3677b3f69"]
+         actual:   ["10",{"published":"472b735259","history":10,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"472b735259"},"79ae45b3677b3f69"]
+
+── 6. Missing base: node 2 restored from an old copy
+  [PASS] restored node 2 shows its old round; node 1 still thinks it acknowledged round 7
+         expected: ["3c5a8d9e7a","472b735259"]
+         actual:   ["3c5a8d9e7a","472b735259"]
+  · round 11 after missing base: incremental→full, 6467 B (6.3 KiB), 312 ms
+  [PASS] incremental refused for a missing base, then a full bundle is sent and published
+         expected: {"attempts":[["incremental",409,"missing-base"],["full",200,null]],"acked":"c38c8c0c15"}
+         actual:   {"attempts":[["incremental",409,"missing-base"],["full",200,null]],"acked":"c38c8c0c15"}
+  [PASS] the old snapshot is still there, unchanged
+         expected: "bafc80b02633d7d0"
+         actual:   "bafc80b02633d7d0"
+  [PASS] published round 11 = offered commit, file by file
+         expected: {"files":5,"differing":[]}
+         actual:   {"files":5,"differing":[]}
+
+── 7. Restart in the middle of receiving (separate process, abrupt exit)
+  [PASS] after-save: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":0,"incomingRefs":0,"published":"c38c8c0c15","receivedRef":"c38c8c0c15"}
+         recovery at restart: {"tmp":1,"snapshots":0,"incomingRefs":0,"refRepaired":0}
+  [PASS] after-save: after restart the pointer names a complete snapshot (old round), no staging visible
+         expected: {"published":"c38c8c0c15","receivedRef":"c38c8c0c15","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"c38c8c0c15","receivedRef":"c38c8c0c15","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] after-save: old snapshot digest unchanged
+         expected: "c47872a284160ea1"
+         actual:   "c47872a284160ea1"
+  [PASS] after-save: a send after restart gets the round acknowledged
+         expected: {"acked":"c3b712d72e","kind":"incremental"}
+         actual:   {"acked":"c3b712d72e","kind":"incremental"}
+  [PASS] after-import: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":0,"incomingRefs":1,"published":"c3b712d72e","receivedRef":"c3b712d72e"}
+         recovery at restart: {"tmp":1,"snapshots":0,"incomingRefs":1,"refRepaired":0}
+  [PASS] after-import: after restart the pointer names a complete snapshot (old round), no staging visible
+         expected: {"published":"c3b712d72e","receivedRef":"c3b712d72e","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"c3b712d72e","receivedRef":"c3b712d72e","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] after-import: old snapshot digest unchanged
+         expected: "a376a22392d9c548"
+         actual:   "a376a22392d9c548"
+  [PASS] after-import: a send after restart gets the round acknowledged
+         expected: {"acked":"15cf310b69","kind":"incremental"}
+         actual:   {"acked":"15cf310b69","kind":"incremental"}
+  [PASS] mid-materialize: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":1,"incomingRefs":1,"published":"15cf310b69","receivedRef":"15cf310b69"}
+         recovery at restart: {"tmp":1,"snapshots":1,"incomingRefs":1,"refRepaired":0}
+  [PASS] mid-materialize: after restart the pointer names a complete snapshot (old round), no staging visible
+         expected: {"published":"15cf310b69","receivedRef":"15cf310b69","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"15cf310b69","receivedRef":"15cf310b69","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] mid-materialize: old snapshot digest unchanged
+         expected: "de2dd60e6af61b4e"
+         actual:   "de2dd60e6af61b4e"
+  [PASS] mid-materialize: a send after restart gets the round acknowledged
+         expected: {"acked":"9e68b5f783","kind":"incremental"}
+         actual:   {"acked":"9e68b5f783","kind":"incremental"}
+  [PASS] after-materialize: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":0,"incomingRefs":1,"published":"9e68b5f783","receivedRef":"9e68b5f783"}
+         recovery at restart: {"tmp":1,"snapshots":1,"incomingRefs":1,"refRepaired":0}
+  [PASS] after-materialize: after restart the pointer names a complete snapshot (old round), no staging visible
+         expected: {"published":"9e68b5f783","receivedRef":"9e68b5f783","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"9e68b5f783","receivedRef":"9e68b5f783","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] after-materialize: old snapshot digest unchanged
+         expected: "841fd65fe976e647"
+         actual:   "841fd65fe976e647"
+  [PASS] after-materialize: a send after restart gets the round acknowledged
+         expected: {"acked":"8fd734fed3","kind":"incremental"}
+         actual:   {"acked":"8fd734fed3","kind":"incremental"}
+  [PASS] after-publish: the receiving process died there
+         expected: 86
+         actual:   86
+         left on disk at the crash: {"tmp":1,"staging":0,"incomingRefs":1,"published":"5bf0aa88ec","receivedRef":"5bf0aa88ec"}
+         recovery at restart: {"tmp":1,"snapshots":1,"incomingRefs":1,"refRepaired":0}
+  [PASS] after-publish: after restart the pointer names a complete snapshot (new round), no staging visible
+         expected: {"published":"5bf0aa88ec","receivedRef":"5bf0aa88ec","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+         actual:   {"published":"5bf0aa88ec","receivedRef":"5bf0aa88ec","tmp":0,"staging":0,"incomingRefs":0,"differing":[]}
+  [PASS] after-publish: a send after restart gets the round acknowledged
+         expected: {"acked":"5bf0aa88ec","kind":"already-had"}
+         actual:   {"acked":"5bf0aa88ec","kind":"already-had"}
+
+── 8. Rejected inputs (each leaves node 2 unchanged)
+  [PASS] symlink entry: refused
+         expected: {"status":422,"error":"unsafe-tree"}
+         actual:   {"status":422,"error":"unsafe-tree"}
+         (detail: symlink link.md)
+  [PASS] submodule (gitlink) entry: refused
+         expected: {"status":422,"error":"unsafe-tree"}
+         actual:   {"status":422,"error":"unsafe-tree"}
+         (detail: submodule sub)
+  [PASS] ".." entry: refused (by Git's fsck at import, or by the tree check)
+         expected: "refused (400 corrupt or 422 unsafe-tree)"
+         actual:   "422 unsafe-tree"
+         (detail: unsafe path "..")
+  [PASS] ".git" entry: refused (by Git's fsck at import, or by the tree check)
+         expected: "refused (400 corrupt or 422 unsafe-tree)"
+         actual:   "422 unsafe-tree"
+         (detail: unsafe path ".git")
+  [PASS] "." entry: refused (by Git's fsck at import, or by the tree check)
+         expected: "refused (400 corrupt or 422 unsafe-tree)"
+         actual:   "422 unsafe-tree"
+         (detail: unsafe path ".")
+  [PASS] "NOTES.md" next to "notes.md" (collide on macOS): refused
+         expected: {"status":422,"error":"unsafe-tree"}
+         actual:   {"status":422,"error":"unsafe-tree"}
+         (detail: names collide on this disk: notes.md)
+  [PASS] bundle head for another discussion: refused
+         expected: {"status":422,"error":"wrong-identity"}
+         actual:   {"status":422,"error":"wrong-identity"}
+         (detail: bundle carries refs/lines/disc-2/node-1, expected refs/lines/disc-1/node-1)
+  [PASS] round metadata from another node: refused
+         expected: {"status":422,"error":"wrong-identity"}
+         actual:   {"status":422,"error":"wrong-identity"}
+         (detail: commit says room-b0/disc-1/node-3, offer is room-b0/disc-1/node-1)
+  [PASS] round metadata from another room: refused
+         expected: {"status":422,"error":"wrong-identity"}
+         actual:   {"status":422,"error":"wrong-identity"}
+         (detail: commit says room-zz/disc-1/node-1, offer is room-b0/disc-1/node-1)
+  [PASS] round metadata missing: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: no .agent-room-round.json)
+  [PASS] round metadata not JSON: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: .agent-room-round.json is not JSON)
+  [PASS] schema 2: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: schema 2)
+  [PASS] round is a string: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: round "17")
+  [PASS] unknown outcome: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: kind "round", outcome "done")
+  [PASS] extra metadata key: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: round metadata keys agents,at,conversation,discussion,ending,kind,name,node,outcome,room,round,schema,session,summary,title)
+  [PASS] round number not after the published one: refused
+         expected: {"status":422,"error":"invalid-schema"}
+         actual:   {"status":422,"error":"invalid-schema"}
+         (detail: round 16 after published round 16)
+  [PASS] offer from another room: refused
+         expected: 403
+         actual:   403
+  [PASS] offer claiming to be node 2 itself: refused
+         expected: 403
+         actual:   403
+  [PASS] offer from an unpaired node: refused
+         expected: 403
+         actual:   403
+  [PASS] offer with an unsafe discussion ID: refused
+         expected: 400
+         actual:   400
+  [PASS] offer with protocol 2: refused
+         expected: 400
+         actual:   400
+  [PASS] bundle over the size limit (8700 B > 1024 B): refused before reading it
+         expected: true
+         actual:   true
+         (sender saw: {"status":413,"ok":false,"error":"too-large","detail":"8700 bytes (limit 1024)"})
+  [PASS] tree check alone, absolute path "/etc/passwd" (Git trees can't carry it): refused
+         expected: "unsafe-tree"
+         actual:   "unsafe-tree"
+  [PASS] tree check alone, backslash "a\\..\\b" (Git trees can't carry it): refused
+         expected: "unsafe-tree"
+         actual:   "unsafe-tree"
+  [PASS] tree check alone, traversal inside a path "a/../b" (Git trees can't carry it): refused
+         expected: "unsafe-tree"
+         actual:   "unsafe-tree"
+  [PASS] tree check alone, empty component "a//b" (Git trees can't carry it): refused
+         expected: "unsafe-tree"
+         actual:   "unsafe-tree"
+  [PASS] node 2 unchanged after all rejected inputs (state, digest)
+         expected: [{"published":"5bf0aa88ec","history":16,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"5bf0aa88ec"},"0163d5181aa37ec6"]
+         actual:   [{"published":"5bf0aa88ec","history":16,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"5bf0aa88ec"},"0163d5181aa37ec6"]
+
+── 9. Rewritten history
+  [PASS] node 1 rewinds its line and sends a different commit: refused
+         expected: {"status":409,"error":"rewrite"}
+         actual:   {"status":409,"error":"rewrite"}
+  [PASS] node 2 unchanged (state, digest); node 1 still holds the rewritten tip
+         expected: [{"published":"5bf0aa88ec","history":16,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"5bf0aa88ec"},"0163d5181aa37ec6","baa3b7628c"]
+         actual:   [{"published":"5bf0aa88ec","history":16,"tmp":0,"staging":0,"incomingRefs":0,"receivedRef":"5bf0aa88ec"},"0163d5181aa37ec6","baa3b7628c"]
+
+── 10. Isolation from the project repository
+  [PASS] project HEAD and `git status` unchanged by the run
+         expected: {"head":"5153ce1ef5","status":" M README.md\n D prototype/replication/README.md\n D prototype/replication/crash-child.mjs\n D prototype/replication/replica.mjs\n D prototype/replication/run.mjs\n M src/cli.mjs\n M src/docs.mjs\n M src/ui.mjs\n?? src/replicate.mjs\n?? test/helpers/replication-crash.mjs\n?? test/helpers/replication.mjs\n?? test/replicate.test.mjs\n?? test/replication-ui.test.mjs\n"}
+         actual:   {"head":"5153ce1ef5","status":" M README.md\n D prototype/replication/README.md\n D prototype/replication/crash-child.mjs\n D prototype/replication/replica.mjs\n D prototype/replication/run.mjs\n M src/cli.mjs\n M src/docs.mjs\n M src/ui.mjs\n?? src/replicate.mjs\n?? test/helpers/replication-crash.mjs\n?? test/helpers/replication.mjs\n?? test/replicate.test.mjs\n?? test/replication-ui.test.mjs\n"}
+
+── Git commands used
+  git init -q --bare  (once per node)
+
+── Measurements (this machine)
+  round 1                                          full                  1655 B   416 ms   16 git runs
+  round 2                                          incremental           1236 B   360 ms   20 git runs
+  round 3                                          incremental            726 B   358 ms   20 git runs
+  round 4                                          incremental            756 B   325 ms   20 git runs
+  typical round 5 (transcript append + note edit)  incremental            648 B   250 ms   20 git runs
+  typical round 6 (transcript append + note edit)  incremental            631 B   252 ms   20 git runs
+  typical round 7 (transcript append + note edit)  incremental            628 B   246 ms   20 git runs
+  round 11 after missing base                      incremental→full      6467 B   312 ms   21 git runs
+
+ALL PASSED: 85 passed, 0 failed
+✔ replication protocol: B0 scenarios, immutable publication and recovery (14606.022516ms)
+Room: A (claude) · worker W (claude) · root /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-QDbArx/Mac
+Transcript: in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-QDbArx/Mac/discussions/, once the first message starts a discussion
+agent-room on Mac, listening on 0.0.0.0:56360 · git version 2.33.0
+  open:  http://192.168.178.112:56360/__room
+  peers: none
+Discussion screen: http://127.0.0.1:56360/__room
+Use the room from the browser. This terminal only shows a log; Quit there, or Ctrl-C here, ends the room.
+
+Room: A (claude) · worker W (claude) · root /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-QDbArx/Pi
+Transcript: in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-QDbArx/Pi/discussions/, once the first message starts a discussion
+agent-room on Pi, listening on 0.0.0.0:56391 · git version 2.33.0
+  open:  http://192.168.178.112:56391/__room
+  peers: none
+Discussion screen: http://127.0.0.1:56391/__room
+Use the room from the browser. This terminal only shows a log; Quit there, or Ctrl-C here, ends the room.
+
+Paired with Pi (/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-QDbArx/Pi). Its rounds will arrive here, and this room's rounds will be sent there.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-QDbArx/Mac/discussions/2026-11-07-replication-test
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/replication-ui-QDbArx/Mac/discussions/2026-11-07-replication-test/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+── your turn · all passed · 1 agent turn · 0s ──
+Peer Pi: reachable, paired
+Received Mac's round 1 of "Replication test".
+Round 1 saved · sent to Pi ✓
+  … A is thinking
+── your turn · all passed · 1 agent turn · 0s ──
+Received Mac's round 2 of "Replication test".
+Round 2 saved · sent to Pi ✓
+  … A is thinking
+── your turn · all passed · 1 agent turn · 0s ──
+Received Mac's round 3 of "Replication test".
+  … A is thinking
+
+✗ A failed (0s): provider failed
+
+── your turn · A failed · 1 agent turn · 0s ──
+Round 3 saved · sent to Pi ✓
+Auto-summarize is on: a summary follows every round in which an agent spoke.
+  … A is thinking
+
+A (0s) › an idea
+
+  … A is thinking
+── round over · all passed · 2 agent turns · 0s · summarizing ──
+  … A (summary, turn 1 of at most 3) is thinking
+✗ A failed: summary failed
+The summary stopped because a turn failed.
+── your turn · auto-summary stopped · 1 agent turn · 0s ──
+Round 4 saved as failed (error: A failed) · Pi refused it (not sent yet)
+Round 5 saved as failed (error: all passed) · Pi refused it (not sent yet)
+✔ two rooms: pairing, round hooks, independent browser pins, deletion and read-only guards (7399.847472ms)
+✔ storage ignores project filters/transcripts rules, preserves Git state and stable identity (378.700927ms)
+✔ concurrent bootstrap pairings cannot replace an established room identity (145.10087ms)
+✔ a round is: user, then agents in order until all of them pass in a row (4.559168ms)
+✔ the first prompt carries the introduction; later prompts do not (1.00742ms)
+✔ each agent sees exactly what it has not seen, never its own replies (0.800391ms)
+✔ a failing agent is recorded and ends the round; it gets what it missed next time (0.951365ms)
+✔ duplicate agent names are refused (0.858674ms)
+✔ a pass is exactly PASS, whitespace trimmed, optional trailing period (0.383643ms)
+✔ all selected agents passing in a row ends the round, without a notice (0.725726ms)
+✔ a real reply resets the pass count (0.59103ms)
+✔ the turn cap ends the round with a notice (0.540862ms)
+✔ no cap notice when the 8th turn completes the all-pass condition (0.519133ms)
+✔ the pass count resets for each user message (0.42676ms)
+✔ an error mid-round ends the round (0.338326ms)
+✔ passes are flagged for the screen to hide, and shown to other agents as (passed) (0.359892ms)
+✔ @name addresses only that agent, case-insensitively, and keeps the text as typed (0.291418ms)
+✔ a single PASS ends an addressed round (0.207909ms)
+✔ an unknown @name sends nothing to any agent and records nothing (0.498935ms)
+✔ an @mention later in the message is ordinary text (0.293148ms)
+✔ an agent left out of a round receives that exchange when next selected (0.323129ms)
+✔ a room recreated on the same state continues the conversation (0.563521ms)
+✔ a reply carries the usage its agent reported for that turn (3.36859ms)
+✔ summary: the draft is agreed when the other agent passes on it (1.008772ms)
+✔ summary: a revision counts as its author's acceptance (0.81692ms)
+✔ summary: three turns each without agreement fail, and the last revision stands (3.166767ms)
+✔ summary: the drafter rotates, and agents see the result in later rounds (0.911918ms)
+✔ summary: nothing to summarize, or a failed turn, records no result (0.435866ms)
+✔ summary: with a single agent, its draft is the summary (0.182819ms)
+✔ state.briefing goes with each agent's first prompt only (0.501499ms)
+✔ UI mode: the screen is the room's input, its replies come back as events, Quit ends the room (781.681227ms)
+✔ saved provider/model choices survive CLI restarts and explicit CLI flags override them (1422.240282ms)
+✔ Restart: a new server process on the same port, re-opening the discussion in use (996.42985ms)
+  … A is thinking
+
+A (0s) › an idea
+
+  … B is thinking
+  … A is thinking
+── round over · all passed · 3 agent turns · 0s · summarizing ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+- the idea
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Auto-summarize is off.
+  … A is thinking
+
+A (0s) › an idea
+
+  … B is thinking
+  … A is thinking
+── your turn · all passed · 3 agent turns · 0s ──
+Auto-summarize is on: a summary follows every round in which an agent spoke.
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-NpNc1I/discussions/2026-11-07-about-pendulums
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-NpNc1I/discussions/2026-11-07-about-pendulums/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✗ Unknown agent "@nobody". Known: A, B
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-R3DNBB/discussions/2026-11-07-1654
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-R3DNBB/discussions/2026-11-07-1654/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✗ No discussion "nosuch" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-qfdBnH/discussions (discussions are folders named <date>-<title>).
+✗ No discussion "../x" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-qfdBnH/discussions (discussions are folders named <date>-<title>).
+Re-opened the discussion 2026-11-01-old: your next message starts a fresh session there; the agents start from its handoff.
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-qfdBnH/discussions/2026-11-01-old
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-qfdBnH/discussions/2026-11-01-old/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-cMKQbI/discussions/2026-11-07-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-cMKQbI/discussions/2026-11-07-first-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Re-opened the discussion 2026-11-01-old: your next message starts a fresh session there; the agents start from its handoff.
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-cMKQbI/discussions/2026-11-01-old
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-cMKQbI/discussions/2026-11-01-old/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✗ No discussion "../x" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-cMKQbI/discussions (discussions are folders named <date>-<title>).
+✗ No discussion "archive" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-cMKQbI/discussions (discussions are folders named <date>-<title>).
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-h7BLUI/discussions/2026-11-07-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-h7BLUI/discussions/2026-11-07-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › fix the bug
+
+✔ each load builds a new room on the same conversation state and CLI sessions (94.440584ms)
+✔ a failing load leaves ctx as it was (32.083735ms)
+✖ the worker is a separate claude agent with its own session, kept across reloads (21.493256ms)
+✔ auto-summarize: on by default, a summary follows a round in which an agent spoke (158.860276ms)
+✔ auto-summarize: no summary after a round of passes, or when turned off (11.589925ms)
+✔ discussion folders: date + title, date and time without a title, -2 when taken (4.426773ms)
+✔ session transcripts: session-<date>-<time>.md, -2 when taken, never overwritten (3.600593ms)
+✔ the first message creates the discussion (titled by Claude) and its transcript before the agents see it (125.663826ms)
+✔ if the title fails, the folder is named after the date and time; an unknown @name creates nothing (8.974877ms)
+✔ /continue: only before the first message; no title asked, the transcript goes in that discussion (35.207083ms)
+✔ /reopen after the session started: a fresh session in that discussion, from its handoff (21.387602ms)
+
+W (worker, 0s) › done
+
+
+You → W › and the test
+
+
+W (worker, 0s) › done
+
+Moved the discussion 2026-11-01-old to archive/.
+Moved the discussion 2026-11-01-old to deferred/.
+Moved the discussion 2026-11-01-old to the active discussions.
+✗ Move it to active, archive or deferred.
+✗ No discussion "nosuch" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-mosIPR/discussions.
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-mosIPR/discussions/2026-11-07-in-use
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-mosIPR/discussions/2026-11-07-in-use/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✗ 2026-11-07-in-use is the discussion in use in this room: it can't move now.
+Moved the discussion 2026-11-01-old to the active discussions.
+Re-opened the discussion 2026-11-01-old: your next message starts a fresh session there; the agents start from its handoff.
+No discussion started yet: your next message starts a new one.
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-0fWDYM/discussions/2026-11-07-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-0fWDYM/discussions/2026-11-07-first-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: your next message names it and starts it. To go back, /reopen 2026-11-07-first-topic.
+  … Claude (choosing the discussion's title) is thinking
+✗ Couldn't create the discussion's folder or transcript: EACCES: permission denied, mkdir '/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-0fWDYM/discussions/2026-11-07-second-topic'
+Your message was not sent to the agents. Here it is, to send again:
+
+second
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-0fWDYM/discussions/2026-11-07-second-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-0fWDYM/discussions/2026-11-07-second-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Re-opened the discussion 2026-11-07-first-topic: your next message starts a fresh session there; the agents start from its handoff.
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-hWHTIh/discussions/2026-11-07-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-hWHTIh/discussions/2026-11-07-first-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › one
+
+✔ the worker is told the active discussion's folder with its first instruction there (819.082564ms)
+✔ agent settings persist, apply before startup, and leave active sessions unchanged (9.632702ms)
+✔ /move: a whole discussion into archive/ or deferred/ and back; never the one in use (8.084515ms)
+✔ /reopen of an archived discussion makes it active first; new names skip archived ones (3.545988ms)
+✔ Restart keeps the launch flags that matter: the same port, agents, worker and dev mode, in the discussion in use (0.591913ms)
+✔ /new: nothing to end before the first message; it creates nothing and changes nothing (1.988373ms)
+✔ /new after a round: the session ends as with Re-open; the next message starts a new titled discussion (9.338704ms)
+
+W (worker, 0s) › ok
+
+
+You → W › long task
+
+New discussion: your next message names it and starts it. To go back, /reopen 2026-11-07-first-topic.
+
+W (worker, 0s) › long done
+
+
+You → W › before the folder exists
+
+
+W (worker, 0s) › ok
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-hWHTIh/discussions/2026-11-07-second-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-hWHTIh/discussions/2026-11-07-second-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › after
+
+
+W (worker, 0s) › ok
+
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-7gm7kA/discussions/2026-11-07-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-7gm7kA/discussions/2026-11-07-first-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › long task
+
+✔ /new leaves the worker alone: a running task keeps its transcript, its log stays, the next instruction learns the new folder (1393.541654ms)
+New discussion: your next message names it and starts it. To go back, /reopen 2026-11-07-first-topic.
+✗ A worker task is still writing to 2026-11-07-first-topic; try again when it finishes.
+
+W (worker, 0s) › done
+
+Moved the discussion 2026-11-07-first-topic to archive/.
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-veTRvL/discussions/2026-11-07-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-veTRvL/discussions/2026-11-07-first-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › task
+
+✔ after New discussion, the previous one can't move while its worker task runs; it can once the task ends (407.4431ms)
+
+W (worker, 0s) › the reply
+
+✗ W: couldn't save to the transcript: ENOENT: no such file or directory, open '/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-veTRvL/discussions/2026-11-07-first-topic/transcripts/session-2026-11-07-1654.md'
+✔ a transcript that can't be written keeps the worker's reply visible, reports the error and ends the busy state (276.190377ms)
+✗ Worker requires a source Git repository for its isolated worktree. The instruction was not sent.
+✔ without a Git repository, or without a commit, the worker is disabled with an explanation (51.446813ms)
+
+You → W › do it
+
+
+W (worker, 0s) › ok
+
+
+You → W › again
+
+
+W (worker, 0s) › ok
+
+
+You → W › do it
+
+✔ the first instruction creates the worktree beside the repository, on worker/main from HEAD; the worker runs there (492.126923ms)
+
+W (worker, 0s) › ok
+
+
+You → W › do it
+
+✔ a dirty room is left exactly as it was; the worker doesn't see its uncommitted changes, and the tab says so (411.912843ms)
+
+W (worker, 0s) › ok
+
+
+You → W › more
+
+
+W (worker, 0s) › ok
+
+
+You → W › do it
+
+
+W (worker, 0s) › ok
+
+
+You → W › do it
+
+✔ after a restart the worktree is reused; an existing worker/main without a worktree is reattached; nothing is deleted (864.885306ms)
+
+✗ W (worker) failed: /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-oBtJF1.worker already exists and isn't the worker's worktree: nothing was changed.
+
+
+You → W › start
+
+✔ a folder already at the worktree's place is refused and left alone; the worker doesn't run (113.180187ms)
+
+W (worker, 0s) › ok
+
+
+You → W › next
+
+
+W (worker, 0s) › ok
+
+
+You → W › dirty
+
+
+W (worker, 0s) › ok
+
+
+You → W › own commits
+
+
+W (worker, 0s) › ok
+
+✔ worker/main catches up with the room only when strictly behind with a clean worktree; otherwise it is left as it is (964.558585ms)
+Reloaded the code and the agents' rulebook; the conversation continues.
+
+✔ the header's version: the checkout's commit and uncommitted changes, outside discussions/, as a snapshot (172.488881ms)
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-eS9Mde/discussions/2026-11-07-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-eS9Mde/discussions/2026-11-07-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › the task
+
+✔ Reload adds its own snapshot of the checkout to the header, keeping the start's (41.501099ms)
+New discussion: your next message names it and starts it. To go back, /reopen 2026-11-07-topic.
+✗ A worker task is still writing to 2026-11-07-topic; try again when it finishes.
+
+W (worker, 0s) › done
+
+Moved the discussion 2026-11-07-topic to archive/.
+
+You → W › do it
+
+✔ a worker task keeps the discussion it started in, even if New discussion comes while it prepares its worktree (243.533584ms)
+
+W (worker, 0s) › ok
+
+
+You → W › again
+
+
+W (worker, 0s) › ok
+
+✔ the worker is told about its scratch notes; .worker-notes is ignored by Git in its worktree (396.194332ms)
+✔ totals add up turn by turn; cost only when some turn had one (2.913772ms)
+✔ quota summary covers only the room's providers, and skips unavailable ones (0.635206ms)
+✔ the /usage report lists each agent and the quotas, or says the meter is unreachable (0.944182ms)
+✔ fetchQuota reads the meter, and returns null when it is down (195.277236ms)
+✔ quota gauges: one per window, for the room's providers only, in their order (3.195589ms)
+ℹ tests 101
+ℹ suites 0
+ℹ pass 100
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15056.617122
+
+✖ failing tests:
+
+test at test/ui.test.mjs:32:1
+✖ the worker is a separate claude agent with its own session, kept across reloads (21.493256ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      'Worker',
+  +   'codex'
+  -   'claude'
+    ]
+  
+      at TestContext.<anonymous> (file:///Users/fausto/Software/agent-room.worker/test/ui.test.mjs:35:10)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'Worker', 'codex' ],
+    expected: [ 'Worker', 'claude' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="470" viewBox="0 0 1440 470" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="1440" height="470" fill="#111"/>
+  <text x="20" y="26" fill="#ddd" font-size="16" font-weight="bold">Header v3 (Claude): room and server details on hover, discussion actions in a menu, status under the title. Coloured zone borders.</text>
+
+  <!-- Header ~58 px -->
+  <rect x="10" y="40" width="1420" height="58" fill="#161616" stroke="#444"/>
+
+  <!-- ROOM -->
+  <rect x="16" y="45" width="250" height="48" rx="5" fill="none" stroke="#5a7bd8" stroke-width="1.5"/>
+  <text x="26" y="65" fill="#fff" font-weight="bold">agent-room ▾</text>
+  <text x="122" y="65" fill="#8fa8ee" font-size="12">ⓘ</text>
+  <text x="26" y="84" fill="#bbb" font-family="Menlo, monospace" font-size="11">/Users/fausto/Software/agent-room</text>
+
+  <!-- DISCUSSION -->
+  <rect x="274" y="45" width="520" height="48" rx="5" fill="none" stroke="#4caf7a" stroke-width="1.5"/>
+  <text x="284" y="65" fill="#6aa8ff" font-weight="bold">Redesigning a Messy Project UI</text>
+  <text x="284" y="84" fill="#9aa" font-size="11">in use · round 4 · your turn</text>
+  <rect x="560" y="56" width="92" height="24" rx="4" fill="#2a2a2a" stroke="#666"/>
+  <text x="570" y="72" fill="#eee">Actions ▾</text>
+  <rect x="664" y="62" width="12" height="12" fill="#3b82f6"/>
+  <text x="682" y="72" fill="#ccc">Auto-summarize</text>
+
+  <!-- MONITORING -->
+  <rect x="802" y="45" width="622" height="48" rx="5" fill="none" stroke="#d6a84c" stroke-width="1.5"/>
+  <circle cx="818" cy="69" r="5" fill="#22c55e"/>
+  <text x="828" y="73" fill="#e6c27a" font-size="12">Server ▾</text>
+  <line x1="892" y1="52" x2="892" y2="86" stroke="#555"/>
+  <text x="902" y="73" fill="#eee" font-weight="bold" font-size="12">Claude</text>
+  <text x="948" y="63" fill="#aaa" font-size="10">5h</text><rect x="972" y="56" width="30" height="5" fill="#333"/><rect x="972" y="56" width="10" height="5" fill="#22c55e"/><text x="1006" y="63" fill="#ccc" font-size="10">32%  resets 6pm</text>
+  <text x="948" y="82" fill="#aaa" font-size="10">week</text><rect x="972" y="75" width="30" height="5" fill="#333"/><rect x="972" y="75" width="12" height="5" fill="#22c55e"/><text x="1006" y="82" fill="#ccc" font-size="10">38%  resets Nov 11 8am</text>
+  <text x="1124" y="73" fill="#eee" font-weight="bold" font-size="12">Codex</text>
+  <text x="1166" y="63" fill="#aaa" font-size="10">5h</text><rect x="1190" y="56" width="30" height="5" fill="#333"/><rect x="1190" y="56" width="6" height="5" fill="#22c55e"/><text x="1224" y="63" fill="#ccc" font-size="10">19%  resets 20:46</text>
+  <text x="1166" y="82" fill="#aaa" font-size="10">week</text><rect x="1190" y="75" width="30" height="5" fill="#333"/><rect x="1190" y="75" width="14" height="5" fill="#22c55e"/><text x="1224" y="82" fill="#ccc" font-size="10">48%  resets 07:45 11 Nov</text>
+  <text x="1362" y="62" fill="#888" font-size="9">upd. 17:13</text>
+  <rect x="1362" y="68" width="44" height="18" rx="3" fill="#2a2a2a" stroke="#666"/><text x="1368" y="81" fill="#eee" font-size="10">Usage</text>
+
+  <!-- Hover / menu insets -->
+  <text x="20" y="130" fill="#ccc" font-size="12">Hover "agent-room" (or ⓘ) → room details</text>
+  <rect x="26" y="140" width="330" height="54" rx="5" fill="#222" stroke="#5a7bd8"/>
+  <text x="36" y="160" fill="#ccc" font-size="11">Mac 192.168.1.35:5566 · Mac's line, round 1</text>
+  <text x="36" y="178" fill="#ccc" font-size="11">agents run on Mac · Version unavailable</text>
+  <text x="20" y="222" fill="#ccc" font-size="12">Click "agent-room ▾" → Switch room… / Open room in folder… / Quit room (as now)</text>
+
+  <text x="560" y="130" fill="#ccc" font-size="12">Click "Actions ▾"</text>
+  <rect x="560" y="140" width="190" height="104" rx="5" fill="#222" stroke="#4caf7a"/>
+  <text x="572" y="162" fill="#eee">Pause discussion</text>
+  <text x="572" y="186" fill="#eee">Summarize</text>
+  <line x1="568" y1="198" x2="742" y2="198" stroke="#444"/>
+  <text x="572" y="222" fill="#7fd6a3">+ New discussion</text>
+  <text x="572" y="238" fill="#888" font-size="10">(still two clicks)</text>
+
+  <text x="802" y="130" fill="#ccc" font-size="12">Hover "● Server" → server details</text>
+  <rect x="808" y="140" width="330" height="54" rx="5" fill="#222" stroke="#d6a84c"/>
+  <text x="818" y="160" fill="#ccc" font-size="11">Server up 22m · port 5566</text>
+  <text x="818" y="178" fill="#ccc" font-family="Menlo, monospace" font-size="10">01e1118 · started 16:56</text>
+  <text x="802" y="222" fill="#ccc" font-size="12">Click "Server ▾" → Reload / Restart / Shutdown server (as now). Dot still turns red if the server stops.</text>
+
+  <!-- Body hint -->
+  <rect x="10" y="250" width="980" height="180" fill="#151515" stroke="#333"/>
+  <text x="30" y="280" fill="#777">Chat — unchanged, gains ~35 px more height</text>
+  <rect x="990" y="250" width="440" height="180" fill="#151515" stroke="#333"/>
+  <text x="1010" y="280" fill="#777">Discussions / document pane — unchanged</text>
+  <text x="20" y="455" fill="#999">Status line examples: "No discussion started", "in use · Claude is thinking", "paused on this machine". Exact wording = open question.</text>
+</svg>

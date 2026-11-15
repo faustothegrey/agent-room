@@ -1,0 +1,406 @@
+
+> agent-room@0.1.0 test
+> node --test 'test/*.test.mjs'
+
+✔ claude: first turn creates the session, later turns resume it, writes anywhere but no shell (7.527734ms)
+✔ claude: an error result throws and does not mark the session started (6.088878ms)
+✔ codex: resumes the thread it was given and runs without a sandbox every call (1.09579ms)
+✔ codex events: last agent_message wins, noise lines are ignored, turn.failed throws (0.463329ms)
+✔ a recreated agent on the same session object resumes instead of starting over (0.91902ms)
+✔ the rulebook goes in as system-level instructions on every turn, for both providers (0.669239ms)
+✔ each turn reports its usage: claude from its JSON result, codex from turn.completed (11.955454ms)
+✔ claude with shell (the worker): Bash is added to the tools and pre-approved (0.376498ms)
+✔ claudeTitle: one claude call with no tools and no saved session; the first line, unquoted (1.081795ms)
+✔ selected models are passed to the provider on initial and resumed turns (0.622931ms)
+✔ a working directory given as a function is read at each turn (the worker's worktree) (0.64352ms)
+✔ listFiles: every non-hidden file, recursively, sorted (7.989033ms)
+✔ Markdown is rendered with images inline, and plain links to images get a preview (164.843248ms)
+✔ files are served with their type; nothing outside proposal/ or hidden is (73.927435ms)
+✔ the mtime endpoint changes when a doc is rewritten, so open pages reload (78.614033ms)
+✔ pick: arrows move, Enter opens and stays, Esc closes (1.350997ms)
+✔ the discussion screen: a new page gets the room so far, then live events (20.855584ms)
+✔ the screen remembers "your turn" until the User speaks again (0.378229ms)
+✔ without a screen, /__room is just a missing file (21.692993ms)
+✔ messageView marks errors and passes for the page (1.334242ms)
+✔ the screen lists proposal/ files and shows the one picked, for every open page (98.147859ms)
+✔ what the User types on the screen reaches the room only from the page itself (48.351246ms)
+✔ in terminal mode the page only watches: /__say is refused and the reset says so (62.686498ms)
+✔ messageView hides summary turns and labels a summary's result (2.540481ms)
+✔ the Worker tab: instructions reach the worker only from the page, and a new page gets its chat (20.908115ms)
+✔ without a worker input (terminal mode), /__work is refused (51.915021ms)
+✔ the auto-summarize checkbox reaches the room only from the page, and a new page gets its state and the gauges (98.370675ms)
+✔ a room serves only its sections of the root: discussions/ and proposal/, with transcripts as text (51.429754ms)
+✔ agent settings endpoint reads choices and protects saves with the same-origin check (42.530148ms)
+✔ the heartbeat: /__health says it is agent-room, with its process, root and discussion (9.918161ms)
+✔ a page learns its code version, so it can refresh after a reload that changed it (29.73874ms)
+✔ a round is: user, then agents in order until all of them pass in a row (4.848069ms)
+✔ the first prompt carries the introduction; later prompts do not (1.571371ms)
+✔ each agent sees exactly what it has not seen, never its own replies (1.922791ms)
+✔ a failing agent is recorded and ends the round; it gets what it missed next time (29.364939ms)
+✔ duplicate agent names are refused (0.913544ms)
+✔ a pass is exactly PASS, whitespace trimmed, optional trailing period (1.068504ms)
+✔ all selected agents passing in a row ends the round, without a notice (1.27413ms)
+✔ a real reply resets the pass count (9.843878ms)
+✔ the turn cap ends the round with a notice (0.481511ms)
+✔ no cap notice when the 8th turn completes the all-pass condition (2.455161ms)
+✔ the pass count resets for each user message (0.578832ms)
+✔ an error mid-round ends the round (0.673978ms)
+✔ passes are flagged for the screen to hide, and shown to other agents as (passed) (0.385955ms)
+✔ @name addresses only that agent, case-insensitively, and keeps the text as typed (0.293361ms)
+✔ a single PASS ends an addressed round (1.041557ms)
+✔ an unknown @name sends nothing to any agent and records nothing (0.516627ms)
+✔ an @mention later in the message is ordinary text (0.314044ms)
+✔ an agent left out of a round receives that exchange when next selected (0.315553ms)
+✔ a room recreated on the same state continues the conversation (0.509336ms)
+✔ a reply carries the usage its agent reported for that turn (0.377769ms)
+✔ summary: the draft is agreed when the other agent passes on it (0.742771ms)
+✔ summary: a revision counts as its author's acceptance (0.299856ms)
+✔ summary: three turns each without agreement fail, and the last revision stands (0.418321ms)
+✔ summary: the drafter rotates, and agents see the result in later rounds (0.453819ms)
+✔ summary: nothing to summarize, or a failed turn, records no result (0.414041ms)
+✔ summary: with a single agent, its draft is the summary (15.259051ms)
+✔ state.briefing goes with each agent's first prompt only (2.684401ms)
+✔ UI mode: the screen is the room's input, its replies come back as events, Quit ends the room (738.773865ms)
+✔ saved provider/model choices survive CLI restarts and explicit CLI flags override them (1397.17691ms)
+✔ Restart: a new server process on the same port, re-opening the discussion in use (986.830371ms)
+  … A is thinking
+
+A (0s) › an idea
+
+  … B is thinking
+  … A is thinking
+── round over · all passed · 3 agent turns · 0s · summarizing ──
+  … A (summary, turn 1 of at most 6) is thinking
+  … B (summary, turn 2 of at most 6) is thinking
+
+Summary (agreed, by A) ›
+- the idea
+
+── your turn · auto-summary agreed · 2 agent turns · 0s ──
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Auto-summarize is off.
+  … A is thinking
+
+A (0s) › an idea
+
+  … B is thinking
+  … A is thinking
+── your turn · all passed · 3 agent turns · 0s ──
+Auto-summarize is on: a summary follows every round in which an agent spoke.
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-qg87R3/discussions/2026-11-07-about-pendulums
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-qg87R3/discussions/2026-11-07-about-pendulums/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✗ Unknown agent "@nobody". Known: A, B
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-NJ39Kz/discussions/2026-11-07-1654
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-NJ39Kz/discussions/2026-11-07-1654/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✗ No discussion "nosuch" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-3aWDzv/discussions (discussions are folders named <date>-<title>).
+✗ No discussion "../x" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-3aWDzv/discussions (discussions are folders named <date>-<title>).
+Re-opened the discussion 2026-11-01-old: your next message starts a fresh session there; the agents start from its handoff.
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-3aWDzv/discussions/2026-11-01-old
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-3aWDzv/discussions/2026-11-01-old/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-2bsEUP/discussions/2026-11-07-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-2bsEUP/discussions/2026-11-07-first-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Re-opened the discussion 2026-11-01-old: your next message starts a fresh session there; the agents start from its handoff.
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-2bsEUP/discussions/2026-11-01-old
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-2bsEUP/discussions/2026-11-01-old/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✗ No discussion "../x" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-2bsEUP/discussions (discussions are folders named <date>-<title>).
+✗ No discussion "archive" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-2bsEUP/discussions (discussions are folders named <date>-<title>).
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-9aylcI/discussions/2026-11-07-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-9aylcI/discussions/2026-11-07-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › fix the bug
+
+✔ each load builds a new room on the same conversation state and CLI sessions (118.80071ms)
+✔ a failing load leaves ctx as it was (20.745489ms)
+✔ the worker is a separate claude agent with its own session, kept across reloads (34.752343ms)
+✔ auto-summarize: on by default, a summary follows a round in which an agent spoke (91.58453ms)
+✔ auto-summarize: no summary after a round of passes, or when turned off (28.094239ms)
+✔ discussion folders: date + title, date and time without a title, -2 when taken (3.517475ms)
+✔ session transcripts: session-<date>-<time>.md, -2 when taken, never overwritten (38.279141ms)
+✔ the first message creates the discussion (titled by Claude) and its transcript before the agents see it (106.556363ms)
+✔ if the title fails, the folder is named after the date and time; an unknown @name creates nothing (39.532914ms)
+✔ /continue: only before the first message; no title asked, the transcript goes in that discussion (9.138467ms)
+✔ /reopen after the session started: a fresh session in that discussion, from its handoff (25.129087ms)
+
+W (worker, 1s) › done
+
+
+You → W › and the test
+
+
+W (worker, 0s) › done
+
+Moved the discussion 2026-11-01-old to archive/.
+Moved the discussion 2026-11-01-old to deferred/.
+Moved the discussion 2026-11-01-old to the active discussions.
+✗ Move it to active, archive or deferred.
+✗ No discussion "nosuch" in /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-VQFRLE/discussions.
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-VQFRLE/discussions/2026-11-07-in-use
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-VQFRLE/discussions/2026-11-07-in-use/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+✗ 2026-11-07-in-use is the discussion in use in this room: it can't move now.
+Moved the discussion 2026-11-01-old to the active discussions.
+Re-opened the discussion 2026-11-01-old: your next message starts a fresh session there; the agents start from its handoff.
+No discussion started yet: your next message starts a new one.
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-VKlD0w/discussions/2026-11-07-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-VKlD0w/discussions/2026-11-07-first-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+New discussion: your next message names it and starts it. To go back, /reopen 2026-11-07-first-topic.
+  … Claude (choosing the discussion's title) is thinking
+✗ Couldn't create the discussion's folder or transcript: EACCES: permission denied, mkdir '/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-VKlD0w/discussions/2026-11-07-second-topic'
+Your message was not sent to the agents. Here it is, to send again:
+
+second
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-VKlD0w/discussions/2026-11-07-second-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-VKlD0w/discussions/2026-11-07-second-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+Re-opened the discussion 2026-11-07-first-topic: your next message starts a fresh session there; the agents start from its handoff.
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-LgpCmS/discussions/2026-11-07-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-LgpCmS/discussions/2026-11-07-first-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › one
+
+✔ the worker is told the active discussion's folder with its first instruction there (849.585796ms)
+✔ agent settings persist, apply before startup, and switch only the active worker after startup (11.173631ms)
+✔ /move: a whole discussion into archive/ or deferred/ and back; never the one in use (12.430482ms)
+✔ /reopen of an archived discussion makes it active first; new names skip archived ones (3.830583ms)
+✔ Restart keeps the launch flags that matter: the same port, agents, worker and dev mode, in the discussion in use (0.709239ms)
+✔ /new: nothing to end before the first message; it creates nothing and changes nothing (2.029673ms)
+✔ /new after a round: the session ends as with Re-open; the next message starts a new titled discussion (12.03054ms)
+
+W (worker, 0s) › ok
+
+
+You → W › long task
+
+New discussion: your next message names it and starts it. To go back, /reopen 2026-11-07-first-topic.
+
+W (worker, 0s) › long done
+
+
+You → W › before the folder exists
+
+
+W (worker, 0s) › ok
+
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-LgpCmS/discussions/2026-11-07-second-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-LgpCmS/discussions/2026-11-07-second-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › after
+
+
+W (worker, 0s) › ok
+
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-8qFxn0/discussions/2026-11-07-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-8qFxn0/discussions/2026-11-07-first-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › long task
+
+✔ /new leaves the worker alone: a running task keeps its transcript, its log stays, the next instruction learns the new folder (1167.915122ms)
+New discussion: your next message names it and starts it. To go back, /reopen 2026-11-07-first-topic.
+✗ A worker task is still writing to 2026-11-07-first-topic; try again when it finishes.
+
+W (worker, 0s) › done
+
+Moved the discussion 2026-11-07-first-topic to archive/.
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-KxTtfu/discussions/2026-11-07-first-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-KxTtfu/discussions/2026-11-07-first-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › task
+
+✔ after New discussion, the previous one can't move while its worker task runs; it can once the task ends (375.341263ms)
+
+W (worker, 0s) › the reply
+
+✗ W: couldn't save to the transcript: ENOENT: no such file or directory, open '/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-KxTtfu/discussions/2026-11-07-first-topic/transcripts/session-2026-11-07-1654.md'
+✔ a transcript that can't be written keeps the worker's reply visible, reports the error and ends the busy state (331.058471ms)
+✗ Worker requires a source Git repository for its isolated worktree. The instruction was not sent.
+✔ without a Git repository, or without a commit, the worker is disabled with an explanation (73.910789ms)
+
+You → W › do it
+
+
+W (worker, 0s) › ok
+
+
+You → W › again
+
+
+W (worker, 0s) › ok
+
+
+You → W › do it
+
+✔ the first instruction creates the worktree beside the repository, on worker/main from HEAD; the worker runs there (459.85371ms)
+
+W (worker, 0s) › ok
+
+
+You → W › do it
+
+✔ a dirty room is left exactly as it was; the worker doesn't see its uncommitted changes, and the tab says so (369.213613ms)
+
+W (worker, 0s) › ok
+
+
+You → W › more
+
+
+W (worker, 0s) › ok
+
+
+You → W › do it
+
+
+W (worker, 0s) › ok
+
+
+You → W › do it
+
+✔ after a restart the worktree is reused; an existing worker/main without a worktree is reattached; nothing is deleted (812.296087ms)
+
+✗ W (worker) failed: /private/var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-1u3xwN.worker already exists and isn't the worker's worktree: nothing was changed.
+
+
+You → W › start
+
+✔ a folder already at the worktree's place is refused and left alone; the worker doesn't run (123.533016ms)
+
+W (worker, 0s) › ok
+
+
+You → W › next
+
+
+W (worker, 0s) › ok
+
+
+You → W › dirty
+
+
+W (worker, 0s) › ok
+
+
+You → W › own commits
+
+
+W (worker, 0s) › ok
+
+✔ worker/main catches up with the room only when strictly behind with a clean worktree; otherwise it is left as it is (898.207586ms)
+Reloaded the code and the agents' rulebook; the conversation continues.
+
+✔ the header's version: the checkout's commit and uncommitted changes, outside discussions/, as a snapshot (177.471445ms)
+Auto-summarize is off.
+  … Claude (choosing the discussion's title) is thinking
+Discussion: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-2QlF7N/discussions/2026-11-07-topic
+Transcript: /var/folders/n1/j_ypbbz157z8sch3ytfy31y00000gn/T/root-test-2QlF7N/discussions/2026-11-07-topic/transcripts/session-2026-11-07-1654.md
+  … A is thinking
+  … B is thinking
+── your turn · all passed · 2 agent turns · 0s ──
+
+You → W › the task
+
+✔ Reload adds its own snapshot of the checkout to the header, keeping the start's (30.261618ms)
+New discussion: your next message names it and starts it. To go back, /reopen 2026-11-07-topic.
+✗ A worker task is still writing to 2026-11-07-topic; try again when it finishes.
+
+W (worker, 0s) › done
+
+Moved the discussion 2026-11-07-topic to archive/.
+
+You → W › do it
+
+✔ a worker task keeps the discussion it started in, even if New discussion comes while it prepares its worktree (267.67909ms)
+
+W (worker, 0s) › ok
+
+
+You → W › again
+
+
+W (worker, 0s) › ok
+
+
+You → W › implement the feature
+
+✔ the worker is told about its scratch notes; .worker-notes is ignored by Git in its worktree (389.357944ms)
+
+✗ W (worker) failed: quota exhausted
+
+
+You → W › retry the feature
+
+
+W (worker, 0s) › completed
+
+✔ worker switches after a running failure, carries history, and retains its session on model changes (371.547777ms)
+✔ totals add up turn by turn; cost only when some turn had one (4.401624ms)
+✔ quota summary covers only the room's providers, and skips unavailable ones (0.646926ms)
+✔ the /usage report lists each agent and the quotas, or says the meter is unreachable (1.050978ms)
+✔ fetchQuota reads the meter, and returns null when it is down (160.870946ms)
+✔ quota gauges: one per window, for the room's providers only, in their order (2.49005ms)
+ℹ tests 98
+ℹ suites 0
+ℹ pass 98
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7761.652317

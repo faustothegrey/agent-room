@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 640" font-family="Helvetica, Arial, sans-serif" font-size="12">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#444"/></marker>
+  </defs>
+  <rect width="900" height="640" fill="#fff"/>
+  <text x="20" y="28" font-size="17" font-weight="bold">One discussion round — sequence (C4 dynamic view) · DRAFT, from src/room.mjs</text>
+
+  <!-- Lifelines -->
+  <g text-anchor="middle" font-weight="bold" fill="#fff">
+    <rect x="30" y="45" width="120" height="34" fill="#08427b"/><text x="90" y="67">User (browser)</text>
+    <rect x="230" y="45" width="160" height="34" fill="#1168bd"/><text x="310" y="67">Harness (room.mjs)</text>
+    <rect x="480" y="45" width="140" height="34" fill="#999"/><text x="550" y="67">Agent A (CLI)</text>
+    <rect x="700" y="45" width="140" height="34" fill="#999"/><text x="770" y="67">Agent B (CLI)</text>
+  </g>
+  <g stroke="#bbb" stroke-dasharray="4 4">
+    <line x1="90" y1="79" x2="90" y2="560"/><line x1="310" y1="79" x2="310" y2="560"/>
+    <line x1="550" y1="79" x2="550" y2="560"/><line x1="770" y1="79" x2="770" y2="560"/>
+  </g>
+
+  <!-- message -->
+  <line x1="90" y1="110" x2="308" y2="110" stroke="#444" marker-end="url(#a)"/>
+  <text x="100" y="104">message (optionally @name)</text>
+  <text x="320" y="128" fill="#1168bd">append to transcript</text>
+
+  <!-- loop frame -->
+  <rect x="200" y="140" width="680" height="330" fill="none" stroke="#1168bd"/>
+  <rect x="200" y="140" width="250" height="20" fill="#1168bd"/>
+  <text x="208" y="154" fill="#fff" font-weight="bold">loop: turns in order, at most 8 (MAX_TURNS)</text>
+
+  <line x1="310" y1="185" x2="548" y2="185" stroke="#444" marker-end="url(#a)"/>
+  <text x="320" y="179">prompt: unseen messages (+ intro on 1st turn)</text>
+  <text x="560" y="200" fill="#b07a1f">role prompt applies;</text>
+  <text x="560" y="214" fill="#b07a1f">reads/writes files itself</text>
+  <line x1="548" y1="235" x2="312" y2="235" stroke="#444" stroke-dasharray="5 3" marker-end="url(#a)"/>
+  <text x="330" y="229">reply text, or exactly "PASS"</text>
+  <text x="320" y="252" fill="#1168bd">record; PASS → passes+1, else passes=0</text>
+  <line x1="310" y1="262" x2="92" y2="262" stroke="#444" stroke-dasharray="5 3" marker-end="url(#a)"/>
+  <text x="110" y="276" font-size="11">shown (passes hidden)</text>
+
+  <line x1="310" y1="305" x2="768" y2="305" stroke="#444" marker-end="url(#a)"/>
+  <text x="320" y="299">prompt: messages B hasn't seen</text>
+  <line x1="768" y1="345" x2="312" y2="345" stroke="#444" stroke-dasharray="5 3" marker-end="url(#a)"/>
+  <text x="330" y="339">reply or PASS</text>
+
+  <rect x="210" y="370" width="660" height="88" fill="#f3f7fb" stroke="#1168bd" stroke-dasharray="3 3"/>
+  <text x="220" y="390" fill="#1168bd" font-weight="bold">stop when (enforced by the harness):</text>
+  <text x="220" y="408">• every addressed agent passed in a row</text>
+  <text x="220" y="424">• a turn failed (error shown to the User, not sent to agents)</text>
+  <text x="220" y="440">• 8 turns reached → "(turn cap reached)"</text>
+
+  <!-- after round -->
+  <text x="320" y="494" fill="#1168bd">if an agent spoke (or auto dev is deciding) and none failed: automatic summary</text>
+  <text x="320" y="508" fill="#1168bd">(drafter rotates; others PASS to agree; ≤3 turns each)</text>
+  <text x="320" y="522" fill="#1168bd">then: replication commit (if on) → checkpoint saved → auto dev decides (if running)</text>
+  <text x="320" y="536" fill="#1168bd" font-size="10">a failed turn: no summary; auto dev pauses</text>
+  <line x1="310" y1="548" x2="92" y2="548" stroke="#444" stroke-dasharray="5 3" marker-end="url(#a)"/>
+  <text x="110" y="542" font-size="11">your turn</text>
+
+  <text x="20" y="590" font-size="11" fill="#666">Blue text = harness enforces it in code. Amber = agent behaviour asked by the role prompt (not enforced).</text>
+  <text x="20" y="606" font-size="11" fill="#666">Each agent turn is a separate CLI process resuming its own session; agents never talk to each other directly.</text>
+  <text x="20" y="622" font-size="11" fill="#666">Steps after the round traced in src/ui.mjs:1783-1804 (2026-11-11).</text>
+</svg>

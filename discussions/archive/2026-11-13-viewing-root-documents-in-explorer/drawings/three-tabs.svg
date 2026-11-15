@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1020" height="810" viewBox="0 0 1020 810" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="1020" height="810" fill="#fff"/>
+  <text x="20" y="28" font-size="18" font-weight="bold">Header + right pane with three tabs</text>
+
+  <!-- Header -->
+  <rect x="20" y="42" width="980" height="56" rx="6" fill="#f3f5fb" stroke="#bbb"/>
+  <text x="34" y="74" font-weight="bold">agent-room ▾</text>
+  <line x1="150" y1="50" x2="150" y2="90" stroke="#ccc"/>
+  <text x="166" y="66" font-weight="bold">viewing-root-documents-in-explorer  <tspan font-weight="normal" fill="#555">⋯</tspan></text>
+  <text x="166" y="86" font-size="12"><tspan fill="#10b981">●</tspan> Claude is thinking</text>
+  <line x1="520" y1="50" x2="520" y2="90" stroke="#ccc" stroke-dasharray="3,3"/>
+  <text x="536" y="66" font-size="12"><tspan fill="#f59e0b">●</tspan> viewing-root-documents · Worker is working</text>
+  <text x="536" y="86" font-size="12"><tspan fill="#f59e0b">●</tspan> project-documentation · Worker is working</text>
+  <line x1="880" y1="50" x2="880" y2="90" stroke="#ccc"/>
+  <text x="896" y="74" fill="#555" font-size="12">usage gauges</text>
+  <text x="166" y="112" font-size="11" fill="#c47a1d">left: shown discussion, its Actions and status (as today; replaces Explorer's activity line)</text>
+  <text x="536" y="126" font-size="11" fill="#c47a1d">right: every open discussion whose worker is working (shown one included)</text>
+
+  <!-- Panel 1: Discussions -->
+  <g transform="translate(20,136)">
+    <rect width="315" height="500" rx="8" fill="#fafafa" stroke="#888"/>
+    <rect x="10" y="10" width="95" height="26" rx="4" fill="#3d5fc4"/><text x="20" y="28" fill="#fff" font-weight="bold">Discussions</text>
+    <text x="118" y="28" fill="#555">Explorer</text><text x="190" y="28" fill="#aaa">Document</text>
+
+    <rect x="10" y="48" width="295" height="56" rx="5" fill="#eef3ff" stroke="#3d5fc4"/>
+    <text x="20" y="68" font-weight="bold">viewing-root-documents…</text>
+    <text x="20" y="86" fill="#3d5fc4" font-size="12">current · started</text>
+    <text x="232" y="86" font-size="12">Actions ▾</text>
+
+    <rect x="10" y="112" width="295" height="56" rx="5" fill="#fff" stroke="#bbb"/>
+    <text x="20" y="132" font-weight="bold">project-documentation…</text>
+    <text x="20" y="150" fill="#555" font-size="12">open, paused</text>
+    <text x="180" y="150" font-size="12">Resume</text><text x="232" y="150" font-size="12">Actions ▾</text>
+
+    <rect x="10" y="176" width="295" height="56" rx="5" fill="#fff" stroke="#bbb"/>
+    <text x="20" y="196" font-weight="bold">viewing-worker-output…</text>
+    <text x="20" y="214" fill="#555" font-size="12">not started</text>
+    <text x="180" y="214" font-size="12">Go to</text><text x="232" y="214" font-size="12">Actions ▾</text>
+
+    <text x="12" y="256" fill="#555" font-size="12">Received from peers · read-only</text>
+    <rect x="10" y="264" width="295" height="56" rx="5" fill="#fff" stroke="#bbb"/>
+    <text x="20" y="284">some-discussion</text><text x="20" y="302" fill="#555" font-size="12">peer-x · round 4</text>
+    <rect x="160" y="290" width="62" height="20" rx="4" fill="#fff" stroke="#c47a1d"/><text x="167" y="304" font-size="11" fill="#c47a1d">Peek files</text>
+    <rect x="228" y="290" width="70" height="20" rx="4" fill="#fff" stroke="#3d5fc4"/><text x="234" y="304" font-size="11" fill="#3d5fc4">View chat</text>
+
+    <text x="12" y="346" fill="#555" font-size="12">▸ Archived (24)   ▸ Deferred (3)</text>
+
+    <text x="12" y="386" fill="#555" font-size="12">Click any discussion's name = peek at its</text>
+    <text x="12" y="402" fill="#555" font-size="12">files in Explorer (see peek.svg).</text>
+    <text x="12" y="426" fill="#555" font-size="12">Resume / Go to = really switch.</text>
+    <text x="12" y="450" fill="#555" font-size="12">View chat = whole window shows the peer's</text>
+    <text x="12" y="466" fill="#555" font-size="12">conversation, read-only (as today's View).</text>
+  </g>
+
+  <!-- Panel 2: Explorer -->
+  <g transform="translate(352,136)">
+    <rect width="315" height="500" rx="8" fill="#fafafa" stroke="#888"/>
+    <text x="20" y="28" fill="#555">Discussions</text>
+    <rect x="100" y="10" width="78" height="26" rx="4" fill="#3d5fc4"/><text x="112" y="28" fill="#fff" font-weight="bold">Explorer</text>
+    <text x="190" y="28" fill="#aaa">Document</text>
+
+    <!-- three-choice bar -->
+    <rect x="10" y="46" width="295" height="26" rx="5" fill="#fff" stroke="#3d5fc4"/>
+    <text x="22" y="64" fill="#3d5fc4" font-size="12">Discussion</text>
+    <rect x="98" y="46" width="104" height="26" fill="#3d5fc4"/>
+    <text x="106" y="64" fill="#fff" font-size="12" font-weight="bold">Room checkout</text>
+    <line x1="202" y1="46" x2="202" y2="72" stroke="#3d5fc4"/>
+    <text x="212" y="64" fill="#3d5fc4" font-size="12">Worker copy</text>
+    <text x="12" y="92" fill="#555" font-size="11">agent-room/ · main</text>
+
+    <text x="12" y="118">README.md</text>
+    <text x="12" y="138">▾ docs/</text>
+    <text x="30" y="158">architecture.md</text>
+    <text x="30" y="178">▸ diagrams/</text>
+    <text x="12" y="198">▾ discussions/</text>
+    <text x="30" y="218">README.md <tspan fill="#c47a1d" font-size="11">(+ other non-discussion files)</tspan></text>
+    <text x="12" y="238">▸ scripts/</text>
+    <text x="12" y="258">▸ src/</text>
+    <text x="12" y="278">▸ test/</text>
+    <text x="12" y="298">AGENT.md</text>
+    <text x="12" y="318">package.json</text>
+    <text x="12" y="338" fill="#aaa">logo.icns   (greyed: can't be shown)</text>
+
+    <text x="12" y="382" fill="#555" font-size="12">One tree at a time, full height.</text>
+    <text x="12" y="400" fill="#555" font-size="12">Discussion = notes, drawings, transcripts.</text>
+    <text x="12" y="418" fill="#555" font-size="12">Worker copy = root in the worker's worktree;</text>
+    <text x="12" y="434" fill="#555" font-size="12">greyed when it doesn't exist.</text>
+    <text x="12" y="458" fill="#555" font-size="12">Hidden: .git, gitignored. Code = plain text.</text>
+    <text x="12" y="478" fill="#555" font-size="12">No discussion open: only Room checkout.</text>
+  </g>
+
+  <!-- Panel 3: Document -->
+  <g transform="translate(684,136)">
+    <rect width="315" height="500" rx="8" fill="#fafafa" stroke="#888"/>
+    <text x="20" y="28" fill="#555">Discussions</text><text x="110" y="28" fill="#555">Explorer</text>
+    <rect x="182" y="10" width="88" height="26" rx="4" fill="#3d5fc4"/><text x="192" y="28" fill="#fff" font-weight="bold">Document</text>
+
+    <rect x="10" y="46" width="295" height="26" rx="4" fill="#eef3ff" stroke="#3d5fc4"/>
+    <text x="18" y="64" fill="#3d5fc4" font-size="12">Room checkout · docs/architecture.md</text>
+    <rect x="10" y="80" width="295" height="270" fill="#fff" stroke="#ddd"/>
+    <text x="22" y="108" font-weight="bold" font-size="15"># Architecture</text>
+    <rect x="22" y="124" width="250" height="8" fill="#e5e5e5"/>
+    <rect x="22" y="140" width="220" height="8" fill="#e5e5e5"/>
+    <rect x="22" y="156" width="240" height="8" fill="#e5e5e5"/>
+    <rect x="22" y="178" width="200" height="110" fill="#f0f0f0" stroke="#ddd"/>
+    <text x="80" y="238" fill="#999">diagram</text>
+
+    <text x="12" y="382" fill="#555" font-size="12">The path line says which copy you read.</text>
+    <text x="12" y="400" fill="#555" font-size="12">Room checkout ⇄ Worker copy: same file</text>
+    <text x="12" y="416" fill="#555" font-size="12">from the other copy, or "not in this copy".</text>
+    <text x="12" y="440" fill="#555" font-size="12">If the worker changes or deletes it while</text>
+    <text x="12" y="456" fill="#555" font-size="12">open, a note says so.</text>
+  </g>
+
+  <!-- Tooltips of the three choices -->
+  <text x="20" y="672" font-size="15" font-weight="bold">Tooltips on Explorer's three choices (shown on hover)</text>
+  <g font-size="12">
+    <rect x="20" y="684" width="315" height="104" rx="6" fill="#333"/>
+    <text x="32" y="706" fill="#fff" font-weight="bold">Discussion</text>
+    <text x="32" y="726" fill="#fff">This discussion's own files: notes,</text>
+    <text x="32" y="742" fill="#fff">drawings, transcripts, attachments.</text>
+    <text x="32" y="758" fill="#fff">Always read from the room's folder</text>
+    <text x="32" y="774" fill="#fff">(discussions/&lt;name&gt;/).</text>
+
+    <rect x="352" y="684" width="315" height="104" rx="6" fill="#333"/>
+    <text x="364" y="706" fill="#fff" font-weight="bold">Room checkout</text>
+    <text x="364" y="726" fill="#fff">The project as it is in the room's folder</text>
+    <text x="364" y="742" fill="#fff">(agent-room/, branch main): what you have</text>
+    <text x="364" y="758" fill="#fff">merged, plus your own uncommitted edits.</text>
+
+    <rect x="684" y="684" width="315" height="104" rx="6" fill="#333"/>
+    <text x="696" y="706" fill="#fff" font-weight="bold">Worker copy</text>
+    <text x="696" y="726" fill="#fff">The project in this discussion's worker workspace</text>
+    <text x="696" y="742" fill="#fff">(agent-room.workers/&lt;name&gt;/, worker/&lt;name&gt;);</text>
+    <text x="696" y="758" fill="#fff">changes there may not be merged yet.</text>
+    <text x="696" y="774" fill="#fff">Read-only. Greyed: "No worker copy yet".</text>
+  </g>
+</svg>

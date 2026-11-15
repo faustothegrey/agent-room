@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="700" viewBox="0 0 1180 700" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="ar" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#333"/></marker>
+  </defs>
+  <rect width="1180" height="700" fill="#fff"/>
+  <text x="20" y="30" font-size="18" font-weight="bold">Peek: looking at another discussion without leaving the current one</text>
+  <text x="20" y="52" fill="#555">Current discussion here: viewing-root-documents. Peeked one: project-documentation. Only the right pane changes; chat, Worker tab and header (with its activity line) stay on the current one.</text>
+
+  <!-- ============ STATE 1: Discussions tab ============ -->
+  <g transform="translate(20,80)">
+    <text x="0" y="0" font-weight="bold" font-size="15">① Discussions tab</text>
+    <rect y="12" width="330" height="330" rx="8" fill="#fafafa" stroke="#888"/>
+    <rect x="10" y="22" width="95" height="24" rx="4" fill="#3d5fc4"/><text x="20" y="39" fill="#fff" font-weight="bold">Discussions</text>
+    <text x="118" y="39" fill="#555">Explorer</text><text x="190" y="39" fill="#555">Document</text>
+
+    <rect x="10" y="58" width="310" height="50" rx="5" fill="#eef3ff" stroke="#3d5fc4"/>
+    <text x="20" y="78" font-weight="bold">viewing-root-documents…</text>
+    <text x="20" y="96" fill="#3d5fc4" font-size="12">current</text><text x="250" y="96" font-size="12">Actions ▾</text>
+
+    <rect x="10" y="116" width="310" height="50" rx="5" fill="#fff" stroke="#c47a1d" stroke-width="2"/>
+    <text x="20" y="136" font-weight="bold" fill="#c47a1d" text-decoration="underline">project-documentation…</text>
+    <text x="20" y="154" fill="#555" font-size="12">open, paused</text><text x="190" y="154" font-size="12">Resume</text><text x="250" y="154" font-size="12">Actions ▾</text>
+    <text x="212" y="136" font-size="18">👆</text>
+
+    <rect x="10" y="174" width="310" height="50" rx="5" fill="#fff" stroke="#bbb"/>
+    <text x="20" y="194" font-weight="bold">viewing-worker-output…</text>
+    <text x="20" y="212" fill="#555" font-size="12">not started</text><text x="190" y="212" font-size="12">Go to</text><text x="250" y="212" font-size="12">Actions ▾</text>
+    <text x="12" y="248" fill="#555" font-size="12">▸ Received · ▸ Archived · ▸ Deferred</text>
+
+    <text x="12" y="285" font-size="12" fill="#c47a1d">Click a discussion's NAME = peek at its files.</text>
+    <text x="12" y="303" font-size="12" fill="#555">Resume / Go to = really switch (as today).</text>
+  </g>
+
+  <!-- arrow 1 -> 2 -->
+  <line x1="355" y1="250" x2="405" y2="250" stroke="#333" stroke-width="2" marker-end="url(#ar)"/>
+  <text x="352" y="238" font-size="12">click name</text>
+
+  <!-- ============ STATE 2: Explorer peeking ============ -->
+  <g transform="translate(415,80)">
+    <text x="0" y="0" font-weight="bold" font-size="15">② Explorer, peeking</text>
+    <rect y="12" width="340" height="400" rx="8" fill="#fafafa" stroke="#c47a1d" stroke-width="2"/>
+    <text x="20" y="39" fill="#555">Discussions</text>
+    <rect x="100" y="22" width="78" height="24" rx="4" fill="#3d5fc4"/><text x="112" y="39" fill="#fff" font-weight="bold">Explorer</text>
+    <text x="190" y="39" fill="#555">Document</text>
+
+    <rect x="10" y="56" width="320" height="34" rx="5" fill="#c47a1d"/>
+    <text x="18" y="78" fill="#fff" font-size="12">Looking at <tspan font-weight="bold">project-documentation</tspan></text>
+    <rect x="222" y="62" width="102" height="22" rx="4" fill="#fff"/><text x="229" y="77" fill="#c47a1d" font-size="12" font-weight="bold">Back to current</text>
+
+    <!-- three-choice bar -->
+    <rect x="10" y="98" width="320" height="26" rx="5" fill="#fff" stroke="#c47a1d"/>
+    <text x="22" y="116" fill="#c47a1d" font-size="12">Discussion</text>
+    <line x1="100" y1="98" x2="100" y2="124" stroke="#c47a1d"/>
+    <text x="110" y="116" fill="#c47a1d" font-size="12">Room checkout</text>
+    <rect x="212" y="98" width="118" height="26" fill="#c47a1d"/>
+    <text x="226" y="116" fill="#fff" font-size="12" font-weight="bold">Worker copy</text>
+    <text x="12" y="144" fill="#555" font-size="11">worker/project-documentation (its worktree)</text>
+
+    <text x="12" y="172">README.md</text>
+    <text x="12" y="192">▾ docs/</text>
+    <text x="30" y="212" fill="#c47a1d" text-decoration="underline">architecture.md</text>
+    <text x="132" y="212" font-size="18">👆</text>
+    <text x="30" y="232">▸ diagrams/</text>
+    <text x="12" y="252">▸ discussions/</text>
+    <text x="12" y="272">▸ src/</text>
+    <text x="12" y="292">package.json</text>
+
+    <text x="12" y="330" font-size="12" fill="#555">All three choices follow the peeked discussion:</text>
+    <text x="12" y="346" font-size="12" fill="#555">its files, the root, and ITS worker copy.</text>
+    <text x="12" y="366" font-size="12" fill="#555">Archived / received: read-only; Worker copy</text>
+    <text x="12" y="382" font-size="12" fill="#555">greyed if it has none.</text>
+  </g>
+
+  <!-- arrow 2 -> 3 -->
+  <line x1="780" y1="250" x2="830" y2="250" stroke="#333" stroke-width="2" marker-end="url(#ar)"/>
+  <text x="772" y="238" font-size="12">click file</text>
+
+  <!-- ============ STATE 3: Document ============ -->
+  <g transform="translate(840,80)">
+    <text x="0" y="0" font-weight="bold" font-size="15">③ Document</text>
+    <rect y="12" width="320" height="400" rx="8" fill="#fafafa" stroke="#888"/>
+    <text x="20" y="39" fill="#555">Discussions</text><text x="110" y="39" fill="#555">Explorer <tspan fill="#c47a1d">●</tspan></text>
+    <rect x="190" y="22" width="88" height="24" rx="4" fill="#3d5fc4"/><text x="200" y="39" fill="#fff" font-weight="bold">Document</text>
+
+    <rect x="10" y="56" width="300" height="40" rx="4" fill="#fff4e6" stroke="#c47a1d"/>
+    <text x="18" y="73" fill="#c47a1d" font-size="12">project-documentation's worker ·</text>
+    <text x="18" y="89" fill="#c47a1d" font-size="12">docs/architecture.md</text>
+    <rect x="10" y="104" width="300" height="220" fill="#fff" stroke="#ddd"/>
+    <text x="22" y="132" font-weight="bold" font-size="15"># Architecture</text>
+    <rect x="22" y="148" width="250" height="8" fill="#e5e5e5"/>
+    <rect x="22" y="164" width="220" height="8" fill="#e5e5e5"/>
+    <rect x="22" y="190" width="200" height="110" fill="#f0f0f0" stroke="#ddd"/>
+    <text x="90" y="250" fill="#999">diagram</text>
+    <text x="12" y="350" font-size="12" fill="#555">Orange dot on Explorer = a peek is on.</text>
+    <text x="12" y="368" font-size="12" fill="#555">You can chat about this file: sending a</text>
+    <text x="12" y="384" font-size="12" fill="#555">message does NOT end the peek.</text>
+  </g>
+
+  <!-- ============ Ending the peek ============ -->
+  <g transform="translate(20,520)">
+    <text x="0" y="0" font-weight="bold" font-size="15">④ How a peek ends</text>
+    <rect y="12" width="1140" height="160" rx="8" fill="#f6f6f6" stroke="#bbb"/>
+
+    <text x="20" y="42" font-weight="bold">Ends the peek → Explorer back to the current discussion and its worker:</text>
+    <text x="40" y="64">• click <tspan font-weight="bold" fill="#c47a1d">Back to current</tspan></text>
+    <text x="40" y="84">• switch discussions (Resume / Go to / New discussion) → Explorer shows the new current one</text>
+
+    <text x="20" y="116" font-weight="bold">Does NOT end it:</text>
+    <text x="40" y="138">• sending a message · agents editing files · switching between Discussions / Explorer / Document tabs</text>
+
+    <text x="700" y="42" font-weight="bold">After Back to current:</text>
+    <text x="700" y="64">Explorer list → current discussion.</text>
+    <text x="700" y="84">Document keeps the file you were reading,</text>
+    <text x="700" y="104">its path line still says where it is from</text>
+    <text x="700" y="124">(e.g. "project-documentation's worker · …"),</text>
+    <text x="700" y="144">until you open another file.</text>
+  </g>
+</svg>

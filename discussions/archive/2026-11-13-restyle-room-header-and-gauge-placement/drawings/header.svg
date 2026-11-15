@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="330" font-family="-apple-system, system-ui, sans-serif" font-size="13">
+<rect width="860" height="330" fill="#fff"/>
+<text x="16" y="22" font-weight="bold">Today</text>
+<rect x="16" y="32" width="230" height="56" rx="6" fill="none" stroke="#5a7bd8" stroke-width="1.5"/>
+<text x="28" y="54" font-weight="bold">agent-room ▾</text>
+<text x="28" y="76" font-family="ui-monospace, monospace" font-size="11">/Users/fausto/Software/agent-room</text>
+<rect x="256" y="32" width="300" height="56" rx="6" fill="none" stroke="#4caf7a" stroke-width="1.5"/>
+<text x="268" y="58">2026-11-13-restyle-room-header… ▾</text>
+<text x="268" y="76" font-size="11" fill="#777">your turn</text>
+<rect x="566" y="32" width="278" height="56" rx="6" fill="none" stroke="#d6a84c" stroke-width="1.5"/>
+<circle cx="582" cy="52" r="4" fill="#4caf7a"/><text x="591" y="56">Server ▾</text>
+<rect x="670" y="42" width="160" height="36" rx="4" fill="#eee"/><text x="680" y="64" font-size="11" fill="#555">quota gauges · on HH:MM</text>
+
+<text x="16" y="132" font-weight="bold">Proposed</text>
+<rect x="16" y="142" width="230" height="56" rx="6" fill="none" stroke="#5a7bd8" stroke-width="1.5"/>
+<text x="28" y="164" font-weight="bold">agent-room ▾</text>
+<text x="128" y="164" font-size="11" fill="#777">← folder name, not fixed text</text>
+<circle cx="34" cy="183" r="4" fill="#4caf7a"/><text x="43" y="187" fill="#5a7bd8">Server ▾</text><text x="102" y="187" fill="#d6a84c">⚠</text><text x="120" y="187" font-size="11" fill="#777">← peer warning, if any</text>
+<rect x="256" y="142" width="300" height="56" rx="6" fill="none" stroke="#4caf7a" stroke-width="1.5"/>
+<text x="268" y="168">2026-11-13-restyle-room-header… ▾</text>
+<text x="268" y="186" font-size="11" fill="#777">your turn</text>
+<rect x="566" y="142" width="200" height="56" rx="6" fill="none" stroke="#d6a84c" stroke-width="1.5"/>
+<rect x="578" y="152" width="176" height="36" rx="4" fill="#eee"/><text x="588" y="174" font-size="11" fill="#555">quota gauges · on HH:MM</text>
+
+<rect x="16" y="214" width="380" height="58" rx="6" fill="#fff" stroke="#5a7bd8"/>
+<text x="26" y="232" font-size="11" fill="#555">Hover on the room name (tooltip):</text>
+<text x="26" y="248" font-family="ui-monospace, monospace" font-size="11">/Users/fausto/Software/agent-room</text>
+<text x="26" y="264" font-size="11" fill="#555">mac 127.0.0.1:… · mac's line, round 4 · Project abc123</text>
+<line x1="60" y1="170" x2="60" y2="214" stroke="#5a7bd8" stroke-dasharray="3 3"/>
+<text x="16" y="300" font-size="11" fill="#777">"Server" moves with its menu and hover details; blue like the room zone (red when down). The ⚠ stays amber.</text>
+</svg>

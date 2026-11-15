@@ -1,0 +1,7 @@
+Copied discussion: { count: 32, bytes: 1242394 }
+{"round":1,"kind":"full","bytes":515172,"captureAndSendMs":449,"sendMs":291,"gitRuns":16,"Mac":{"gitKiB":756,"snapshotsKiB":0},"Pi":{"gitKiB":588,"snapshotsKiB":1280}}
+{"round":2,"kind":"incremental","bytes":585,"captureAndSendMs":310,"sendMs":222,"gitRuns":20,"Mac":{"gitKiB":772,"snapshotsKiB":0},"Pi":{"gitKiB":596,"snapshotsKiB":1284}}
+{"round":3,"kind":"incremental","bytes":573,"captureAndSendMs":310,"sendMs":227,"gitRuns":20,"Mac":{"gitKiB":788,"snapshotsKiB":0},"Pi":{"gitKiB":604,"snapshotsKiB":1288}}
+{"round":4,"kind":"incremental","bytes":516,"captureAndSendMs":294,"sendMs":218,"gitRuns":20,"Mac":{"gitKiB":804,"snapshotsKiB":0},"Pi":{"gitKiB":612,"snapshotsKiB":1292}}
+{"round":5,"kind":"incremental","bytes":517,"captureAndSendMs":325,"sendMs":234,"gitRuns":20,"Mac":{"gitKiB":820,"snapshotsKiB":0},"Pi":{"gitKiB":620,"snapshotsKiB":1296}}
+{"round":6,"kind":"incremental","bytes":518,"captureAndSendMs":338,"sendMs":237,"gitRuns":20,"Mac":{"gitKiB":836,"snapshotsKiB":0},"Pi":{"gitKiB":628,"snapshotsKiB":1300}}

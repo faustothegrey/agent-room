@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+  <rect width="960" height="560" fill="#fff"/>
+  <text x="480" y="32" text-anchor="middle" font-size="20" font-weight="bold">Current proposal: one room, always on the Pi</text>
+  <text x="480" y="54" text-anchor="middle" fill="#555">The Mac only looks at it. Closing the laptop does not stop the discussion.</text>
+
+  <!-- Mac -->
+  <rect x="30" y="90" width="300" height="260" rx="12" fill="#eef4ff" stroke="#3b6fd8" stroke-width="2"/>
+  <text x="180" y="118" text-anchor="middle" font-size="17" font-weight="bold">Your Mac</text>
+  <rect x="50" y="135" width="260" height="80" rx="8" fill="#fff" stroke="#999"/>
+  <text x="180" y="162" text-anchor="middle">Browser</text>
+  <text x="180" y="184" text-anchor="middle" fill="#555" font-size="12">http://127.0.0.1:5566/__room</text>
+  <text x="180" y="202" text-anchor="middle" fill="#555" font-size="12">(check the Pi's actual port)</text>
+  <rect x="50" y="240" width="260" height="90" rx="8" fill="#fff" stroke="#999" stroke-dasharray="5 4"/>
+  <text x="180" y="266" text-anchor="middle">Optional: copy of discussions/</text>
+  <text x="180" y="288" text-anchor="middle" fill="#555" font-size="12">read-only, for offline reading</text>
+  <text x="180" y="308" text-anchor="middle" fill="#555" font-size="12">no local room runs</text>
+
+  <!-- Pi -->
+  <rect x="560" y="90" width="370" height="260" rx="12" fill="#eefbef" stroke="#2f9e44" stroke-width="2"/>
+  <text x="745" y="118" text-anchor="middle" font-size="17" font-weight="bold">Raspberry Pi 4: the only writer</text>
+  <rect x="580" y="135" width="330" height="60" rx="8" fill="#fff" stroke="#999"/>
+  <text x="745" y="160" text-anchor="middle">agent-room (node) in tmux</text>
+  <text x="745" y="180" text-anchor="middle" fill="#555" font-size="12">listens on 127.0.0.1 only, unchanged</text>
+  <rect x="580" y="205" width="155" height="55" rx="8" fill="#fff" stroke="#999"/>
+  <text x="657" y="238" text-anchor="middle">claude CLI</text>
+  <rect x="755" y="205" width="155" height="55" rx="8" fill="#fff" stroke="#999"/>
+  <text x="832" y="238" text-anchor="middle">codex CLI</text>
+  <rect x="580" y="270" width="330" height="60" rx="8" fill="#fff" stroke="#999"/>
+  <text x="745" y="295" text-anchor="middle">repo checkout: discussions/, notes,</text>
+  <text x="745" y="315" text-anchor="middle">drawings, transcripts</text>
+  <line x1="745" y1="195" x2="657" y2="205" stroke="#333" marker-end="url(#a)"/>
+  <line x1="745" y1="195" x2="832" y2="205" stroke="#333" marker-end="url(#a)"/>
+
+  <!-- providers -->
+  <rect x="600" y="420" width="140" height="50" rx="25" fill="#f6f6f6" stroke="#999"/>
+  <text x="670" y="450" text-anchor="middle">Anthropic</text>
+  <rect x="770" y="420" width="140" height="50" rx="25" fill="#f6f6f6" stroke="#999"/>
+  <text x="840" y="450" text-anchor="middle">OpenAI</text>
+  <line x1="657" y1="260" x2="668" y2="418" stroke="#333" marker-end="url(#a)"/>
+  <line x1="832" y1="260" x2="838" y2="418" stroke="#333" marker-end="url(#a)"/>
+  <text x="935" y="495" text-anchor="end" fill="#555" font-size="12">models run at the providers</text>
+
+  <!-- tunnel -->
+  <path d="M310,175 L578,165" fill="none" stroke="#3b6fd8" stroke-width="3" stroke-dasharray="8 5" marker-end="url(#a)" marker-start="url(#a)"/>
+  <text x="444" y="150" text-anchor="middle" fill="#3b6fd8" font-size="13">SSH tunnel (live view)</text>
+  <text x="444" y="196" text-anchor="middle" fill="#3b6fd8" font-size="12">ssh -L 5566:127.0.0.1:5566 pi</text>
+
+  <!-- mirror -->
+  <path d="M578,300 L312,290" fill="none" stroke="#d99a00" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#a)"/>
+  <text x="444" y="275" text-anchor="middle" fill="#b07800" font-size="13">optional one-way mirror</text>
+  <text x="444" y="318" text-anchor="middle" fill="#b07800" font-size="12">Pi → Mac only (Syncthing or rsync)</text>
+
+  <text x="30" y="420" font-weight="bold">What it gives now</text>
+  <text x="30" y="442" font-size="13">• one discussion, one writer: no conflicts</text>
+  <text x="30" y="462" font-size="13">• continues unattended for one round</text>
+  <text x="30" y="482" font-size="13">• no change to agent-room's code</text>
+  <text x="30" y="512" font-weight="bold">Later</text>
+  <text x="30" y="534" font-size="13">• more devices (phone) · Mac CLIs over SSH · moving a running discussion</text>
+</svg>

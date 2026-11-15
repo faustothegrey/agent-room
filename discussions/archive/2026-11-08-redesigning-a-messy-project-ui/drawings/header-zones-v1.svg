@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="560" viewBox="0 0 1440 560" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="13">
+  <rect width="1440" height="560" fill="#111"/>
+  <text x="20" y="28" fill="#ddd" font-size="16" font-weight="bold">Header reorganized in three zones (proposal v1, Claude) — same density, same overall layout</text>
+
+  <!-- Header frame -->
+  <rect x="10" y="45" width="1420" height="150" fill="#161616" stroke="#444"/>
+
+  <!-- ROOM zone -->
+  <rect x="18" y="53" width="330" height="134" rx="6" fill="#1b2130" stroke="#5a7bd8"/>
+  <text x="28" y="72" fill="#8fa8ee" font-size="11" font-weight="bold">ROOM</text>
+  <text x="28" y="94" fill="#fff" font-weight="bold">agent-room</text>
+  <text x="28" y="112" fill="#bbb" font-family="Menlo, monospace" font-size="11">/Users/fausto/Software/agent-room</text>
+  <g fill="#2a2a2a" stroke="#666"><rect x="28" y="124" width="100" height="24" rx="4"/><rect x="134" y="124" width="140" height="24" rx="4"/><rect x="28" y="154" width="80" height="24" rx="4"/></g>
+  <g fill="#eee"><text x="38" y="140">Switch room…</text><text x="143" y="140">Open room in folder…</text><text x="38" y="170">Quit room</text></g>
+  <text x="118" y="170" fill="#bbb" font-size="11">Mac's line, no saved round</text>
+
+  <!-- DISCUSSION zone -->
+  <rect x="358" y="53" width="470" height="134" rx="6" fill="#1b2a22" stroke="#4caf7a"/>
+  <text x="368" y="72" fill="#7fd6a3" font-size="11" font-weight="bold">CURRENT DISCUSSION</text>
+  <text x="368" y="96" fill="#6aa8ff" font-size="15" font-weight="bold">Redesigning a Messy Project UI</text>
+  <text x="368" y="114" fill="#999" font-size="11">← back to "…" appears here when relevant</text>
+  <g fill="#2a2a2a" stroke="#666"><rect x="368" y="124" width="120" height="24" rx="4"/><rect x="494" y="124" width="85" height="24" rx="4"/></g>
+  <g fill="#eee"><text x="378" y="140">Pause discussion</text><text x="503" y="140">Summarize</text></g>
+  <rect x="586" y="130" width="12" height="12" fill="#3b82f6"/><text x="603" y="140" fill="#ccc">Auto-summarize</text>
+  <line x1="712" y1="122" x2="712" y2="182" stroke="#4caf7a" stroke-dasharray="3 3"/>
+  <rect x="722" y="124" width="98" height="24" rx="4" fill="none" stroke="#7fd6a3" stroke-dasharray="4 3"/>
+  <text x="729" y="140" fill="#7fd6a3">+ New discussion</text>
+  <text x="722" y="166" fill="#999" font-size="10">starts another one:</text>
+  <text x="722" y="178" fill="#999" font-size="10">kept apart (Codex)</text>
+
+  <!-- MONITORING zone -->
+  <rect x="838" y="53" width="584" height="134" rx="6" fill="#2a2418" stroke="#d6a84c"/>
+  <text x="848" y="72" fill="#e6c27a" font-size="11" font-weight="bold">SERVER &amp; MONITORING</text>
+  <circle cx="852" cy="89" r="4" fill="#22c55e"/>
+  <text x="862" y="93" fill="#bbb" font-size="11">Server up 22m · port 5566 · Mac 192.168.1.35</text>
+  <text x="848" y="110" fill="#999" font-family="Menlo, monospace" font-size="11">01e1118 · started 16:56</text>
+  <text x="848" y="132" fill="#eee" font-weight="bold">Claude</text>
+  <text x="900" y="132" fill="#bbb" font-size="11">5h 32% · week 38%</text>
+  <text x="1030" y="132" fill="#eee" font-weight="bold">Codex</text>
+  <text x="1078" y="132" fill="#bbb" font-size="11">5h 19% · week 48%</text>
+  <text x="1210" y="132" fill="#888" font-size="11">updated 17:13</text>
+  <g fill="#2a2a2a" stroke="#666"><rect x="848" y="154" width="64" height="24" rx="4"/><rect x="918" y="154" width="68" height="24" rx="4"/><rect x="992" y="154" width="120" height="24" rx="4"/></g>
+  <g fill="#eee"><text x="858" y="170">Reload</text><text x="928" y="170">Restart</text><text x="1002" y="170">Shutdown server</text></g>
+  <text x="1122" y="170" fill="#888" font-size="10">← whole server</text>
+  <rect x="1300" y="118" width="60" height="22" rx="4" fill="#2a2a2a" stroke="#666"/>
+  <text x="1310" y="133" fill="#eee">Usage</text>
+
+  <!-- Body hint -->
+  <rect x="10" y="205" width="980" height="250" fill="#151515" stroke="#333"/>
+  <text x="30" y="235" fill="#777">Discussion | Worker tabs and chat — unchanged</text>
+  <rect x="990" y="205" width="440" height="250" fill="#151515" stroke="#333"/>
+  <text x="1010" y="235" fill="#777">Discussions / document pane — unchanged</text>
+  <rect x="20" y="395" width="960" height="50" rx="5" fill="#1d1d1d" stroke="#555"/>
+  <text x="32" y="425" fill="#888">Message box — the button row under it is gone (all moved up into their zones)</text>
+
+  <!-- Legend -->
+  <text x="20" y="490" fill="#ccc">Rule: a button lives in the zone of what it acts on.</text>
+  <text x="20" y="510" fill="#8fa8ee">Blue = this room</text>
+  <text x="160" y="510" fill="#7fd6a3">Green = the discussion in use</text>
+  <text x="380" y="510" fill="#e6c27a">Amber = the whole server (all rooms) + monitoring</text>
+  <text x="20" y="535" fill="#999">Reload/Restart act on every room, so they sit with the server, not the room.</text>
+</svg>

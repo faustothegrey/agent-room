@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#333"/>
+    </marker>
+  </defs>
+  <rect width="960" height="640" fill="#fff"/>
+  <text x="480" y="32" text-anchor="middle" font-size="20" font-weight="bold">First trial: one unattended round on the Pi</text>
+  <text x="480" y="54" text-anchor="middle" fill="#555">Nothing new to build: existing room + git + an SSH tunnel</text>
+
+  <!-- Mac -->
+  <rect x="30" y="90" width="300" height="300" rx="12" fill="#eef4ff" stroke="#3b6fd8" stroke-width="2"/>
+  <text x="180" y="118" text-anchor="middle" font-size="17" font-weight="bold">Your Mac</text>
+  <rect x="50" y="135" width="260" height="70" rx="8" fill="#fff" stroke="#999"/>
+  <text x="180" y="160" text-anchor="middle">agent-room checkout</text>
+  <text x="180" y="182" text-anchor="middle" fill="#555" font-size="12">discussions/&lt;name&gt;/handoff.md, notes</text>
+  <rect x="50" y="220" width="260" height="70" rx="8" fill="#fff" stroke="#999"/>
+  <text x="180" y="245" text-anchor="middle">Browser</text>
+  <text x="180" y="267" text-anchor="middle" fill="#555" font-size="12">opens http://127.0.0.1:5566</text>
+  <rect x="50" y="305" width="260" height="70" rx="8" fill="#fff" stroke="#999" stroke-dasharray="5 4"/>
+  <text x="180" y="330" text-anchor="middle">Local room: STOPPED</text>
+  <text x="180" y="352" text-anchor="middle" fill="#555" font-size="12">one owner at a time</text>
+
+  <!-- Pi -->
+  <rect x="560" y="90" width="370" height="300" rx="12" fill="#eefbef" stroke="#2f9e44" stroke-width="2"/>
+  <text x="745" y="118" text-anchor="middle" font-size="17" font-weight="bold">Raspberry Pi 4 (4 GB, Debian 13)</text>
+  <rect x="580" y="135" width="330" height="70" rx="8" fill="#fff" stroke="#999"/>
+  <text x="745" y="160" text-anchor="middle">agent-room (node), inside tmux</text>
+  <text x="745" y="182" text-anchor="middle" fill="#555" font-size="12">listens on 127.0.0.1:5566 only; survives logout</text>
+  <rect x="580" y="220" width="155" height="70" rx="8" fill="#fff" stroke="#999"/>
+  <text x="657" y="250" text-anchor="middle">claude CLI</text>
+  <text x="657" y="270" text-anchor="middle" fill="#555" font-size="12">no Chrome tools here</text>
+  <rect x="755" y="220" width="155" height="70" rx="8" fill="#fff" stroke="#999"/>
+  <text x="832" y="250" text-anchor="middle">codex CLI</text>
+  <text x="832" y="270" text-anchor="middle" fill="#555" font-size="12">aarch64 build</text>
+  <rect x="580" y="305" width="330" height="70" rx="8" fill="#fff" stroke="#999"/>
+  <text x="745" y="330" text-anchor="middle">clone of the repo</text>
+  <text x="745" y="352" text-anchor="middle" fill="#555" font-size="12">writes notes.md, drawings, transcripts/</text>
+  <line x1="745" y1="205" x2="657" y2="220" stroke="#333" marker-end="url(#a)"/>
+  <line x1="745" y1="205" x2="832" y2="220" stroke="#333" marker-end="url(#a)"/>
+
+  <!-- providers -->
+  <rect x="600" y="440" width="140" height="50" rx="25" fill="#f6f6f6" stroke="#999"/>
+  <text x="670" y="470" text-anchor="middle">Anthropic</text>
+  <rect x="770" y="440" width="140" height="50" rx="25" fill="#f6f6f6" stroke="#999"/>
+  <text x="840" y="470" text-anchor="middle">OpenAI</text>
+  <line x1="657" y1="290" x2="665" y2="438" stroke="#333" marker-end="url(#a)"/>
+  <line x1="832" y1="290" x2="838" y2="438" stroke="#333" marker-end="url(#a)"/>
+  <text x="935" y="420" text-anchor="end" fill="#555" font-size="12">models run here, not on the Pi</text>
+
+  <!-- git remote -->
+  <rect x="345" y="440" width="190" height="60" rx="8" fill="#fff8e6" stroke="#d99a00" stroke-width="2"/>
+  <text x="440" y="466" text-anchor="middle" font-weight="bold">git remote</text>
+  <text x="440" y="486" text-anchor="middle" fill="#555" font-size="12">GitHub, or a bare repo on the Pi</text>
+  <path d="M180,205 C180,430 300,470 343,470" fill="none" stroke="#d99a00" stroke-width="2" marker-end="url(#a)" marker-start="url(#a)"/>
+  <path d="M580,340 C500,340 470,400 455,438" fill="none" stroke="#d99a00" stroke-width="2" marker-end="url(#a)" marker-start="url(#a)"/>
+  <text x="225" y="425" fill="#b07800" font-size="13">1 push / 5 pull</text>
+  <text x="470" y="380" fill="#b07800" font-size="13">2 pull / 5 push</text>
+
+  <!-- ssh tunnel -->
+  <path d="M310,255 L558,170" fill="none" stroke="#3b6fd8" stroke-width="3" stroke-dasharray="8 5" marker-end="url(#a)"/>
+  <text x="434" y="196" text-anchor="middle" fill="#3b6fd8" font-size="13">3 SSH tunnel</text>
+  <text x="434" y="214" text-anchor="middle" fill="#3b6fd8" font-size="12">ssh -L 5566:127.0.0.1:5566 pi</text>
+
+  <!-- steps -->
+  <text x="30" y="540" font-weight="bold">Steps</text>
+  <text x="30" y="560" font-size="13">1  Mac: write handoff.md, commit, push; stop the local room.     2  Pi: pull; in tmux, npm start -- --reopen &lt;name&gt;.</text>
+  <text x="30" y="580" font-size="13">3  Mac: open the tunnel, send the bounded instruction in the browser, close the laptop.</text>
+  <text x="30" y="600" font-size="13">4  Pi: one round (all pass, or 8 turns); agents update notes; measure memory with free -h / vmstat.</text>
+  <text x="30" y="620" font-size="13">5  Later: reopen the tunnel to read the room, or commit + push on the Pi and pull on the Mac.</text>
+</svg>
