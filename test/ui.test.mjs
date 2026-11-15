@@ -1384,6 +1384,30 @@ test('terminal: Start fresh while the discussion\'s old worker task still runs: 
   assert.equal(ctx.sessions.get(key).id, 'worker-new');
 });
 
+test('closed state persists independently of checkpoints, and Resume clears it', async () => {
+  const { mkdirSync } = await import('node:fs');
+  const cwd = await tmp('closed-state-');
+  const ctx = await savedRoom(cwd, 'closed-state-1');
+  ctx.sessions.get('B').threadId = 'saved-thread';
+  mkdirSync(`${cwd}/discussions/2026-01-01-old`, { recursive: true });
+  await handleLine('hello', ctx);
+  const name = ctx.discussion.name;
+  assert.deepEqual(ctx.screen.room.closedDiscussions, []); // old and open discussions have no marker
+  const restarted = await savedRoom(cwd, 'closed-state-2');
+  await handleLine('/resume 2026-01-01-old', restarted);
+  assert.deepEqual(restarted.screen.room.closedDiscussions, []); // an open discussion left behind is paused
+  await handleLine('/close', ctx);
+  assert.deepEqual(ctx.screen.room.closedDiscussions, [name]);
+  const after = await savedRoom(cwd, 'closed-state-3');
+  await handleLine('/resume 2026-01-01-old', after);
+  assert.deepEqual(after.screen.room.closedDiscussions, [name]);
+  await handleLine('/resume ' + name, after);
+  assert.deepEqual(after.screen.room.closedDiscussions, []);
+  const again = await savedRoom(cwd, 'closed-state-4');
+  await handleLine('/resume 2026-01-01-old', again);
+  assert.deepEqual(again.screen.room.closedDiscussions, []);
+});
+
 test('every round saves a checkpoint; Close keeps it; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions', async () => {
   const { readFileSync, writeFileSync, existsSync } = await import('node:fs');
   const ctx = await savedRoom(await tmp('checkpoint-test-'), 'checkpoint-unit');
@@ -1413,6 +1437,7 @@ test('every round saves a checkpoint; Close keeps it; a corrupt or missing-sessi
   await assert.rejects(handleLine('/resume ' + name, ctx), /checkpoint of .* is invalid/);
   assert.equal(ctx.state, emptyState);
   assert.equal(ctx.discussion, null);
+  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
   assert.equal(existsSync(file), true);
   writeFileSync(file, JSON.stringify({ ...saved, sessions: [] }));
   await assert.rejects(handleLine('/resume ' + name, ctx), /provider session.*missing/);

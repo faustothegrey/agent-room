@@ -1254,12 +1254,14 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
     'discussions/2026-11-15-current/notes.md',
     'discussions/2026-11-15-open/notes.md',
     'discussions/2026-11-14-closed/notes.md',
+    'discussions/2026-11-13-paused/notes.md',
   ]);
   harness.setRoom({
     folder: '/tmp/project',
     active: 'discussions/2026-11-15-current',
     discussion: 'Current',
     started: true,
+    closedDiscussions: ['2026-11-14-closed'],
     open: [
       { active: 'discussions/2026-11-15-current', title: 'Current', started: true, current: true, url: '/r/current-id/__room' },
       { active: 'discussions/2026-11-15-open', title: 'Open', started: true, current: false, url: '/r/open-id/__room' },
@@ -1271,6 +1273,11 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   const rows = list.children.filter((c) => c.tag === 'div' && c.className.includes('discussion-row'));
   const rowFor = (name) => rows.find((r) => r.children.find((c) => c.className !== 'drag-handle')?.children?.[0]?.textContent === name); // active rows start with the drag handle
   const resumeBtn = (name) => rowFor(name).children.find((c) => c.tag === 'button' && c.textContent === 'Resume');
+  const label = (name) => rowFor(name).children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent;
+  assert.equal(label('2026-11-15-current'), 'open');
+  assert.equal(label('2026-11-15-open'), 'open');
+  assert.equal(label('2026-11-14-closed'), 'closed');
+  assert.equal(label('2026-11-13-paused'), 'paused');
 
   // 1. Open discussion, clean notes: navigates straight to openHere.url during a round without sending /resume.
   let stopped = 0;

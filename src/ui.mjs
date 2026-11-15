@@ -331,6 +331,7 @@ function header(ctx) {
     autoDev: autoDevView(ctx), retryId: ctx.retryFailure?.available ? ctx.retryFailure.id : null,
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
     checkpoints: checkpoints(ctx), // the saved discussions, for Explorer's Resume (see "Checkpoints")
+    closedDiscussions: closedDiscussions(ctx),
     back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
     code: ctx.code ?? null, // the version this process runs (see codeInfo)
     rollbacks: [...(shopOf(ctx).rollbacks?.values() ?? [])].map(({ name, status, report, commit }) => ({ name, status, report, commit })),
@@ -665,6 +666,30 @@ function briefing(ctx) {
 const checkpointDirectory = (ctx) => join(homedir(), '.local', 'state', 'agent-room', 'paused',
   createHash('sha256').update(realpathSync(ctx.cwd)).digest('hex'));
 const checkpointFile = (ctx, name) => join(checkpointDirectory(ctx), createHash('sha256').update(name).digest('hex') + '.json');
+// Explicit closes are local lifecycle state, separate from checkpoints (which keep changing as
+// detached worker tasks finish). Missing markers, including discussions from older versions, mean paused.
+const closedDirectory = (ctx) => join(checkpointDirectory(ctx), 'closed');
+const closedFile = (ctx, name) => join(closedDirectory(ctx), createHash('sha256').update(name).digest('hex'));
+function closedDiscussions(ctx) {
+  const dir = closedDirectory(ctx);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => /^[a-f0-9]{64}$/.test(f)).flatMap((f) => {
+    try { return [readFileSync(join(dir, f), 'utf8')]; } catch { return []; }
+  });
+}
+function setClosed(ctx, name, closed) {
+  const file = closedFile(ctx, name);
+  if (closed) {
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+    const temp = `${file}.${process.pid}.tmp`;
+    try {
+      writeFileSync(temp, name, { mode: 0o600 });
+      renameSync(temp, file);
+    } finally { if (existsSync(temp)) unlinkSync(temp); }
+  } else {
+    try { unlinkSync(file); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+  }
+}
 const listedCheckpoints = new Map(); // file → { stamp, entry }: the header lists them often
 // [{ name, at, kind: 'full' | 'fresh' }], for the page's Resume tooltips. A brainstorm's name is its
 // key, "brainstorms/<name>", with its title (the Brainstorms tab shows it).
@@ -986,6 +1011,8 @@ async function resumeDiscussion(ctx, ref) {
   const name = d.name, saved = readCheckpoint(ctx, name);
   if (saved && !saved.fresh) {
     await continueFrom(ctx, saved, name, false);
+    setClosed(ctx, name, false);
+    showHeader(ctx);
     await reportWork(ctx, name, saved.work);
     refreshWorker(ctx).catch(() => {});
     return;
@@ -994,6 +1021,8 @@ async function resumeDiscussion(ctx, ref) {
     throw new Error(`The checkpoint of ${name} is invalid. It was kept; Start fresh starts the discussion from its handoff instead.`);
   await leaveSession(ctx, `resuming the discussion ${name}`);
   switchTo(ctx, { name, dir: join(parent, name), title: name, continued: true });
+  setClosed(ctx, name, false);
+  showHeader(ctx);
   ctx.freshSummary = checkpointSummary(saved);
   note(ctx, `Resumed the discussion ${name}: it has no saved session, so your next message starts a fresh one there, from its handoff and notes${ctx.freshSummary ? ' and the summary chosen at Start fresh' : ''}.`);
   await reportWork(ctx, name, saved?.work);
@@ -1066,6 +1095,8 @@ async function startFresh(ctx, ref) {
   writeCheckpoint(ctx, name, { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
     discussion: { name, title: name }, fresh: true, summary, work: workOf(shopOf(ctx), name) });
   switchTo(ctx, { name, dir: join(parent, name), title: name, continued: true });
+  setClosed(ctx, name, false);
+  showHeader(ctx);
   ctx.freshSummary = summary;
   note(ctx, `Started ${name} afresh: your next message starts a new session there, from its handoff and notes${summary ? `, with its latest summary${summary.outcome === 'agreed' ? '' : ' (not agreed)'}` : ''}. Its saved sessions and chat were discarded.`);
 }
@@ -1387,14 +1418,19 @@ function closeDiscussion(ctx) {
   const hold = workerHold(ctx);
   if (hold) return note(ctx, `✗ This can't be closed yet: ${hold}.`, true);
   const others = siblings(ctx).filter((c) => c !== ctx);
+  if ((!others.length || !multi(ctx)) && fresh(ctx) && !ctx.state.brainstorm)
+    return note(ctx, 'Nothing to close: no discussion is open here.');
+  if (others.length && multi(ctx) && ctx.replicaOwner) return note(ctx, '✗ This discussion holds the room\'s replication (its peers and storage): it stays open while others are. Close them first, or Quit room.', true);
+  if (ctx.discussion && !ctx.state.brainstorm) {
+    try { setClosed(ctx, ctx.discussion.name, true); }
+    catch (err) { return note(ctx, `✗ Could not save the closed state: ${err.message}.`, true); }
+  }
   if (!others.length || !multi(ctx)) {
-    if (fresh(ctx) && !ctx.state.brainstorm) return note(ctx, 'Nothing to close: no discussion is open here.');
     const was = ctx.discussion, brain = !!ctx.state.brainstorm;
     if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, brain ? 'closing the brainstorm' : 'closing the discussion');
     switchTo(ctx, null);
     return note(ctx, was ? `Closed ${was.name}; its checkpoint is kept. To go back, Resume it in ${brain ? 'Brainstorms' : 'Explorer'}.` : 'Closed the brainstorm.');
   }
-  if (ctx.replicaOwner) return note(ctx, '✗ This discussion holds the room\'s replication (its peers and storage): it stays open while others are. Close them first, or Quit room.', true);
   closeContext(ctx, others[0]);
 }
 
