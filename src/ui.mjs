@@ -319,7 +319,9 @@ function header(ctx) {
     active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath || !!ctx.state.brainstorm,
     brainstorm: !!ctx.state.brainstorm, // a conversation kept only in memory (see newBrainstorm)
     // The agents this discussion started with, for the members panel once it has started.
-    members: ctx.agentSpecs.split(',').map((s) => parseSpec(s)).map((a) => ({ ...a, enabled: !(ctx.state.disabledAgents ?? []).includes(a.name) })),
+    members: ctx.room.agents.map((a) => ({ provider: a.provider, name: a.name,
+      model: (ctx.agentSpecs ?? '').split(',').filter(Boolean).map((s) => parseSpec(s)).find((s) => s.name === a.name)?.model ?? '',
+      enabled: !(ctx.state.disabledAgents ?? []).includes(a.name) })),
     failedAgents: ctx.room.agents.filter((a) => ctx.state.transcript.some((m) => m.error && m.speaker === a.name) || (ctx.state.disabledAgents ?? []).includes(a.name)).map((a) => ({ name: a.name, disabled: (ctx.state.disabledAgents ?? []).includes(a.name) })),
     autoDev: autoDevView(ctx), retryId: ctx.retryFailure?.available ? ctx.retryFailure.id : null,
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
