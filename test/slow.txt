@@ -60,3 +60,7 @@ retry runs before later queued instructions and reports commits made since the f
 Retry with applies worker settings for later instructions
 auto dev: restarting while a retry runs cannot resume the old run
 a failed retry offers another retry and keeps the auto dev failure pause
+auto dev: step counts adjust the limit and fix rounds consume slack
+auto dev: the step limit is capped at 15 at start and when raised
+Shutdown server, from the server's own address, ends every room; with --node only the launch room replicates
+Resume replaces a brainstorm only with a valid checkpoint; on the discussion in use it changes nothing; Start fresh asks twice and keeps only the latest summary

@@ -1,3 +1,4 @@
 node_modules/
 transcripts/
 .worker-notes/
+test/.timings.json

@@ -98,7 +98,6 @@ summary: nothing to summarize, or a failed turn, records no result
 summary: with a single agent, its draft is the summary
 state.briefing goes with each agent's first prompt only
 discussion agents take turns in the selected row order
-Shutdown server, from the server's own address, ends every room; with --node only the launch room replicates
 ending refuses room creation, including a delayed folder choice; busy warnings name all rooms
 stopping a room kills provider child commands even after the provider exits
 CLI accepts agy for discussion and worker and exposes both in settings
@@ -134,7 +133,6 @@ Switch room lists this server's rooms, with the pages open on each and which one
 no worker sends from a brainstorm, before or after its first message, on the screen or in the terminal; once turned into a discussion, its work goes to its own lane
 terminal: a brainstorm's worker session is never carried into a discussion, by New discussion or Resume
 every round saves a checkpoint; Close keeps it; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions
-Resume replaces a brainstorm only with a valid checkpoint; on the discussion in use it changes nothing; Start fresh asks twice and keeps only the latest summary
 Start fresh briefs with the latest summary, marked if not agreed, or none; a Restart before the first message keeps it; the first round replaces it
 removed commands answer with a hint and reach no agent
 Explorer's Resume says what it will do: show an open one, continue a saved one, or start from the handoff
@@ -179,3 +177,5 @@ checkLogin: a command that fails or times out is unknown, with its error; a logg
 agy gauges use Antigravity model windows and hide missing data
 agy login is unmonitored without invoking a command
 agy grouped gauges show Gemini and Argon while summaries retain all models
+auto dev: step metadata is only before the Outcome and outside the instruction
+fast test timings count only consecutive completed passes and move after three
