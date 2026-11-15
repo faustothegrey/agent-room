@@ -1422,7 +1422,10 @@ function renderDiscussions() {
 
     const openEntry = room?.open?.find((o) => o.active === path);
     const openHere = openEntry?.current ? null : openEntry;
-    let statusText = isCurrent || openEntry ? 'open' : room?.closedDiscussions?.includes(d) ? 'closed' : 'paused';
+    let statusText = '';
+    if (isCurrent) statusText = 'current' + (room?.started ? ' · started' : '');
+    else if (openHere) statusText = openHere.started ? 'open, paused' : 'not started';
+    else statusText = room?.closedDiscussions?.includes(d) ? 'closed' : 'paused';
     if (openEntry?.working) statusText += ' · worker working';
     block.append(el('div', 'local-label', statusText));
     row.append(block);
@@ -1531,8 +1534,7 @@ function renderDiscussions() {
         renderDiscussions();
       };
       block.append(nameBtn);
-      const openEntry = room?.open?.find((o) => o.active === path);
-      block.append(el('div', 'local-label', openEntry ? 'open' : room?.closedDiscussions?.includes(d) ? 'closed' : 'paused'));
+      block.append(el('div', 'local-label', (s === 'archive' ? 'archived' : 'deferred') + (room?.closedDiscussions?.includes(d) ? ' · closed' : '')));
       row.append(block);
 
       if (canAct) {

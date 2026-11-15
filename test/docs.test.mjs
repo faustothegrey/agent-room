@@ -1253,18 +1253,24 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   harness.setFiles([
     'discussions/2026-11-15-current/notes.md',
     'discussions/2026-11-15-open/notes.md',
+    'discussions/2026-11-15-unstarted/notes.md',
     'discussions/2026-11-14-closed/notes.md',
     'discussions/2026-11-13-paused/notes.md',
+    'discussions/archive/2026-11-12-archived/notes.md',
+    'discussions/archive/2026-11-11-archived-closed/notes.md',
+    'discussions/deferred/2026-11-10-deferred/notes.md',
+    'discussions/deferred/2026-11-09-deferred-closed/notes.md',
   ]);
   harness.setRoom({
     folder: '/tmp/project',
     active: 'discussions/2026-11-15-current',
     discussion: 'Current',
     started: true,
-    closedDiscussions: ['2026-11-14-closed'],
+    closedDiscussions: ['2026-11-14-closed', '2026-11-11-archived-closed', '2026-11-09-deferred-closed'],
     open: [
       { active: 'discussions/2026-11-15-current', title: 'Current', started: true, current: true, url: '/r/current-id/__room' },
       { active: 'discussions/2026-11-15-open', title: 'Open', started: true, current: false, url: '/r/open-id/__room' },
+      { active: 'discussions/2026-11-15-unstarted', title: 'Unstarted', started: false, current: false, url: '/r/unstarted-id/__room' },
     ],
   });
   harness.renderDiscussions();
@@ -1274,10 +1280,18 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   const rowFor = (name) => rows.find((r) => r.children.find((c) => c.className !== 'drag-handle')?.children?.[0]?.textContent === name); // active rows start with the drag handle
   const resumeBtn = (name) => rowFor(name).children.find((c) => c.tag === 'button' && c.textContent === 'Resume');
   const label = (name) => rowFor(name).children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent;
-  assert.equal(label('2026-11-15-current'), 'open');
-  assert.equal(label('2026-11-15-open'), 'open');
+  assert.equal(label('2026-11-15-current'), 'current · started');
+  assert.equal(label('2026-11-15-open'), 'open, paused');
+  assert.equal(label('2026-11-15-unstarted'), 'not started');
   assert.equal(label('2026-11-14-closed'), 'closed');
   assert.equal(label('2026-11-13-paused'), 'paused');
+  const sectionLabel = (name) => list.children.filter((c) => c.tag === 'details').flatMap((c) => c.children)
+    .find((r) => r.className?.includes('discussion-row') && r.children[0].children[0].textContent === name)
+    .children[0].children.find((c) => c.className === 'local-label').textContent;
+  assert.equal(sectionLabel('2026-11-12-archived'), 'archived');
+  assert.equal(sectionLabel('2026-11-11-archived-closed'), 'archived · closed');
+  assert.equal(sectionLabel('2026-11-10-deferred'), 'deferred');
+  assert.equal(sectionLabel('2026-11-09-deferred-closed'), 'deferred · closed');
 
   // 1. Open discussion, clean notes: navigates straight to openHere.url during a round without sending /resume.
   let stopped = 0;
@@ -1318,6 +1332,10 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   resumeBtn('2026-11-14-closed').onclick({ stopPropagation() {} });
   assert.equal(location.href, '/r/current-id/__room');
   assert.deepEqual(sent, ['/resume 2026-11-14-closed']);
+  harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-15-current', started: false, open: [] });
+  harness.renderDiscussions();
+  const current = els['discussions-pane'].firstChild.children.find((r) => r.className?.includes('discussion-row') && r.children.find((c) => c.className === 'discussion-block')?.children[0].textContent === '2026-11-15-current');
+  assert.equal(current.children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent, 'current');
 });
 
 test('a started discussion\'s members panel lists the agents it started with, locked but for On, which enables or disables each', async () => {
