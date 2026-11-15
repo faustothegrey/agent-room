@@ -1359,3 +1359,105 @@ test('a started discussion\'s members panel lists the agents it started with, lo
     s.close();
   }
 });
+
+test('Brainstorms tab: rows by title with their actions, and an order of their own (agent-room.brainstorm-order:<folder>), apart from the Discussions order', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return { toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(...c) { c.forEach((x) => s.add(x)); }, remove(...c) { c.forEach((x) => s.delete(x)); }, contains(cls) { return s.has(cls); } };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', disabled: false, children: [], dataset: {}, style: {}, classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; }, querySelector() { return null; }, addEventListener() {}, setAttribute() {}, getAttribute() { return null; },
+  });
+  const els = {}, store = new Map(), sent = [], location = { href: '' };
+  const localStorage = { getItem: (k) => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)) };
+  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'localStorage', 'fetch', 'send',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'let attaching = false, pending = [];\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (act) => act();\n' +
+    code + '\n' +
+    'return { setRoom, renderBrainstorms, renderDiscussions, forgetOrder, ' +
+    '  setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
+  )((id) => els[id] || (els[id] = node(id)), { createElement: node, title: '' }, location, null, () => {}, (cb) => cb(), () => {}, localStorage, async () => ({ ok: false }),
+    (line) => sent.push(line));
+
+  const KEY = 'agent-room.brainstorm-order:/tmp/project', DKEY = 'agent-room.discussion-order:/tmp/project';
+  const files = (brainstorms) => ['discussions/2026-11-10-d/notes.md', ...brainstorms.map((n) => 'brainstorms/' + n + '/transcripts/session.md')];
+  const rows = () => els['brainstorms-pane'].firstChild.children.filter((c) => c.className.includes('discussion-row'));
+  const block = (r) => r.children.find((c) => c.className === 'discussion-block');
+  const titles = () => rows().map((r) => block(r).children[0].textContent);
+  const row = (title) => rows().find((r) => block(r).children[0].textContent === title);
+  const buttons = (title) => row(title).children.filter((c) => c.tag === 'button').map((b) => b.textContent);
+  const action = (title, label) => row(title).children.find((c) => c.tag === 'details').children[1].children.find((b) => b.textContent.startsWith(label) || b.dataset.label === label);
+  const click = (b) => b.onclick({ stopPropagation() {} });
+  const open = [
+    { url: '/r/x/__room', current: true, title: 'Current idea', active: 'brainstorms/2026-11-14-current', brainstorm: true, started: true },
+    { url: '/r/x-d2/__room', current: false, title: 'Open idea', active: 'brainstorms/2026-11-13-open', brainstorm: true, started: true }];
+  const checkpoints = [{ name: 'brainstorms/2026-11-12-closed', at: 'x', kind: 'full', title: 'Closed idea' }, { name: '2026-11-10-d', at: 'x', kind: 'full' }];
+  harness.setRoom({ folder: '/tmp/project', active: 'brainstorms/2026-11-14-current', brainstorm: true, discussion: 'Current idea', started: true, multi: true, open, checkpoints });
+  harness.setFiles(files(['2026-11-12-closed', '2026-11-13-open', '2026-11-14-current', '2026-11-11-untitled']));
+  harness.renderDiscussions();
+  harness.renderBrainstorms();
+
+  // Rows by title (the folder name without a checkpoint title), newest first at first.
+  assert.deepEqual(titles(), ['Current idea', 'Open idea', 'Closed idea', '2026-11-11-untitled']);
+  assert.equal(store.get(KEY), JSON.stringify(['2026-11-14-current', '2026-11-13-open', '2026-11-12-closed', '2026-11-11-untitled']));
+  assert.equal(store.get(DKEY), JSON.stringify(['2026-11-10-d'])); // the Discussions order, apart
+  assert.ok(row('Current idea').className.includes('in-use'));
+  assert.ok(row('Closed idea').children.some((c) => c.className === 'drag-handle'));
+  // Resume for a closed one, Go to for one open elsewhere, neither for the one shown.
+  assert.ok(!buttons('Current idea').includes('Resume') && !buttons('Current idea').includes('Go to'));
+  assert.ok(buttons('Open idea').includes('Go to'));
+  assert.ok(buttons('Closed idea').includes('Resume'));
+  click(row('Closed idea').children.find((c) => c.textContent === 'Resume'));
+  assert.equal(sent.at(-1), '/resume brainstorms/2026-11-12-closed');
+  click(row('Open idea').children.find((c) => c.textContent === 'Go to'));
+  assert.equal(location.href, '/r/x-d2/__room');
+  // The actions menu: Close, Turn into a discussion, Start fresh, Delete, Move up / Move down; no Archive or Defer.
+  const labels = row('Closed idea').children.find((c) => c.tag === 'details').children[1].children.filter((b) => b.tag === 'button').map((b) => b.textContent);
+  assert.deepEqual(labels, ['Close', 'Turn into a discussion', 'Start fresh', 'Delete', 'Move up', 'Move down']);
+  assert.equal(action('Closed idea', 'Close').disabled, true); // not open
+  assert.equal(action('Open idea', 'Close').disabled, false);
+  click(action('Open idea', 'Close'));
+  assert.equal(sent.at(-1), '/close brainstorms/2026-11-13-open');
+  // Delete: disabled while open (here or elsewhere); otherwise two clicks, the first one warning.
+  assert.equal(action('Current idea', 'Delete').disabled, true);
+  assert.equal(action('Open idea', 'Delete').disabled, true);
+  assert.equal(action('Open idea', 'Delete').title, 'Close this brainstorm before deleting it');
+  const del = action('Closed idea', 'Delete');
+  assert.equal(del.disabled, false);
+  const before = sent.length;
+  click(del);
+  assert.equal(sent.length, before);
+  assert.equal(del.textContent, 'Click again: its folder (transcripts, drawings) and checkpoint are removed; uncommitted files are lost for good');
+  click(del);
+  assert.equal(sent.at(-1), '/delete brainstorms/2026-11-12-closed');
+  // Turn into a discussion and Start fresh: two clicks too.
+  for (const [label, line] of [['Turn into a discussion', '/convert brainstorms/2026-11-12-closed'], ['Start fresh', '/fresh brainstorms/2026-11-12-closed']]) {
+    const b = action('Closed idea', label), n = sent.length;
+    click(b); assert.equal(sent.length, n);
+    click(b); assert.equal(sent.at(-1), line);
+  }
+  // Move up / Move down change only the Brainstorms order.
+  assert.equal(action('Current idea', 'Move up').disabled, true);
+  action('Current idea', 'Move down').onclick();
+  assert.deepEqual(titles(), ['Open idea', 'Current idea', 'Closed idea', '2026-11-11-untitled']);
+  action('2026-11-11-untitled', 'Move up').onclick();
+  assert.deepEqual(titles(), ['Open idea', 'Current idea', '2026-11-11-untitled', 'Closed idea']);
+  assert.equal(store.get(KEY), JSON.stringify(['2026-11-13-open', '2026-11-14-current', '2026-11-11-untitled', '2026-11-12-closed']));
+  assert.equal(store.get(DKEY), JSON.stringify(['2026-11-10-d']));
+  // A new brainstorm goes on top; one turned into a discussion leaves this order only.
+  harness.setFiles(files(['2026-11-12-closed', '2026-11-13-open', '2026-11-14-current', '2026-11-11-untitled', '2026-11-15-new']));
+  harness.renderBrainstorms();
+  assert.equal(titles()[0], '2026-11-15-new');
+  harness.forgetOrder('2026-11-13-open', 'brainstorms');
+  assert.ok(!JSON.parse(store.get(KEY)).includes('2026-11-13-open'));
+  assert.equal(store.get(DKEY), JSON.stringify(['2026-11-10-d']));
+});
