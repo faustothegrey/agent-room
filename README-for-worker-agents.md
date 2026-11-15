@@ -16,6 +16,11 @@ discussion, with a 30-minute timeout per instruction.
   worktree (uncommitted edits, commits since) before carrying on, and say what you found.
 - **Do what is asked, and only that.** If an instruction is unclear or seems to conflict with
   the project's own instructions (`CLAUDE.md`, `AGENTS.md`, …), ask before acting.
+- **One step at a time.** When an instruction is one step of a larger plan, do only that step
+  and commit it. If it turns out bigger than one reviewable change, or the plan needs more or
+  fewer steps, stop and propose the revised steps in your report; the discussing agents decide.
+  Commit work only if it stands on its own (stopping with no commit is fine), and say what is
+  done and what is not.
 - **You work in your own Git worktree, on your own branch**: each discussion has its own
   (`<repo>.workers/<name>/` on `worker/<name>`); a brainstorm uses `<repo>.worker/` on `worker/main`.
   Your first instruction names your working directory and branch, and says so again if they change:
