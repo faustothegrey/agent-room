@@ -98,10 +98,11 @@ function inside(dir, rel) {
 
 const isDatedDiscussion = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(name);
 const DISC_SECTIONS = new Set(['archive', 'deferred']);
-// Files inside a dated discussion (active, archived or deferred): kept even when .gitignore ignores
-// patterns such as transcripts/. Room checkout files outside discussions respect .gitignore.
+// Files inside a dated discussion (active, archived or deferred) or brainstorm (brainstorms/<date>-…):
+// kept even when .gitignore ignores patterns such as transcripts/. Room checkout files outside them respect .gitignore.
 function inDiscussion(rel) {
   const p = rel.split(/[/\\]/);
+  if (p[0] === 'brainstorms') return p.length >= 2 && isDatedDiscussion(p[1]);
   return p[0] === 'discussions' && ((p.length >= 2 && isDatedDiscussion(p[1])) || (p.length >= 2 && DISC_SECTIONS.has(p[1])));
 }
 function isGitIgnored(dir, rel) {
@@ -132,10 +133,10 @@ export function docFiles(dir, screen) {
   } catch {
     rootFiles = listFiles(dir).map((f) => f.split(sep).join('/')).filter((f) => !inDiscussion(f));
   }
-  let discFiles = [];
-  try {
-    discFiles = listFiles(join(dir, 'discussions')).map((f) => 'discussions/' + f.split(sep).join('/')).filter(inDiscussion);
-  } catch {}
+  const discFiles = [];
+  for (const top of ['discussions', 'brainstorms']) {
+    try { discFiles.push(...listFiles(join(dir, top)).map((f) => top + '/' + f.split(sep).join('/')).filter(inDiscussion)); } catch {}
+  }
   return [...new Set([...rootFiles, ...discFiles])].sort();
 }
 export function roomBranch(dir) {
@@ -183,7 +184,7 @@ setInterval(async () => {
 //   thinking: name or null, status: the last round's end line or null,
 //   room: { folder (the full root path), agents: [names], worker: name, discussion: its title,
 //     active: its folder under the root or null, started: first message sent (or a brainstorm),
-//     brainstorm: a conversation kept only in memory, transcript: this session's transcript,
+//     brainstorm: a brainstorm (active: brainstorms/<name>), transcript: this session's transcript,
 //     under the root, or null } for the header,
 //   sections: the root's folders a room serves (discussions/),
 //   worker: the worker tab's messages (messageView, plus meta: time and tokens),
@@ -424,40 +425,40 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #discussions-pane, #pane { overflow-y: auto; }
 #doc { border: 0; width: 100%; height: 100%; }
 .empty { display: grid; place-items: center; color: var(--dim); height: 100%; padding: 1rem; text-align: center; }
-#files, #disc-list { padding: 1rem; }
-#files .entry, #disc-list .entry { display: block; width: 100%; text-align: left; margin: 0; padding: .3rem .5rem; border: 0; border-radius: 4px; background: none; font-size: .9rem; break-inside: avoid; }
-#files .entry:hover, #disc-list .entry:hover { background: #8882; }
+#files, :is(#disc-list, #brain-list) { padding: 1rem; }
+#files .entry, :is(#disc-list, #brain-list) .entry { display: block; width: 100%; text-align: left; margin: 0; padding: .3rem .5rem; border: 0; border-radius: 4px; background: none; font-size: .9rem; break-inside: avoid; }
+#files .entry:hover, :is(#disc-list, #brain-list) .entry:hover { background: #8882; }
 #files .entry.file.shown, #files .entry.file.shown:hover { background: #3b82f633; box-shadow: inset 3px 0 #60a5fa; }
 #files .entry.unviewable { opacity: .5; cursor: default; }
 #files .entry.unviewable:hover { background: none; }
-#files .entry::before, #disc-list .entry::before { display: inline-block; width: 1.5em; }
-#files .entry.folder::before, #disc-list .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.discussion::before, #disc-list .entry.discussion::before { content: '💬'; }
-#files .entry .tag, #disc-list .entry .tag { color: var(--dim); font-size: .8rem; margin-left: .5rem; }
-#files .back, #disc-list .back { border: 0; background: none; padding: 0; color: var(--dim); font-size: .85rem; margin: 0 0 .4rem; }
-#files .back:hover, #disc-list .back:hover { color: CanvasText; text-decoration: underline; }
-#files .title, #disc-list .title { font-size: 1.05rem; font-weight: 600; margin: 0 0 .5rem; }
-#files .status, #disc-list .status { font-size: .75rem; font-weight: 400; padding: .05rem .45rem; border-radius: 9px; background: #8883; margin-left: .5rem; vertical-align: middle; }
-#files .status.archive, #disc-list .status.archive { background: #8882; } #files .status.deferred, #disc-list .status.deferred { background: #eab30833; } #files .status.inuse, #disc-list .status.inuse { background: #3b82f633; }
-#files .actions, #disc-list .actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; padding: 0 0 .8rem; border-bottom: 1px solid var(--line); }
-#files .actions .primary, #disc-list .actions .primary { background: #3b82f6; border-color: #3b82f6; color: white; }
-#files .row, #disc-list .row { display: flex; align-items: center; gap: .3rem; }
-#files .row .entry, #disc-list .row .entry { flex: 1; min-width: 0; }
-#files button.archiving::before, #disc-list button.archiving::before { content: ""; display: inline-block; width: .65em; height: .65em; margin-right: .35em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: archive-spin .7s linear infinite; }
+#files .entry::before, :is(#disc-list, #brain-list) .entry::before { display: inline-block; width: 1.5em; }
+#files .entry.folder::before, :is(#disc-list, #brain-list) .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.discussion::before, :is(#disc-list, #brain-list) .entry.discussion::before { content: '💬'; } #brain-list .entry.brainstorm::before { content: '💡'; }
+#files .entry .tag, :is(#disc-list, #brain-list) .entry .tag { color: var(--dim); font-size: .8rem; margin-left: .5rem; }
+#files .back, :is(#disc-list, #brain-list) .back { border: 0; background: none; padding: 0; color: var(--dim); font-size: .85rem; margin: 0 0 .4rem; }
+#files .back:hover, :is(#disc-list, #brain-list) .back:hover { color: CanvasText; text-decoration: underline; }
+#files .title, :is(#disc-list, #brain-list) .title { font-size: 1.05rem; font-weight: 600; margin: 0 0 .5rem; }
+#files .status, :is(#disc-list, #brain-list) .status { font-size: .75rem; font-weight: 400; padding: .05rem .45rem; border-radius: 9px; background: #8883; margin-left: .5rem; vertical-align: middle; }
+#files .status.archive, :is(#disc-list, #brain-list) .status.archive { background: #8882; } #files .status.deferred, :is(#disc-list, #brain-list) .status.deferred { background: #eab30833; } #files .status.inuse, :is(#disc-list, #brain-list) .status.inuse { background: #3b82f633; }
+#files .actions, :is(#disc-list, #brain-list) .actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; padding: 0 0 .8rem; border-bottom: 1px solid var(--line); }
+#files .actions .primary, :is(#disc-list, #brain-list) .actions .primary { background: #3b82f6; border-color: #3b82f6; color: white; }
+#files .row, :is(#disc-list, #brain-list) .row { display: flex; align-items: center; gap: .3rem; }
+#files .row .entry, :is(#disc-list, #brain-list) .row .entry { flex: 1; min-width: 0; }
+#files button.archiving::before, :is(#disc-list, #brain-list) button.archiving::before { content: ""; display: inline-block; width: .65em; height: .65em; margin-right: .35em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: archive-spin .7s linear infinite; }
 @keyframes archive-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { #files button.archiving::before, #disc-list button.archiving::before { animation: none; } }
-#files .row .reopen, #disc-list .row .reopen { font-size: .75rem; padding: .1rem .5rem; }
-#files .row-menu > summary, #disc-list .row-menu > summary { font-size: .75rem; margin-left: 0; }
-#files .row-menu .menu-items, #disc-list .row-menu .menu-items { left: auto; right: 0; }
-#files .row-menu .menu-items button, #disc-list .row-menu .menu-items button { font-size: .85rem; padding: .3rem .6rem; }
+@media (prefers-reduced-motion: reduce) { #files button.archiving::before, :is(#disc-list, #brain-list) button.archiving::before { animation: none; } }
+#files .row .reopen, :is(#disc-list, #brain-list) .row .reopen { font-size: .75rem; padding: .1rem .5rem; }
+#files .row-menu > summary, :is(#disc-list, #brain-list) .row-menu > summary { font-size: .75rem; margin-left: 0; }
+#files .row-menu .menu-items, :is(#disc-list, #brain-list) .row-menu .menu-items { left: auto; right: 0; }
+#files .row-menu .menu-items button, :is(#disc-list, #brain-list) .row-menu .menu-items button { font-size: .85rem; padding: .3rem .6rem; }
 .menu-items button:disabled { color: var(--dim); cursor: default; background: none; }
-#files .discussion-row, #disc-list .discussion-row { align-items: baseline; flex-wrap: wrap; }
-#files .discussion-row > .discussion-lines, #disc-list .discussion-row > .discussion-lines, #disc-list .discussion-row > .discussion-block { flex-basis: 14rem; flex: 1; min-width: 0; }
-#files .discussion-row.in-use, #disc-list .discussion-row.in-use { background: linear-gradient(#3b82f614, #3b82f614), Canvas; box-shadow: inset 3px 0 #60a5fa; border-radius: 4px; padding-left: .5rem; }
-#disc-list .drag-handle { cursor: grab; color: var(--dim); padding: 0 .2rem; user-select: none; }
-#disc-list .discussion-row.dragging { opacity: .5; }
-#disc-list .discussion-row.drop-before { box-shadow: inset 0 2px #60a5fa; }
-#disc-list .discussion-row.drop-after { box-shadow: inset 0 -2px #60a5fa; }
-#disc-list .discussion-row.peeking { background: linear-gradient(#f59e0b18, #f59e0b18), Canvas; box-shadow: inset 3px 0 #f59e0b; border-radius: 4px; padding-left: .5rem; }
+#files .discussion-row, :is(#disc-list, #brain-list) .discussion-row { align-items: baseline; flex-wrap: wrap; }
+#files .discussion-row > .discussion-lines, :is(#disc-list, #brain-list) .discussion-row > .discussion-lines, :is(#disc-list, #brain-list) .discussion-row > .discussion-block { flex-basis: 14rem; flex: 1; min-width: 0; }
+#files .discussion-row.in-use, :is(#disc-list, #brain-list) .discussion-row.in-use { background: linear-gradient(#3b82f614, #3b82f614), Canvas; box-shadow: inset 3px 0 #60a5fa; border-radius: 4px; padding-left: .5rem; }
+:is(#disc-list, #brain-list) .drag-handle { cursor: grab; color: var(--dim); padding: 0 .2rem; user-select: none; }
+:is(#disc-list, #brain-list) .discussion-row.dragging { opacity: .5; }
+:is(#disc-list, #brain-list) .discussion-row.drop-before { box-shadow: inset 0 2px #60a5fa; }
+:is(#disc-list, #brain-list) .discussion-row.drop-after { box-shadow: inset 0 -2px #60a5fa; }
+:is(#disc-list, #brain-list) .discussion-row.peeking { background: linear-gradient(#f59e0b18, #f59e0b18), Canvas; box-shadow: inset 3px 0 #f59e0b; border-radius: 4px; padding-left: .5rem; }
 .peek-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem; margin: 0 0 .6rem; padding: .35rem .6rem; border: 1px solid #f59e0b; border-radius: 6px; background: #f59e0b1f; color: light-dark(#92400e, #fcd34d); font-size: .82rem; }
 .peek-banner button { font-size: .78rem; padding: .1rem .5rem; border-color: #f59e0b88; color: inherit; background: #f59e0b22; }
 .explorer-bar { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 0 0 .35rem; }
@@ -482,9 +483,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .discussion-info > button { border: 0; background: none; color: #8fa8ee; padding: .15rem; }
 .info-detail { display: none; position: absolute; right: 0; top: 100%; z-index: 5; width: 15rem; padding: .5rem; background: Canvas; color: CanvasText; border: 1px solid var(--line); border-radius: 4px; font-size: .8rem; }
 .discussion-info:hover .info-detail, .discussion-info:focus-within .info-detail { display: block; }
-#files .actions .sep, #disc-list .actions .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 .3rem; }
-#files h3, #disc-list h3 { color: var(--dim); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; margin: .9rem 0 .3rem; }
-#disc-list .hint { display: block; margin: 0 0 .8rem; }
+#files .actions .sep, :is(#disc-list, #brain-list) .actions .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 .3rem; }
+#files h3, :is(#disc-list, #brain-list) h3 { color: var(--dim); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; margin: .9rem 0 .3rem; }
+:is(#disc-list, #brain-list) .hint { display: block; margin: 0 0 .8rem; }
 #talk, #tab-talk { --accent: #3b82f6; --tint: #3b82f612; }
 #work, #tab-work { --accent: #a855f7; --tint: #a855f712; }
 .tab.on { border-bottom-color: var(--accent); background: var(--tint); }
@@ -518,7 +519,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b id="room-name">agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, kept only in memory: no folder, transcript or notes. It ends this session; Restart or Quit room loses it, and a new one replaces it.">New brainstorm</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
+<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">New brainstorm</button><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
 <div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 </header>
 <div id="left">
@@ -564,8 +565,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </div>
 <div id="split" role="separator" aria-orientation="vertical" aria-label="Resize the chat and the document" tabindex="0" title="Drag to resize"></div>
 <div id="right">
-  <div id="subtabs" role="tablist"><button class="tab" id="tab-discussions" role="tab">Discussions</button><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button></div>
+  <div id="subtabs" role="tablist"><button class="tab" id="tab-discussions" role="tab">Discussions</button><button class="tab" id="tab-brainstorms" role="tab">Brainstorms</button><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button></div>
   <div class="view" id="discussions" hidden><div id="discussions-pane"></div></div>
+  <div class="view" id="brainstorms" hidden><div id="brainstorms-pane"></div></div>
   <div class="view" id="explorer"><div id="pane"></div></div>
   <div class="view" id="document" hidden>
     <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
@@ -701,6 +703,20 @@ function showFailedAgents(agents) {
   }
 }
 // The Worker tab's line: its worktree, or why the worker is disabled.
+// A brainstorm sends no work: its Worker tab says so, whatever the worker's own state. Every
+// update goes through here, which keeps the latest info for when the window shows a discussion.
+const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a discussion to send work.';
+let workerInfoShown = null, workPlaceholder = null;
+function showWorkerInfo(info) {
+  workerInfoShown = info;
+  workPlaceholder ??= wbox.placeholder;
+  if (room?.brainstorm) setWorkerInfo({ lines: [BRAINSTORM_NO_WORK], disabled: true });
+  else {
+    setWorkerInfo(info);
+    if (!info?.disabled) { wbox.disabled = false; wbox.placeholder = workPlaceholder; }
+  }
+  if (ended || restarting) wbox.disabled = true;
+}
 // Each lane (the discussion's own branch first, then every other one with something to review) is
 // shown collapsed under a one-line summary; what the User opens stays open across refreshes.
 function setWorkerInfo(info) {
@@ -846,11 +862,14 @@ function showSub(name) {
   if (name === 'document' && !doc) return;
   subtab = name;
   if ($('discussions')) $('discussions').hidden = name !== 'discussions';
+  if ($('brainstorms')) $('brainstorms').hidden = name !== 'brainstorms';
   $('explorer').hidden = name !== 'explorer'; $('document').hidden = name !== 'document';
   if ($('tab-discussions')) $('tab-discussions').classList.toggle('on', name === 'discussions');
+  if ($('tab-brainstorms')) $('tab-brainstorms').classList.toggle('on', name === 'brainstorms');
   $('tab-explorer').classList.toggle('on', name === 'explorer'); $('tab-document').classList.toggle('on', name === 'document');
 }
 if ($('tab-discussions')) $('tab-discussions').onclick = () => showSub('discussions');
+if ($('tab-brainstorms')) $('tab-brainstorms').onclick = () => showSub('brainstorms');
 $('tab-explorer').onclick = () => { showSub('explorer'); revealDoc(); };
 // Back to Explorer with a local file shown: if that file is inside the tree Explorer is showing now,
 // unfold its parent folders and scroll it into view. Never re-enters a peek that was ended.
@@ -859,7 +878,7 @@ async function revealDoc() {
   const mode = effectiveExplorerMode();
   if (mode === 'root') {
     const p = doc.split('/');
-    if (p[0] !== 'discussions' || (p.length >= 2 && !isDiscussion(p[1]) && !SECTIONS[p[1]])) {
+    if (!inDiscussion(doc)) {
       for (let i = 1; i < p.length; i++) expandedLines.add('root:' + p.slice(0, i).join('/'));
     }
   } else {
@@ -883,7 +902,7 @@ function docLabel(file) {
     return name + ' · ' + rest.join('/');
   }
   const p = file.split('/');
-  if (p[0] === 'discussions' && p.length >= 3 && isDiscussion(p[1])) return p[1] + ' · ' + p.slice(2).join('/');
+  if ((p[0] === 'discussions' || p[0] === 'brainstorms') && p.length >= 3 && isDiscussion(p[1])) return p[1] + ' · ' + p.slice(2).join('/');
   if (p[0] === 'discussions' && p.length >= 4 && SECTIONS[p[1]] && isDiscussion(p[2])) return p[2] + ' · ' + p.slice(3).join('/');
   return 'Room checkout · ' + file;
 }
@@ -895,7 +914,7 @@ function showDoc(file) {
   // the agents to read it as background; its old sessions are not resumed.
   const feed = $('feed');
   const p = doc ? doc.split('/') : [];
-  const transcript = p.length >= 3 && p.length <= 5 && p[0] === 'discussions' && p.at(-2) === 'transcripts' && p.at(-1).endsWith('.md');
+  const transcript = p.length >= 3 && p.length <= 5 && (p[0] === 'discussions' || p[0] === 'brainstorms') && p.at(-2) === 'transcripts' && p.at(-1).endsWith('.md');
   feed.hidden = !transcript || !room || doc === room.transcript || !!viewing || $('composer').hidden;
   feed.onclick = () => {
     showTab('talk');
@@ -1046,12 +1065,15 @@ function updateReplicaView() {
   // New brainstorm, beside it, is always offered (it ends a session or a brainstorm the same way).
   $('new-discussion').hidden = !(room && localInput && !viewing);
   $('newdisc').hidden = !(room?.active || room?.brainstorm);
+  // Turn into a discussion: a brainstorm once its first message has named it.
+  $('convert').hidden = !(room?.brainstorm && room.active);
   // With several discussions open (the screen), New discussion and Resume keep this one open;
   // Close discussion closes it. Their tooltips say so.
   $('closedisc').hidden = !room?.multi || !(room.active || room.brainstorm || room.open?.length > 1);
+  $('closedisc').textContent = room?.brainstorm ? 'Close brainstorm' : 'Close discussion';
   if (room?.multi) {
-    $('newdisc').title = 'Open a new discussion beside this one, which stays open (Explorer: Resume shows it again). An open brainstorm ends.';
-    $('newbrainstorm').title = 'A conversation with the same agents, kept only in memory, beside the open discussions (one per folder; a new one replaces it).';
+    $('newdisc').title = 'Open a new discussion beside this one, which stays open (Discussions or Brainstorms: Resume shows it again).';
+    $('newbrainstorm').title = 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.';
   }
   $('actions-menu').hidden = ['summary', 'new-discussion'].every((id) => $(id).hidden);
   if (!viewing) return;
@@ -1138,7 +1160,7 @@ setInterval(async () => { if (viewing) { try { const r = await post('__view', { 
 // itself: the index of its discussions).
 const isDiscussion = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(name);
 const SECTIONS = { archive: 'Archive', deferred: 'Deferred' };
-const inDiscussion = (f) => { const p = f.split('/'); return p[0] === 'discussions' && p.length >= 2 && (isDiscussion(p[1]) || Boolean(SECTIONS[p[1]])); };
+const inDiscussion = (f) => { const p = f.split('/'); return p[0] === 'brainstorms' ? p.length >= 2 && isDiscussion(p[1]) : p[0] === 'discussions' && p.length >= 2 && (isDiscussion(p[1]) || Boolean(SECTIONS[p[1]])); };
 // The discussion a list path shows, as /resume and /move name it ("<name>" or "archive/<name>"), or null.
 function discussionOf(parts) {
   if (parts.length === 2 && isDiscussion(parts[1])) return { ref: parts[1], section: null };
@@ -1220,19 +1242,30 @@ const expandedDiscussions = new Set();
 let openRowMenu = null; // the discussion path whose ▾ Actions menu is open
 let cachedDetail = { files: null, unviewable: new Set(), branch: null }; // files: null until the list loads
 
-// The User's order of active discussions, kept in this browser per room (room.folder) as a JSON
-// array of names. Discussions it does not list go on top, newest first; names gone are dropped.
-const ORDER_KEY = 'agent-room.discussion-order:';
+// The User's order of active discussions (and, in the Brainstorms tab, of brainstorms), kept in this
+// browser per room (room.folder) as a JSON array of names, under each list's own key. Names it does
+// not list go on top, newest first; names gone are dropped.
+const ORDER_KEYS = { discussions: 'agent-room.discussion-order:', brainstorms: 'agent-room.brainstorm-order:' };
 let dragging = false, renderAfterDrag = false; // the list is not replaced while a row is dragged
-function readOrder(folder) {
+function readOrder(folder, kind = 'discussions') {
   let raw = null;
-  try { raw = localStorage.getItem(ORDER_KEY + folder); } catch {}
+  try { raw = localStorage.getItem(ORDER_KEYS[kind] + folder); } catch {}
   let list = [];
   try { const v = JSON.parse(raw); if (Array.isArray(v)) list = v.filter((x) => typeof x === 'string'); } catch {}
   return { raw, list };
 }
-function saveOrder(folder, order) {
-  try { localStorage.setItem(ORDER_KEY + folder, JSON.stringify(order)); } catch {}
+function saveOrder(folder, order, kind = 'discussions') {
+  try { localStorage.setItem(ORDER_KEYS[kind] + folder, JSON.stringify(order)); } catch {}
+}
+const renderOrdered = (kind) => (kind === 'brainstorms' ? renderBrainstorms() : renderDiscussions());
+// The names found in the files list, in the User's order (saved back when it changed), or as found
+// while the list hasn't loaded (null: no ordering then).
+function ordered(found, kind) {
+  if (!room?.folder || !Array.isArray(cachedDetail?.files)) return null;
+  const saved = readOrder(room.folder, kind);
+  const list = orderDiscussions(found, saved.list);
+  if (JSON.stringify(list) !== saved.raw) saveOrder(room.folder, list, kind);
+  return list;
 }
 function orderDiscussions(found, saved) {
   const here = new Set(found);
@@ -1241,20 +1274,72 @@ function orderDiscussions(found, saved) {
   return [...found.filter((d) => !known.has(d)), ...kept];
 }
 // Moves name to index in order, saves it and redraws (Move up / Move down, and a drop).
-function moveDiscussion(order, name, index) {
+function moveDiscussion(order, name, index, kind = 'discussions') {
   const next = order.filter((d) => d !== name);
   next.splice(Math.max(0, Math.min(index, next.length)), 0, name);
-  if (room?.folder) saveOrder(room.folder, next);
-  renderDiscussions();
+  if (room?.folder) saveOrder(room.folder, next, kind);
+  renderOrdered(kind);
 }
 // A discussion moved out of or back into discussions/ loses its place: it returns on top.
-function forgetOrder(name) {
+function forgetOrder(name, kind = 'discussions') {
   if (!room?.folder || !name) return;
-  const { raw, list } = readOrder(room.folder);
-  if (raw !== null && list.includes(name)) saveOrder(room.folder, list.filter((d) => d !== name));
+  const { raw, list } = readOrder(room.folder, kind);
+  if (raw !== null && list.includes(name)) saveOrder(room.folder, list.filter((d) => d !== name), kind);
 }
 if (typeof addEventListener === 'function') {
-  addEventListener('storage', (e) => { if (room?.folder && e.key === ORDER_KEY + room.folder) renderDiscussions(); });
+  addEventListener('storage', (e) => {
+    for (const kind of Object.keys(ORDER_KEYS)) if (room?.folder && e.key === ORDER_KEYS[kind] + room.folder) renderOrdered(kind);
+  });
+}
+// A row of an ordered list (names, in order): its ⠿ handle, and the row as a drop target.
+function dragRow(row, name, names, kind) {
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+  const handle = el('span', 'drag-handle', '⠿');
+  handle.title = 'Drag to reorder';
+  handle.draggable = true;
+  handle.addEventListener('dragstart', (e) => {
+    dragging = true;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', name);
+    e.dataTransfer.setDragImage?.(row, 0, 0);
+    row.classList.add('dragging');
+  });
+  handle.addEventListener('dragend', () => {
+    dragging = false;
+    row.classList.remove('dragging');
+    if (renderAfterDrag) { renderAfterDrag = false; renderDiscussions(); renderBrainstorms(); }
+  });
+  row.append(handle);
+  const after = (e) => { const r = row.getBoundingClientRect(); return e.clientY > r.top + r.height / 2; };
+  const clear = () => row.classList.remove('drop-before', 'drop-after');
+  row.addEventListener('dragover', (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    row.classList.toggle('drop-after', after(e));
+    row.classList.toggle('drop-before', !after(e));
+  });
+  row.addEventListener('dragleave', clear);
+  row.addEventListener('drop', (e) => {
+    clear();
+    const moved = e.dataTransfer.getData('text/plain');
+    if (!dragging || !names.includes(moved)) return;
+    e.preventDefault();
+    const rest = names.filter((x) => x !== moved);
+    const next = rest.indexOf(name) + (after(e) ? 1 : 0);
+    if (moved !== name) { rest.splice(next, 0, moved); saveOrder(room.folder, rest, kind); }
+    renderAfterDrag = true; // drawn on dragend, which follows the drop
+  });
+}
+// Move up / Move down in a row's menu, disabled at the ends.
+function orderButtons(items, name, i, names, kind) {
+  for (const [label, to, off] of [['Move up', i - 1, i === 0], ['Move down', i + 1, i === names.length - 1]]) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.disabled = off;
+    b.onclick = () => { openRowMenu = null; closeMenus(); moveDiscussion(names, name, to, kind); };
+    items.append(b);
+  }
 }
 
 function updateTabs() {
@@ -1281,13 +1366,8 @@ function renderDiscussions() {
   const heading = (text) => list.append(el('h3', '', text));
   const canAct = room && localInput && !viewing;
 
-  let discussions = discussionsIn('discussions');
-  const ordered = !!room?.folder && Array.isArray(cachedDetail?.files);
-  if (ordered) {
-    const saved = readOrder(room.folder);
-    discussions = orderDiscussions(discussions, saved.list);
-    if (JSON.stringify(discussions) !== saved.raw) saveOrder(room.folder, discussions);
-  }
+  const inOrder = ordered(discussionsIn('discussions'), 'discussions');
+  const discussions = inOrder ?? discussionsIn('discussions');
 
   for (const o of (room?.open ?? []).filter((x) => !x.current && !x.active)) {
     const r = el('div', 'row discussion-row');
@@ -1303,7 +1383,7 @@ function renderDiscussions() {
 
   const currentWorker = room?.open?.find((o) => o.current)?.working ? ' · worker working' : '';
   if (room?.brainstorm && canAct) {
-    list.append(el('span', 'hint', (room.multi ? 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Close discussion ends it.' : 'A brainstorm is in progress: agent-room keeps no record of it. New discussion or Resume ends it.') + currentWorker));
+    list.append(el('span', 'hint', 'A brainstorm is shown: it is listed in Brainstorms. Turn it into a discussion (Actions ▾) to have it here.'));
   } else if (!discussions.length && !replica?.received?.some((l) => !l.local)) {
     list.append(el('span', 'hint', (room?.started ? '' : 'No active discussions: your first message starts one.') + currentWorker));
   } else if (room && !room.started && canAct) {
@@ -1311,53 +1391,14 @@ function renderDiscussions() {
   }
 
   heading('Discussions');
-  const canOrder = canAct && ordered && discussions.length > 1;
+  const canOrder = canAct && !!inOrder && discussions.length > 1;
   for (const [i, d] of discussions.entries()) {
     const path = 'discussions/' + d;
     const isCurrent = path === room?.active;
     const isPeeking = peek?.kind === 'local' && peek.path === path;
     const row = el('div', 'row discussion-row' + (isCurrent ? ' in-use' : '') + (isPeeking ? ' peeking' : ''));
     const block = el('div', 'discussion-block');
-    if (canOrder) {
-      const handle = el('span', 'drag-handle', '⠿');
-      handle.title = 'Drag to reorder';
-      handle.draggable = true;
-      handle.addEventListener('dragstart', (e) => {
-        dragging = true;
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', d);
-        e.dataTransfer.setDragImage?.(row, 0, 0);
-        row.classList.add('dragging');
-      });
-      handle.addEventListener('dragend', () => {
-        dragging = false;
-        row.classList.remove('dragging');
-        if (renderAfterDrag) { renderAfterDrag = false; renderDiscussions(); }
-      });
-      row.append(handle);
-    }
-    if (canOrder) {
-      const after = (e) => { const r = row.getBoundingClientRect(); return e.clientY > r.top + r.height / 2; };
-      const clear = () => row.classList.remove('drop-before', 'drop-after');
-      row.addEventListener('dragover', (e) => {
-        if (!dragging) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        row.classList.toggle('drop-after', after(e));
-        row.classList.toggle('drop-before', !after(e));
-      });
-      row.addEventListener('dragleave', clear);
-      row.addEventListener('drop', (e) => {
-        clear();
-        const name = e.dataTransfer.getData('text/plain');
-        if (!dragging || !discussions.includes(name)) return;
-        e.preventDefault();
-        const rest = discussions.filter((x) => x !== name);
-        const next = rest.indexOf(d) + (after(e) ? 1 : 0);
-        if (name !== d) { rest.splice(next, 0, name); saveOrder(room.folder, rest); }
-        renderAfterDrag = true; // drawn on dragend, which follows the drop
-      });
-    }
+    if (canOrder) dragRow(row, d, discussions, 'discussions');
 
     const nameBtn = el('button', 'entry discussion', d);
     nameBtn.onclick = () => {
@@ -1414,14 +1455,9 @@ function renderDiscussions() {
       if (!(isCurrent && !room.started)) {
         const f = el('button', '', 'Start fresh'); freshButton(f, d); items.append(f);
       }
-      if (ordered) {
+      if (inOrder) {
         items.append(el('hr'));
-        for (const [label, to, off] of [['Move up', i - 1, i === 0], ['Move down', i + 1, i === discussions.length - 1]]) {
-          const b = el('button', '', label);
-          b.disabled = off;
-          b.onclick = () => { openRowMenu = null; closeMenus(); moveDiscussion(discussions, d, to); };
-          items.append(b);
-        }
+        orderButtons(items, d, i, discussions, 'discussions');
       }
       items.append(el('hr'));
       rollbackButtons(items, block, d, d, isCurrent);
@@ -1534,6 +1570,96 @@ function renderDiscussions() {
   }
 }
 
+// Brainstorms: the room's brainstorms (brainstorms/<date>-<title>/), in the User's order (as the
+// active discussions, with its own key), each by its title. Resume (Go to when open elsewhere),
+// Close, Turn into a discussion, Start fresh, Delete, Move up / Move down. No Archive or Defer.
+function brainstormTitle(name) {
+  const path = 'brainstorms/' + name;
+  return room?.open?.find((o) => o.active === path)?.title ?? room?.checkpoints?.find((c) => c.name === path)?.title ?? name;
+}
+function renderBrainstorms() {
+  const container = $('brainstorms-pane');
+  if (!container) return;
+  if (dragging) { renderAfterDrag = true; return; }
+  const scroll = container.scrollTop;
+  container.innerHTML = '<div id="brain-list"></div>';
+  const list = container.firstChild;
+  requestAnimationFrame(() => { container.scrollTop = scroll; });
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+  const canAct = room && localInput && !viewing;
+  const inOrder = ordered(discussionsIn('brainstorms'), 'brainstorms');
+  const names = inOrder ?? discussionsIn('brainstorms');
+  if (room?.brainstorm && !room.active && canAct) list.append(el('span', 'hint', 'Your first message names this brainstorm and saves it here.'));
+  else if (!names.length) list.append(el('span', 'hint', "No brainstorms yet: New brainstorm (in the header's Actions ▾) starts one."));
+  list.append(el('h3', '', 'Brainstorms'));
+  const canOrder = canAct && !!inOrder && names.length > 1;
+  for (const [i, b] of names.entries()) {
+    const path = 'brainstorms/' + b;
+    const isCurrent = path === room?.active;
+    const isPeeking = peek?.kind === 'local' && peek.path === path;
+    const openEntry = room?.open?.find((o) => o.active === path);
+    const openHere = openEntry?.current ? null : openEntry;
+    const row = el('div', 'row discussion-row' + (isCurrent ? ' in-use' : '') + (isPeeking ? ' peeking' : ''));
+    const block = el('div', 'discussion-block');
+    if (canOrder) dragRow(row, b, names, 'brainstorms');
+    const nameBtn = el('button', 'entry brainstorm', brainstormTitle(b));
+    nameBtn.title = path;
+    nameBtn.onclick = () => {
+      peek = isCurrent ? null : { kind: 'local', path, name: b, readonly: false };
+      explorerMode = 'discussion';
+      showSub('explorer');
+      renderExplorer();
+      renderBrainstorms();
+    };
+    block.append(nameBtn);
+    block.append(el('div', 'local-label', (isCurrent ? 'current' : openHere ? 'open' : 'closed') + ' · ' + b));
+    row.append(block);
+    if (canAct) {
+      if (openHere) {
+        const g = el('button', 'reopen', 'Go to');
+        g.title = 'Show this open brainstorm: its agents carry on';
+        g.onclick = (e) => { e.stopPropagation(); notesGuard(() => { location.href = openHere.url; }); };
+        row.append(g);
+      } else if (!isCurrent) {
+        const r = el('button', 'reopen primary', 'Resume');
+        const saved = room?.checkpoints?.find((c) => c.name === path);
+        r.title = saved?.kind === 'full' ? 'Continue where it stopped: the same agent sessions, and its chat.'
+          : 'No saved session: a fresh one starts, from its latest summary or its transcripts.';
+        r.onclick = (e) => { e.stopPropagation(); send('/resume ' + path); };
+        row.append(r);
+      }
+      const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
+      menu.append(el('summary', '', 'Actions'), items);
+      menu.open = openRowMenu === path;
+      menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
+      const close = el('button', '', 'Close');
+      close.disabled = !(isCurrent || openHere);
+      close.title = close.disabled ? 'It is not open' : 'Close it: its agents stop; its checkpoint is kept';
+      close.onclick = () => { closeMenus(); send('/close ' + path); };
+      items.append(close);
+      const convert = el('button', '', 'Turn into a discussion');
+      convert.title = 'Move it to discussions/: its agents keep their sessions and are told the new folder; the worker can then be sent work.';
+      confirmed(convert, () => { closeMenus(); send('/convert ' + path); }, 'Click again: it moves to discussions/', () => true);
+      items.append(convert);
+      const fresh = el('button', '', 'Start fresh');
+      fresh.title = 'New agent sessions, briefed from its latest summary or, with none, pointed at its transcripts. Its saved sessions and chat are discarded.';
+      confirmed(fresh, () => { closeMenus(); send('/fresh ' + path); }, 'Click again: its saved sessions and chat are discarded', () => true);
+      items.append(fresh);
+      const del = el('button', 'danger', 'Delete');
+      del.disabled = isCurrent || !!openHere;
+      del.title = del.disabled ? 'Close this brainstorm before deleting it' : 'Delete its folder (transcripts, drawings) and its checkpoint';
+      confirmed(del, () => { closeMenus(); send('/delete ' + path); }, 'Click again: its folder (transcripts, drawings) and checkpoint are removed; uncommitted files are lost for good', () => true);
+      items.append(del);
+      if (inOrder) {
+        items.append(el('hr'));
+        orderButtons(items, b, i, names, 'brainstorms');
+      }
+      row.append(menu);
+    }
+    list.append(row);
+  }
+}
+
 async function renderExplorer() {
   const container = $('pane');
   if (!container) return;
@@ -1555,6 +1681,7 @@ async function renderExplorer() {
       updateTabs();
       renderExplorer();
       renderDiscussions();
+      renderBrainstorms();
     };
     banner.append(backBtn);
     list.append(banner);
@@ -1698,6 +1825,7 @@ async function openFiles() {
   } catch {}
   updateTabs();
   renderDiscussions();
+  renderBrainstorms();
   await renderExplorer();
 }
 // The header: the room's folder name, its full root path (in the tooltip) and its active discussion.
@@ -2177,11 +2305,11 @@ const closeMenus = () => menus().forEach((m) => { m.open = false; });
 document.addEventListener('click', (e) => { if (!e.target.closest('details.menu')) closeMenus(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 for (const id of ['switchroom', 'newroom', 'reload', 'summary']) $(id).addEventListener('click', closeMenus);
-// On the screen with several discussions, New discussion asks twice only when it ends a brainstorm,
-// and New brainstorm only when it discards one.
-const brainstormOpen = () => !!room?.open?.some((o) => o.brainstorm);
-confirmed($('newdisc'), () => send('/new'), null, () => (room?.multi ? brainstormOpen() : room?.started));
-confirmed($('newbrainstorm'), () => send('/brainstorm'), null, () => (room?.multi ? brainstormOpen() : room?.started));
+// On the screen with several discussions, New discussion and New brainstorm open beside the others,
+// ending nothing, so one click is enough; in the terminal they end the session in use.
+confirmed($('newdisc'), () => send('/new'), null, () => !room?.multi && room?.started);
+confirmed($('newbrainstorm'), () => send('/brainstorm'), null, () => !room?.multi && room?.started);
+confirmed($('convert'), () => { closeMenus(); send('/convert ' + room.active); }, 'Click again: it moves to discussions/', () => true);
 confirmed($('closedisc'), () => send('/close'), 'Click again: this discussion closes (its agents stop)', () => !!room?.started);
 $('summary').onclick = () => send('/summary');
 $('reload').onclick = () => send('/reload');
@@ -2259,21 +2387,21 @@ events.onmessage = (e) => {
     if (ev.status) status(ev.status);
     setWorking(ev.working);
     if (!ev.workInput) { $('wcomposer').hidden = true; }
-    setWorkerInfo(ev.workerInfo);
+    showWorkerInfo(ev.workerInfo);
     monitor = ev.monitor ?? {};
     showQuota(ev.quota, ev.quotaAt);
-    if (ev.room) { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); }
+    if (ev.room) { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); showWorkerInfo(workerInfoShown); }
     $('newroom').hidden = !ev.newRoom;
     replicaOff = ev.replicaOff ?? null;
     showReplica(ev.replica);
   }
   if (ev.type === 'replica') showReplica(ev.replica);
-  if (ev.type === 'room') { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); openFiles(); } // its buttons and "in use" follow
+  if (ev.type === 'room') { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); showWorkerInfo(workerInfoShown); openFiles(); } // its buttons and "in use" follow (a brainstorm: no work)
   if (ev.type === 'work') workMessage(ev.message, true);
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
   if (ev.type === 'monitor') showMonitor(ev.monitor);
   if (ev.type === 'working') setWorking(ev.name);
-  if (ev.type === 'workerinfo') setWorkerInfo(ev.info);
+  if (ev.type === 'workerinfo') showWorkerInfo(ev.info);
   if (ev.type === 'message') message(ev.message);
   if (ev.type === 'thinking') setThinking(ev.name);
   if (ev.type === 'turn') { yourTurn = true; status(ev.text); updateReplicaView(); }
@@ -2288,7 +2416,7 @@ events.onmessage = (e) => {
   if (ev.type === 'files') { showSub('explorer'); openFiles(); }
   if (ev.type === 'moved') {
     pendingArchives.delete(ev.from);
-    forgetOrder(ev.from?.split('/').pop());
+    forgetOrder(ev.from?.split('/').pop(), ev.from?.startsWith('brainstorms/') ? 'brainstorms' : 'discussions');
     openFiles();
   }
   if (ev.type === 'goto') { location.href = ev.url; return; } // this window switches discussion

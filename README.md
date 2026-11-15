@@ -49,9 +49,9 @@ replication line. Under the room name is **● Server ▾** (blue, or red when d
 **Reload**, **Restart** and **Shutdown server**; hover or focus **Server** for its uptime, port and
 the server's version. An amber ⚠ to the right of **Server** means a replication peer is unreachable
 (hover for how many); click it to open **Peers…**. **Current discussion** (green): on the left, the selected
-discussion, **Brainstorm** or **No discussion started**, with its state under it (who is thinking, or your
-turn); **Actions ▾** holds **Summarize**, **New discussion**, **New brainstorm** and (on the screen)
-**Close discussion**; on the right, every open discussion whose worker is working is listed, one per line,
+discussion's or brainstorm's title (**New brainstorm** before a brainstorm's first message), or **No discussion started**, with its state under it (who is thinking, or your
+turn); **Actions ▾** holds **Summarize**, **New discussion**, **New brainstorm**, **Turn into a discussion** (when a
+brainstorm is shown) and (on the screen) **Close discussion** (**Close brainstorm**); on the right, every open discussion whose worker is working is listed, one per line,
 as `<title> · Worker is working` (the shown discussion included). **Monitoring** (amber): the monitor panel, with the subscription usage gauges
 and a warning per provider (below).
 
@@ -106,7 +106,14 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   [The worker's worktrees](#the-workers-worktrees)). A discussion's instructions run one at a time,
   in the order sent, alongside the discussion and alongside other discussions' (at most two
   worker tasks at once in a folder), with a 30-minute timeout per instruction.
-- **Discussions**, **Explorer** and **Document** (right pane, three tabs):
+- **Discussions**, **Brainstorms**, **Explorer** and **Document** (right pane, four tabs):
+  - In **Brainstorms**, the room's brainstorms, each by its title, in your order (drag the ⠿ handle,
+    or **Move up** / **Move down**; kept in this browser per room, apart from the Discussions order;
+    new ones go on top). **Resume** (**Go to** for one open in another window's context), and in
+    **Actions**: **Close**, **Turn into a discussion**, **Start fresh**, **Delete** (two clicks; it removes
+    the folder, transcripts and drawings included, and the checkpoint: uncommitted files are lost for
+    good; disabled while the brainstorm is open). No Archive or Defer. Clicking a title shows its
+    files in Explorer, as for a discussion.
   - In **Discussions**, browse discussions (the active one first), check their state, and manage them (Resume, Go to, Archive, Defer, and actions menu). Archived and deferred discussions are kept in their own sections; received discussions from peers show **Peek files** and **View chat** buttons. Rows show state and actions only, no inline files.
   - In **Explorer**, view one tree at a time, chosen with the bar `[ Discussion | Room checkout | Worker copy ]` (Worker copy is coming soon). Under the bar, a line shows the folder and branch. **Discussion** shows the active (or peeked) discussion's files. **Room checkout** shows the room's root checkout, excluding hidden and gitignored files (non-discussion files in `discussions/`, such as `discussions/README.md`, remain reachable). Code, config, and other text files open as plain text in Document; supported images and PDFs stay viewable; files that cannot be displayed are greyed out ("can't be shown here").
   - **Peek**: clicking another discussion's name in Discussions shows its files in Explorer without switching discussions. An orange banner ("Looking at <name> · Back to current") and an orange dot on the Explorer tab indicate the peek; Document's path line names the peeked discussion.
@@ -126,7 +133,7 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
   one per note, named by time and random letters (never the title): never in the room's folder,
   never replicated, and the agents are not told about them. Like the Terminal, only in pages opened on this
   computer.
-- **Transcripts** are in each discussion's `transcripts/` folder, under **Explorer**. On an
+- **Transcripts** are in each discussion's (and brainstorm's) `transcripts/` folder, under **Explorer**. On an
   earlier session's transcript, **Send to agents** asks the discussion agents to read it as
   background; it does not resume its sessions.
 - **Reload:** load code and rulebook edits between discussion commands without losing the
@@ -217,13 +224,14 @@ several discussions open at once, each with its own agents' sessions, chat and a
 own worker session, worktree and queue (below): their worker tasks run at the same time, at most
 two at once. You can switch discussion while one waits for its worker task: the window shows one
 discussion, the one what you type goes to, and the task's report still goes back to its own. One window shows one of them; Discussions marks the others "open". **Resume** shows an open one as
-it is, during a round too: its agents carry on, nothing is restarted. An open brainstorm, or an open discussion that
-hasn't started (no message yet), has **Go to** instead, which only shows it. **New discussion** opens
-the new one beside the discussion in use, which stays open, and ends an open brainstorm. Resume
-and Start fresh open any other discussion beside the open ones. At most one brainstorm is open per folder. **Close
+it is, during a round too: its agents carry on, nothing is restarted. An open discussion that hasn't started (no message
+yet) has **Go to** instead, which only shows it. **New discussion** and **New brainstorm** open the new
+one beside the one in use, which stays open (in place, when the one in use hasn't started). Resume
+and Start fresh open any other discussion or brainstorm beside the open ones; several brainstorms
+can be open at once. **Close
 discussion** (in **Actions ▾**, or `/close`) closes the one shown and its agents; it can't close one
 whose worker edits are unresolved (below); its checkpoint is kept. **Quit room** closes them all, and
-Restart brings back every open discussion from its checkpoint (not brainstorms or empty ones). In a
+Restart brings back every open discussion and brainstorm from its checkpoint (not empty ones). In a
 `--node` launch room every open discussion replicates, through the room's one replica; the first one
 holds it, so it closes last (or with Quit room). Each discussion keeps its own worker settings and
 session. In the terminal one discussion is open at
@@ -248,15 +256,28 @@ the fresh session's worker in the checkpoint. Its token usage isn't counted in a
 totals.
 
 **New brainstorm** (in the header's **Actions ▾** menu, or `/brainstorm`) starts a conversation with
-the same agents, turns and `PASS` rules, but agent-room keeps no record of it: no title, folder,
-transcript, notes or handoff (the providers' own session histories may remain, and changes you ask
-the worker for are real). Its chat lives only in the server's memory: it survives a page refresh and
-Reload, and is lost on Restart or Quit room. A room has one brainstorm at a time: New brainstorm
-discards the current one, and New discussion or Resume ends it. Like New discussion, it ends the
-session of the discussion in use, which keeps its folder and transcripts. The agents are told it is
-a brainstorm, write no files and may read the project; the worker, with a session of its own,
-works as with no active discussion. Typing in a room with no discussion still starts a discussion. A brainstorm has no
-checkpoint.
+the same agents, turns and `PASS` rules. Its first message gets a title from Claude and a folder,
+as a discussion's does, but under `brainstorms/` at the root: `brainstorms/<date>-<title>/`, holding
+`transcripts/` and, if the agents draw, `drawings/`. A name is never one already taken in
+`discussions/` (`archive/` and `deferred/` included), nor a discussion's one taken in `brainstorms/`.
+It saves checkpoints like a discussion (below), under the key `brainstorms/<name>` and with no worker
+part, so Resume (`/resume brainstorms/<name>`), Close and Restart work as for discussions. The agents
+are told it is a brainstorm: they write nothing except drawings in its `drawings/`, may read the
+project, and propose turning it into a discussion when something else tangible is wanted. A
+brainstorm sends no work: while one is shown, the Worker tab says "Turn this brainstorm into a
+discussion to send work." and refuses instructions; there is no Attach, auto dev or automatic
+summary (manual **Summarize** works), and the lap cap is 20. Brainstorms are not replicated to
+peers. Typing in a room with no discussion still starts a discussion.
+
+**Turn into a discussion** (in **Brainstorms** or **Actions ▾**, two clicks; `/convert
+brainstorms/<name>`) moves `brainstorms/<name>/` to `discussions/<name>/`, never over an existing
+folder (checked as it moves: then nothing moves), and its checkpoint to the discussion's key. The
+agents keep their sessions: each is told once, in its next prompt, the new folder and that the
+discussion rules apply from then on (an open one carries on at once; a closed one, at its Resume).
+The worker starts fresh at the discussion's first task. **Start fresh** on a brainstorm (`/fresh
+brainstorms/<name>`) starts new agent sessions briefed from its latest summary (marked when it
+wasn't agreed) or, with none, pointed at its `transcripts/` to read first, as the source that a
+summary may leave details out of. **Delete** (`/delete brainstorms/<name>`) refuses an open brainstorm.
 
 **Every discussion saves itself.** After every round (with or without its summary), every
 `/summary` and every worker task, and when its session ends (Close, New discussion, Quit room,
@@ -304,8 +325,8 @@ re-sent. The next instruction from that discussion tells the worker, once, that 
 instruction was interrupted. A task from a discussion that has no full checkpoint yet (after Start
 fresh, or a Resume from its handoff, before the first message) is recorded in a small checkpoint
 that holds only these records; the discussion still starts from its handoff. What remains
-unrecorded: tasks sent from a brainstorm (it has no name or checkpoint), and tasks sent before a new
-discussion's first message, which names and creates it.
+unrecorded: tasks sent before a new discussion's first message, which names and creates it (a
+brainstorm sends none).
 
 **Start fresh** (in a row's **Actions ▾**, or on the discussion's page; two clicks; `/fresh
 <folder-name>`) discards the saved sessions and chat: new agent and worker sessions start from the
@@ -403,14 +424,15 @@ a question, `Send to the Worker: "…"` with the instruction word for word (or, 
 `Send to the Worker:` alone on its line followed by the instruction as a `>` block quote), or
 `Do:` an action of your own; **Later** lists the remaining actions in order. An instruction for the worker is kept until
 you say it was sent, replaced or withdrawn. In a discussion, under Later it is referred to by
-name, with its full text in the discussion's `pending-instructions.md`; a brainstorm has no folder,
-so this applies to discussions only (see below). The format and what the code reads from it are
+name, with its full text in the discussion's `pending-instructions.md`; in a brainstorm, where
+agents write no notes, this applies to discussions only (see below). The format and what the code reads from it are
 in [the summary contract](docs/architecture.md#summary-contract). The drafter rotates between summaries. Writing
 or revising counts as accepting that version; every other agent must pass on it for agreement.
 Each agent gets at most three turns. Without agreement, the last revision is shown as
 **not agreed**. Only the result appears in the chat; the exchange is retained in the transcript.
 In a brainstorm, summaries work the same way, but their prompt leaves out the sentence about
-`pending-instructions.md`: a worker instruction lives only in the chat, and nothing is retained.
+`pending-instructions.md`: a worker instruction lives only in the chat (and its transcript) until the
+brainstorm becomes a discussion.
 
 **Auto-summarize** is always on in discussions (not in brainstorms, where you can still run
 **Summarize** or `/summary` yourself). After a discussion round where an agent spoke and none
@@ -466,11 +488,13 @@ node src/cli.mjs --help
 | Command | Effect |
 |---|---|
 | `/docs` | Browse documents; in terminal mode, ↑/↓ selects, Enter opens, Esc leaves the picker. |
-| `/resume <folder-name>` | Resume a discussion not on screen: show it if it is open, else continue from its checkpoint (same sessions and chat), or from its handoff without one. `archive/…` or `deferred/…` is made active first. |
-| `/fresh <folder-name>` | Start fresh: new sessions there, from its handoff and notes and its checkpoint's latest summary; the saved sessions and chat are discarded. |
-| `/new` | On the screen, open a new discussion beside this one (which stays open); an open brainstorm ends. In the terminal, end this session; your next message starts a new discussion. Its worker tasks finish in its own worker session; the new discussion's worker starts fresh. |
+| `/resume <folder-name>` | Resume a discussion not on screen: show it if it is open, else continue from its checkpoint (same sessions and chat), or from its handoff without one. `archive/…` or `deferred/…` is made active first; `brainstorms/<folder-name>` resumes a brainstorm. |
+| `/fresh <folder-name>` | Start fresh: new sessions there, from its handoff and notes and its checkpoint's latest summary; the saved sessions and chat are discarded. `brainstorms/<folder-name>`: from its latest summary or its transcripts. |
+| `/new` | On the screen, open a new discussion beside this one (which stays open). In the terminal, end this session; your next message starts a new discussion. Its worker tasks finish in its own worker session; the new discussion's worker starts fresh. |
 | `/close` | Close discussion: close the one shown, keeping the others open (not while it holds unresolved worker edits). |
-| `/brainstorm` | End this session (or brainstorm) and start a brainstorm: nothing saved, lost on Restart or Quit. |
+| `/brainstorm` | Start a brainstorm (on the screen beside this one; in the terminal, ending this session). Its first message names it in `brainstorms/`. |
+| `/convert brainstorms/<folder-name>` | Turn into a discussion: the folder moves to `discussions/`, the agents keep their sessions and are told. |
+| `/delete brainstorms/<folder-name>` | Delete a closed brainstorm's folder and checkpoint, for good. |
 | `/rollback <folder-name>` | Queue Archive with rollback as a worker task; review its report before archiving. |
 | `/archive-rollback <folder-name>` | Explicitly confirm archive after a successful rollback report (switch away first). |
 | `/move <folder-name> active\|archive\|deferred` | Move a whole discussion (not the one in use) into `archive/` or `deferred/`, or back. |
@@ -566,7 +590,7 @@ remain separate deployment checks.
 
 The worker never edits the room's own files. It works in a Git worktree of the room's repository,
 one per discussion: `<repo>.workers/<folder-name>/` on the branch `worker/<folder-name>` (for
-agent-room: `/Users/fausto/Software/agent-room.workers/<folder-name>/`). A brainstorm, and a task
+agent-room: `/Users/fausto/Software/agent-room.workers/<folder-name>/`). A task
 sent before a discussion's first message (when it has no name yet), use `<repo>.worker/` on
 `worker/main`, the one worktree every discussion shared before. Its notes still go in the room's
 discussion folder. Each worktree has its own queue: a discussion's tasks run one at a time, in the
@@ -650,7 +674,7 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   fresh report. The User keeps the final merge into main; no automatic conflict-free rollback is promised.
 - The latest failed instruction in a discussion offers **Retry** with the current worker settings, or **Retry with…** to choose a provider and model. The chosen settings remain for later instructions. A retry runs ahead of later queued instructions and tells the worker the original instruction, failure, and commits made since, asking it to inspect the worktree and Git state first. The buttons return if the retry fails. They are not offered for interrupted instructions or brainstorms.
 - The worker commits every completed task on its branch, with a message starting with its origin
-  in brackets (`[<discussion folder name>]`, or `[brainstorm]`) and the commit ID in its reply.
+  in brackets (`[<discussion folder name>]`) and the commit ID in its reply.
   agent-room reports commits without that label. Each instruction in the Worker tab shows its
   origin, and its reply goes back to that discussion's transcript.
 - Before each discussion round, including one started by a worker report, a single chat and

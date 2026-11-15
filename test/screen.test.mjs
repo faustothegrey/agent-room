@@ -303,7 +303,7 @@ test('CLI flags remain the defaults for a new brainstorm and a beside discussion
     await next();
     await say('/brainstorm'); await until((e) => e.type === 'note' && /New brainstorm/.test(e.text));
     assert.deepEqual((await (await fetch(base + '__settings')).json()).settings, flags);
-    await say('/new'); await until((e) => e.type === 'note' && /brainstorm ended/.test(e.text));
+    await say('/new'); await until((e) => e.type === 'note' && /New discussion: your next message names it/.test(e.text)); // the new brainstorm, not started, becomes it
     assert.deepEqual((await (await fetch(base + '__settings')).json()).settings, flags);
     await say('hello'); await until((e) => e.type === 'turn');
     await say('/new');

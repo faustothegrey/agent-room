@@ -9,7 +9,7 @@ export const MAX_LAPS = 10;
 export const BRAINSTORM_MAX_LAPS = 20;
 export const SUMMARY_TURNS_EACH = 3;
 
-// A brainstorm (state.brainstorm) has no folder: its summary leaves out the sentence about
+// A brainstorm (state.brainstorm) has no notes: its summary leaves out the sentence about
 // pending-instructions.md, and an instruction for the worker lives only in the chat.
 const summaryFormat = (brainstorm) => [
   'Write it briefly and by points, in this format (leave out a section that would be empty):',

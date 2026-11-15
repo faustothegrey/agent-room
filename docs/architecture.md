@@ -173,8 +173,9 @@ cycles per start (`AUTO_DEV_CYCLES`). Anything unexpected, or the User typing, p
 A discussion's folder, `discussions/<date>-<title>/`, is created at its first message, with its
 transcripts in `transcripts/`. A checkpoint on this computer after every round lets Resume and
 Restart continue the same sessions; Start fresh begins new sessions from the handoff, notes and
-latest summary. Discussions can be moved to `archive/` or `deferred/`. A brainstorm has no folder
-and lives in memory only.
+latest summary. Discussions can be moved to `archive/` or `deferred/`. A brainstorm has its own
+folder, `brainstorms/<date>-<title>/` (transcripts, drawings), and checkpoint, sends no worker
+tasks, and can be turned into a discussion, which moves its folder to `discussions/`.
 
 ![Discussion lifecycle: unstarted, open, brainstorm, Resume, Start fresh, and moving to archive or deferred](diagrams/discussion-lifecycle.svg)
 
