@@ -307,7 +307,7 @@ function wire(ctx) {
   };
   ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
   ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
-  ctx.screen.setAgentEnabled = (name, enabled) => setAgentEnabled(ctx, name, enabled);
+  ctx.screen.setAgentEnabled = (name, enabled, member) => setAgentEnabled(ctx, name, enabled, { member });
 }
 
 // The screen's header: the full root path, the active discussion (active: its folder, under the
@@ -318,6 +318,8 @@ function header(ctx) {
     discussion: d ? d.title : ctx.state.brainstorm ? 'Brainstorm' : 'No discussion started',
     active: d ? `discussions/${d.name}` : null, started: !!ctx.logPath || !!ctx.state.brainstorm,
     brainstorm: !!ctx.state.brainstorm, // a conversation kept only in memory (see newBrainstorm)
+    // The agents this discussion started with, for the members panel once it has started.
+    members: ctx.agentSpecs.split(',').map((s) => parseSpec(s)).map((a) => ({ ...a, enabled: !(ctx.state.disabledAgents ?? []).includes(a.name) })),
     failedAgents: ctx.room.agents.filter((a) => ctx.state.transcript.some((m) => m.error && m.speaker === a.name) || (ctx.state.disabledAgents ?? []).includes(a.name)).map((a) => ({ name: a.name, disabled: (ctx.state.disabledAgents ?? []).includes(a.name) })),
     autoDev: autoDevView(ctx), retryId: ctx.retryFailure?.available ? ctx.retryFailure.id : null,
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
@@ -336,19 +338,23 @@ function showHeader(ctx) {
   }
 }
 
-// A failed participant can be disabled in this discussion without changing future-room defaults.
-export function setAgentEnabled(ctx, name, enabled) {
+// A participant can be disabled in this discussion without changing future-room defaults: a failed
+// one from its notice, any one of a started discussion from the members panel (`member`). During a
+// round, the change counts from the next round (a round keeps the speakers it started with) and is
+// checkpointed with that round; between rounds, at once.
+export function setAgentEnabled(ctx, name, enabled, { member = false } = {}) {
   const agent = ctx.room.agents.find((a) => a.name === name);
   if (!agent || typeof enabled !== 'boolean') throw new Error('Unknown discussion agent.');
-  if (ctx.busy || ctx.stopped) throw new Error('Wait for the current discussion turn to end.');
+  if (ctx.stopped || (ctx.busy && !member)) throw new Error('Wait for the current discussion turn to end.');
+  if (member && !settingsStarted(ctx)) throw new Error('Before the discussion starts, choose its members in the panel.');
   const disabled = new Set(ctx.state.disabledAgents ?? []);
   if (!enabled) {
-    if (!ctx.state.transcript.some((m) => m.speaker === name && m.error)) throw new Error('Only a failed agent can be disabled here.');
+    if (!member && !ctx.state.transcript.some((m) => m.speaker === name && m.error)) throw new Error('Only a failed agent can be disabled here.');
     if (!disabled.has(name) && ctx.room.agents.length - disabled.size <= 1) throw new Error('At least one discussion agent must stay enabled.');
     disabled.add(name);
   } else disabled.delete(name);
   ctx.state.disabledAgents = [...disabled];
-  captureRound(ctx);
+  if (!ctx.busy) captureRound(ctx);
   showHeader(ctx);
 }
 

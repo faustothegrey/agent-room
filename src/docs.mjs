@@ -1706,6 +1706,8 @@ function setRoom(r) {
   const changed = room && r && room.active !== r.active;
   room = r;
   if (changed) { peek = null; updateTabs(); }
+  // The members panel follows the room: each agent's state, or the usual panel once a new discussion begins.
+  if (membersModels && $('talk-settings').open) { if (r?.started) renderMembers(); else $('talk-settings').ontoggle(); }
   renderAutoDev();
   $('room-name').textContent = r.folder?.replace(/[/]+$/, '').split('/').pop() || r.folder || 'agent-room';
   $('disc').textContent = r.discussion || '';
@@ -1731,6 +1733,7 @@ function showVersion(c) {
     '\\n+ means uncommitted changes (outside discussions/). These are snapshots of the checkout, taken at start and at the last Reload: after a Reload the process may run a mix of files from both.';
   el.textContent = text; el.title = title;
 }
+let membersModels = null; // the model lists, while the members panel shows a started discussion's agents (renderMembers)
 // Settings stay outside the conversation; saving never changes an active CLI session.
 const settingsRows = {};
 let settingsSave = Promise.resolve();
@@ -1794,6 +1797,31 @@ function agentRow(parent, a, models, title, member = null) {
   return { row, refresh, get: () => ({ name: name.value.trim(), provider: provider.value, model: model.value === '__custom' ? custom.value.trim() : model.value }),
     active: () => !member || checked.checked, incomplete: () => (!member || checked.checked) && model.value === '__custom' && !custom.value.trim() };
 }
+// Once the discussion has started, the members panel lists the agents it started with (room.members):
+// each one's On box leaves it out of this discussion or brings it back, from its next round. Their
+// provider, name and model are fixed; new discussions get theirs before their first message.
+function renderMembers() {
+  const parent = $('talk-agent-rows'), result = $('talk-settings-status'), members = room?.members ?? [];
+  parent.replaceChildren();
+  delete settingsRows.talk; // nothing here saves settings
+  const on = () => members.filter((m) => m.enabled).length;
+  members.forEach((m, i) => {
+    const a = { ...m, active: m.enabled, automatic: false };
+    const { row } = agentRow(parent, a, membersModels, 'Agent ' + (i + 1), {
+      provider() {}, name() {}, refresh() {},
+      locked: () => a.active && on() <= 1,
+      toggle(enabled) {
+        a.active = m.enabled = enabled;
+        result.textContent = '';
+        post('__agent-enabled', { name: m.name, enabled, member: true })
+          .then(async (res) => { if (!res.ok) throw new Error(await res.text()); })
+          .catch((err) => { m.enabled = !enabled; renderMembers(); result.textContent = 'Could not change ' + m.name + ': ' + err.message; });
+      },
+    });
+    for (const el of row.querySelectorAll('select, input:not([type="checkbox"])')) el.disabled = true;
+  });
+  $('talk-member-note').hidden = true;
+}
 function selectedSettings(data) {
   return data.started ? data.launchDefaults ?? data.defaults ?? data.settings : data.settings;
 }
@@ -1814,6 +1842,12 @@ for (const scope of ['talk', 'work']) {
       const res = await fetch('__settings');
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(), selected = selectedSettings(data);
+      if (scope === 'talk') membersModels = data.started && room?.members ? data.models : null;
+      if (scope === 'talk' && membersModels) {
+        renderMembers();
+        hint.textContent = 'This discussion’s members. Untick one to leave it out of this discussion from its next round; tick it to bring it back. Their provider and model stay as they started: choose those for a new discussion before its first message.';
+        return;
+      }
       if (scope === 'talk') selected.agents = memberPanelAgents(data);
       if (scope === 'work') selected.worker = data.settings.worker;
       const parent = $(scope + '-agent-rows'); parent.replaceChildren();
@@ -2583,7 +2617,7 @@ function handleScreen(req, res, url, dir, screen) {
       if (url.pathname === '/__agent-enabled') {
         if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before changing discussion agents.');
         if (!screen.setAgentEnabled) return send(409, 'text/plain', 'Discussion agent controls are unavailable.');
-        return Promise.resolve().then(() => screen.setAgentEnabled(body?.name, body?.enabled)).then(() => send(204, 'text/plain', ''), (err) => send(400, 'text/plain', err.message));
+        return Promise.resolve().then(() => screen.setAgentEnabled(body?.name, body?.enabled, body?.member === true)).then(() => send(204, 'text/plain', ''), (err) => send(400, 'text/plain', err.message));
       }
       if (url.pathname === '/__retry') {
         if (!screen.retryWork) return send(409, 'text/plain', 'Retry is unavailable.');

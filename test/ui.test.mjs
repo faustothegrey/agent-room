@@ -3227,3 +3227,34 @@ test('a failed discussion agent can be disabled across Reload and Resume, and en
   ctx.state.transcript.push({ speaker: 'B', text: 'failed too', error: true });
   assert.throws(() => setAgentEnabled(ctx, 'B', false), /At least one/);
 });
+
+test('the members panel leaves any agent of a started discussion out, from its next round, and brings it back', async () => {
+  const { setAgentEnabled } = await import('../src/ui.mjs');
+  const ctx = await savedRoom(await tmp('member-off-'), 'member-off');
+  assert.throws(() => setAgentEnabled(ctx, 'B', false, { member: true }), /Before the discussion starts/);
+  let a = 0, b = 0;
+  ctx.room.agents[0].turn = async () => { a++; return 'PASS'; };
+  ctx.room.agents[1].turn = async () => { b++; return 'PASS'; };
+  await handleLine('start', ctx);
+  assert.equal(a, 1); assert.equal(b, 1);
+  assert.deepEqual(ctx.screen.room.members.map((m) => [m.name, m.enabled]), [['A', true], ['B', true]]);
+  // Not failed, yet the panel can leave it out; the failed-agent notice still can't.
+  assert.throws(() => setAgentEnabled(ctx, 'B', false), /Only a failed agent/);
+  setAgentEnabled(ctx, 'B', false, { member: true });
+  assert.deepEqual(ctx.state.disabledAgents, ['B']);
+  assert.deepEqual(ctx.screen.room.members.map((m) => m.enabled), [true, false]);
+  assert.throws(() => setAgentEnabled(ctx, 'A', false, { member: true }), /At least one/);
+  await handleLine('next', ctx);
+  assert.equal(a, 2); assert.equal(b, 1);
+  // During a round: that round keeps its speakers, the next one goes without.
+  ctx.room.agents[0].turn = async () => { a++; if (a === 3) setAgentEnabled(ctx, 'B', true, { member: true }); return 'PASS'; };
+  await handleLine('during', ctx);
+  assert.equal(a, 3); assert.equal(b, 1);
+  assert.deepEqual(ctx.state.disabledAgents, []);
+  ctx.room.agents[0].turn = async () => { a++; if (a === 4) setAgentEnabled(ctx, 'A', false, { member: true }); return 'PASS'; };
+  await handleLine('both', ctx);
+  assert.equal(a, 4); assert.equal(b, 2);
+  assert.deepEqual(ctx.lastRound.state.disabledAgents, ['A']); // checkpointed with the round it came in
+  await handleLine('only B', ctx);
+  assert.equal(a, 4); assert.equal(b, 3);
+});
