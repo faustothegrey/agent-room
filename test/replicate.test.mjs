@@ -13,7 +13,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import * as R from './helpers/replication.mjs';
-import { test } from 'node:test';
+import { test } from './helpers/test.mjs';
 import assert from 'node:assert/strict';
 
 const here = dirname(fileURLToPath(import.meta.url));

@@ -1,0 +1,66 @@
+attachments over 25 MB are refused, and nothing is saved or sent
+terminal: a shell that fails to start is reported in the pane, and the server keeps answering
+terminal: with the token and a matching Origin, the WebSocket runs a shell
+terminal: Quit room ends that room's shells; another room's shell keeps working
+replication protocol: B0 scenarios, immutable publication and recovery
+two rooms: pairing, round hooks, independent browser pins, deletion and read-only guards
+every open discussion of a --node launch room replicates, through the launch room's replica
+one server, two rooms: separate state and files, independent rounds, Quit room ends only one
+two open discussions in one room: switching keeps their sessions, and a worker report returns to its origin
+Restart with two rooms: both come back at the same addresses, with their current agents, worker and discussion
+UI mode: the screen is the room's input, its replies come back as events, Quit ends the room
+saved provider/model choices survive CLI restarts and explicit CLI flags override them
+Restart: a new server process on the same port, resuming the discussion in use
+Quit room, then start again in the discussion: its checkpoint restores the discussion and worker provider sessions
+CLI flags remain the defaults for a new brainstorm and a beside discussion
+the worker is told the active discussion's folder with its first instruction there
+/new in the terminal doesn't wait: a running task finishes in the old discussion's worker session and transcript, its log stays, and the new discussion's worker starts fresh
+after New discussion, the previous one can't move while its worker task runs; it can once the task ends
+the first instruction creates the worktree beside the repository, on worker/main from HEAD; the worker runs there
+a dirty room is left exactly as it was; the worker doesn't see its uncommitted changes, and the tab says so
+after a restart the worktree is reused; an existing worker/main without a worktree is reattached; nothing is deleted
+worker/main catches up with the room only when strictly behind with a clean worktree; otherwise it is left as it is
+each discussion works in its own lane, <repo>.workers/<name>/ on worker/<name>; before the first message, worker/main; a saved session is told its worktree changed; a brainstorm sends none
+a task queued before the discussion's first message stays on worker/main, even if it runs after the message created the discussion
+migration: a discussion's lane waits while worker/main has uncommitted edits or that discussion's commits not in main, which are left where they are; Defer counts those commits too
+the Worker tab checks each branch with work not in main: whether it contains main, the commits its worker last reported testing, and an advisory merge preview that changes no branch, worktree or index
+Reload from the code before lanes is refused, before anything changes, idle or busy; the tasks then go on under that code
+Reload from the code before lanes is refused with a hold over uncommitted edits, or after a failed worktree inspection; the hold and the wait go on under that code
+Reload from the code before lanes with two or three open discussions is refused in each, and a discussion opened beside is refused too; their tasks run one at a time in 1a's worktree, and a fresh start loads the new code
+a worker task keeps the discussion it started in, even if New discussion comes while it prepares its worktree
+the worker is told about its scratch notes; .worker-notes is ignored by Git in its worktree
+worker switches after a running failure, carries history, and retains its session on model changes
+terminal: /new while a worker task runs, a task in the new discussion, then Resume of the first: each report reaches its own discussion, and each continues its own worker session
+terminal: a task that leaves edits after the room switched holds its own discussion's worktree, named for it; only that discussion's instructions resolve it; and its usage counts for it
+terminal: Start fresh while the discussion's old worker task still runs: its report goes to the old session's transcript, and neither its report nor its checkpoint update replaces the new worker session
+auto dev: Start relays the instruction; the report starts a round; one SEND per report; FINISH ends it
+auto dev: at most 5 worker cycles per start; the 5th report is still reviewed; Restart grants 5 more
+auto dev pauses on WAIT FOR USER, an unagreed summary, a failed turn, or a User message; a failed worker counts as a cycle
+auto dev: never in a brainstorm; New discussion ends a run; Reload keeps it, and a lost worker result pauses it
+one workshop per folder: tasks labelled by origin, one worker session, lane and queue each, reports back there; Close discussion; Quit room closes them all
+lanes run at the same time: two discussions' tasks overlap with separate queues, holds, worker sessions and worktrees; a hold in one doesn't stop the other; a third waits for a free place
+a queued task starting after its context switches does not mark the new discussion working
+leftover edits hold their own lane for their origin, which can recover them; other lanes go on; they block Close, Archive and Defer; unknown leftovers hold their lane
+worker changes stay in their discussion and only unstarted changes update defaults
+Stage 2: completed work is reported once before a round, including Worker report rounds, never just by switching
+Stage 2: Defer refuses labelled commits absent from main and permits them after a normal merge
+Stage 2: private owner records survive restart and recovery, invalid records block as unknown, and a brainstorm writes none
+Stage 2: cleaning held edits by hand clears the private record and hold without another task
+Stage 3: a diverged clean worker is instructed to merge main normally before its task
+Stage 3: a worker merge conflict holds its own lane, not other discussions', and recovery keeps the original ownership
+Stage 3: clean merge, revert and sequencer states hold their lane's dispatch and survive ownership restoration
+Stage 3: rollback includes merged implementation, never restores prior rollback, and archives only on explicit confirmation
+Stage 3: an ambiguous or failed rollback report cannot authorize archiving
+failed worktree inspection blocks even the holding origin recovery in its lane, preserves ownership and retries; other lanes go on
+a worker task cut off with a clean worktree: Resume reports it and the task never started; the worker is told once; "Result unknown" without a starting commit
+Quit room during a worker task: the stopped task is kept as interrupted, the queued one as not started, and Resume reports both
+auto dev: retry keeps the failure pause through discussion and resumes the same cycle
+auto dev: a retry cannot resume a run that ended while it was working
+retry runs before later queued instructions and reports commits made since the failure
+Retry with applies worker settings for later instructions
+auto dev: restarting while a retry runs cannot resume the old run
+a failed retry offers another retry and keeps the auto dev failure pause
+auto dev: step counts adjust the limit and fix rounds consume slack
+auto dev: the step limit is capped at 15 at start and when raised
+Shutdown server, from the server's own address, ends every room; with --node only the launch room replicates
+Resume replaces a brainstorm only with a valid checkpoint; on the discussion in use it changes nothing; Start fresh asks twice and keeps only the latest summary

@@ -749,7 +749,7 @@ agent-room's source.
 | `src/replicate.mjs` | Separate discussion Git storage, pairing, background transfer and immutable received snapshots. |
 | `src/usage.mjs` | Token accounting, optional quota-meter data and the providers' login status. |
 
-Run `npm test`. Tests exercise provider arguments with fake runners, round logic, HTTP endpoints,
+Run `npm test` for the fast suite, `npm run test:slow` for the slow suite, or `npm run test:all` for both. Tests exercise provider arguments with fake runners, round logic, HTTP endpoints,
 settings persistence across CLI restarts, and screen/terminal coordination; they do not establish
 live provider access or browser appearance.
 

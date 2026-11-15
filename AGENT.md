@@ -18,4 +18,5 @@ worker receives `README-for-worker-agents.md`; that rulebook is also source, not
 2. **Small diffs.** Change only what the task needs.
 3. **Tests are contracts.** Don't weaken or rewrite a test to make it pass; ask first.
 4. **Ask before changing behaviour** that the owner relies on, including fixing a bug you found.
-5. **Done** means it works as asked, `npm test` is green, and you said honestly what you didn't check.
+5. **Done** means it works as asked, `npm test` (the fast suite) is green, and you said honestly what you didn't check.
+6. **Fast and slow tests.** `npm test` runs the fast suite: run it whenever you run a test suite, and before merging. `npm run test:slow` and `npm run test:all` run only when the User asks. A new test that passes is timed on its first run and assigned to `test/fast.txt` (1 s or less) or `test/slow.txt` (over 1 s). A failing new test is reported and remains unassigned. The suite itself moves a fast-list test that passes in more than 1 s three runs in a row to the slow list. Don't edit `test/fast.txt`, `test/slow.txt` or `test/.timings.json` by hand: just run the suite you need.
