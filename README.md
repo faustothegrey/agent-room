@@ -371,6 +371,10 @@ Cancelling the chooser leaves everything as it was.
 
 ## Choose providers and models
 
+The Discussion members and Worker provider panels show each current CLI session ID after its first
+completed turn. You can copy an ID to resume that provider's session locally; using the same session
+concurrently from another CLI may interfere with agent-room's conversation.
+
 Expand **Discussion agents · provider & model** in Discussion, or **Worker · provider & model**
 in Worker. The Discussion panel has three rows: tick two or three members, in the order they should
 speak. Untick a member only after ticking its replacement. Names suggested from the provider remain

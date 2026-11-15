@@ -318,6 +318,7 @@ function wire(ctx) {
 function header(ctx) {
   const d = ctx.discussion;
   return { folder: ctx.cwd, agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name,
+    cliSessions: sessionView(ctx),
     discussion: d ? d.title : ctx.state.brainstorm ? 'New brainstorm' : 'No discussion started',
     active: folderOf(ctx), started: !!ctx.logPath || !!ctx.state.brainstorm,
     brainstorm: !!ctx.state.brainstorm, // a brainstorm, in brainstorms/<name>/ once started (see newBrainstorm)
@@ -333,6 +334,15 @@ function header(ctx) {
     code: ctx.code ?? null, // the version this process runs (see codeInfo)
     rollbacks: [...(shopOf(ctx).rollbacks?.values() ?? [])].map(({ name, status, report, commit }) => ({ name, status, report, commit })),
     multi: multi(ctx), open: openList(ctx) }; // the folder's open discussions (see openList)
+}
+export function sessionView(ctx) {
+  const id = (agent, key) => {
+    const session = ctx.sessions?.get(key);
+    return agent.provider === 'claude' ? (session?.started ? session.id : null)
+      : agent.provider === 'codex' ? session?.threadId : agent.provider === 'agy' ? session?.conversationId : null;
+  };
+  return { agents: ctx.room.agents.map((a) => ({ name: a.name, provider: a.provider, id: id(a, a.name) ?? null })),
+    worker: { name: ctx.worker.name, provider: ctx.worker.provider, id: id(ctx.worker, `worker:${ctx.worker.name}`) ?? null } };
 }
 // Every page of the folder's open discussions: they list each other.
 function showHeader(ctx) {
@@ -2845,6 +2855,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   // Its worker session and briefing, in its own discussion's checkpoint: the one in use, or the one
   // left meanwhile (saveLeftWorker).
   if (worker === ctx.worker) saveCheckpoint(ctx); else if (worker.seat) saveLeftWorker(ctx, worker, leftUsage);
+  showHeader(ctx);
   await refreshWorker(ctx).catch(() => {}); // the tab's checks are current when the task counts as done
   refreshQuota(ctx).catch(() => {});
   return before;

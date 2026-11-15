@@ -1,8 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handleLine, load, restartArgs, workerLane, workNote } from '../src/ui.mjs';
+import { handleLine, load, restartArgs, sessionView, workerLane, workNote } from '../src/ui.mjs';
 
 const freshCtx = () => ({ cwd: '/tmp', agentSpecs: 'claude:A,codex:B', state: { transcript: [], seen: new Map() }, sessions: new Map() });
+
+test('session IDs identify each current agent and the separate worker', () => {
+  const ctx = { room: { agents: [{ name: 'A', provider: 'claude' }, { name: 'B', provider: 'codex' }, { name: 'C', provider: 'agy' }] },
+    worker: { name: 'W', provider: 'claude' }, sessions: new Map([['A', { id: 'a', started: true }], ['B', { threadId: 'b' }],
+      ['C', { conversationId: 'c' }], ['worker:W', { id: 'w', started: false }]]) };
+  assert.deepEqual(sessionView(ctx), { agents: [{ name: 'A', provider: 'claude', id: 'a' }, { name: 'B', provider: 'codex', id: 'b' },
+    { name: 'C', provider: 'agy', id: 'c' }], worker: { name: 'W', provider: 'claude', id: null } });
+  ctx.sessions.get('worker:W').started = true;
+  assert.equal(sessionView(ctx).worker.id, 'w');
+});
 
 test('each load builds a new room on the same conversation state and CLI sessions', async () => {
   const ctx = freshCtx();

@@ -530,6 +530,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <form id="talk-settings-form">
         <p class="settings-hint" id="talk-settings-hint"></p>
         <div id="talk-agent-rows"></div>
+        <div class="settings-hint" id="talk-sessions"></div>
         <p class="settings-hint member-note" id="talk-member-note" hidden></p>
         <p class="settings-hint">CLI default uses the provider’s settings. Custom model IDs require account access.</p>
         <p class="settings-status" id="talk-settings-status" role="status"></p>
@@ -550,6 +551,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <form id="work-settings-form">
         <p class="settings-hint" id="work-settings-hint"></p>
         <div id="work-agent-rows"></div>
+        <div class="settings-hint" id="work-sessions"></div>
         <p class="settings-hint">CLI default uses the provider’s settings. Custom model IDs require account access.</p>
         <p class="settings-status" id="work-settings-status" role="status"></p>
       </form>
@@ -1833,6 +1835,14 @@ let room = null;
 function setRoom(r) {
   const changed = room && r && room.active !== r.active;
   room = r;
+  for (const [target, sessions] of [['talk-sessions', r.cliSessions?.agents ?? []], ['work-sessions', r.cliSessions?.worker ? [r.cliSessions.worker] : []]]) {
+    const el = $(target); if (!el) continue; el.replaceChildren();
+    for (const session of sessions) {
+      const line = document.createElement('div');
+      line.textContent = session.name + ' (' + session.provider + ') session ID: ' + (session.id ?? 'available after its first completed turn');
+      el.append(line);
+    }
+  }
   if (changed) { peek = null; updateTabs(); }
   // The members panel follows the room: each agent's state, or the usual panel once a new discussion begins.
   if (membersModels && $('talk-settings').open) { if (r?.started) renderMembers(); else $('talk-settings').ontoggle(); }
