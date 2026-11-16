@@ -27,7 +27,8 @@ const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 // which exists only from its first instruction on).
 const at = (cwd) => (typeof cwd === 'function' ? cwd() : cwd);
 
-// Run a command with `input` on stdin; resolve with stdout, reject on non-zero exit or timeout.
+// Run a command with `input` on stdin; resolve with stdout, reject on non-zero exit or timeout,
+// or if it exits 0 before all of a non-empty input was sent.
 // `procs` (a Set, optional) holds the process while it runs, so its room can stop it (Quit room).
 // `record` ({ agent, room, dir? }, optional) writes the program in the record of programs (below)
 // until its process group ends.
@@ -53,9 +54,18 @@ export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOU
     proc.on('error', (err) => { clearTimeout(timer); procs?.delete(proc); forget(); reject(err); });
     proc.on('close', (code, signal) => {
       clearTimeout(timer);
-      if (code === 0) resolve(stdout);
-      else if (code === null) reject(new Error(`${command} was stopped (${signal})`));
+      if (code === 0) {
+        // Exited 0: with input, only once all of it was sent; an error closing an empty stdin is harmless.
+        if (!input) resolve(stdout);
+        else sent.then((err) => (err ? reject(new Error(`${command} could not send the complete prompt: ${err.message}`)) : resolve(stdout)));
+      } else if (code === null) reject(new Error(`${command} was stopped (${signal})`));
       else reject(new Error(`${command} exited with code ${code}: ${stderr.trim().slice(-500)}`));
+    });
+    // Errors writing stdin (EPIPE when the program exits before reading it) are kept, not thrown.
+    const sent = new Promise((done) => {
+      proc.stdin.on('error', (err) => done(err));
+      proc.stdin.on('finish', () => done(null));
+      proc.stdin.on('close', () => done(proc.stdin.writableFinished ? null : new Error('stdin closed early')));
     });
     proc.stdin.end(input);
   });

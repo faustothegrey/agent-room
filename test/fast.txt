@@ -179,3 +179,5 @@ agy login is unmonitored without invoking a command
 agy grouped gauges show Gemini and Argon while summaries retain all models
 auto dev: step metadata is only before the Outcome and outside the instruction
 fast test timings count only consecutive completed passes and move after three
+run: a program that exits 0 without reading its input rejects; a non-zero exit is reported as before
+run: with empty input, an error from stdin never fails a successful exit
