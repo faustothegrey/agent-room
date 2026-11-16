@@ -1214,8 +1214,8 @@ function rollbackButtons(row, details, name, ref, inUse) {
   }
   if (r?.status === 'ready') {
     const confirm = document.createElement('button'); confirm.className = 'reopen'; confirm.textContent = 'Confirm archive after rollback';
-    confirm.disabled = !!inUse;
-    confirm.title = inUse ? 'Switch to another discussion before confirming archive' : 'Review the rollback report first. Archive the discussion; merging its worker branch into main stays manual.';
+    confirm.disabled = !!inUse || !room?.closedDiscussions?.includes(name);
+    confirm.title = !room?.closedDiscussions?.includes(name) ? 'Close the discussion before archiving it.' : inUse ? 'Switch to another discussion before confirming archive' : 'Review the rollback report first. Archive the discussion; merging its worker branch into main stays manual.';
     confirmed(confirm, () => send('/archive-rollback ' + ref), 'Click again: I reviewed the rollback report; archive', () => true);
     row.append(confirm);
   }
@@ -1459,8 +1459,8 @@ function renderDiscussions() {
       }
       for (const [label, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
         const b = el('button', '', label);
-        b.disabled = isCurrent;
-        b.title = isCurrent ? 'The discussion in use cannot be moved' : 'Move the whole discussion into ' + target + '/';
+        b.disabled = isCurrent || !room?.closedDiscussions?.includes(d);
+        b.title = !room?.closedDiscussions?.includes(d) ? 'Close the discussion before moving it into ' + target + '/.' : isCurrent ? 'The discussion in use cannot be moved' : 'Move the whole discussion into ' + target + '/';
         b.onclick = () => { closeMenus(); send('/move ' + d + ' ' + target); };
         if (target === 'archive') archiveButton(b, d);
         items.append(b);
@@ -1576,6 +1576,8 @@ function renderDiscussions() {
 
         const otherSection = s === 'archive' ? 'deferred' : 'archive';
         const moveOther = el('button', '', otherSection === 'archive' ? 'Archive' : 'Defer');
+        moveOther.disabled = !room?.closedDiscussions?.includes(d);
+        if (moveOther.disabled) moveOther.title = 'Close the discussion before moving it into ' + otherSection + '/.';
         moveOther.onclick = () => { closeMenus(); send('/move ' + s + '/' + d + ' ' + otherSection); };
         if (otherSection === 'archive') archiveButton(moveOther, s + '/' + d);
         items.append(moveOther);

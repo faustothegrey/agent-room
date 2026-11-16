@@ -64,3 +64,5 @@ auto dev: step counts adjust the limit and fix rounds consume slack
 auto dev: the step limit is capped at 15 at start and when raised
 Shutdown server, from the server's own address, ends every room; with --node only the launch room replicates
 Resume replaces a brainstorm only with a valid checkpoint; on the discussion in use it changes nothing; Start fresh asks twice and keeps only the latest summary
+Close waits for running and queued worker reports before asking the agents
+a paused discussion can be closed without replacing the current discussion

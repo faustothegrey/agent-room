@@ -1285,6 +1285,12 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   assert.equal(label('2026-11-15-unstarted'), 'not started');
   assert.equal(label('2026-11-14-closed'), 'closed');
   assert.equal(label('2026-11-13-paused'), 'paused');
+  const moveButton = (name, label) => rowFor(name).children.find((c) => c.tag === 'details').children[1].children.find((c) => c.textContent === label);
+  for (const action of ['Archive', 'Defer']) {
+    assert.equal(moveButton('2026-11-13-paused', action).disabled, true);
+    assert.match(moveButton('2026-11-13-paused', action).title, /Close the discussion/);
+    assert.equal(moveButton('2026-11-14-closed', action).disabled, false);
+  }
   const sectionLabel = (name) => list.children.filter((c) => c.tag === 'details').flatMap((c) => c.children)
     .find((r) => r.className?.includes('discussion-row') && r.children[0].children[0].textContent === name)
     .children[0].children.find((c) => c.className === 'local-label').textContent;

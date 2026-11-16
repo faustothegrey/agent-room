@@ -179,3 +179,16 @@ agy login is unmonitored without invoking a command
 agy grouped gauges show Gemini and Argon while summaries retain all models
 auto dev: step metadata is only before the Outcome and outside the instruction
 fast test timings count only consecutive completed passes and move after three
+agents draft and revise a closing statement with worker reports, without changing the chat
+a closing turn that loses its provider session retries with the full chat
+a transient closing turn failure keeps the usable provider session
+Close writes a statement and drops saved provider IDs only after the agents finish
+Close waits for queued work, refuses instructions and can be cancelled
+closing a discussion does not stop an earlier discussion's detached worker
+a failed statement leaves the previous file and discussion intact for a retry
+a failure persisting Close restores the statement, checkpoint and provider IDs
+closed state persists independently of checkpoints, and Resume clears it
+every round saves a checkpoint; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions
+archive and defer require a closed discussion, and Make active keeps it closed
+a reopened discussion retains its statement briefing across restart before its first message
+a reopened discussion without a closing statement starts from its pending handoff

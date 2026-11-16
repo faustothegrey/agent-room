@@ -262,10 +262,15 @@ test('agent settings persist, apply before startup, and switch only the active w
 
 test('/move: a whole discussion into archive/ or deferred/ and back; never the one in use', async () => {
   const { existsSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { dirname, basename, join } = await import('node:path');
   const ctx = await freshSession([], async () => ({ title: 'In use' }));
   const root = `${ctx.cwd}/discussions`;
   mkdirSync(`${root}/2026-11-01-old/transcripts`, { recursive: true });
   writeFileSync(`${root}/2026-11-01-old/notes.md`, 'n');
+  const checkpoint = await checkpointPath(ctx.cwd, '2026-11-01-old');
+  const closed = join(dirname(checkpoint), 'closed');
+  mkdirSync(closed, { recursive: true });
+  writeFileSync(join(closed, basename(checkpoint, '.json')), '2026-11-01-old');
   await handleLine('/move 2026-11-01-old archive', ctx);
   assert.ok(existsSync(`${root}/archive/2026-11-01-old/notes.md`)); // archive/ created when first needed
   assert.ok(!existsSync(`${root}/2026-11-01-old`));
@@ -294,6 +299,31 @@ test('/resume of an archived discussion makes it active first; new names skip ar
 
   mkdirSync(`${root}/deferred/2026-11-02-topic`, { recursive: true });
   assert.equal(createDiscussionFolder(root, 'Topic', new Date(2026, 10, 2)), '2026-11-02-topic-2');
+});
+
+test('archive and defer require a closed discussion, and Make active keeps it closed', async () => {
+  const { existsSync } = await import('node:fs');
+  const ctx = await freshSession([], async () => ({ title: 'Move state' }));
+  ctx.noScreen = true;
+  const notes = [];
+  ctx.docs = { ...ctx.docs, broadcast: (screen, event) => { if (event.type === 'note') notes.push(event.text); } };
+  await handleLine('hello', ctx);
+  const name = ctx.discussion.name, root = `${ctx.cwd}/discussions`;
+  await handleLine(`/move ${name} archive`, ctx);
+  assert.match(notes.at(-1), /must be closed before.*archive/);
+  await handleLine('/new', ctx);
+  await handleLine(`/move ${name} deferred`, ctx);
+  assert.match(notes.at(-1), /must be closed before.*deferred/);
+  assert.ok(existsSync(`${root}/${name}`));
+  await handleLine(`/resume ${name}`, ctx);
+  await handleLine('/close', ctx);
+  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+  await handleLine(`/move ${name} archive`, ctx);
+  assert.ok(existsSync(`${root}/archive/${name}`));
+  await handleLine(`/move archive/${name} active`, ctx);
+  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+  await handleLine(`/move ${name} deferred`, ctx);
+  assert.ok(existsSync(`${root}/deferred/${name}`));
 });
 
 test('Restart keeps the launch flags that matter: the same port, agents, worker and dev mode, in the discussion in use', () => {
@@ -1400,6 +1430,16 @@ test('Close writes a statement and drops saved provider IDs only after the agent
   assert.ok(ctx.screen.room.closedDiscussions.includes(name));
   assert.deepEqual(JSON.parse(readFileSync(await checkpointPath(cwd, name), 'utf8')).sessions, []);
   assert.ok(sessions.every((session) => !['prior-agent', 'prior-thread', 'prior-worker'].includes(session.id ?? session.threadId ?? session.conversationId)));
+  await handleLine('/resume ' + name, ctx);
+  assert.ok(!ctx.screen.room.closedDiscussions.includes(name));
+  assert.notEqual(ctx.sessions.get('A').id, 'prior-agent');
+  assert.notEqual(ctx.sessions.get('B').threadId, 'prior-thread');
+  assert.notEqual(ctx.sessions.get('worker:W').id, 'prior-worker');
+  const prompts = [];
+  for (const agent of ctx.room.agents) agent.turn = async (p) => { prompts.push(p); return 'PASS'; };
+  await handleLine('continue', ctx);
+  assert.equal(prompts.length, 2);
+  assert.ok(prompts.every((p) => p.includes('Decisions and pending-instructions.md')));
 });
 
 test('Close waits for queued work, refuses instructions and can be cancelled', async () => {
@@ -1418,6 +1458,42 @@ test('Close waits for queued work, refuses instructions and can be cancelled', a
   assert.equal(ctx.discussion.name, name);
   assert.deepEqual(ctx.screen.room.closedDiscussions, []);
   lane.tasks.length = 0;
+});
+
+test('a reopened discussion retains its statement briefing across restart before its first message', async () => {
+  const cwd = await tmp('reopen-restart-');
+  const ctx = await savedRoom(cwd, 'reopen-restart-1');
+  ctx.sessions.get('B').threadId = 'before-close';
+  await handleLine('decide', ctx);
+  const name = ctx.discussion.name;
+  for (const agent of ctx.room.agents) agent.turn = async () => 'reopen context: pending-instructions.md';
+  await handleLine('/close', ctx);
+  await handleLine('/resume ' + name, ctx);
+  const after = await savedRoom(cwd, 'reopen-restart-2');
+  await handleLine('/resume ' + name, after);
+  const prompts = [];
+  for (const agent of after.room.agents) agent.turn = async (p) => { prompts.push(p); return 'PASS'; };
+  await handleLine('continue', after);
+  assert.equal(prompts.length, 2);
+  assert.ok(prompts.every((p) => p.includes('reopen context: pending-instructions.md')));
+});
+
+test('a reopened discussion without a closing statement starts from its pending handoff', async () => {
+  const { unlinkSync, writeFileSync } = await import('node:fs');
+  const ctx = await savedRoom(await tmp('reopen-handoff-'), 'reopen-handoff');
+  ctx.sessions.get('B').threadId = 'before-close';
+  await handleLine('decide', ctx);
+  const { name, dir } = ctx.discussion;
+  for (const agent of ctx.room.agents) agent.turn = async () => 'statement: pending-instructions.md';
+  await handleLine('/close', ctx);
+  unlinkSync(`${dir}/closing-statement.md`);
+  writeFileSync(`${dir}/handoff.md`, 'Pending handoff');
+  await handleLine('/resume ' + name, ctx);
+  const prompts = [];
+  for (const agent of ctx.room.agents) agent.turn = async (p) => { prompts.push(p); return 'PASS'; };
+  await handleLine('continue', ctx);
+  assert.equal(prompts.length, 2);
+  assert.ok(prompts.every((p) => p.includes('Start from its handoff')));
 });
 
 test('Close waits for running and queued worker reports before asking the agents', async () => {
@@ -1540,7 +1616,11 @@ test('closed state persists independently of checkpoints, and Resume clears it',
   const after = await savedRoom(cwd, 'closed-state-3');
   await handleLine('/resume 2026-01-01-old', after);
   assert.deepEqual(after.screen.room.closedDiscussions, [name]);
-  // Resume-after-Close checks are recorded unchanged for stage 3 in the discussion's stage-2 investigation.
+  await handleLine('/resume ' + name, after);
+  assert.deepEqual(after.screen.room.closedDiscussions, []);
+  const again = await savedRoom(cwd, 'closed-state-4');
+  await handleLine('/resume 2026-01-01-old', again);
+  assert.deepEqual(again.screen.room.closedDiscussions, []);
 });
 
 test('every round saves a checkpoint; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions', async () => {

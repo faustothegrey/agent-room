@@ -426,6 +426,7 @@ async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) 
   const target = to === 'active' ? null : to;
   if (to !== 'active' && !SECTIONS.includes(to)) return note(ctx, '✗ Move it to active, archive or deferred.', true), null;
   if (d.section === target) return { name: d.name }; // already there
+  if (target && !closedDiscussions(ctx).includes(d.name)) return note(ctx, `✗ ${d.name} must be closed before it can be moved to ${target}/.`, true), null;
   await recoverWorkerOwner(ctx);
   const from = join(parent, d.section ?? '', d.name);
   if (ctx.discussion?.dir === from) return note(ctx, `✗ ${d.name} is the discussion in use in this room: it can't move now.`, true), null;
@@ -649,6 +650,10 @@ function briefing(ctx) {
       : `Before replying, read its earlier sessions' transcripts in ${transcripts}: the transcripts are the source, and a summary of them may omit details.`);
   }
   if (continued) {
+    if (ctx.closedBriefing && existsSync(join(dir, 'closing-statement.md'))) {
+      const text = readFileSync(join(dir, 'closing-statement.md'), 'utf8');
+      return `This session continues the discussion in ${dir}: create, read and write this discussion's documents (notes, drawings) there. Start from its closing statement:\n\n${text}`;
+    }
     return `This session continues the discussion in ${dir}: create, read and write this discussion's documents (notes, drawings) there. Start from its handoff `
       + '(see "Where to start reading" in your rulebook); you can also read its notes and its transcripts/ folder.' + summary;
   }
@@ -1013,6 +1018,28 @@ async function resumeDiscussion(ctx, ref) {
   if (multi(ctx) && !fresh(ctx)) return besideWith(ctx, (next) => resumeDiscussion(next, ref));
   if (d.section && !await moveDiscussion(ctx, ref, 'active')) return;
   const name = d.name, saved = readCheckpoint(ctx, name);
+  const wasClosed = closedDiscussions(ctx).includes(name);
+  if (wasClosed || saved?.fromClosed) {
+    if (saved && (saved.invalid || saved.version !== 1 || saved.root !== realpathSync(ctx.cwd) || saved.discussion?.name !== name))
+      throw new Error(`The checkpoint of ${name} is invalid. It was kept; Start fresh starts the discussion from its handoff instead.`);
+    const state = { transcript: [], seen: new Map() }, sessions = new Map();
+    const next = { ...ctx, state, sessions, agentSpecs: saved?.agentSpecs ?? ctx.agentSpecs, workerSpec: saved?.workerSpec ?? ctx.workerSpec };
+    const loaded = await load(next, `?reopen=${Date.now()}`);
+    await leaveSession(ctx, `resuming the discussion ${name}`);
+    const freshSaved = { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(), discussion: { name, title: saved?.discussion?.title ?? name },
+      fresh: true, fromClosed: true, agentSpecs: next.agentSpecs, workerSpec: next.workerSpec, work: saved?.work ?? workOf(shopOf(ctx), name) };
+    writeCheckpoint(ctx, name, freshSaved);
+    setClosed(ctx, name, false);
+    Object.assign(ctx, loaded, { state, sessions, agentSpecs: next.agentSpecs, workerSpec: next.workerSpec,
+      freshSummary: null, lastRound: null, agentsStarted: false, workerBriefed: null, workerTree: null,
+      workerLabel: null, workerHandoff: false, workerSeat: randomBytes(6).toString('hex') });
+    ctx.screen.transcript = state.transcript;
+    switchTo(ctx, { name, dir: join(parent, name), title: freshSaved.discussion.title, continued: true });
+    ctx.closedBriefing = true;
+    wire(ctx);
+    await reportWork(ctx, name, freshSaved.work);
+    return;
+  }
   if (saved && !saved.fresh) {
     await continueFrom(ctx, saved, name, false);
     setClosed(ctx, name, false);
@@ -1237,6 +1264,7 @@ function endSession(ctx, why, onReset = null) {
 // "← back to …" link, until the next message opens a discussion.
 function switchTo(ctx, next) {
   const was = ctx.discussion;
+  ctx.closedBriefing = false;
   if (was && was.dir !== next?.dir) ctx.previous = { name: was.name, title: was.title };
   if (next && ctx.previous?.name === next.name) ctx.previous = null; // went back to it
   ctx.discussion = next;
