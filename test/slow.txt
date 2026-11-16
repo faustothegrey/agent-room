@@ -68,3 +68,4 @@ Close waits for running and queued worker reports before asking the agents
 a paused discussion can be closed without replacing the current discussion
 closed discussion lifecycle publishes only on Close
 every closed discussion of a --node launch room replicates, through the launch room's replica
+failed Close captures cannot reach peers, including after restart and retry

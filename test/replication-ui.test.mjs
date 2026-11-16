@@ -66,6 +66,62 @@ test('closed discussion lifecycle publishes only on Close', { timeout: 30000 }, 
     await R.removeTree(root);
   }
 });
+test('failed Close captures cannot reach peers, including after restart and retry', { timeout: 30000 }, async () => {
+  const root = await fs.mkdtemp(join(tmpdir(), 'failed-close-')), rooms = [];
+  const make = async (node) => {
+    const cwd = join(root, node); await fs.mkdir(cwd);
+    const ctx = { cwd, node, peers: [], port: 0, noScreen: true, hub: { rooms: new Map(), node },
+      agentSpecs: 'claude:A', workerSpec: 'claude:W', sessions: new Map(), state: { transcript: [], seen: new Map() } };
+    Object.assign(ctx, await ui.load(ctx, '')); ctx.hub.rooms.set(ctx.key, ctx);
+    ctx.usage = { ...ctx.usage, fetchQuota: async () => null };
+    ctx.suggestTitle = async () => ({ title: 'Failed capture' });
+    await ui.start(ctx); rooms.push(ctx);
+    ctx.origin = `http://127.0.0.1:${ctx.server.address().port}`;
+    return ctx;
+  };
+  try {
+    const a = await make('Mac'), b = await make('Pi');
+    a.peers.push({ name: 'Pi', url: b.origin }); b.peers.push({ name: 'Mac', url: a.origin });
+    await R.pair(a.replica, 'Pi');
+    const script = () => { a.room.agents[0].turn = async (p) => p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS'; };
+    script(); await ui.handleLine('first', a);
+    const { name, dir } = a.discussion;
+    await ui.handleLine('/close', a);
+    await wait(async () => (await R.receivedLines(b.replica.s)).length === 1);
+    const [line] = await R.receivedLines(b.replica.s);
+    const previous = await R.readPointer(b.replica.s, line.discussion, 'Mac');
+    await ui.handleLine(`/resume ${name}`, a); script();
+    await fs.writeFile(join(dir, 'failed-only.md'), 'must not be published');
+    const notes = [], broadcast = a.docs.broadcast;
+    a.docs = { ...a.docs, broadcast: (screen, event) => { if (event.type === 'note') notes.push(event.text); broadcast(screen, event); } };
+    const real = a.replicate;
+    a.replicate = { ...real, capture: async () => { throw new Error('capture failed'); } };
+    await ui.handleLine('/close', a);
+    assert.equal(a.discussion.name, name);
+    assert.ok(!a.screen.room.closedDiscussions.includes(name));
+    assert.ok(notes.some((text) => text.includes('capture failed')));
+    a.replicate = { ...real, publishCapture: async (...args) => { await real.publishCapture(...args); throw new Error('publish failed'); } };
+    await ui.handleLine('/close', a);
+    assert.equal(a.discussion.name, name);
+    assert.ok(!a.screen.room.closedDiscussions.includes(name));
+    assert.equal((await R.ownLines(a.replica.s))[line.discussion].commit, previous.commit);
+    const reopenedStore = await R.openStore(a.cwd, 'Mac');
+    assert.equal((await R.ownLines(reopenedStore))[line.discussion].commit, previous.commit);
+    await R.kick(a.replica, 'Pi');
+    assert.equal((await R.readPointer(b.replica.s, line.discussion, 'Mac')).commit, previous.commit);
+    await fs.unlink(join(dir, 'failed-only.md'));
+    a.replicate = real;
+    await ui.handleLine('/close', a);
+    assert.ok(a.screen.room.closedDiscussions.includes(name));
+    await wait(async () => (await R.readPointer(b.replica.s, line.discussion, 'Mac')).round === previous.round + 1);
+    const latest = await R.readPointer(b.replica.s, line.discussion, 'Mac');
+    assert.equal(R.snapshotFile(b.replica.s, line.discussion, 'Mac', latest.commit, 'failed-only.md'), null);
+  } finally {
+    for (const c of rooms) { ui.ended(c); clearInterval(c.quotaTimer); await new Promise((r) => c.server.close(r)); }
+    await R.removeTree(root);
+  }
+});
+
 test('two rooms: pairing, round hooks, independent browser pins, deletion and read-only guards', async () => {
   const root = await fs.mkdtemp(join(tmpdir(),'replication-ui-')), rooms=[];
   const make = async (node) => {

@@ -195,7 +195,7 @@ async function folderFiles(folder) {
 }
 const stamps = (folder, files) => Promise.all(files.map((f) => fs.stat(join(folder, f)).then((st) => `${st.size}:${st.mtimeMs}`, () => 'gone')));
 
-export async function capture(s, { name, dir, title }, round, { attempts = 3 } = {}) {
+export async function capture(s, { name, dir, title }, round, { attempts = 3, detached = false } = {}) {
   const d = await discussionId(s, name, true), ref = lineRef(d, s.node);
   const room = (await roomInfo(s)).roomId ?? null;
   for (let attempt = 1; ; attempt++) {
@@ -222,10 +222,19 @@ export async function capture(s, { name, dir, title }, round, { attempts = 3 } =
       const tree = await git(s.store, ['write-tree'], { env: { GIT_INDEX_FILE: index } });
       const who = { GIT_AUTHOR_NAME: s.node, GIT_AUTHOR_EMAIL: `${s.node}@agent-room.invalid`, GIT_COMMITTER_NAME: s.node, GIT_COMMITTER_EMAIL: `${s.node}@agent-room.invalid` };
       const commit = await git(s.store, ['commit-tree', tree, ...(parent ? ['-p', parent] : []), '-m', `${round.kind} ${number} (${round.outcome})`], { env: who });
-      await git(s.store, ['update-ref', ref, commit, parent ?? ZERO]); // append-only: the old value is checked
-      return { discussion: d, commit, round: number, skipped };
+      if (!detached) await git(s.store, ['update-ref', ref, commit, parent ?? ZERO]); // append-only: the old value is checked
+      return { discussion: d, commit, round: number, skipped, ...(detached && { parent }) };
     } finally { await fs.rm(index, { force: true }); }
   }
+}
+export async function publishCapture(s, capture) {
+  await git(s.store, ['update-ref', lineRef(capture.discussion, s.node), capture.commit, capture.parent ?? ZERO]);
+}
+export async function discardCapture(s, capture) {
+  const ref = lineRef(capture.discussion, s.node);
+  if (await revParse(s.store, ref) !== capture.commit) return;
+  if (capture.parent) await git(s.store, ['update-ref', ref, capture.parent, capture.commit]);
+  else await git(s.store, ['update-ref', '-d', ref, capture.commit]);
 }
 // This node's lines: { <discussion ID>: { commit, round } }.
 export async function ownLines(s) {

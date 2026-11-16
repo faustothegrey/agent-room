@@ -1453,6 +1453,21 @@ test('Close writes a statement and drops saved provider IDs only after the agent
   assert.ok(prompts.every((p) => p.includes('Decisions and pending-instructions.md')));
 });
 
+test('Close asks only enabled discussion agents', async () => {
+  const { readFileSync } = await import('node:fs');
+  const ctx = await savedRoom(await tmp('close-disabled-'), 'close-disabled');
+  await handleLine('decide', ctx);
+  const { name, dir } = ctx.discussion;
+  ctx.state.disabledAgents = ['B'];
+  let asked = 0;
+  ctx.room.agents[0].turn = async () => { asked++; return 'Statement: pending-instructions.md'; };
+  ctx.room.agents[1].turn = async () => { throw new Error('disabled agent was asked'); };
+  await handleLine('/close', ctx);
+  assert.equal(asked, 1);
+  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+  assert.match(readFileSync(`${dir}/closing-statement.md`, 'utf8'), /pending-instructions\.md/);
+});
+
 test('Close waits for queued work, refuses instructions and can be cancelled', async () => {
   const { cancelClose, queueWork } = await import('../src/ui.mjs');
   const ctx = await savedRoom(await tmp('close-wait-'), 'close-wait');

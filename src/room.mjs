@@ -124,7 +124,9 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
     // all turns succeed. A failed attempt therefore cannot replace the previous statement.
     async closingStatement({ dir, workerReports = '', onReset }) {
       let statement = '';
-      for (const agent of agents) {
+      const active = activeAgents();
+      if (!active.length) throw new Error('No enabled discussion agent is available to write the closing statement.');
+      for (const agent of active) {
         const task = [
           `The User is closing this discussion. Write a complete closing statement for ${dir}/closing-statement.md.`,
           `Read the discussion's notes and transcripts in ${dir}; they include decisions and worker reports.`,
@@ -146,11 +148,11 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
           }
           throw err;
         }
-        if (!text || isPass(text) || !text.includes('pending-instructions.md'))
+        if (!text || isPass(text))
           throw new Error(`${agent.name} did not provide a complete closing statement pointing to pending-instructions.md.`);
         statement = text;
       }
-      if (!statement) throw new Error('No discussion agent is available to write the closing statement.');
+      if (!statement.includes('pending-instructions.md')) throw new Error('The closing statement must point to pending-instructions.md.');
       return statement;
     },
     // Rejects on an unknown @name, before anything is recorded or sent. `speaker`: who the round's

@@ -56,6 +56,20 @@ test('a transient closing turn failure keeps the usable provider session', async
   assert.equal(state.seen.get('A'), 2);
 });
 
+test('only the final enabled agent draft needs the pending instructions reference', async () => {
+  const a = fakeAgent('A', ['Early draft']);
+  const b = fakeAgent('B', ['Final: pending-instructions.md']);
+  const disabled = fakeAgent('C');
+  const state = { transcript: [], seen: new Map(), disabledAgents: ['C'] };
+  const room = createRoom([a, b, disabled], state);
+  assert.equal(await room.closingStatement({ dir: '/topic' }), 'Final: pending-instructions.md');
+  assert.match(b.prompts[0], /Early draft/);
+  assert.deepEqual(disabled.prompts, []);
+  state.disabledAgents = ['A', 'B', 'C'];
+  await assert.rejects(room.closingStatement({ dir: '/topic' }), /No enabled discussion agent/);
+  await assert.rejects(createRoom([fakeAgent('A', ['No reference'])]).closingStatement({ dir: '/topic' }), /must point to pending-instructions\.md/);
+});
+
 test('a round is: user, then agents in order until all of them pass in a row', async () => {
   const a = fakeAgent('A', ['a1', 'PASS', 'PASS']);
   const b = fakeAgent('B', ['PASS', 'PASS']);

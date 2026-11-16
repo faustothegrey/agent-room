@@ -1469,10 +1469,6 @@ function closeDiscussion(ctx) {
   if ((!others.length || !multi(ctx)) && fresh(ctx) && !ctx.state.brainstorm)
     return note(ctx, 'Nothing to close: no discussion is open here.');
   if (others.length && multi(ctx) && ctx.replicaOwner) return note(ctx, '✗ This discussion holds the room\'s replication (its peers and storage): it stays open while others are. Close them first, or Quit room.', true);
-  if (ctx.discussion && !ctx.state.brainstorm) {
-    try { setClosed(ctx, ctx.discussion.name, true); }
-    catch (err) { return note(ctx, `✗ Could not save the closed state: ${err.message}.`, true); }
-  }
   if (!others.length || !multi(ctx)) {
     const was = ctx.discussion, brain = !!ctx.state.brainstorm;
     if (ctx.logPath || ctx.state.brainstorm) endSession(ctx, brain ? 'closing the brainstorm' : 'closing the discussion');
@@ -1543,6 +1539,7 @@ async function closeNamedDiscussion(ctx, name) {
     const previous = existsSync(file) ? readFileSync(file) : null;
     const checkpoint = readCheckpoint(ctx, d.name);
     const sessions = [...(target.sessions?.values() ?? [])].map((s) => [s, { ...s }]);
+    let snapshot, markedClosed = false;
     try {
       writeFileSync(temp, statement + '\n');
       // CLI calls run one process per turn; the worker and closing turns have returned. Drop their
@@ -1551,19 +1548,31 @@ async function closeNamedDiscussion(ctx, name) {
       if (checkpoint?.invalid) throw new Error('The discussion checkpoint is invalid.');
       if (checkpoint) writeCheckpoint(ctx, d.name, { ...checkpoint, sessions: [], closedSessions: true });
       renameSync(temp, file);
+      if (target.replica) {
+        const conversation = target.state.transcript.map(({ speaker, text, error, pass, summary, outcome, by }) =>
+          ({ speaker, text: String(text ?? ''), ...(error && { error }), ...(pass && { pass }), ...(summary && { summary: true }), ...(outcome && { outcome, by }) }));
+        const r = target.replica, R = target.replicate;
+        const capture = (r.s.captures ?? Promise.resolve()).then(() => R.capture(r.s, target.discussion,
+          { kind: 'round', outcome: 'completed', ending: 'closed', summary: null, agents: currentSettings(target).agents, conversation }, { detached: true }));
+        r.s.captures = capture.catch(() => {});
+        snapshot = await capture;
+      }
       setClosed(ctx, d.name, true);
+      markedClosed = true;
+      if (snapshot) await target.replicate.publishCapture(target.replica.s, snapshot);
     } catch (err) {
+      if (markedClosed) setClosed(ctx, d.name, false);
+      let discardError;
+      if (snapshot) try { await target.replicate.discardCapture(target.replica.s, snapshot); } catch (e) { discardError = e; }
       for (const [session, old] of sessions) { for (const key of Object.keys(session)) delete session[key]; Object.assign(session, old); }
       if (checkpoint && !checkpoint.invalid) writeCheckpoint(ctx, d.name, checkpoint);
       if (previous === null) { if (existsSync(file)) unlinkSync(file); }
       else writeFileSync(file, previous);
+      if (discardError) throw new Error(`${err.message}; could not discard the provisional snapshot: ${discardError.message}`);
       throw err;
     } finally {
       if (existsSync(temp)) unlinkSync(temp);
     }
-    const snapshot = target.replica ? { discussion: { ...target.discussion }, agents: currentSettings(target).agents,
-      conversation: target.state.transcript.map(({ speaker, text, error, pass, summary, outcome, by }) =>
-        ({ speaker, text: String(text ?? ''), ...(error && { error }), ...(pass && { pass }), ...(summary && { summary: true }), ...(outcome && { outcome, by }) })) } : null;
     if (opened) {
       target.lastRound = null;
       const others = siblings(target).filter((x) => x !== target);
@@ -1576,7 +1585,7 @@ async function closeNamedDiscussion(ctx, name) {
       }
     }
     note(ctx, `Closed ${d.name}.`);
-    if (snapshot) await saveClosed(ctx, target, snapshot);
+    if (snapshot) saveClosed(ctx, target, snapshot);
   } catch (err) {
     note(ctx, `✗ Could not close ${d.name}: ${err.message}`, true);
   } finally {
@@ -3213,7 +3222,7 @@ async function setupReplica(ctx) {
   const all = () => siblings(ctx).filter((c) => c.replica);
   const r = ctx.replica = await R.createReplica({ root: ctx.cwd, node: ctx.node, peers: ctx.peers, state: ctx.replicaState,
     activity: () => (siblings(ctx).some((c) => c.busy) ? 'running a round' : 'idle'), project: () => ctx.project ?? null, log: (t) => out(ctx, red(t)) });
-  r.canSend = (name) => !r.state.reopening?.has(name) && closedDiscussions(ctx).includes(name);
+  r.canSend = (name) => !r.state.reopening?.has(name) && !shopOf(ctx).closing?.has(name) && closedDiscussions(ctx).includes(name);
   r.changed = () => { for (const c of all()) pushReplica(c); };
   r.onReceived = (p) => { for (const c of all()) note(c, `Received ${p.node}'s ${p.kind} ${p.round} of "${p.title}".`); r.changed(); };
   r.onSent = (x) => { if (x.late) R.lineRound(r.s, x.acked).then((n) => note(ctx, `Round ${n} sent to ${x.peer} ✓`), () => {}); };
@@ -3286,17 +3295,8 @@ async function pushReplica(ctx) {
 
 // Only a successful Close captures a discussion. The existing round metadata format is kept for
 // peer compatibility; its round number now counts closed snapshots.
-async function saveClosed(ctx, target, snapshot) {
+function saveClosed(ctx, target, c) {
   const R = target.replicate, r = target.replica, label = 'Round', outcome = 'completed';
-  let c;
-  try {
-    const capture = (r.s.captures ?? Promise.resolve()).then(() => R.capture(r.s, snapshot.discussion,
-      { kind: 'round', outcome, ending: 'closed', summary: null, agents: snapshot.agents, conversation: snapshot.conversation }));
-    r.s.captures = capture.catch(() => {});
-    c = await capture;
-  } catch (err) {
-    return note(ctx, `✗ Could not save ${label.toLowerCase()}: ${err.message}. The discussion's files are as they were; nothing was sent.`, true);
-  }
   const head = `${label} ${c.round} saved${c.skipped.length ? ` (left out: ${c.skipped.join(', ')})` : ''}`;
   pushReplica(ctx);
   R.sendNow(r, c.discussion, c.commit).then((sent) => {

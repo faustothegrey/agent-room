@@ -192,3 +192,5 @@ every round saves a checkpoint; a corrupt or missing-session checkpoint leaves t
 archive and defer require a closed discussion, and Make active keeps it closed
 a reopened discussion retains its statement briefing across restart before its first message
 a reopened discussion without a closing statement starts from its pending handoff
+only the final enabled agent draft needs the pending instructions reference
+Close asks only enabled discussion agents
