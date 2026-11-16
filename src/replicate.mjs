@@ -604,10 +604,18 @@ async function syncPeer(r, name, p) {
   const room = await roomInfo(s);
   if (!room.paired[name] || st.roomId !== room.roomId) return false; // not paired (yet): nothing is sent
   let pending = false;
+  const names = r.canSend ? Object.fromEntries(Object.entries(await discussionIds(s)).map(([folder, id]) => [id, folder])) : {};
   for (const [d, { commit }] of Object.entries(await ownLines(s))) {
     if ((await acked(s, name, d)) === commit) continue;
+    const folder = names[d];
+    if (r.canSend && (!folder || !r.canSend(folder))) continue;
     try {
-      const res = await send(s, name, peer.url, d);
+      const transfer = send(s, name, peer.url, d);
+      const active = r.state.transfers ??= new Map();
+      if (!active.has(folder)) active.set(folder, new Set());
+      active.get(folder).add(transfer);
+      let res;
+      try { res = await transfer; } finally { active.get(folder).delete(transfer); }
       r.onSent?.({ peer: name, discussion: d, ...res, late: p.waiting.has(d) });
       p.waiting.delete(d);
     } catch (e) {

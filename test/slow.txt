@@ -66,3 +66,5 @@ Shutdown server, from the server's own address, ends every room; with --node onl
 Resume replaces a brainstorm only with a valid checkpoint; on the discussion in use it changes nothing; Start fresh asks twice and keeps only the latest summary
 Close waits for running and queued worker reports before asking the agents
 a paused discussion can be closed without replacing the current discussion
+closed discussion lifecycle publishes only on Close
+every closed discussion of a --node launch room replicates, through the launch room's replica

@@ -571,6 +571,7 @@ test('after New discussion, the previous one can\'t move while its worker task r
   queueWork(ctx, 'long task');
   await until(() => finish);
   await handleLine('/new', ctx);
+  await markClosed(ctx.cwd, name);
   const notes = [];
   ctx.docs = { ...ctx.docs, broadcast: (screen, ev) => { if (ev.type === 'note') notes.push(ev); } };
 
@@ -822,6 +823,7 @@ test('migration: a discussion\'s lane waits while worker/main has uncommitted ed
   const shared = `${realpathSync(ctx.cwd)}.worker`;
   const name = '2026-11-12-old-topic';
   mkdirSync(`${ctx.cwd}/discussions/${name}`, { recursive: true });
+  await markClosed(ctx.cwd, name);
   git('-C', shared, 'commit', '-q', '--allow-empty', '-m', `[${name}] earlier work`);
   const kept = git('rev-parse', 'worker/main');
   const lane = await workerPlace(ctx.cwd, name);
@@ -1114,6 +1116,7 @@ test('a worker task keeps the discussion it started in, even if New discussion c
   assert.equal(ctx.discussion, null);
   await until(() => finish);
   assert.match(got[0], new RegExp(`^The active discussion's folder is ${first.dir}: `)); // its own, not "no discussion"
+  await markClosed(ctx.cwd, first.name);
   await handleLine(`/move ${first.name} archive`, ctx); // still locked by the task
   assert.match(ctx.notes.at(-1), /A worker task is still writing to/);
   finish('done');
@@ -1204,6 +1207,14 @@ async function checkpointPath(cwd, name) {
   const { realpathSync } = await import('node:fs');
   return join(homedir(), '.local', 'state', 'agent-room', 'paused',
     createHash('sha256').update(realpathSync(cwd)).digest('hex'), createHash('sha256').update(name).digest('hex') + '.json');
+}
+async function markClosed(cwd, name) {
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { dirname, basename, join } = await import('node:path');
+  const checkpoint = await checkpointPath(cwd, name);
+  const dir = join(dirname(checkpoint), 'closed');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, basename(checkpoint, '.json')), name);
 }
 // A loaded room (real agents' adapters, their turns scripted), in terminal mode.
 async function savedRoom(cwd, tag) {
@@ -2340,6 +2351,7 @@ test('leftover edits hold their own lane for their origin, which can recover the
 
   await handleLine('/close', first);
   assert.match(first.notes.at(-1), /can't be closed yet: its worker edits from "make wip" are unresolved/);
+  await markClosed(first.cwd, first.discussion.name);
   await handleLine(`/move ${first.discussion.name} archive`, second);
   assert.match(second.notes.at(-1), /can't move: its worker edits from "make wip" are unresolved/);
   await handleLine(`/move ${first.discussion.name} deferred`, second);
@@ -2579,6 +2591,7 @@ test('Stage 2: Defer refuses labelled commits absent from main and permits them 
   const second = contexts()[1]; await handleLine('topic-b', second);
   queueWork(first, 'work'); await first.workQueue;
   const name = first.discussion.name;
+  await markClosed(first.cwd, name);
   await handleLine(`/move ${name} deferred`, second);
   assert.match(second.notes.at(-1), new RegExp(`can't be deferred: commits on worker/${name} are not merged into main: [0-9a-f]+`)); // its own lane's branch
   assert.ok(existsSync(`${first.cwd}/discussions/${name}`));
@@ -2806,6 +2819,7 @@ test('Stage 3: rollback includes merged implementation, never restores prior rol
   assert.equal(existsSync(`${first.cwd}/discussions/${name}`), true); // report alone archives nothing
   assert.equal(existsSync(`${first.cwd}/feature.txt`), true); // main untouched
   assert.equal(existsSync(`${first.workerDir.path}/feature.txt`), false);
+  await markClosed(first.cwd, name);
   await handleLine(`/move ${name} archive`, second);
   assert.match(second.notes.at(-1), /explicit archive confirmation/);
   await handleLine(`/archive-rollback ${name}`, second);

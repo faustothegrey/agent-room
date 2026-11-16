@@ -8,6 +8,64 @@ import * as R from '../src/replicate.mjs';
 import { createRoom } from '../src/room.mjs';
 
 const wait = async (fn) => { for (let i=0;i<100;i++) { if (await fn()) return; await new Promise(r=>setTimeout(r,50)); } throw new Error('Timed out'); };
+
+test('closed discussion lifecycle publishes only on Close', { timeout: 30000 }, async () => {
+  const root = await fs.mkdtemp(join(tmpdir(), 'closed-cycle-')), rooms = [];
+  const make = async (node) => {
+    const cwd = join(root, node); await fs.mkdir(cwd);
+    const ctx = { cwd, node, peers: [], port: 0, noScreen: true, hub: { rooms: new Map(), node },
+      agentSpecs: 'claude:A', workerSpec: 'claude:W', sessions: new Map(), state: { transcript: [], seen: new Map() } };
+    Object.assign(ctx, await ui.load(ctx, ''));
+    ctx.hub.rooms.set(ctx.key, ctx);
+    ctx.usage = { ...ctx.usage, fetchQuota: async () => null };
+    ctx.suggestTitle = async () => ({ title: 'Closed cycle' });
+    await ui.start(ctx); rooms.push(ctx);
+    ctx.origin = `http://127.0.0.1:${ctx.server.address().port}`;
+    return ctx;
+  };
+  try {
+    const a = await make('Mac'), b = await make('Pi');
+    a.peers.push({ name: 'Pi', url: b.origin }); b.peers.push({ name: 'Mac', url: a.origin });
+    await R.pair(a.replica, 'Pi');
+    Object.assign(a.sessions.get('A'), { id: 'old-agent', started: true });
+    Object.assign(a.sessions.get('worker:W'), { id: 'old-worker', started: true });
+    a.room.agents[0].turn = async (p) => p.includes('The User is closing this discussion.') ? 'Closing statement; pending-instructions.md' : p.includes('User asked for a summary') ? 'An agreed summary' : 'PASS';
+    await ui.handleLine('first round', a);
+    await ui.handleLine('/summary', a);
+    const name = a.discussion.name, dir = a.discussion.dir;
+    assert.deepEqual(await R.ownLines(a.replica.s), {});
+    assert.deepEqual(await R.receivedLines(b.replica.s), []);
+    await ui.handleLine('/close', a);
+    assert.match(await fs.readFile(join(dir, 'closing-statement.md'), 'utf8'), /pending-instructions\.md/);
+    assert.ok(a.screen.room.closedDiscussions.includes(name));
+    assert.notEqual(a.sessions.get('A').id, 'old-agent');
+    assert.notEqual(a.sessions.get('worker:W').id, 'old-worker');
+    await wait(async () => (await R.receivedLines(b.replica.s)).length === 1);
+    const [line] = await R.receivedLines(b.replica.s);
+    const old = await R.readPointer(b.replica.s, line.discussion, 'Mac');
+    await ui.handleLine(`/move ${name} archive`, a);
+    await ui.handleLine(`/move archive/${name} active`, a);
+    assert.ok(a.screen.room.closedDiscussions.includes(name));
+    await ui.handleLine(`/resume ${name}`, a);
+    assert.ok(!a.screen.room.closedDiscussions.includes(name));
+    assert.notEqual(a.sessions.get('A').id, 'old-agent');
+    assert.notEqual(a.sessions.get('worker:W').id, 'old-worker');
+    const prompts = [];
+    a.room.agents[0].turn = async (p) => { prompts.push(p); return p.includes('The User is closing this discussion.') ? 'Updated statement; pending-instructions.md' : 'PASS'; };
+    await ui.handleLine('after reopening', a);
+    assert.match(prompts[0], /Closing statement; pending-instructions\.md/);
+    await fs.writeFile(join(a.discussion.dir, 'after-reopen.md'), 'not yet replicated');
+    await R.kick(a.replica, 'Pi');
+    assert.equal((await R.readPointer(b.replica.s, line.discussion, 'Mac')).commit, old.commit);
+    await ui.handleLine('/close', a);
+    await wait(async () => (await R.readPointer(b.replica.s, line.discussion, 'Mac')).round === old.round + 1);
+    const latest = await R.readPointer(b.replica.s, line.discussion, 'Mac');
+    assert.ok(R.snapshotFile(b.replica.s, line.discussion, 'Mac', latest.commit, 'after-reopen.md'));
+  } finally {
+    for (const c of rooms) { ui.ended(c); clearInterval(c.quotaTimer); await new Promise((r) => c.server.close(r)); }
+    await R.removeTree(root);
+  }
+});
 test('two rooms: pairing, round hooks, independent browser pins, deletion and read-only guards', async () => {
   const root = await fs.mkdtemp(join(tmpdir(),'replication-ui-')), rooms=[];
   const make = async (node) => {
@@ -18,7 +76,7 @@ test('two rooms: pairing, round hooks, independent browser pins, deletion and re
     Object.assign(ctx, await ui.load(ctx, ''));
     hub.rooms.set(ctx.key, ctx);
     ctx.usage={...ctx.usage,fetchQuota:async()=>null};
-    ctx.room=createRoom([{name:'A',provider:'claude',turn:async()=> 'PASS'}],ctx.state);
+    ctx.room=createRoom([{name:'A',provider:'claude',turn:async(p)=>p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS'}],ctx.state);
     ctx.suggestTitle=async()=>({title:'Replication test'});
     await ui.start(ctx); rooms.push(ctx);
     assert.deepEqual(ctx.screen.replica.project, ctx.project);
@@ -35,6 +93,9 @@ test('two rooms: pairing, round hooks, independent browser pins, deletion and re
     assert.equal(preview.peer.root,b.cwd); assert.equal(preview.local.root,a.cwd); assert.equal(preview.peer.project.commit,null);
     assert.equal((await post(a,'/__pair',{peer:'Pi',confirm:true})).status,200);
     await ui.handleLine('first round',a);
+    const name=a.discussion.name, dir=a.discussion.dir;
+    assert.deepEqual(await R.receivedLines(b.replica.s),[]);
+    await ui.handleLine('/close',a);
     await wait(async()=> (await R.receivedLines(b.replica.s)).length===1);
     const [line]=await R.receivedLines(b.replica.s);
     assert.ok((await fs.readdir(R.snapshotPath(b.replica.s,line.discussion,'Mac',line.commit))).includes('transcripts'));
@@ -42,8 +103,12 @@ test('two rooms: pairing, round hooks, independent browser pins, deletion and re
     const v1=await view('browser-one'),v2=await view('browser-two');
     assert.equal(v1.viewing.commit,line.commit); assert.equal(v2.viewing.commit,line.commit);
     assert.equal((await post(b,'/__say',{text:'must refuse'})).status,409);
-    await fs.writeFile(join(a.discussion.dir,'drawing.svg'),'<svg xmlns="http://www.w3.org/2000/svg"/>');
+    await ui.handleLine('/resume '+name,a);
+    a.room.agents[0].turn=async(p)=>p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS';
+    await fs.writeFile(join(dir,'drawing.svg'),'<svg xmlns="http://www.w3.org/2000/svg"/>');
     await ui.handleLine('second round',a);
+    assert.equal((await R.readPointer(b.replica.s,line.discussion,'Mac')).commit,line.commit);
+    await ui.handleLine('/close',a);
     await wait(async()=> (await R.readPointer(b.replica.s,line.discussion,'Mac')).round===2);
     const latest=await R.readPointer(b.replica.s,line.discussion,'Mac');
     assert.ok(R.snapshotFile(b.replica.s,line.discussion,'Mac',line.commit,'transcripts/'+(await fs.readdir(join(R.snapshotPath(b.replica.s,line.discussion,'Mac',line.commit),'transcripts')))[0]));
@@ -51,24 +116,27 @@ test('two rooms: pairing, round hooks, independent browser pins, deletion and re
     assert.ok(await fs.stat(R.snapshotPath(b.replica.s,line.discussion,'Mac',line.commit)));
     await post(b,'/__view',{back:true},'browser-two');
     await assert.rejects(fs.stat(R.snapshotPath(b.replica.s,line.discussion,'Mac',line.commit)),{code:'ENOENT'});
-    await fs.rm(join(a.discussion.dir,'drawing.svg'));
+    await ui.handleLine('/resume '+name,a);
+    a.room.agents[0].turn=async(p)=>p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS';
+    await fs.rm(join(dir,'drawing.svg'));
     await ui.handleLine('third round',a);
+    assert.equal((await R.readPointer(b.replica.s,line.discussion,'Mac')).commit,latest.commit);
+    await ui.handleLine('/close',a);
     await wait(async()=> (await R.readPointer(b.replica.s,line.discussion,'Mac')).round===3);
     const third=await R.readPointer(b.replica.s,line.discussion,'Mac');
     assert.equal(R.snapshotFile(b.replica.s,line.discussion,'Mac',third.commit,'drawing.svg'),null);
     await wait(async()=> !(await fs.stat(R.snapshotPath(b.replica.s,line.discussion,'Mac',latest.commit)).catch(()=>null)));
     await assert.rejects(fs.stat(R.snapshotPath(b.replica.s,line.discussion,'Mac',latest.commit)),{code:'ENOENT'});
+    await ui.handleLine('/resume '+name,a);
     a.room = createRoom([{name:'A',provider:'claude',turn:async()=>{throw new Error('provider failed');}}],a.state);
     await ui.handleLine('failed round',a);
     let own=(await R.ownLines(a.replica.s))[line.discussion];
-    let meta=JSON.parse(await R.git(a.replica.s.store,['cat-file','blob',`${own.commit}:${R.META}`]));
-    assert.equal(meta.outcome,'failed');
+    assert.equal(own.commit,third.commit);
     const replies=['an idea','PASS',new Error('summary failed')];
     a.room=createRoom([{name:'A',provider:'claude',turn:async()=>{const r=replies.shift();if(r instanceof Error)throw r;return r??'PASS';}}],a.state);
     await ui.handleLine('failed auto summary',a);
     own=(await R.ownLines(a.replica.s))[line.discussion];
-    meta=JSON.parse(await R.git(a.replica.s.store,['cat-file','blob',`${own.commit}:${R.META}`]));
-    assert.equal(meta.outcome,'failed'); assert.equal(meta.summary,'failed');
+    assert.equal(own.commit,third.commit);
     // A receiver restored with a different room identity refuses pairing and preserves both IDs.
     const before=await R.roomInfo(a.replica.s);
     await fs.writeFile(join(b.replica.s.dir,'room.json'),JSON.stringify({roomId:'another-room',paired:{}}));
@@ -82,15 +150,15 @@ test('two rooms: pairing, round hooks, independent browser pins, deletion and re
 });
 
 // The launch room's other open discussions (contexts that cli.mjs adds with a `context` tag) use its
-// one replica: each saves and sends its own rounds, and closing one doesn't stop the peers.
-test('every open discussion of a --node launch room replicates, through the launch room\'s replica', async () => {
+// one replica: each sends a closed snapshot, and closing one doesn't stop the peers.
+test('every closed discussion of a --node launch room replicates, through the launch room\'s replica', async () => {
   const root = await fs.mkdtemp(join(tmpdir(),'replication-ctx-')), rooms=[];
   const room = async (fields) => {
     const ctx = {port:0,agentSpecs:'claude:A',workerSpec:'claude:W',sessions:new Map(),state:{transcript:[],seen:new Map()},say:()=>{},...fields};
     Object.assign(ctx, await ui.load(ctx, ''));
     ctx.hub.rooms.set(ctx.key, ctx);
     ctx.usage={...ctx.usage,fetchQuota:async()=>null};
-    ctx.room=createRoom([{name:'A',provider:'claude',turn:async()=> 'PASS'}],ctx.state);
+    ctx.room=createRoom([{name:'A',provider:'claude',turn:async(p)=>p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS'}],ctx.state);
     await ui.start(ctx); rooms.push(ctx);
     return ctx;
   };
@@ -102,20 +170,29 @@ test('every open discussion of a --node launch room replicates, through the laun
     const post=(path,body)=>fetch(a.base+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
     assert.equal((await post('/__pair',{peer:'Pi',confirm:true})).status,200);
     await ui.handleLine('a round in the first discussion',a);
+    const name=a.discussion.name;
+    assert.deepEqual(await R.receivedLines(b.replica.s),[]);
+    await ui.handleLine('/close',a);
     await wait(async()=> (await R.receivedLines(b.replica.s)).length===1);
     // A second open discussion in Mac's launch folder, as New discussion makes it.
     const second = await room({cwd:a.cwd,key:`${a.key}#d1`,context:'d1',hub:a.hub,launch:false});
     second.suggestTitle=async()=>({title:'Second topic'});
     assert.deepEqual([second.node, second.replica, second.screen.replicaOff], ['Mac', a.replica, null]);
     await ui.handleLine('a round in the second discussion',second);
+    assert.equal((await R.receivedLines(b.replica.s)).length,1);
+    await ui.handleLine('/close',second);
     await wait(async()=> (await R.receivedLines(b.replica.s)).length===2);
     const titles=(await R.receivedLines(b.replica.s)).map((l)=>l.title).sort();
     assert.deepEqual(titles,['First topic','Second topic']);
     // Closing the second one leaves the replication running for the first.
     ui.ended(second); clearInterval(second.quotaTimer);
     assert.notEqual(a.replica.state.stopped,true);
+    await ui.handleLine('/resume '+name,a);
+    a.room.agents[0].turn=async(p)=>p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS';
     await ui.handleLine('another round in the first',a);
     const first=(await R.receivedLines(b.replica.s)).find((l)=>l.title==='First topic');
+    assert.equal((await R.readPointer(b.replica.s,first.discussion,'Mac')).round,1);
+    await ui.handleLine('/close',a);
     await wait(async()=> (await R.readPointer(b.replica.s,first.discussion,'Mac')).round===2);
   } finally {
     for(const c of rooms) { if (c.context) continue; ui.ended(c); clearInterval(c.quotaTimer); await new Promise(r=>c.server.close(r)); }

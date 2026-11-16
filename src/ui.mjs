@@ -650,9 +650,9 @@ function briefing(ctx) {
       : `Before replying, read its earlier sessions' transcripts in ${transcripts}: the transcripts are the source, and a summary of them may omit details.`);
   }
   if (continued) {
-    if (ctx.closedBriefing && existsSync(join(dir, 'closing-statement.md'))) {
+    if (existsSync(join(dir, 'closing-statement.md'))) {
       const text = readFileSync(join(dir, 'closing-statement.md'), 'utf8');
-      return `This session continues the discussion in ${dir}: create, read and write this discussion's documents (notes, drawings) there. Start from its closing statement:\n\n${text}`;
+      return `This session continues the discussion in ${dir}: create, read and write this discussion's documents (notes, drawings) there. Start from its closing statement:\n\n${text}${summary}`;
     }
     return `This session continues the discussion in ${dir}: create, read and write this discussion's documents (notes, drawings) there. Start from its handoff `
       + '(see "Where to start reading" in your rulebook); you can also read its notes and its transcripts/ folder.' + summary;
@@ -1020,6 +1020,8 @@ async function resumeDiscussion(ctx, ref) {
   const name = d.name, saved = readCheckpoint(ctx, name);
   const wasClosed = closedDiscussions(ctx).includes(name);
   if (wasClosed || saved?.fromClosed) {
+    const release = await suspendTransfers(ctx, name);
+    try {
     if (saved && (saved.invalid || saved.version !== 1 || saved.root !== realpathSync(ctx.cwd) || saved.discussion?.name !== name))
       throw new Error(`The checkpoint of ${name} is invalid. It was kept; Start fresh starts the discussion from its handoff instead.`);
     const state = { transcript: [], seen: new Map() }, sessions = new Map();
@@ -1038,6 +1040,7 @@ async function resumeDiscussion(ctx, ref) {
     ctx.closedBriefing = true;
     wire(ctx);
     await reportWork(ctx, name, freshSaved.work);
+    } finally { release(); }
     return;
   }
   if (saved && !saved.fresh) {
@@ -1122,6 +1125,8 @@ async function startFresh(ctx, ref) {
   if (multi(ctx) && !fresh(ctx) && !isDiscussion(ctx, d.name)) return besideWith(ctx, (next) => startFresh(next, ref));
   if (d.section && !await moveDiscussion(ctx, ref, 'active')) return;
   const name = d.name;
+  const release = await suspendTransfers(ctx, name);
+  try {
   await leaveSession(ctx, `starting the discussion ${name} afresh`); // saves its checkpoint first
   const summary = checkpointSummary(readCheckpoint(ctx, name));
   writeCheckpoint(ctx, name, { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
@@ -1131,6 +1136,15 @@ async function startFresh(ctx, ref) {
   showHeader(ctx);
   ctx.freshSummary = summary;
   note(ctx, `Started ${name} afresh: your next message starts a new session there, from its handoff and notes${summary ? `, with its latest summary${summary.outcome === 'agreed' ? '' : ' (not agreed)'}` : ''}. Its saved sessions and chat were discarded.`);
+  } finally { release(); }
+}
+
+async function suspendTransfers(ctx, name) {
+  const state = ctx.replica?.state;
+  if (!state) return () => {};
+  (state.reopening ??= new Set()).add(name);
+  await Promise.allSettled([...(state.transfers?.get(name) ?? [])]);
+  return () => state.reopening.delete(name);
 }
 
 // /fresh brainstorms/<name>: new agent sessions there, briefed from its latest summary (marked if it
@@ -1547,6 +1561,9 @@ async function closeNamedDiscussion(ctx, name) {
     } finally {
       if (existsSync(temp)) unlinkSync(temp);
     }
+    const snapshot = target.replica ? { discussion: { ...target.discussion }, agents: currentSettings(target).agents,
+      conversation: target.state.transcript.map(({ speaker, text, error, pass, summary, outcome, by }) =>
+        ({ speaker, text: String(text ?? ''), ...(error && { error }), ...(pass && { pass }), ...(summary && { summary: true }), ...(outcome && { outcome, by }) })) } : null;
     if (opened) {
       target.lastRound = null;
       const others = siblings(target).filter((x) => x !== target);
@@ -1559,6 +1576,7 @@ async function closeNamedDiscussion(ctx, name) {
       }
     }
     note(ctx, `Closed ${d.name}.`);
+    if (snapshot) await saveClosed(ctx, target, snapshot);
   } catch (err) {
     note(ctx, `✗ Could not close ${d.name}: ${err.message}`, true);
   } finally {
@@ -2369,8 +2387,7 @@ export async function handleLine(line, ctx) {
   if (move) return void await moveDiscussion(ctx, move[1], move[2]);
   if (line === '/summary') {
     ctx.agentsStarted = true;
-    const status = await runSummary(ctx);
-    if (status !== 'empty') await saveRound(ctx, { kind: 'summary', outcome: status === 'failed' ? 'failed' : 'completed', ending: `summary ${status}`, summary: status });
+    await runSummary(ctx);
     captureRound(ctx);
     return;
   }
@@ -2518,17 +2535,14 @@ async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
       out(ctx, dim(`── round over · ${parts.filter(Boolean).join(' · ')} · summarizing ──`));
       toScreen(ctx, { type: 'note', text: `round over · ${parts.filter(Boolean).join(' · ')} · summarizing` });
       const summary = await runSummary(ctx, true, deciding ? autoDevTask(run) : undefined);
-      await saveRound(ctx, { kind: 'round', outcome: summary === 'failed' ? 'failed' : 'completed', ending, summary });
       captureRound(ctx);
       if (deciding) decide(ctx, run, summary);
       return;
     }
     out(ctx, dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
     toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
-    await saveRound(ctx, { kind: 'round', outcome: ending.endsWith('failed') ? 'failed' : 'completed', ending, summary: null });
     captureRound(ctx);
   } catch (err) {
-    if (ctx.replica && ctx.state.transcript.at(-1)?.error) await saveRound(ctx, { kind: 'round', outcome: 'interrupted', ending: err.message, summary: null });
     // An unknown @name: nothing was sent or recorded.
     note(ctx, `✗ ${err.message}`, true);
   }
@@ -3199,6 +3213,7 @@ async function setupReplica(ctx) {
   const all = () => siblings(ctx).filter((c) => c.replica);
   const r = ctx.replica = await R.createReplica({ root: ctx.cwd, node: ctx.node, peers: ctx.peers, state: ctx.replicaState,
     activity: () => (siblings(ctx).some((c) => c.busy) ? 'running a round' : 'idle'), project: () => ctx.project ?? null, log: (t) => out(ctx, red(t)) });
+  r.canSend = (name) => !r.state.reopening?.has(name) && closedDiscussions(ctx).includes(name);
   r.changed = () => { for (const c of all()) pushReplica(c); };
   r.onReceived = (p) => { for (const c of all()) note(c, `Received ${p.node}'s ${p.kind} ${p.round} of "${p.title}".`); r.changed(); };
   r.onSent = (x) => { if (x.late) R.lineRound(r.s, x.acked).then((n) => note(ctx, `Round ${n} sent to ${x.peer} ✓`), () => {}); };
@@ -3269,23 +3284,20 @@ async function pushReplica(ctx) {
   } catch (err) { out(ctx, red(`✗ replication status: ${err.message}`)); }
 }
 
-// End of a round (after its summary) or of a manual summary: one commit on this node's line, then
-// sent to the paired peers in the background. The conversation never waits for a peer.
-async function saveRound(ctx, { kind, outcome, ending, summary }) {
-  if (!ctx.replica || !ctx.discussion || !ctx.logPath || ctx.state.brainstorm) return; // brainstorms don't replicate
-  const R = ctx.replicate, r = ctx.replica, label = kind === 'summary' ? 'Summary' : 'Round';
+// Only a successful Close captures a discussion. The existing round metadata format is kept for
+// peer compatibility; its round number now counts closed snapshots.
+async function saveClosed(ctx, target, snapshot) {
+  const R = target.replicate, r = target.replica, label = 'Round', outcome = 'completed';
   let c;
   try {
-    const conversation = ctx.state.transcript.map(({ speaker, text, error, pass, summary: turn, outcome: o, by }) =>
-      ({ speaker, text: String(text ?? ''), ...(error && { error }), ...(pass && { pass }), ...(turn && { summary: true }), ...(o && { outcome: o, by }) }));
-    // One capture at a time in the storage: the launch room's open discussions share it.
-    const capture = (r.s.captures ?? Promise.resolve()).then(() => R.capture(r.s, ctx.discussion, { kind, outcome, ending, summary, agents: currentSettings(ctx).agents, conversation }));
+    const capture = (r.s.captures ?? Promise.resolve()).then(() => R.capture(r.s, snapshot.discussion,
+      { kind: 'round', outcome, ending: 'closed', summary: null, agents: snapshot.agents, conversation: snapshot.conversation }));
     r.s.captures = capture.catch(() => {});
     c = await capture;
   } catch (err) {
     return note(ctx, `✗ Could not save ${label.toLowerCase()}: ${err.message}. The discussion's files are as they were; nothing was sent.`, true);
   }
-  const head = `${label} ${c.round} saved${outcome !== 'completed' ? ` as ${outcome} (error: ${ending})` : ''}${c.skipped.length ? ` (left out: ${c.skipped.join(', ')})` : ''}`;
+  const head = `${label} ${c.round} saved${c.skipped.length ? ` (left out: ${c.skipped.join(', ')})` : ''}`;
   pushReplica(ctx);
   R.sendNow(r, c.discussion, c.commit).then((sent) => {
     note(ctx, [head, ...sent.map((x) => (x.sent ? `sent to ${x.peer} ✓` : x.reachable ? `${x.peer} refused it (${x.error})` : `${x.peer} unreachable, will send when it's back`))].join(' · '));
