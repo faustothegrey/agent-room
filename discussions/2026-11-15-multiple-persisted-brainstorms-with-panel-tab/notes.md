@@ -92,5 +92,6 @@ tab today."
   - `src/docs.mjs:1193-1223` stores the order in `localStorage` per room (`agent-room.discussion-order:<folder>`), automatically placing any newly arrived name at the top and dropping names that left (`orderDiscussions`, line 1205).
   - Giving **Brainstorms** its own key (`agent-room.brainstorm-order:<folder>`) and sharing the row/drag-and-drop helper (`⠿` handle + `Move up` / `Move down` in the row menu) means a brainstorm converted to a discussion automatically drops from **Brainstorms** and appears at the top of **Discussions** (matching how unarchived discussions behave, `src/docs.mjs:1218`).
 
-## Open questions for the User
-- None. Worker instruction draft: `pending-instructions.md` (awaiting the User's confirmation to send).
+## Status
+- Implemented by the Worker and merged into `main` as `38823e0` (2026-11-15); 242 tests pass (run by Claude on the branch).
+- Not yet tried: a real provider session resuming after Turn into a discussion and after Restart (tests used scripted replies).
