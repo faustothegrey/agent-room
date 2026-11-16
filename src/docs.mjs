@@ -1214,8 +1214,8 @@ function rollbackButtons(row, details, name, ref, inUse) {
   }
   if (r?.status === 'ready') {
     const confirm = document.createElement('button'); confirm.className = 'reopen'; confirm.textContent = 'Confirm archive after rollback';
-    confirm.disabled = !!inUse;
-    confirm.title = inUse ? 'Switch to another discussion before confirming archive' : 'Review the rollback report first. Archive the discussion; merging its worker branch into main stays manual.';
+    confirm.disabled = !!inUse || !room?.closedDiscussions?.includes(name);
+    confirm.title = !room?.closedDiscussions?.includes(name) ? 'Close the discussion before archiving it.' : inUse ? 'Switch to another discussion before confirming archive' : 'Review the rollback report first. Archive the discussion; merging its worker branch into main stays manual.';
     confirmed(confirm, () => send('/archive-rollback ' + ref), 'Click again: I reviewed the rollback report; archive', () => true);
     row.append(confirm);
   }
@@ -1425,12 +1425,18 @@ function renderDiscussions() {
     let statusText = '';
     if (isCurrent) statusText = 'current' + (room?.started ? ' · started' : '');
     else if (openHere) statusText = openHere.started ? 'open, paused' : 'not started';
-    else statusText = 'paused';
+    else statusText = room?.closedDiscussions?.includes(d) ? 'closed' : 'paused';
     if (openEntry?.working) statusText += ' · worker working';
+    if (room?.closingDiscussions?.includes(d)) statusText += ' · closing, waiting for worker';
     block.append(el('div', 'local-label', statusText));
     row.append(block);
 
     if (canAct) {
+      if (room?.closingDiscussions?.includes(d)) {
+        const cancel = el('button', 'reopen', 'Cancel close');
+        cancel.onclick = () => post('__cancelclose', { name: d }).catch((err) => status(err.message, true));
+        row.append(cancel);
+      }
       if (openHere && !openHere.started) {
         const b = el('button', 'reopen', 'Go to');
         b.title = 'Show this open discussion: it has not started yet';
@@ -1446,10 +1452,15 @@ function renderDiscussions() {
       menu.append(el('summary', '', 'Actions'), items);
       menu.open = openRowMenu === path;
       menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
+      if (!room?.closedDiscussions?.includes(d)) {
+        const close = el('button', '', 'Close');
+        close.onclick = () => { closeMenus(); send('/close ' + d); };
+        items.append(close);
+      }
       for (const [label, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
         const b = el('button', '', label);
-        b.disabled = isCurrent;
-        b.title = isCurrent ? 'The discussion in use cannot be moved' : 'Move the whole discussion into ' + target + '/';
+        b.disabled = isCurrent || !room?.closedDiscussions?.includes(d);
+        b.title = !room?.closedDiscussions?.includes(d) ? 'Close the discussion before moving it into ' + target + '/.' : isCurrent ? 'The discussion in use cannot be moved' : 'Move the whole discussion into ' + target + '/';
         b.onclick = () => { closeMenus(); send('/move ' + d + ' ' + target); };
         if (target === 'archive') archiveButton(b, d);
         items.append(b);
@@ -1534,10 +1545,15 @@ function renderDiscussions() {
         renderDiscussions();
       };
       block.append(nameBtn);
-      block.append(el('div', 'local-label', s === 'archive' ? 'archived' : 'deferred'));
+      block.append(el('div', 'local-label', (s === 'archive' ? 'archived' : 'deferred') + (room?.closedDiscussions?.includes(d) ? ' · closed' : '') + (room?.closingDiscussions?.includes(d) ? ' · closing, waiting for worker' : '')));
       row.append(block);
 
       if (canAct) {
+        if (room?.closingDiscussions?.includes(d)) {
+          const cancel = el('button', 'reopen', 'Cancel close');
+          cancel.onclick = () => post('__cancelclose', { name: d }).catch((err) => status(err.message, true));
+          row.append(cancel);
+        }
         const b = el('button', 'reopen primary', 'Resume');
         b.title = 'Resume: makes it active first';
         b.onclick = (e) => { e.stopPropagation(); send('/resume ' + s + '/' + d); };
@@ -1548,12 +1564,20 @@ function renderDiscussions() {
         menu.open = openRowMenu === path;
         menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
 
+        if (!room?.closedDiscussions?.includes(d)) {
+          const close = el('button', '', 'Close');
+          close.onclick = () => { closeMenus(); send('/close ' + s + '/' + d); };
+          items.append(close);
+        }
+
         const makeActive = el('button', '', 'Make active');
         makeActive.onclick = () => { closeMenus(); send('/move ' + s + '/' + d + ' active'); };
         items.append(makeActive);
 
         const otherSection = s === 'archive' ? 'deferred' : 'archive';
         const moveOther = el('button', '', otherSection === 'archive' ? 'Archive' : 'Defer');
+        moveOther.disabled = !room?.closedDiscussions?.includes(d);
+        if (moveOther.disabled) moveOther.title = 'Close the discussion before moving it into ' + otherSection + '/.';
         moveOther.onclick = () => { closeMenus(); send('/move ' + s + '/' + d + ' ' + otherSection); };
         if (otherSection === 'archive') archiveButton(moveOther, s + '/' + d);
         items.append(moveOther);
@@ -2734,7 +2758,7 @@ function handleScreen(req, res, url, dir, screen) {
       (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
-  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom', '/__retry', '/__agent-enabled'].includes(url.pathname)) {
+  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom', '/__retry', '/__agent-enabled', '/__cancelclose'].includes(url.pathname)) {
     if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain; charset=utf-8', 'Refused: only the room page can send input.'); return true; }
     readJson(req, url.pathname === '/__say' ? ATTACH_TOTAL * 1.4 : undefined).then((body) => {
       if (url.pathname === '/__newroom') {
@@ -2752,6 +2776,11 @@ function handleScreen(req, res, url, dir, screen) {
       }
       if (url.pathname === '/__workerinfo') { // the Worker tab is shown: recheck its branches (sent as a workerinfo event)
         screen.refreshWorker?.();
+        return send(204, 'text/plain', '');
+      }
+      if (url.pathname === '/__cancelclose') {
+        if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before cancelling Close.');
+        if (!screen.cancelClose?.(body?.name)) return send(409, 'text/plain; charset=utf-8', 'Close is no longer waiting for the worker.');
         return send(204, 'text/plain', '');
       }
       if (url.pathname === '/__agent-enabled') {

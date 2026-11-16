@@ -195,7 +195,7 @@ async function folderFiles(folder) {
 }
 const stamps = (folder, files) => Promise.all(files.map((f) => fs.stat(join(folder, f)).then((st) => `${st.size}:${st.mtimeMs}`, () => 'gone')));
 
-export async function capture(s, { name, dir, title }, round, { attempts = 3 } = {}) {
+export async function capture(s, { name, dir, title }, round, { attempts = 3, detached = false } = {}) {
   const d = await discussionId(s, name, true), ref = lineRef(d, s.node);
   const room = (await roomInfo(s)).roomId ?? null;
   for (let attempt = 1; ; attempt++) {
@@ -222,10 +222,19 @@ export async function capture(s, { name, dir, title }, round, { attempts = 3 } =
       const tree = await git(s.store, ['write-tree'], { env: { GIT_INDEX_FILE: index } });
       const who = { GIT_AUTHOR_NAME: s.node, GIT_AUTHOR_EMAIL: `${s.node}@agent-room.invalid`, GIT_COMMITTER_NAME: s.node, GIT_COMMITTER_EMAIL: `${s.node}@agent-room.invalid` };
       const commit = await git(s.store, ['commit-tree', tree, ...(parent ? ['-p', parent] : []), '-m', `${round.kind} ${number} (${round.outcome})`], { env: who });
-      await git(s.store, ['update-ref', ref, commit, parent ?? ZERO]); // append-only: the old value is checked
-      return { discussion: d, commit, round: number, skipped };
+      if (!detached) await git(s.store, ['update-ref', ref, commit, parent ?? ZERO]); // append-only: the old value is checked
+      return { discussion: d, commit, round: number, skipped, ...(detached && { parent }) };
     } finally { await fs.rm(index, { force: true }); }
   }
+}
+export async function publishCapture(s, capture) {
+  await git(s.store, ['update-ref', lineRef(capture.discussion, s.node), capture.commit, capture.parent ?? ZERO]);
+}
+export async function discardCapture(s, capture) {
+  const ref = lineRef(capture.discussion, s.node);
+  if (await revParse(s.store, ref) !== capture.commit) return;
+  if (capture.parent) await git(s.store, ['update-ref', ref, capture.parent, capture.commit]);
+  else await git(s.store, ['update-ref', '-d', ref, capture.commit]);
 }
 // This node's lines: { <discussion ID>: { commit, round } }.
 export async function ownLines(s) {
@@ -604,10 +613,18 @@ async function syncPeer(r, name, p) {
   const room = await roomInfo(s);
   if (!room.paired[name] || st.roomId !== room.roomId) return false; // not paired (yet): nothing is sent
   let pending = false;
+  const names = r.canSend ? Object.fromEntries(Object.entries(await discussionIds(s)).map(([folder, id]) => [id, folder])) : {};
   for (const [d, { commit }] of Object.entries(await ownLines(s))) {
     if ((await acked(s, name, d)) === commit) continue;
+    const folder = names[d];
+    if (r.canSend && (!folder || !r.canSend(folder))) continue;
     try {
-      const res = await send(s, name, peer.url, d);
+      const transfer = send(s, name, peer.url, d);
+      const active = r.state.transfers ??= new Map();
+      if (!active.has(folder)) active.set(folder, new Set());
+      active.get(folder).add(transfer);
+      let res;
+      try { res = await transfer; } finally { active.get(folder).delete(transfer); }
       r.onSent?.({ peer: name, discussion: d, ...res, late: p.waiting.has(d) });
       p.waiting.delete(d);
     } catch (e) {

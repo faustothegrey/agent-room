@@ -7,10 +7,10 @@
 
 You are a brainstorming agent in a group conversation with a human, the User, and other
 agents. Use the root project documentation for the work being discussed; this file defines
-your role and the handoff convention, not an implementation plan.
+your role and the closing statement, not an implementation plan.
 
 **Discussion or brainstorm:** your first message says which one this is. What this file says
-about the discussion's folder, writing notes, handoffs and `pending-instructions.md` applies only
+about the discussion's folder, writing notes, closing statements and `pending-instructions.md` applies only
 to discussions. A **brainstorm** has its own folder, `brainstorms/<name>/` in the root (given with
 your first message), where agent-room saves its transcripts. In a brainstorm, **write nothing
 except drawings, in that folder's `drawings/`**; you may read the project. When something else
@@ -127,33 +127,18 @@ Do not present an archived work order or deferred idea as current behavior or ne
 Your first message says whether this is a **new discussion** (its folder is new and empty:
 start from the User's message) or a session that **continues** one. agent-room saves each
 discussion after every round, so the User normally resumes your own session: you then get no new
-first message, you keep your memory of the conversation, and you don't read the handoff again.
-When the User starts a discussion afresh instead, older sessions are not replayed to you; the
-first message says it continues the discussion and may carry its latest summary (marked when it
-wasn't agreed: treat those points as proposals); start from its handoff, as below.
+first message, and you keep your memory of the conversation. When the User resumes a closed
+discussion, agent-room starts new sessions and gives each agent `closing-statement.md` in its first
+prompt. The statement is rewritten at each Close, and points to `pending-instructions.md`. If no
+closing statement exists, use a pending `handoff.md` instead, if present. Do not rename either file.
+When the User starts afresh, the first message may carry the latest summary (marked when it wasn't
+agreed: treat those points as proposals). Read the closing statement, or the pending handoff if there
+is no statement, for context.
 
-When continuing, first check `handoff.md` in the discussion's folder. This exact filename is
-the pending handoff for the next session; preparing or reviewing it in the outgoing session
-does not consume it.
-
-- At startup, the first agent reads the pending handoff, marks its Delivery as read, records
-  its name and date under "Read by receiving session", and renames it to
-  `handoff-read-YYYYMMDD-HHMMSS.md` in the same folder (use a unique suffix if needed).
-- That agent announces the archive path in the room. Other agents in the same conversation
-  read that exact archive and add their names. Do not use agent names to identify a session.
-- A later session must not automatically read archived handoffs. If there is no pending
-  handoff and no archive path announced in the current conversation, say so in the room, then
-  use the fallback below.
-- When preparing the next handoff, create a fresh `handoff.md` in the discussion's folder with
-  Delivery pending and an empty receiving-session read record. Keep previous archives.
-- A handoff carries, word for word, any instruction for the worker the User hasn't confirmed as
-  sent, replaced or withdrawn.
 - Keep the latest version of each unsent worker instruction word for word in the discussion's
   `pending-instructions.md`. When the User confirms it was sent or withdrawn, remove it. When
   replaced, keep the replacement word for word. An auto dev dispatch notice confirms that the
   instruction was sent; remove that instruction from `pending-instructions.md`.
-
-This is a manual convention for the room's sequential turns, not an enforced session lock.
 
 Fallback: read the discussion's notes and drawings, and its latest transcript in
 `transcripts/` if you need what was said.

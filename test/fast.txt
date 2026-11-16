@@ -137,7 +137,6 @@ auto dev: reading the instruction only from Next step, and the Outcome line
 auto dev: while a run is active, the status under the title says so instead of "your turn"
 on the screen, New discussion keeps the discussion open with its sessions; Resume of an open one goes there; brainstorms open beside them, several at once
 Restart brings back every open discussion and started brainstorm of a folder, each in its own context
-Quit room during a round: after the grace period the agent mid-turn is stopped, and no new one starts
 Open room in folder… opens an existing room, says when it is open elsewhere, and creates one only with its one-time token
 Stage 3: Explorer queues rollback separately from two-click archive confirmation after a report
 an interrupted round: Resume says the transcript grew after the checkpoint; every restore tells the agents once; an unstarted Claude session gets a new ID
@@ -172,5 +171,20 @@ agy login is unmonitored without invoking a command
 agy grouped gauges show Gemini and Argon while summaries retain all models
 auto dev: step metadata is only before the Outcome and outside the instruction
 fast test timings count only consecutive completed passes and move after three
+agents draft and revise a closing statement with worker reports, without changing the chat
+a closing turn that loses its provider session retries with the full chat
+a transient closing turn failure keeps the usable provider session
+Close writes a statement and drops saved provider IDs only after the agents finish
+Close waits for queued work, refuses instructions and can be cancelled
+closing a discussion does not stop an earlier discussion's detached worker
+a failed statement leaves the previous file and discussion intact for a retry
+a failure persisting Close restores the statement, checkpoint and provider IDs
+closed state persists independently of checkpoints, and Resume clears it
+every round saves a checkpoint; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions
+archive and defer require a closed discussion, and Make active keeps it closed
+a reopened discussion retains its statement briefing across restart before its first message
+a reopened discussion without a closing statement starts from its pending handoff
+only the final enabled agent draft needs the pending instructions reference
+Close asks only enabled discussion agents
 run: a program that exits 0 without reading its input rejects; a non-zero exit is reported as before
 run: with empty input, an error from stdin never fails a successful exit

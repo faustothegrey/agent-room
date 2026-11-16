@@ -64,6 +64,11 @@ auto dev: step counts adjust the limit and fix rounds consume slack
 auto dev: the step limit is capped at 15 at start and when raised
 Shutdown server, from the server's own address, ends every room; with --node only the launch room replicates
 Resume replaces a brainstorm only with a valid checkpoint; on the discussion in use it changes nothing; Start fresh asks twice and keeps only the latest summary
+Close waits for running and queued worker reports before asking the agents
+a paused discussion can be closed without replacing the current discussion
+closed discussion lifecycle publishes only on Close
+every closed discussion of a --node launch room replicates, through the launch room's replica
+failed Close captures cannot reach peers, including after restart and retry
 a worker task cut off after an edit: Resume reports the uncommitted edits, and the queue holds for that discussion
 auto dev: a failure during an agent turn reaches that agent with the next message
 storage ignores project filters/transcripts rules, preserves Git state and stable identity
@@ -71,3 +76,5 @@ a transcript that can't be written keeps the worker's reply visible, reports the
 no worker sends from a brainstorm, before or after its first message, on the screen or in the terminal; once turned into a discussion, its work goes to its own lane
 auto dev: while paused, any agreed summary ending in Outcome: FINISH finishes the run, and none sends anything
 switching discussion while one waits for its worker task: the message typed in the other and the worker's later report each reach their own discussion
+Quit room during a round: after the grace period the agent mid-turn is stopped, and no new one starts
+replication startup publishes a closed snapshot interrupted before its line update
