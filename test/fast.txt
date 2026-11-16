@@ -194,3 +194,5 @@ a reopened discussion retains its statement briefing across restart before its f
 a reopened discussion without a closing statement starts from its pending handoff
 only the final enabled agent draft needs the pending instructions reference
 Close asks only enabled discussion agents
+run: a program that exits 0 without reading its input rejects; a non-zero exit is reported as before
+run: with empty input, an error from stdin never fails a successful exit

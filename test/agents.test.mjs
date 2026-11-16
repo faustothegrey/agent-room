@@ -225,6 +225,21 @@ test('a recorded program: written at spawn with its start, removed when its proc
   await run('true', [], { record: undefined });
 });
 
+test('run: a program that exits 0 without reading its input rejects; a non-zero exit is reported as before', async () => {
+  // Larger than any pipe buffer, so the write can't simply land in it.
+  const input = 'x'.repeat(8 * 1024 * 1024);
+  await assert.rejects(run('true', [], { input }), /true could not send the complete prompt/);
+  await assert.rejects(run('sh', ['-c', 'exit 3'], { input }), /sh exited with code 3/);
+});
+
+test('run: with empty input, an error from stdin never fails a successful exit', async () => {
+  const procs = new Set();
+  const turn = run('true', [], { procs });
+  const [proc] = procs;
+  proc.stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+  assert.equal(await turn, '');
+});
+
 test('leftovers: not in this server\'s procs and group alive, with the same start; reused PIDs and gone groups dropped', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'programs-'));
   const now = Date.now();
