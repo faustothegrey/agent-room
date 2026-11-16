@@ -67,7 +67,6 @@ terminal: a missing or wrong token gets 401 on the WebSocket
 notes: create, list, read, save exactly as typed, remove; stored outside the room, one set per room folder
 notes: bad ids, bodies and methods are refused; ids never reach outside the folder
 notes: only from this computer, with the terminal pane's Host and Origin checks
-storage ignores project filters/transcripts rules, preserves Git state and stable identity
 concurrent bootstrap pairings cannot replace an established room identity
 a round is: user, then agents in order until all of them pass in a row
 the first prompt carries the introduction; later prompts do not
@@ -124,28 +123,23 @@ terminal: New discussion or Resume ends the brainstorm session (its folder stays
 Reload keeps the brainstorm's messages and its mode: the next message goes on in its folder, creating no discussion
 /new: nothing to end before the first message; it creates nothing and changes nothing
 /new after a round: the session ends as with Resume; the next message starts a new titled discussion
-a transcript that can't be written keeps the worker's reply visible, reports the error and ends the busy state
 without a Git repository, or without a commit, the worker is disabled with an explanation
 a folder already at the worktree's place is refused and left alone; the worker doesn't run
 the header's version: the checkout's commit and uncommitted changes, outside discussions/, as a snapshot
 Reload adds its own snapshot of the checkout to the header, keeping the start's
 Switch room lists this server's rooms, with the pages open on each and which one is asking
-no worker sends from a brainstorm, before or after its first message, on the screen or in the terminal; once turned into a discussion, its work goes to its own lane
 terminal: a brainstorm's worker session is never carried into a discussion, by New discussion or Resume
 every round saves a checkpoint; Close keeps it; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions
 Start fresh briefs with the latest summary, marked if not agreed, or none; a Restart before the first message keeps it; the first round replaces it
 removed commands answer with a hint and reach no agent
 Explorer's Resume says what it will do: show an open one, continue a saved one, or start from the handoff
 auto dev: reading the instruction only from Next step, and the Outcome line
-auto dev: while paused, any agreed summary ending in Outcome: FINISH finishes the run, and none sends anything
 auto dev: while a run is active, the status under the title says so instead of "your turn"
 on the screen, New discussion keeps the discussion open with its sessions; Resume of an open one goes there; brainstorms open beside them, several at once
-switching discussion while one waits for its worker task: the message typed in the other and the worker's later report each reach their own discussion
 Restart brings back every open discussion and started brainstorm of a folder, each in its own context
 Quit room during a round: after the grace period the agent mid-turn is stopped, and no new one starts
 Open room in folder… opens an existing room, says when it is open elsewhere, and creates one only with its one-time token
 Stage 3: Explorer queues rollback separately from two-click archive confirmation after a report
-a worker task cut off after an edit: Resume reports the uncommitted edits, and the queue holds for that discussion
 an interrupted round: Resume says the transcript grew after the checkpoint; every restore tells the agents once; an unstarted Claude session gets a new ID
 a worker task from a discussion with no full checkpoint yet is recorded too, and reported on the next Resume
 worker notes follow their captured owner, including brainstorms and room-wide events
@@ -157,7 +151,6 @@ new screen discussions and terminal sessions use the saved worker default
 a started worker-only change leaves an absent defaults file absent
 open discussions keep their members and sessions; new and resumed discussions use their own sets
 launch defaults follow flags and panel changes per folder, without changing other rooms
-auto dev: a failure during an agent turn reaches that agent with the next message
 a failed discussion agent can be disabled across Reload and Resume, and enabled again
 a brainstorm saves its checkpoint under brainstorms/<name>, without a worker part; Resume and Restart bring it back with its sessions and chat
 an existing discussion checkpoint, saved before brainstorms had their own, still loads under its name
