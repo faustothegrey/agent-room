@@ -142,7 +142,6 @@ auto dev: while a run is active, the status under the title says so instead of "
 on the screen, New discussion keeps the discussion open with its sessions; Resume of an open one goes there; brainstorms open beside them, several at once
 switching discussion while one waits for its worker task: the message typed in the other and the worker's later report each reach their own discussion
 Restart brings back every open discussion and started brainstorm of a folder, each in its own context
-Quit room during a round: after the grace period the agent mid-turn is stopped, and no new one starts
 Open room in folder… opens an existing room, says when it is open elsewhere, and creates one only with its one-time token
 Stage 3: Explorer queues rollback separately from two-click archive confirmation after a report
 a worker task cut off after an edit: Resume reports the uncommitted edits, and the queue holds for that discussion

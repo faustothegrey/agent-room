@@ -66,6 +66,47 @@ test('closed discussion lifecycle publishes only on Close', { timeout: 30000 }, 
     await R.removeTree(root);
   }
 });
+test('replication startup publishes a closed snapshot interrupted before its line update', { timeout: 30000 }, async () => {
+  const root = await fs.mkdtemp(join(tmpdir(), 'interrupted-close-')), rooms = [];
+  const make = async (node, peers = []) => {
+    const cwd = join(root, node); await fs.mkdir(cwd, { recursive: true });
+    const ctx = { cwd, node, peers, port: 0, noScreen: true, hub: { rooms: new Map(), node },
+      agentSpecs: 'claude:A', workerSpec: 'claude:W', sessions: new Map(), state: { transcript: [], seen: new Map() } };
+    Object.assign(ctx, await ui.load(ctx, '')); ctx.hub.rooms.set(ctx.key, ctx);
+    ctx.usage = { ...ctx.usage, fetchQuota: async () => null };
+    ctx.suggestTitle = async () => ({ title: 'Interrupted close' });
+    await ui.start(ctx); rooms.push(ctx);
+    ctx.origin = `http://127.0.0.1:${ctx.server.address().port}`;
+    return ctx;
+  };
+  try {
+    const a = await make('Mac'), b = await make('Pi');
+    a.peers.push({ name: 'Pi', url: b.origin }); b.peers.push({ name: 'Mac', url: a.origin });
+    await R.pair(a.replica, 'Pi');
+    a.room.agents[0].turn = async (p) => p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS';
+    await ui.handleLine('first', a);
+    const { name } = a.discussion;
+    let marked;
+    const stopped = new Promise((resolve) => { marked = resolve; });
+    a.replicate = { ...a.replicate, publishCapture: async (_store, snapshot) => { marked(snapshot); await new Promise(() => {}); } };
+    void ui.handleLine('/close', a);
+    const snapshot = await stopped;
+    assert.deepEqual(await R.ownLines(a.replica.s), {});
+    assert.deepEqual(await R.receivedLines(b.replica.s), []);
+    ui.ended(a); clearInterval(a.quotaTimer); await new Promise((resolve) => a.server.close(resolve));
+    rooms.splice(rooms.indexOf(a), 1);
+    const restarted = await make('Mac', [{ name: 'Pi', url: b.origin }]);
+    assert.ok(restarted.screen.room.closedDiscussions.includes(name));
+    assert.equal((await R.ownLines(restarted.replica.s))[snapshot.discussion].commit, snapshot.commit);
+    await wait(async () => (await R.receivedLines(b.replica.s)).length === 1);
+    const peer = await R.readPointer(b.replica.s, snapshot.discussion, 'Mac');
+    assert.equal(peer.commit, snapshot.commit);
+  } finally {
+    for (const c of rooms) { ui.ended(c); clearInterval(c.quotaTimer); await new Promise((resolve) => c.server.close(resolve)); }
+    await R.removeTree(root);
+  }
+});
+
 test('failed Close captures cannot reach peers, including after restart and retry', { timeout: 30000 }, async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'failed-close-')), rooms = [];
   const make = async (node) => {

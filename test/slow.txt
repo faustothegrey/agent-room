@@ -76,3 +76,5 @@ a transcript that can't be written keeps the worker's reply visible, reports the
 no worker sends from a brainstorm, before or after its first message, on the screen or in the terminal; once turned into a discussion, its work goes to its own lane
 auto dev: while paused, any agreed summary ending in Outcome: FINISH finishes the run, and none sends anything
 switching discussion while one waits for its worker task: the message typed in the other and the worker's later report each reach their own discussion
+Quit room during a round: after the grace period the agent mid-turn is stopped, and no new one starts
+replication startup publishes a closed snapshot interrupted before its line update

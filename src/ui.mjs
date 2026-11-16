@@ -678,20 +678,24 @@ const checkpointFile = (ctx, name) => join(checkpointDirectory(ctx), createHash(
 // detached worker tasks finish). Missing markers, including discussions from older versions, mean paused.
 const closedDirectory = (ctx) => join(checkpointDirectory(ctx), 'closed');
 const closedFile = (ctx, name) => join(closedDirectory(ctx), createHash('sha256').update(name).digest('hex'));
-function closedDiscussions(ctx) {
+function closedEntries(ctx) {
   const dir = closedDirectory(ctx);
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter((f) => /^[a-f0-9]{64}$/.test(f)).flatMap((f) => {
-    try { return [readFileSync(join(dir, f), 'utf8')]; } catch { return []; }
+    try {
+      const text = readFileSync(join(dir, f), 'utf8');
+      return [text.startsWith('{') ? JSON.parse(text) : { name: text }];
+    } catch { return []; }
   });
 }
-function setClosed(ctx, name, closed) {
+const closedDiscussions = (ctx) => closedEntries(ctx).map((entry) => entry.name);
+function setClosed(ctx, name, closed, snapshot = null) {
   const file = closedFile(ctx, name);
   if (closed) {
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
     const temp = `${file}.${process.pid}.tmp`;
     try {
-      writeFileSync(temp, name, { mode: 0o600 });
+      writeFileSync(temp, snapshot ? JSON.stringify({ name, snapshot: { discussion: snapshot.discussion, commit: snapshot.commit, parent: snapshot.parent } }) : name, { mode: 0o600 });
       renameSync(temp, file);
     } finally { if (existsSync(temp)) unlinkSync(temp); }
   } else {
@@ -1557,7 +1561,7 @@ async function closeNamedDiscussion(ctx, name) {
         r.s.captures = capture.catch(() => {});
         snapshot = await capture;
       }
-      setClosed(ctx, d.name, true);
+      setClosed(ctx, d.name, true, snapshot);
       markedClosed = true;
       if (snapshot) await target.replicate.publishCapture(target.replica.s, snapshot);
     } catch (err) {
@@ -3222,6 +3226,12 @@ async function setupReplica(ctx) {
   const all = () => siblings(ctx).filter((c) => c.replica);
   const r = ctx.replica = await R.createReplica({ root: ctx.cwd, node: ctx.node, peers: ctx.peers, state: ctx.replicaState,
     activity: () => (siblings(ctx).some((c) => c.busy) ? 'running a round' : 'idle'), project: () => ctx.project ?? null, log: (t) => out(ctx, red(t)) });
+  if (first) {
+    const lines = await R.ownLines(r.s);
+    for (const { snapshot } of closedEntries(ctx)) {
+      if (snapshot && lines[snapshot.discussion]?.commit !== snapshot.commit) await R.publishCapture(r.s, snapshot);
+    }
+  }
   r.canSend = (name) => !r.state.reopening?.has(name) && !shopOf(ctx).closing?.has(name) && closedDiscussions(ctx).includes(name);
   r.changed = () => { for (const c of all()) pushReplica(c); };
   r.onReceived = (p) => { for (const c of all()) note(c, `Received ${p.node}'s ${p.kind} ${p.round} of "${p.title}".`); r.changed(); };
