@@ -143,6 +143,10 @@ agent's model and the worker's, as their panels list them ("<provider> default" 
     that have one; a spec with an error shows the message. Click a bar or point to point at it
     (`[pointing at: chart point day: 16 Nov, runs: 42 in …]`), and `[[16 Nov]]` in the chat highlights
     every mark with a field of that value.
+  - **Marking up.** A document with tables, diagrams or charts gets a small toolbar (top right): **Point**
+    (clicking, as above), **Pen**, **Circle** and **Arrow** draw over the document, and each finished mark
+    points at what it covers (an arrow: what its tip is on), as a chip such as "✎ circled Worker". Marks
+    stay on the page until **Clear marks** or a reload, and are never saved. Esc returns to Point.
 - **Terminal** (below Explorer/Document, collapsed): a shell on this computer, in the room's
   folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening it starts a
   fresh shell; collapsing it, reloading the page or stopping the server ends it. It appears only

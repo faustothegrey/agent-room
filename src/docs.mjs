@@ -285,6 +285,13 @@ table { border-collapse: collapse; } th, td { border: 1px solid #8886; padding: 
 .mermaid-error { color: #c33; white-space: pre-wrap; font: 13px ui-monospace, Menlo, monospace; }
 .vl-box { margin: 1rem 0; width: 100%; overflow-x: auto; } .vl-box .vega-embed { width: 100%; }
 .vl-box .hl { stroke: #e07a10 !important; stroke-width: 3px !important; }
+main { position: relative; }
+#ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 5; }
+body.drawing #ink { pointer-events: auto; cursor: crosshair; touch-action: none; }
+#ink path, #ink ellipse, #ink line { fill: none; stroke: #d6337a; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+#ink-tools { position: fixed; top: .5rem; right: .5rem; z-index: 10; display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: Canvas; border: 1px solid #8886; font: 12px system-ui, sans-serif; }
+#ink-tools button { font: inherit; border: 1px solid transparent; background: none; color: CanvasText; border-radius: 5px; padding: 2px 8px; cursor: pointer; }
+#ink-tools button[aria-pressed="true"] { border-color: #2f6fde; color: #2f6fde; background: #2f6fde1f; }
 nav { font-size: .85rem; opacity: .7; margin-bottom: 1rem; }
 </style></head><body><nav>${home} · ${esc(title)}</nav><main>${body}</main>
 ${body.includes('<div class="mermaid-box">') ? `<script src="${esc(base)}__lib/mermaid.js"></script>` : ''}
@@ -343,6 +350,69 @@ setInterval(async () => {
   if (last !== null && t !== last) location.reload();
   last = t;
 }, 2000);
+// Shown in the room page, with tables, diagrams or charts: a markup layer. Pen, Circle and Arrow
+// draw over the document; a finished mark points at what it covers (an arrow: what its tip is on).
+// Marks stay until Clear marks or a reload. Esc goes back to Point.
+const pointables = () => [
+  ...[...document.querySelectorAll('.sheet td[data-cell]')].map((td) => {
+    const sheet = td.closest('table').dataset.sheet;
+    return { el: td, text: 'table cell ' + (sheet === 'table' ? '' : sheet + '!') + td.dataset.cell, short: (sheet === 'table' ? '' : sheet + '!') + td.dataset.cell };
+  }),
+  ...[...document.querySelectorAll('.mermaid-box g.node')].filter(nodeName).map((g) => ({ el: g, text: 'diagram box ' + nodeName(g), short: nodeName(g) })),
+  ...chartItems().map((item) => ({ el: item._svg, text: 'chart point ' + datumText(item.datum), short: datumText(item.datum).split(', ').slice(0, 2).map((p) => p.split(': ')[1]).join(': ') })),
+];
+if (parent !== window && document.querySelector('.sheet, .mermaid-box, .vl-box')) {
+  const NS = 'http://www.w3.org/2000/svg', main = document.querySelector('main');
+  const ink = document.createElementNS(NS, 'svg'); ink.id = 'ink';
+  ink.innerHTML = '<defs><marker id="ink-tip" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill: #d6337a; stroke: none"/></marker></defs>';
+  main.append(ink);
+  const bar = document.createElement('div'); bar.id = 'ink-tools'; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Markup');
+  const TOOLS = { point: 'Point', pen: 'Pen', circle: 'Circle', arrow: 'Arrow' };
+  let tool = 'point';
+  const setTool = (t) => { tool = t; document.body.classList.toggle('drawing', t !== 'point'); for (const b of bar.querySelectorAll('[data-tool]')) b.setAttribute('aria-pressed', String(b.dataset.tool === t)); };
+  for (const [t, label] of Object.entries(TOOLS)) {
+    const b = document.createElement('button'); b.type = 'button'; b.dataset.tool = t; b.textContent = label; b.onclick = () => setTool(t); bar.append(b);
+  }
+  const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = 'Clear marks'; clear.title = 'Remove your marks from this page';
+  clear.onclick = () => { for (const m of [...ink.children]) if (m.tagName !== 'defs') m.remove(); };
+  bar.append(clear); document.body.append(bar); setTool('point');
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') setTool('point'); });
+  let shape = null, pts = [];
+  const local = (e) => { const b = main.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
+  const draw = (p) => {
+    pts.push(p); const s = pts[0];
+    if (tool === 'pen') shape.setAttribute('d', 'M' + pts.map((q) => q.join(' ')).join('L'));
+    else if (tool === 'circle') { shape.setAttribute('cx', (s[0] + p[0]) / 2); shape.setAttribute('cy', (s[1] + p[1]) / 2); shape.setAttribute('rx', Math.abs(p[0] - s[0]) / 2); shape.setAttribute('ry', Math.abs(p[1] - s[1]) / 2); }
+    else { shape.setAttribute('x1', s[0]); shape.setAttribute('y1', s[1]); shape.setAttribute('x2', p[0]); shape.setAttribute('y2', p[1]); }
+  };
+  ink.addEventListener('pointerdown', (e) => {
+    if (tool === 'point') return;
+    ink.setPointerCapture(e.pointerId); pts = [];
+    shape = document.createElementNS(NS, tool === 'pen' ? 'path' : tool === 'circle' ? 'ellipse' : 'line');
+    if (tool === 'arrow') shape.setAttribute('marker-end', 'url(#ink-tip)');
+    ink.append(shape); draw(local(e));
+  });
+  ink.addEventListener('pointermove', (e) => { if (shape) draw(local(e)); });
+  ink.addEventListener('pointerup', (e) => {
+    if (!shape) return;
+    draw(local(e)); shape = null;
+    const b = main.getBoundingClientRect(), xs = pts.map((q) => q[0] + b.left), ys = pts.map((q) => q[1] + b.top);
+    const box = { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
+    const inside = (r, x, y) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    const all = pointables().map((p) => Object.assign(p, { r: p.el.getBoundingClientRect() }));
+    let hit;
+    if (tool === 'arrow') hit = all.filter((p) => inside(p.r, xs[xs.length - 1], ys[ys.length - 1]));
+    else {
+      hit = all.filter((p) => inside(box, (p.r.left + p.r.right) / 2, (p.r.top + p.r.bottom) / 2));
+      if (!hit.length) hit = all.filter((p) => p.r.left < box.right && p.r.right > box.left && p.r.top < box.bottom && p.r.bottom > box.top);
+    }
+    hit = hit.slice(0, 8);
+    const verb = tool === 'pen' ? 'drew over' : tool === 'circle' ? 'circled' : 'pointed an arrow at';
+    const what = hit.length ? hit.map((p) => p.short).join(', ') : 'an empty spot';
+    parent.postMessage({ type: 'agent-room:point', label: '✎ ' + verb + ' ' + what,
+      text: 'a mark: ' + verb + ' ' + (hit.length ? hit.map((p) => p.text).join('; ') : 'an empty spot') + ' in ' + ${JSON.stringify(watch)} }, location.origin);
+  });
+}
 // Shown in the room page: a [[D4]] or [[runs!D4]] hovered in the chat highlights that cell here.
 addEventListener('message', (e) => {
   const d = e.data;

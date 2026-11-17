@@ -167,6 +167,8 @@ test('a document page\'s own script parses as served (it is written inside a tem
   assert.match(scripts[0], /for \(const g of document\.querySelectorAll\('\.mermaid-box g\.node'\)\)/);
   assert.match(scripts[0], /'chart point ' \+ text \+ ' in ' \+ "both\.md"/);
   assert.match(scripts[0], /for \(const item of chartItems\(\)\)/);
+  assert.match(scripts[0], /if \(parent !== window && document\.querySelector\('\.sheet, \.mermaid-box, \.vl-box'\)\)/); // the markup layer, in the room only
+  assert.match(scripts[0], /text: 'a mark: ' \+ verb/);
 });
 
 test('a ```vega-lite block: its spec is kept (escaped) for the page to draw, with Vega loaded only then; /__lib serves only its list', async () => {
