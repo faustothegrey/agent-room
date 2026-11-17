@@ -127,6 +127,13 @@ agent's model and the worker's, as their panels list them ("<provider> default" 
   - In **Explorer**, view one tree at a time, chosen with the bar `[ Discussion | Room checkout | Worker copy ]` (Worker copy is coming soon). Under the bar, a line shows the folder and branch. **Discussion** shows the active (or peeked) discussion's files. **Room checkout** shows the room's root checkout, excluding hidden and gitignored files (non-discussion files in `discussions/`, such as `discussions/README.md`, remain reachable). Code, config, and other text files open as plain text in Document; supported images and PDFs stay viewable; files that cannot be displayed are greyed out ("can't be shown here").
   - **Peek**: clicking another discussion's name in Discussions shows its files in Explorer without switching discussions. An orange banner ("Looking at <name> · Back to current") and an orange dot on the Explorer tab indicate the peek; Document's path line names the peeked discussion.
   - In **Document**, view the chosen file with its path. Each tab keeps its place when you switch; Document is disabled until a file is chosen. The chosen document stays selected when agents edit other files, and open documents check for changes every two seconds. Drag the divider to resize the panes. Browsing is available during agent turns and does not notify the agents.
+  - **Tables and pointing.** A ```` ```csv ```` block in a Markdown document shows as a table with
+    column letters and row numbers (```` ```csv runs ```` names it `runs`). A cell starting with `=` is a
+    formula: cell references, `+ - * /`, and `SUM`, `AVERAGE`, `MIN` or `MAX` over a range (`=SUM(B2:B8)`);
+    errors show as `#REF`, `#CYCLE`, `#DIV/0` or `#VALUE`. Click a cell to point at it: a chip appears by
+    the message box, and your next message ends with one `[pointing at: …]` line naming the cell, its value,
+    its row and column labels and its formula (✕ on a chip drops it; commands never carry it). A
+    `[[D4]]` or `[[runs!D4]]` in the chat highlights that cell in the shown document while you hover it.
 - **Terminal** (below Explorer/Document, collapsed): a shell on this computer, in the room's
   folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening it starts a
   fresh shell; collapsing it, reloading the page or stopping the server ends it. It appears only
