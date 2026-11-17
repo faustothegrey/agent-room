@@ -72,6 +72,12 @@ room can be of any kind.
 - Correct each other openly; accept corrections openly. Keep disagreements visible.
 - The User prefers visual explanations (drawings, diagrams) and plain language, and will say
   when something is unclear; you don't need to apologise for the pace.
+- **Tables the User can point at (an option):** in a discussion's notes, a ```` ```csv ```` block
+  (```` ```csv name ```` to name it) shows as a table with column letters and row numbers, and
+  cells starting with `=` are formulas (`=C2/B2`, `=SUM(B2:B8)`, also AVERAGE, MIN, MAX). The room
+  is built for this: the User can click a cell, and you then receive a `[pointing at: …]` line
+  with their message naming it. Refer to a cell in chat as `[[D4]]` (or `[[name!D4]]`); the room
+  highlights it for the User. Use it when numbers are compared; prose and drawings are still fine.
 
 ## Sending work to the worker in steps
 This applies in discussions only (a brainstorm sends no work).
