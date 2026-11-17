@@ -90,9 +90,9 @@ of agent-room's checkout when the server started and its start time, such as `4c
 Reload it adds `· reloaded 12:41 (commit)`, again with `+` if needed. Both are snapshots taken
 then, never read live; hover for the full dates and the checkout's folder. Agent settings live inside their tabs.
 
-The **Discussion** and **Worker** tabs name the models in use, such as
-**Discussion (Claude default, Codex default)** and **Worker (Opus)**: each enabled discussion
-agent's model and the worker's, as their panels list them ("<provider> default" for CLI default).
+The provider panels' headings name the models in use, such as **Discussion members · Claude
+default, Codex default** and **Worker · Opus**: each enabled discussion agent's model and the
+worker's, as their panels list them ("<provider> default" for CLI default).
 
 - **Discussion:** send messages to the brainstorming agents. Enter sends; Shift+Enter adds
   a line. Start with `@name` to address one agent. Agents take turns in the configured order,

@@ -825,7 +825,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button class="tab" id="tab-providers" role="tab" title="Default providers and models for new discussions: members and worker together">Providers</button></div>
   <div class="view" id="talk">
     <details class="agent-settings" id="talk-settings">
-      <summary>Discussion members · provider & model</summary>
+      <summary>Discussion members · <span id="talk-models">provider & model</span></summary>
       <form id="talk-settings-form">
         <p class="settings-hint" id="talk-settings-hint"></p>
         <div id="talk-agent-rows"></div>
@@ -859,7 +859,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
   </div>
   <div class="view" id="work" hidden>
     <details class="agent-settings" id="work-settings">
-      <summary>Worker · provider & model</summary>
+      <summary>Worker · <span id="work-models">provider & model</span></summary>
       <form id="work-settings-form">
         <p class="settings-hint" id="work-settings-hint"></p>
         <div id="work-agent-rows"></div>
@@ -2326,8 +2326,11 @@ let membersModels = null; // the model lists, while the members panel shows a st
 function tabTitles() {
   const models = (room?.members ?? []).filter((m) => m.enabled && m.modelLabel).map((m) => m.modelLabel);
   const talk = $('tab-talk'), work = $('tab-work'); if (!talk || !work) return;
-  talk.textContent = 'Discussion' + (models.length ? ' (' + models.join(', ') + ')' : '');
-  work.textContent = 'Worker' + (room?.workerModel ? ' (' + room.workerModel + ')' : '') + (work.dataset.working ? ' …' : '');
+  // The tabs keep their plain names; each panel's heading names its providers and models.
+  talk.textContent = 'Discussion';
+  work.textContent = 'Worker' + (work.dataset.working ? ' …' : '');
+  $('talk-models').textContent = models.length ? models.join(', ') : 'provider & model';
+  $('work-models').textContent = room?.workerModel || 'provider & model';
 }
 // Settings stay outside the conversation; saving never changes an active CLI session.
 const settingsRows = {};
