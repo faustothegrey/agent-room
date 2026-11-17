@@ -1479,7 +1479,7 @@ function renderDiscussions() {
     if (openEntry?.working) statusText += ' · worker working';
     if (room?.closingDiscussions?.includes(d)) statusText += ' · closing, waiting for worker';
     const work = pendingWork.find((p) => p.lane === d);
-    if (workerPending && !work) statusText += ' · worker: no changes';
+    if (workerPending && !work) statusText += ' · no changes';
     block.append(el('div', 'local-label', statusText));
     if (work) block.append(el('div', 'worker-pending', '⚠ Worker: ' + pendingText(work)));
     row.append(block);
