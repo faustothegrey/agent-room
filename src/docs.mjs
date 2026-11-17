@@ -720,9 +720,9 @@ function showFailedAgents(agents) {
 const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a discussion to send work.';
 let workerInfoShown = null, workPlaceholder = null;
 function showWorkerInfo(info) {
-  const pendingChanged = JSON.stringify(info?.pending ?? []) !== JSON.stringify(workerPending);
+  const pendingChanged = JSON.stringify(info?.pending ?? null) !== JSON.stringify(workerPending);
   workerInfoShown = info;
-  if (pendingChanged) { workerPending = info?.pending ?? []; renderDiscussions(); } // its rows say which have worker work to merge or commit
+  if (pendingChanged) { workerPending = info?.pending ?? null; renderDiscussions(); } // its rows say which have worker work to merge or commit
   workPlaceholder ??= wbox.placeholder;
   if (room?.brainstorm) setWorkerInfo({ lines: [BRAINSTORM_NO_WORK], disabled: true });
   else {
@@ -1397,7 +1397,8 @@ function discussionsIn(prefix) {
 
 // Worker work not yet in main, from the Worker tab's checks (showWorkerInfo): each lane's
 // { lane: its discussion or null for worker/main, branch, ahead: commits not in main, dirty }.
-let workerPending = [];
+// null: not known (no checks yet, or no worker here), so rows say nothing about it.
+let workerPending = null;
 function renderDiscussions() {
   const container = $('discussions-pane');
   if (!container) return;
@@ -1436,7 +1437,7 @@ function renderDiscussions() {
 
   // Worker work not yet in main: on its discussion's row, or here when its branch is worker/main
   // or belongs to no row of this list.
-  const pendingWork = workerPending;
+  const pendingWork = workerPending ?? [];
   const pendingText = (p) => [p.ahead && p.ahead + (p.ahead === 1 ? ' commit' : ' commits') + ' not merged into main', p.dirty && 'uncommitted changes'].filter(Boolean).join(' · ');
   for (const p of pendingWork.filter((p) => !discussions.includes(p.lane)))
     list.append(el('div', 'worker-pending', '⚠ ' + p.branch + ': ' + pendingText(p)));
@@ -1477,8 +1478,9 @@ function renderDiscussions() {
     else statusText = room?.closedDiscussions?.includes(d) ? 'closed' : 'paused';
     if (openEntry?.working) statusText += ' · worker working';
     if (room?.closingDiscussions?.includes(d)) statusText += ' · closing, waiting for worker';
-    block.append(el('div', 'local-label', statusText));
     const work = pendingWork.find((p) => p.lane === d);
+    if (workerPending && !work) statusText += ' · worker: no changes';
+    block.append(el('div', 'local-label', statusText));
     if (work) block.append(el('div', 'worker-pending', '⚠ Worker: ' + pendingText(work)));
     row.append(block);
 
