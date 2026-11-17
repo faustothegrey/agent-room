@@ -256,6 +256,8 @@ table { border-collapse: collapse; } th, td { border: 1px solid #8886; padding: 
 .sheet { font: 13px/1.4 ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
 .sheet th { font-weight: 400; opacity: .6; background: #8881; } .sheet td.num { text-align: right; }
 .sheet td.formula { color: #2f6fde; } @media (prefers-color-scheme: dark) { .sheet td.formula { color: #7aa7ff; } }
+.sheet td { cursor: pointer; } .sheet td:hover { background: #2f6fde1f; }
+.sheet td.hl { outline: 2px solid #e07a10; outline-offset: -2px; background: #e07a1026; }
 nav { font-size: .85rem; opacity: .7; margin-bottom: 1rem; }
 </style></head><body><nav>${home} · ${esc(title)}</nav><main>${body}</main>
 <script>
@@ -266,6 +268,18 @@ setInterval(async () => {
   if (last !== null && t !== last) location.reload();
   last = t;
 }, 2000);
+// Shown in the room page: a click on a table cell points at it there (a chip by the message box).
+document.addEventListener('click', (e) => {
+  const td = e.target.closest && e.target.closest('.sheet td[data-cell]');
+  if (!td || parent === window) return;
+  const table = td.closest('table'), sheet = table.dataset.sheet;
+  const name = (sheet === 'table' ? '' : sheet + '!') + td.dataset.cell;
+  const rowLabel = td.parentElement.querySelector('td').textContent, colLabel = table.tBodies[0].rows[0].cells[td.cellIndex].textContent;
+  const formula = td.title.includes(': =') ? ', formula ' + td.title.slice(td.title.indexOf(': =') + 2) : '';
+  parent.postMessage({ type: 'agent-room:point', label: '↳ ' + name + ' = ' + td.textContent,
+    text: 'table cell ' + name + ' in ' + ${JSON.stringify(watch)} + ' = ' + td.textContent + ' (' + [rowLabel, colLabel].filter(Boolean).join(', ') + ')' + formula }, location.origin);
+  td.classList.add('hl'); setTimeout(() => td.classList.remove('hl'), 1200);
+});
 </script></body></html>`;
 }
 
@@ -491,8 +505,8 @@ body.resizing iframe { pointer-events: none; } /* the document would swallow the
 .composer { border-top: 1px solid var(--line); padding: .6rem; }
 #attach-row { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-top: .35rem; font-size: .8rem; }
 #attach { font-size: .8rem; padding: .1rem .5rem; }
-#attachments .chip { display: inline-flex; align-items: center; gap: .25rem; padding: .05rem .2rem .05rem .5rem; border: 1px solid var(--line); border-radius: 9px; margin-right: .3rem; }
-#attachments .chip button { border: 0; background: none; padding: 0 .25rem; font-size: .8rem; cursor: pointer; }
+#attachments .chip, #pointed .chip { display: inline-flex; align-items: center; gap: .25rem; padding: .05rem .2rem .05rem .5rem; border: 1px solid var(--line); border-radius: 9px; margin-right: .3rem; }
+#attachments .chip button, #pointed .chip button { border: 0; background: none; padding: 0 .25rem; font-size: .8rem; cursor: pointer; }
 .box { width: 100%; min-height: 3.2rem; resize: vertical; font: inherit; padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--line); }
 .tools { display: flex; gap: .4rem; align-items: center; margin-top: .4rem; font-size: .85rem; }
 .hint { color: var(--dim); flex: 1; }
@@ -643,7 +657,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <div id="remote-view" hidden></div>
       <div id="autodev" role="status" hidden></div>
       <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"></textarea>
-      <div id="attach-row"><button type="button" id="attach" title="Attach files to your next message: saved into the discussion's files/ folder when you send it (25 MB at most each)">📎 Attach</button><input type="file" id="attach-input" multiple hidden><span id="attachments"></span></div>
+      <div id="attach-row"><button type="button" id="attach" title="Attach files to your next message: saved into the discussion's files/ folder when you send it (25 MB at most each)">📎 Attach</button><input type="file" id="attach-input" multiple hidden><span id="attachments"></span><span id="pointed"></span></div>
     </div>
   </div>
   <div class="view" id="work" hidden>
@@ -2354,8 +2368,32 @@ async function send(text) {
   }
   if (!res.ok) status(await res.text(), true);
 }
+// Pointing: a click on a table cell in the shown document (its page posts it here) becomes a chip
+// by the message box; the next message carries what was pointed at, as text, for the agents.
+let pointed = [];
+window.addEventListener('message', (e) => {
+  const frame = document.getElementById('doc'), p = e.data;
+  if (e.origin !== location.origin || !frame || e.source !== frame.contentWindow) return;
+  if (p?.type !== 'agent-room:point' || typeof p.label !== 'string' || typeof p.text !== 'string') return;
+  pointed = pointed.filter((q) => q.label !== p.label).concat({ label: p.label.slice(0, 80), text: p.text.slice(0, 300) });
+  renderPointed();
+});
+function renderPointed() {
+  $('pointed').replaceChildren(...pointed.map((p, i) => {
+    const chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = p.label; chip.title = p.text;
+    const x = document.createElement('button'); x.type = 'button'; x.textContent = '✕'; x.title = 'Stop pointing at this';
+    x.onclick = () => { pointed.splice(i, 1); renderPointed(); };
+    chip.append(x); return chip;
+  }));
+}
+// Moves the chips into the message's text as it is sent (not into a command).
+function withPointing() {
+  if (!pointed.length || box.value.trim().startsWith('/')) return;
+  box.value = box.value.trimEnd() + (box.value.trim() ? '\\n' : '') + '[pointing at: ' + pointed.map((p) => p.text).join('; ') + ']';
+  pointed = []; renderPointed();
+}
 box.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (pending.length) return sendWithFiles(); send(box.value); box.value = ''; }
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); withPointing(); if (pending.length) return sendWithFiles(); send(box.value); box.value = ''; }
 });
 async function sendWork(text) {
   text = text.trim();

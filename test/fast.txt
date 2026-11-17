@@ -195,3 +195,5 @@ without a stand-in, Close's writer is a one-off agent with the worker's provider
 the worker's worktree links the room's node_modules and ignores the link
 a ```csv block shows as a table: column letters, row numbers, formulas worked out, every cell named
 table formulas: AVERAGE, MIN, MAX, precedence; errors show in the cell; cell text is escaped
+pointing: a cell click from the shown document becomes a chip, and the next message carries it as text
+a shown document posts a table cell click to the room page, with its sheet, labels and formula

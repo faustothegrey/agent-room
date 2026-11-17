@@ -75,6 +75,48 @@ test('table formulas: AVERAGE, MIN, MAX, precedence; errors show in the cell; ce
   assert.match(html, /data-sheet="table"/);
 });
 
+test('pointing: a cell click from the shown document becomes a chip, and the next message carries it as text', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  // The room page's script is a template literal in docs.mjs: read it as the browser gets it.
+  const slice = source.slice(source.indexOf('// Pointing: a click on a table cell'), source.indexOf("box.addEventListener('keydown'"));
+  const code = new Function('return `' + slice.replace(/`/g, '\\`') + '`')();
+  const frame ={ contentWindow: {} }, chips = { children: [], replaceChildren(...c) { this.children = c; } };
+  const node = () => ({ append() {} });
+  let onMessage;
+  const window = { addEventListener: (type, f) => { if (type === 'message') onMessage = f; } };
+  const document = { getElementById: (id) => (id === 'doc' ? frame : null), createElement: node };
+  const box = { value: '' };
+  const page = new Function('window', 'document', 'location', '$', 'box', code + '; return { withPointing, pointed: () => pointed };')(
+    window, document, { origin: 'http://127.0.0.1:5566' }, () => chips, box);
+  const point = { type: 'agent-room:point', label: '↳ runs!D4 = 5.96', text: 'table cell runs!D4 in discussions/x/notes.md = 5.96 (Total, per run), formula =C4/B4' };
+  onMessage({ origin: 'http://evil.example', source: frame.contentWindow, data: point }); // another site
+  onMessage({ origin: 'http://127.0.0.1:5566', source: {}, data: point }); // not the shown document
+  onMessage({ origin: 'http://127.0.0.1:5566', source: frame.contentWindow, data: { type: 'other' } });
+  assert.equal(page.pointed().length, 0);
+  onMessage({ origin: 'http://127.0.0.1:5566', source: frame.contentWindow, data: point });
+  onMessage({ origin: 'http://127.0.0.1:5566', source: frame.contentWindow, data: point }); // the same cell again: one chip
+  assert.equal(chips.children.length, 1);
+  box.value = '/summary';
+  page.withPointing(); // a command never gets the pointing
+  assert.equal(box.value, '/summary');
+  box.value = 'Why is this lower?  ';
+  page.withPointing();
+  assert.equal(box.value, 'Why is this lower?\n[pointing at: ' + point.text + ']');
+  assert.equal(page.pointed().length, 0);
+  assert.equal(chips.children.length, 0);
+});
+
+test('a shown document posts a table cell click to the room page, with its sheet, labels and formula', async () => {
+  const dir = fixture();
+  writeFileSync(join(dir, 'runs.md'), '```csv runs\nday,runs\nTotal,=1+1\n```\n');
+  const s = await serve(dir);
+  const html = await (await s.get('/runs.md')).text();
+  s.close();
+  assert.match(html, /parent\.postMessage\(\{ type: 'agent-room:point'/);
+  assert.match(html, /' in ' \+ "runs\.md" \+ ' = '/);
+  assert.match(html, /location\.origin\);/); // only to a page of the same room server
+});
+
 test('files are served with their type; nothing outside proposal/ or hidden is', async () => {
   const s = await serve(fixture());
   const png = await s.get('/drawings/flow.png');
