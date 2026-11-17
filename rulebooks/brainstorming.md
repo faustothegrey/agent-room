@@ -82,6 +82,10 @@ room can be of any kind.
   in the Document tab. In a flowchart the User can click a box, and you receive its name (its id in
   the source: `Worker` in `Worker[The worker]`, so give boxes short, meaningful ids); refer to a box
   in chat as `[[Worker]]` and the room highlights it. SVG drawings in `drawings/` are still fine.
+- **Charts the User can point at (an option):** a ```` ```vega-lite ```` block (a Vega-Lite JSON spec,
+  with inline `values` or a `url` to a data file beside the notes) is drawn as a chart. The User can
+  click a bar or point, and you receive its fields (`day: 16 Nov, runs: 42`); `[[16 Nov]]` in chat
+  highlights the marks with that value.
 
 ## Sending work to the worker in steps
 This applies in discussions only (a brainstorm sends no work).
