@@ -84,7 +84,7 @@ test('pointing: a cell click from the shown document becomes a chip, and the nex
   const node = () => ({ append() {} });
   let onMessage;
   const window = { addEventListener: (type, f) => { if (type === 'message') onMessage = f; } };
-  const document = { getElementById: (id) => (id === 'doc' ? frame : null), createElement: node };
+  const document = { getElementById: (id) => (id === 'doc' ? frame : null), createElement: node, addEventListener() {} };
   const box = { value: '' };
   const page = new Function('window', 'document', 'location', '$', 'box', code + '; return { withPointing, pointed: () => pointed };')(
     window, document, { origin: 'http://127.0.0.1:5566' }, () => chips, box);
@@ -115,6 +115,24 @@ test('a shown document posts a table cell click to the room page, with its sheet
   assert.match(html, /parent\.postMessage\(\{ type: 'agent-room:point'/);
   assert.match(html, /' in ' \+ "runs\.md" \+ ' = '/);
   assert.match(html, /location\.origin\);/); // only to a page of the same room server
+});
+
+test('[[D4]] in a message becomes a reference the room page can highlight; text is escaped, code stays code', () => {
+  const { html } = messageView({ speaker: 'Claude', text: 'See [[runs!D4]] and [[<b>x</b>]], not `[[B2]]` or [link](https://example.com).' });
+  assert.match(html, /<span class="ref" data-ref="runs!D4">runs!D4<\/span>/);
+  assert.match(html, /<span class="ref" data-ref="&lt;b&gt;x&lt;\/b&gt;">&lt;b&gt;x&lt;\/b&gt;<\/span>/);
+  assert.match(html, /<code>\[\[B2\]\]<\/code>/);
+  assert.match(html, /<a href="https:\/\/example.com">link<\/a>/);
+});
+
+test('a shown document highlights the cells a hovered [[reference]] names, only when its room page asks', async () => {
+  const dir = fixture();
+  writeFileSync(join(dir, 'runs.md'), '```csv runs\nday,runs\n```\n');
+  const s = await serve(dir);
+  const html = await (await s.get('/runs.md')).text();
+  s.close();
+  assert.match(html, /e\.origin !== location\.origin \|\| e\.source !== parent \|\| !d \|\| d\.type !== 'agent-room:highlight'/);
+  assert.match(html, /d\.ref === td\.dataset\.cell \|\| d\.ref === sheet \+ '!' \+ td\.dataset\.cell/);
 });
 
 test('files are served with their type; nothing outside proposal/ or hidden is', async () => {

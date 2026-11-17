@@ -66,6 +66,16 @@ const md = new Marked({
       return kind === 'csv' ? csvTable(text, name) : false;
     },
   },
+  // [[D4]] or [[runs!D4]]: a reference the room page highlights in the shown document on hover.
+  extensions: [{
+    name: 'pointer', level: 'inline',
+    start: (src) => src.indexOf('[['),
+    tokenizer(src) {
+      const m = /^\[\[([^[\]\n]{1,60})\]\]/.exec(src);
+      if (m) return { type: 'pointer', raw: m[0], ref: m[1].trim() };
+    },
+    renderer: ({ ref }) => `<span class="ref" data-ref="${esc(ref)}">${esc(ref)}</span>`,
+  }],
 });
 
 // ── Tables from ```csv blocks ──
@@ -268,6 +278,18 @@ setInterval(async () => {
   if (last !== null && t !== last) location.reload();
   last = t;
 }, 2000);
+// Shown in the room page: a [[D4]] or [[runs!D4]] hovered in the chat highlights that cell here.
+addEventListener('message', (e) => {
+  const d = e.data;
+  if (e.origin !== location.origin || e.source !== parent || !d || d.type !== 'agent-room:highlight') return;
+  let first = null;
+  for (const td of document.querySelectorAll('.sheet td[data-cell]')) {
+    const sheet = td.closest('table').dataset.sheet, hit = d.ref === td.dataset.cell || d.ref === sheet + '!' + td.dataset.cell;
+    td.classList.toggle('hl', !!d.on && hit);
+    if (hit && !first) first = td;
+  }
+  if (d.on && first) first.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+});
 // Shown in the room page: a click on a table cell points at it there (a chip by the message box).
 document.addEventListener('click', (e) => {
   const td = e.target.closest && e.target.closest('.sheet td[data-cell]');
@@ -505,6 +527,7 @@ body.resizing iframe { pointer-events: none; } /* the document would swallow the
 .composer { border-top: 1px solid var(--line); padding: .6rem; }
 #attach-row { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-top: .35rem; font-size: .8rem; }
 #attach { font-size: .8rem; padding: .1rem .5rem; }
+.ref { font-family: ui-monospace, Menlo, monospace; font-size: .9em; background: #e07a1026; border: 1px solid transparent; border-radius: 4px; padding: 0 .25em; cursor: default; } .ref:hover { border-color: #e07a10; }
 #attachments .chip, #pointed .chip { display: inline-flex; align-items: center; gap: .25rem; padding: .05rem .2rem .05rem .5rem; border: 1px solid var(--line); border-radius: 9px; margin-right: .3rem; }
 #attachments .chip button, #pointed .chip button { border: 0; background: none; padding: 0 .25rem; font-size: .8rem; cursor: pointer; }
 .box { width: 100%; min-height: 3.2rem; resize: vertical; font: inherit; padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--line); }
@@ -2386,6 +2409,11 @@ function renderPointed() {
     chip.append(x); return chip;
   }));
 }
+// A [[D4]] in the chat: hovering it highlights that cell in the shown document.
+for (const [type, on] of [['mouseover', true], ['mouseout', false]]) document.addEventListener(type, (e) => {
+  const ref = e.target.closest && e.target.closest('.ref[data-ref]'), frame = document.getElementById('doc');
+  if (ref && frame) frame.contentWindow.postMessage({ type: 'agent-room:highlight', ref: ref.dataset.ref, on }, location.origin);
+});
 // Moves the chips into the message's text as it is sent (not into a command).
 function withPointing() {
   if (!pointed.length || box.value.trim().startsWith('/')) return;
