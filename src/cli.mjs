@@ -244,7 +244,7 @@ function watchSource() {
     }, 300);
   };
   watch(new URL('./', import.meta.url), (_, f) => f?.endsWith('.mjs') && changed(f));
-  watch(new URL('../', import.meta.url), (_, f) => /^README-for-.+\.md$/.test(f ?? '') && changed(f));
+  watch(new URL('../rulebooks/', import.meta.url), (_, f) => f?.endsWith('.md') && changed(f));
   console.log('Dev mode: saved source and rulebook edits reload by themselves.');
 }
 

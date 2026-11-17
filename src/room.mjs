@@ -42,7 +42,7 @@ export function introduction(agent, agents) {
     `You are ${agent.name}, one of several AI agents in a group conversation with a human user.`,
     `Participants: the User, ${agents.map((a) => a.name).join(', ')}.`,
     `After each User message, agents take turns in this order: ${order}, until all of them pass in a row.`,
-    'You are a brainstorming agent started by agent-room: your rulebook is README-for-brainstorming-agents.md, in your system instructions.',
+    'You are a brainstorming agent started by agent-room: your rulebook is rulebooks/brainstorming.md, in your system instructions.',
     'When you have nothing to add, reply exactly PASS.',
   ].join('\n');
 }

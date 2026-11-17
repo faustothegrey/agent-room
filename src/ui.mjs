@@ -212,8 +212,8 @@ export async function load(ctx, v) {
     ctx.agentSpecs ??= saved ? saved.agents.map(specFor).join(',') : 'claude,codex';
     ctx.workerSpec ??= saved ? specFor(saved.worker) : 'claude:Worker';
   }
-  const instructions = readFileSync(new URL('../README-for-brainstorming-agents.md', import.meta.url), 'utf8');
-  const workerInstructions = readFileSync(new URL('../README-for-worker-agents.md', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../rulebooks/brainstorming.md', import.meta.url), 'utf8');
+  const workerInstructions = readFileSync(new URL('../rulebooks/worker.md', import.meta.url), 'utf8');
   const { createAgent, claudeTitle, run, findLeftovers } = await import(`./agents.mjs${v}`);
   const { createRoom, closingStatement } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);

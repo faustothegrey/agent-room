@@ -9,10 +9,10 @@ Current setup, behavior and the source map are in `README.md`. Remaining decisio
 historical material are in `discussions/` (start at `discussions/README.md`).
 
 **Brainstorming agents** (the discussion agents agent-room starts in a room) follow
-`README-for-brainstorming-agents.md`: it is their main reference, sent to them as system
+`rulebooks/brainstorming.md`: it is their main reference, sent to them as system
 instructions by the harness. It is **not** your rulebook: if you are working on agent-room's
 code, edit that file like any other source and follow these instructions instead. The separate
-worker receives `README-for-worker-agents.md`; that rulebook is also source, not your rulebook.
+worker receives `rulebooks/worker.md`; that rulebook is also source, not your rulebook.
 
 1. **Report real output.** Never say something passed without running it and reading the result.
 2. **Small diffs.** Change only what the task needs.

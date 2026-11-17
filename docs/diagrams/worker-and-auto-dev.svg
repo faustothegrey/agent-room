@@ -46,7 +46,7 @@
   <text x="816" y="108" font-weight="bold" fill="#b07a1f">4. The worker's turn</text>
   <text x="816" y="126">One CLI process (agents.mjs),</text>
   <text x="816" y="142">30 min timeout, its own session,</text>
-  <text x="816" y="158">README-for-worker-agents.md.</text>
+  <text x="816" y="158">rulebooks/worker.md.</text>
   <text x="816" y="174">Commits on its branch, message</text>
   <text x="816" y="190">labelled [&lt;discussion&gt;].</text>
   <line x1="922" y1="212" x2="922" y2="236" stroke="#444" marker-end="url(#a)"/>
