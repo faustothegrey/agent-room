@@ -60,8 +60,95 @@ const md = new Marked({
       if (!IMAGE.test(href)) return false;
       return `<a href="${esc(href)}">${this.parser.parseInline(tokens)}</a><img class="preview" src="${esc(href)}" alt="">`;
     },
+    // ```csv (or ```csv <name>) shows as a table: see csvTable().
+    code({ text, lang }) {
+      const [kind, name] = String(lang ?? '').trim().split(/\s+/);
+      return kind === 'csv' ? csvTable(text, name) : false;
+    },
   },
 });
+
+// ── Tables from ```csv blocks ──
+// Column letters and row numbers as in a spreadsheet; a cell starting with = is a formula: cell
+// references, numbers, + - * / and parentheses, and SUM, AVERAGE, MIN or MAX over a range (A1:B3).
+// Formulas are worked out here; an error shows as #REF, #CYCLE, #DIV/0 or #VALUE. Every cell
+// carries its reference (data-cell), so the room page can point at it.
+function parseCsv(text) {
+  const rows = []; let row = [], cell = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch !== '"') cell += ch;
+      else if (text[i + 1] === '"') { cell += '"'; i++; } else quoted = false;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') { row.push(cell.trim()); cell = ''; }
+    else if (ch === '\n') { row.push(cell.trim()); rows.push(row); row = []; cell = ''; }
+    else if (ch !== '\r') cell += ch;
+  }
+  if (cell.trim() || row.length) { row.push(cell.trim()); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c !== ''));
+}
+const colName = (c) => { let s = ''; for (c++; c; c = Math.floor((c - 1) / 26)) s = String.fromCharCode(65 + ((c - 1) % 26)) + s; return s; };
+const parseRef = (ref) => {
+  const m = /^([A-Z]+)(\d+)$/.exec(ref);
+  return m ? [Number(m[2]) - 1, [...m[1]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1] : null;
+};
+const RANGE_FUNCTIONS = {
+  SUM: (v) => v.reduce((a, b) => a + b, 0),
+  AVERAGE: (v) => { if (!v.length) throw new Error('#DIV/0'); return v.reduce((a, b) => a + b, 0) / v.length; },
+  MIN: (v) => (v.length ? Math.min(...v) : 0),
+  MAX: (v) => (v.length ? Math.max(...v) : 0),
+};
+function sheetValue(grid, ref, seen = new Set()) {
+  const p = parseRef(ref), raw = p && grid[p[0]]?.[p[1]];
+  if (raw === undefined || raw === null) throw new Error('#REF');
+  if (!raw.startsWith('=')) return raw !== '' && !isNaN(raw) ? Number(raw) : raw;
+  if (seen.has(ref)) throw new Error('#CYCLE');
+  const inner = new Set(seen).add(ref);
+  const only = /^\s*([A-Z]+\d+)\s*$/i.exec(raw.slice(1));
+  if (only) return sheetValue(grid, only[1].toUpperCase(), inner); // =B3 shows B3, text included
+  const number =(r) => { const v = sheetValue(grid, r, inner); return typeof v === 'number' ? v : 0; };
+  const src = raw.slice(1).toUpperCase()
+    .replace(/\b(SUM|AVERAGE|MIN|MAX)\(([A-Z]+\d+):([A-Z]+\d+)\)/g, (_, f, a, b) => {
+      const [r1, c1] = parseRef(a), [r2, c2] = parseRef(b), values = [];
+      for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) for (let c = Math.min(c1, c2); c <= Math.max(c1, c2); c++) {
+        const v = sheetValue(grid, colName(c) + (r + 1), inner); if (typeof v === 'number') values.push(v);
+      }
+      return '(' + RANGE_FUNCTIONS[f](values) + ')';
+    })
+    .replace(/[A-Z]+\d+/g, (r) => '(' + number(r) + ')');
+  return arithmetic(src);
+}
+function arithmetic(src) { // numbers, + - * / and parentheses, by recursive descent (never eval)
+  const s = src.replace(/\s+/g, ''); let i = 0;
+  const num = () => { const m = /^\d+(\.\d+)?(e[+-]?\d+)?/i.exec(s.slice(i)); if (!m) throw new Error('#VALUE'); i += m[0].length; return Number(m[0]); };
+  const atom = () => {
+    if (s[i] === '-') { i++; return -atom(); }
+    if (s[i] === '(') { i++; const v = sum(); if (s[i++] !== ')') throw new Error('#VALUE'); return v; }
+    return num();
+  };
+  const product = () => {
+    let v = atom();
+    while (s[i] === '*' || s[i] === '/') { const op = s[i++], w = atom(); if (op === '/' && w === 0) throw new Error('#DIV/0'); v = op === '*' ? v * w : v / w; }
+    return v;
+  };
+  const sum = () => { let v = product(); while (s[i] === '+' || s[i] === '-') { const op = s[i++], w = product(); v = op === '+' ? v + w : v - w; } return v; };
+  const v = sum(); if (i !== s.length) throw new Error('#VALUE'); return v;
+}
+export function csvTable(text, name = 'table') {
+  const grid = parseCsv(text), cols = Math.max(0, ...grid.map((r) => r.length));
+  const shown = (ref) => {
+    try { const v = sheetValue(grid, ref); return typeof v === 'number' ? String(Math.round(v * 100) / 100) : v; }
+    catch (err) { return err.message; }
+  };
+  const head = '<tr><th></th>' + Array.from({ length: cols }, (_, c) => `<th>${colName(c)}</th>`).join('') + '</tr>';
+  const body = grid.map((row, r) => `<tr><th>${r + 1}</th>` + Array.from({ length: cols }, (_, c) => {
+    const ref = colName(c) + (r + 1), raw = row[c] ?? '', value = raw === '' ? '' : shown(ref);
+    const cls = [raw.startsWith('=') && 'formula', value !== '' && !isNaN(value) && 'num'].filter(Boolean).join(' ');
+    return `<td data-cell="${ref}"${cls ? ` class="${cls}"` : ''} title="${esc(ref + (raw.startsWith('=') ? ': ' + raw : ''))}">${esc(value)}</td>`;
+  }).join('') + '</tr>').join('');
+  return `<div class="sheet-box"><table class="sheet" data-sheet="${esc(name)}"><thead>${head}</thead><tbody>${body}</tbody></table></div>\n`;
+}
 
 // Transcripts quote whatever was said, so raw HTML in them is shown as text, never run.
 const mdText = new Marked({ renderer: { html: ({ text }) => esc(text) } });
@@ -165,6 +252,10 @@ body { font: 16px/1.55 -apple-system, system-ui, sans-serif; max-width: 860px; m
 img { max-width: 100%; } img.preview { display: block; margin: .5rem 0; }
 pre, code { background: #8881; border-radius: 4px; } pre { padding: .75rem; overflow-x: auto; } code { padding: 0 .2em; }
 table { border-collapse: collapse; } th, td { border: 1px solid #8886; padding: .3rem .6rem; }
+.sheet-box { overflow-x: auto; margin: 1rem 0; }
+.sheet { font: 13px/1.4 ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.sheet th { font-weight: 400; opacity: .6; background: #8881; } .sheet td.num { text-align: right; }
+.sheet td.formula { color: #2f6fde; } @media (prefers-color-scheme: dark) { .sheet td.formula { color: #7aa7ff; } }
 nav { font-size: .85rem; opacity: .7; margin-bottom: 1rem; }
 </style></head><body><nav>${home} · ${esc(title)}</nav><main>${body}</main>
 <script>

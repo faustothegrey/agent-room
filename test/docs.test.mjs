@@ -6,7 +6,7 @@ import { createServer, request } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ATTACH_LIMIT, broadcast, docFiles, handle, isTextFile, isViewable, listFiles, messageView, pick, roomBranch, saveAttachments } from '../src/docs.mjs';
+import { ATTACH_LIMIT, broadcast, csvTable, docFiles, handle, isTextFile, isViewable, listFiles, messageView, pick, roomBranch, saveAttachments } from '../src/docs.mjs';
 
 // A proposal/ folder with a doc, a drawing, a hidden file, and a file just outside it.
 function fixture() {
@@ -42,6 +42,37 @@ test('Markdown is rendered with images inline, and plain links to images get a p
   assert.match(html, /<img src="drawings\/flow.png" alt="flow">/);
   assert.match(html, /<a href="drawings\/sketch.png">the sketch<\/a><img class="preview" src="drawings\/sketch.png"/);
   assert.match(html, /<a href="https:\/\/example.com">site<\/a>(?!<img)/);
+});
+
+test('a ```csv block shows as a table: column letters, row numbers, formulas worked out, every cell named', async () => {
+  const dir = fixture();
+  writeFileSync(join(dir, 'runs.md'), '# Runs\n\n```csv runs\nday,runs,minutes,per run\n11 Nov,9,54,=C2/B2\n"16 Nov, late",42,250,=C3/B3\nTotal,=SUM(B2:B3),=SUM(C2:C3),=C4/B4\n```\n\n```js\nconst a = 1;\n```\n');
+  const s = await serve(dir);
+  const html = await (await s.get('/runs.md')).text();
+  s.close();
+  assert.match(html, /<table class="sheet" data-sheet="runs"><thead><tr><th><\/th><th>A<\/th><th>B<\/th><th>C<\/th><th>D<\/th><\/tr>/);
+  assert.match(html, /<tr><th>1<\/th><td data-cell="A1" title="A1">day<\/td>/);
+  assert.match(html, /<td data-cell="A3" title="A3">16 Nov, late<\/td>/); // a quoted comma stays in its cell
+  assert.match(html, /<td data-cell="D2" class="formula num" title="D2: =C2\/B2">6<\/td>/);
+  assert.match(html, /<td data-cell="B4" class="formula num" title="B4: =SUM\(B2:B3\)">51<\/td>/);
+  assert.match(html, /<td data-cell="D4" class="formula num" title="D4: =C4\/B4">5.96<\/td>/); // 304 / 51, two decimals at most
+  assert.match(html, /<pre><code class="language-js">const a = 1;/); // other code blocks are unchanged
+});
+
+test('table formulas: AVERAGE, MIN, MAX, precedence; errors show in the cell; cell text is escaped', () => {
+  const html = csvTable('2,4,=AVERAGE(A1:B1)+MIN(A1:B1)*MAX(A1:B1)\n=A1/0,=Z9,=C2\n=B3,<b>x</b>,=A1+\n,=(A1+B1)*-2,=A2');
+  const cell = (ref) => new RegExp(`data-cell="${ref}"[^>]*>([^<]*)<`).exec(html)[1];
+  assert.equal(cell('C1'), '11'); // 3 + 2 * 4
+  assert.equal(cell('A2'), '#DIV/0');
+  assert.equal(cell('B2'), '#REF');
+  assert.equal(cell('C2'), '#CYCLE');
+  assert.equal(cell('A3'), '&lt;b&gt;x&lt;/b&gt;'); // a reference to text shows the text, escaped
+  assert.equal(cell('C3'), '#VALUE');
+  assert.equal(cell('A4'), ''); // an empty cell stays empty
+  assert.equal(cell('B4'), '-12');
+  assert.equal(cell('C4'), '#DIV/0'); // an error passes through a reference
+  assert.ok(!html.includes('<b>'));
+  assert.match(html, /data-sheet="table"/);
 });
 
 test('files are served with their type; nothing outside proposal/ or hidden is', async () => {
