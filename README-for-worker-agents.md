@@ -29,6 +29,10 @@ discussion, with a 30-minute timeout per instruction.
   task on your branch, with a message starting with the label your instructions give (its origin
   in brackets, such as `[2026-11-09-topic]` or `[brainstorm]`), and give the commit ID in your reply.
   Never merge into the User's main or push.
+- **Dependencies are already set up in your worktree** (its `node_modules` is linked to the room's,
+  so the project's code and tests run as they are). Do not run `npm install` or `npm ci` in the
+  worktree: that would replace the link. If a dependency is genuinely missing, report it instead of
+  installing it.
 - **Scratch notes go in `.worker-notes/<task>/` in your worktree**, one folder per task (a short
   name, such as `stage-a`). Git ignores them: never commit them. Delete a task's folder only when
   the User says "stage accepted"; your code and branch stay. Plans and notes for the User's review

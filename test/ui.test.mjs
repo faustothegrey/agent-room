@@ -1144,6 +1144,19 @@ test('the worker is told about its scratch notes; .worker-notes is ignored by Gi
   assert.equal(readFileSync(exclude, 'utf8').split('\n').filter((l) => l === '.worker-notes/').length, 1);
 });
 
+test("the worker's worktree links the room's node_modules and ignores the link", async () => {
+  const { mkdirSync, writeFileSync, realpathSync, lstatSync } = await import('node:fs');
+  const { ctx } = await workerRoom();
+  const git = await gitRoom(ctx.cwd);
+  mkdirSync(`${ctx.cwd}/node_modules`, { recursive: true });
+  writeFileSync(`${ctx.cwd}/node_modules/a-package.js`, 'x\n');
+  await work(ctx, 'do it');
+  const path = `${realpathSync(ctx.cwd)}.worker`;
+  assert.ok(lstatSync(`${path}/node_modules`).isSymbolicLink());
+  assert.equal(realpathSync(`${path}/node_modules`), realpathSync(`${ctx.cwd}/node_modules`));
+  assert.equal(git('-C', path, 'status', '--porcelain'), '');
+});
+
 
 test('worker switches after a running failure, carries history, and retains its session on model changes', async () => {
   const { queueWork, saveSettings } = await import('../src/ui.mjs');

@@ -8,7 +8,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
-import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -2692,12 +2692,28 @@ const mainRef = async (top) => (await gitOk(top, 'rev-parse', '--verify', '-q', 
 // The worker's scratch notes, <worktree>/.worker-notes/<task>/, are ignored by Git in any project:
 // listed in the repository's own info/exclude (local, never committed), once.
 export const NOTES = '.worker-notes';
-async function ignoreNotes(place) {
+async function ignoreNotes(place) { await appendExclude(place, `${NOTES}/`); }
+// Adds an entry to the worktree's local info/exclude (local to that worktree, never committed),
+// once. `entry` is the exact line: a trailing slash ignores a folder only, none ignores a file,
+// folder or symlink.
+async function appendExclude(place, entry) {
   const file = await git(place.path, 'rev-parse', '--path-format=absolute', '--git-path', 'info/exclude');
   const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
-  if (text.split('\n').some((l) => l.trim().replace(/^\/|\/$/g, '') === NOTES)) return;
+  if (text.split('\n').some((l) => l.trim().replace(/^\/|\/$/g, '') === entry.replace(/^\/|\/$/g, ''))) return;
   mkdirSync(dirname(file), { recursive: true });
-  appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}${NOTES}/\n`);
+  appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}${entry}\n`);
+}
+// The worktree has no node_modules of its own (it isn't committed): link the room's in, so the
+// worker's code and tests run without installing again. The link is ignored locally, so it never
+// dirties the worktree; the worktree and its room are on one filesystem, so the link is valid.
+async function linkDeps(place) {
+  const source = [join(place.root, 'node_modules'), join(place.top, 'node_modules')].find((p) => existsSync(p));
+  if (!source) return;                    // nothing installed to link
+  const target = join(place.path, 'node_modules');
+  try { if (lstatSync(target).isSymbolicLink()) return; } catch {} // already linked
+  if (existsSync(target)) return;         // a real node_modules already there: leave it
+  symlinkSync(source, target, 'dir');
+  await appendExclude(place, 'node_modules');
 }
 
 // The worktree compared with the room: whether it exists, the room's HEAD, commits on each side,
@@ -2767,7 +2783,7 @@ export async function refreshWorker(ctx, { prepare = false, fastForward = true, 
   place ??= await lanePlace(ctx, laneOf(ctx));
   if (prepare && !place.disabled) {
     try {
-      await ensureWorktree(place); await ignoreNotes(place);
+      await ensureWorktree(place); await ignoreNotes(place); await linkDeps(place);
       let s = await worktreeStatus(place);
       if (fastForward) s = await catchUp(place, s);
       (ctx.workerDir ??= { path: null }).path = s.exists ? place.cwd : null;
