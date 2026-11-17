@@ -78,6 +78,10 @@ room can be of any kind.
   is built for this: the User can click a cell, and you then receive a `[pointing at: …]` line
   with their message naming it. Refer to a cell in chat as `[[D4]]` (or `[[name!D4]]`); the room
   highlights it for the User. Use it when numbers are compared; prose and drawings are still fine.
+- **Diagrams the User can point at (an option):** a ```` ```mermaid ```` block in the notes is drawn
+  in the Document tab. In a flowchart the User can click a box, and you receive its name (its id in
+  the source: `Worker` in `Worker[The worker]`, so give boxes short, meaningful ids); refer to a box
+  in chat as `[[Worker]]` and the room highlights it. SVG drawings in `drawings/` are still fine.
 
 ## Sending work to the worker in steps
 This applies in discussions only (a brainstorm sends no work).
