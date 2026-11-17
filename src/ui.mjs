@@ -85,7 +85,7 @@ export function validateSettings(value) {
     throw new Error('Choose between 1 and 8 discussion agents.');
   const names = new Set();
   const agent = (a) => {
-    if (!a || !['claude', 'codex', 'agy'].includes(a.provider)) throw new Error('Choose Claude, Codex or agy.');
+    if (!a || !['claude', 'codex', 'agy'].includes(a.provider)) throw new Error('Choose Claude, Codex or Agy.');
     if (typeof a.name !== 'string' || !/^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(a.name)) throw new Error('Names must use letters, numbers, underscores or hyphens.');
     if (names.has(a.name.toLowerCase())) throw new Error('Each agent and the worker need a different name.');
     names.add(a.name.toLowerCase());
@@ -136,7 +136,7 @@ export function modelChoices() {
 }
 // A model's name for the tab titles: its label in the catalog (or its ID), "<Provider> default" for the CLI default.
 function modelLabel(provider, model) {
-  if (!model) return `${provider === 'agy' ? 'agy' : provider[0].toUpperCase() + provider.slice(1)} default`;
+  if (!model) return `${provider[0].toUpperCase() + provider.slice(1)} default`;
   return modelChoices()[provider]?.find((m) => m.id === model)?.label ?? model;
 }
 // The Providers tab: the shared defaults for discussion members and the worker together. Before
@@ -1570,7 +1570,7 @@ async function closeNamedDiscussion(ctx, name) {
     // agents (`closingAgent`: a stand-in for tests).
     if (!target.closingStatement) throw new Error('No agent is available to write the closing statement: Reload or Restart, then close again.');
     const spec = parseSpec(target.workerSpec ?? 'claude', true);
-    const writer = `${spec.provider === 'agy' ? 'agy' : spec.provider[0].toUpperCase() + spec.provider.slice(1)} (${modelLabel(spec.provider, spec.model)})`;
+    const writer = `${spec.provider[0].toUpperCase() + spec.provider.slice(1)} (${modelLabel(spec.provider, spec.model)})`;
     note(ctx, `Closing ${d.name}: ${writer} is writing the closing statement…`);
     const statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports }, target.closingAgent?.());
     const file = join(target.discussion.dir, 'closing-statement.md');

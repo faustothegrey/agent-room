@@ -2367,7 +2367,7 @@ function agentRow(parent, a, models, title, member = null) {
   let checked;
   if (member) { checked = field('On', document.createElement('input')); checked.type = 'checkbox'; checked.parentElement.className = 'member-toggle'; checked.checked = a.active; }
   const provider = field('provider', document.createElement('select'));
-  for (const p of ['claude', 'codex', 'agy']) provider.add(new Option(p === 'claude' ? 'Claude' : p === 'codex' ? 'Codex' : 'agy', p));
+  for (const p of ['claude', 'codex', 'agy']) provider.add(new Option(p === 'claude' ? 'Claude' : p === 'codex' ? 'Codex' : 'Agy', p));
   provider.value = a.provider;
   const name = field('name', document.createElement('input')); name.value = a.name; name.required = !member || a.active;
   const model = field('model', document.createElement('select'));

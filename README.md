@@ -60,7 +60,7 @@ still going on: a request of this page, or a command (Resume, Close, Summarize, 
 been waiting or running for more than 0.3 seconds. It turns red for 1.5 seconds when the action
 fails; the error is shown as before. It is not shown for agents thinking or the worker working.
 
-The monitor panel watches agent-room's own Claude, Codex and agy programs and Claude and Codex login, for the room
+The monitor panel watches agent-room's own Claude, Codex and Agy programs and Claude and Codex login, for the room
 being viewed. A ⚠ right of a provider's name means a problem: **amber** when its login ends in 2
 days or less, its login status is unknown (the status command failed or its output couldn't be
 read; the error is shown), or one of its programs is left over; **red** when logged out or the login
@@ -453,10 +453,10 @@ from later rounds and summaries in this discussion; **Enable** brings it back wi
 session. At least one agent must remain enabled. This choice survives Reload and Resume of the
 discussion, and does not change other discussions or future-room defaults.
 
-- **Provider:** Claude, Codex or agy, for both discussion agents and the worker.
+- **Provider:** Claude, Codex or Agy, for both discussion agents and the worker.
 - **Model:** Claude offers Opus, Sonnet and Haiku aliases. Codex reads the visible entries in
   its local `models_cache.json` under `CODEX_HOME` or `~/.codex`. There is no live account-model
-  lookup for Codex. agy reads its available models from `agy models`. If a catalog is unavailable,
+  lookup for Codex. Agy reads its available models from `agy models`. If a catalog is unavailable,
   use CLI default or a custom model ID.
 - **CLI default:** pass no model argument and let that CLI choose.
 - **Custom…:** enter a model ID supported by your installed CLI and account.
@@ -520,8 +520,8 @@ reset times, and when the meter last measured them, as `on HH:MM` (hover for whe
 
 Quotas come from the optional local meter at `http://127.0.0.1:9899` (override with
 `AGENT_ROOM_METER`). They refresh every minute and after turns. If the meter is unavailable,
-the header and usage report say so; the room still works. For agy, the meter’s Antigravity
-model entries supply the highest used percentage in each available window. agy login is not monitored.
+the header and usage report say so; the room still works. For Agy, the meter’s Antigravity
+model entries supply the highest used percentage in each available window. Agy login is not monitored.
 
 ## Launch options and commands
 
@@ -764,8 +764,8 @@ is an instruction, not a sandbox. The worker may edit files and run commands whe
 Claude discussion agents and workers get pre-approved Bash, file tools, web search/fetch,
 sub-agents, skills, and the allowed look-and-click Chrome tools.
 Claude uses strict MCP configuration rather than your claude.ai connectors. Codex discussion
-agents and workers run without a sandbox and with live web search configured. agy discussion agents
-and workers use `--dangerously-skip-permissions`; agy also loads its own local instructions. Its
+agents and workers run without a sandbox and with live web search configured. Agy discussion agents
+and workers use `--dangerously-skip-permissions`; Agy also loads its own local instructions. Its
 rulebook is prefixed to the first prompt and sent again when it changes.
 
 The server listens on `0.0.0.0`: devices on the LAN can open its printed IP address and
