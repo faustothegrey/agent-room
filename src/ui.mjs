@@ -1552,6 +1552,9 @@ async function closeNamedDiscussion(ctx, name) {
     // Written by the worker's provider and model as set for this discussion, not by its discussion
     // agents (`closingAgent`: a stand-in for tests).
     if (!target.closingStatement) throw new Error('No agent is available to write the closing statement: Reload or Restart, then close again.');
+    const spec = parseSpec(target.workerSpec ?? 'claude', true);
+    const writer = `${spec.provider === 'agy' ? 'agy' : spec.provider[0].toUpperCase() + spec.provider.slice(1)} (${modelLabel(spec.provider, spec.model)})`;
+    note(ctx, `Closing ${d.name}: ${writer} is writing the closing statement…`);
     const statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports }, target.closingAgent?.());
     const file = join(target.discussion.dir, 'closing-statement.md');
     const temp = `${file}.${process.pid}.tmp`;
@@ -1603,7 +1606,7 @@ async function closeNamedDiscussion(ctx, name) {
         switchTo(target, null);
       }
     }
-    note(ctx, `Closed ${d.name}.`);
+    note(ctx, `Closed ${d.name}. Closing statement written by ${writer}.`);
     if (snapshot) saveClosed(ctx, target, snapshot);
   } catch (err) {
     note(ctx, `✗ Could not close ${d.name}: ${err.message}`, true);

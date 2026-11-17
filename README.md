@@ -244,7 +244,7 @@ discussion's row. It refuses new worker instructions and waits for its queued an
 while waiting the row says **closing, waiting for worker** and offers **Cancel close**. A one-off
 agent with the provider and model set in that discussion's **Worker · provider & model** panel
 (not the discussion agents, nor the worker's own session) then reads the discussion's notes and
-transcripts and writes a closing statement pointing to `pending-instructions.md`; agent-room writes the one
+transcripts and writes a closing statement pointing to `pending-instructions.md` (the system messages name its provider and model, when it starts and when the discussion is closed); agent-room writes the one
 current `closing-statement.md`, ends the sessions and marks the discussion closed. Unresolved worker
 edits still prevent Close. If Close fails or is cancelled, the discussion stays open or paused and
 can be retried. **Quit room** ends the room, and Restart brings back every open discussion and

@@ -1465,7 +1465,12 @@ test('Close asks one agent with the worker\'s settings for the statement, never 
   for (const agent of ctx.room.agents) agent.turn = async () => { throw new Error('a discussion agent was asked'); };
   const prompts = [];
   ctx.closingAgent = () => ({ name: 'W', turn: async (p) => { prompts.push(p); return 'Statement: pending-instructions.md'; } });
+  const notes = [];
+  ctx.docs = { ...ctx.docs, broadcast: (screen, event) => { if (event.type === 'note') notes.push(event.text); } };
   await handleLine('/close', ctx);
+  // The system messages say who writes the statement: the worker's provider and model (claude:W, CLI default).
+  assert.ok(notes.includes(`Closing ${name}: Claude (Claude default) is writing the closing statement…`));
+  assert.equal(notes.at(-1), `Closed ${name}. Closing statement written by Claude (Claude default).`);
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /The User is closing this discussion\./);
   assert.ok(ctx.screen.room.closedDiscussions.includes(name));
