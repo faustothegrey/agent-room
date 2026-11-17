@@ -262,6 +262,31 @@ test('agent settings persist, apply before startup, and switch only the active w
   assert.equal(readFileSync(file, 'utf8'), before);
 });
 
+test('Providers tab: members and worker together; before the start they apply too, after it only the defaults change', async () => {
+  const { saveDefaultSettings, readDefaults } = await import('../src/ui.mjs');
+  const { readFileSync } = await import('node:fs');
+  const file = `${await tmp('defaults-test-')}/config/defaults.json`;
+  const ctx = { ...freshCtx(), workerSpec: 'claude:Worker' };
+  Object.assign(ctx, await load(ctx, ''));
+  const first = { agents: [{ provider: 'codex', name: 'Ada', model: '' }, { provider: 'claude', name: 'Linus', model: 'opus' }],
+    worker: { provider: 'codex', name: 'Worker', model: '' }, scope: 'defaults' };
+  assert.equal((await saveDefaultSettings(ctx, first, file)).applied, true); // not started: this discussion too
+  assert.equal(ctx.agentSpecs, 'codex:Ada:,claude:Linus:opus');
+  assert.equal(ctx.workerSpec, 'codex:Worker:');
+  ctx.agentsStarted = true;
+  const running = { room: ctx.room, worker: ctx.worker, agentSpecs: ctx.agentSpecs, workerSpec: ctx.workerSpec };
+  const later = { agents: [{ provider: 'claude', name: 'Bob', model: 'haiku' }, { provider: 'agy', name: 'Agy', model: '' }],
+    worker: { provider: 'claude', name: 'Ada', model: '' }, scope: 'defaults' }; // Ada: a running agent's name is fine for the worker of future discussions
+  assert.equal((await saveDefaultSettings(ctx, later, file)).applied, false);
+  for (const key of Object.keys(running)) assert.equal(ctx[key], running[key]); // the running discussion is untouched
+  const { scope, ...expected } = later;
+  assert.deepEqual(readDefaults(file), expected);
+  assert.deepEqual(ctx.screen.getSettings().launchDefaults, expected); // new discussions in this room use them
+  const before = readFileSync(file, 'utf8');
+  await assert.rejects(saveDefaultSettings(ctx, { ...later, worker: later.agents[0] }, file), /different name/);
+  assert.equal(readFileSync(file, 'utf8'), before);
+});
+
 test('/move: a whole discussion into archive/ or deferred/ and back; never the one in use', async () => {
   const { existsSync, mkdirSync, writeFileSync } = await import('node:fs');
   const { dirname, basename, join } = await import('node:path');

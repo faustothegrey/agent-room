@@ -789,6 +789,8 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #header, #bar { background: #88808; }
 .agent-settings { border-bottom: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--tint); padding: .5rem .8rem; max-height: 45%; overflow-y: auto; flex-shrink: 0; }
 .agent-settings summary { cursor: pointer; font-weight: 600; font-size: .85rem; }
+.providers-panel { padding: .6rem .9rem; overflow-y: auto; }
+.providers-heading { font-size: .85rem; margin: .9rem 0 .2rem; }
 .settings-hint, .settings-status { font-size: .8rem; margin: .5rem 0; }
 .settings-hint { color: var(--dim); }
 .agent-row { display: flex; flex-wrap: wrap; gap: .5rem; padding: .6rem; margin: .6rem 0; border: 1px solid var(--line); border-left: 3px solid var(--provider); border-radius: 6px; background: Canvas; }
@@ -820,7 +822,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <div id="busy" aria-hidden="true"></div>
 </header>
 <div id="left">
-  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
+  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button class="tab" id="tab-providers" role="tab" title="Default providers and models for new discussions: members and worker together">Providers</button></div>
   <div class="view" id="talk">
     <details class="agent-settings" id="talk-settings">
       <summary>Discussion members · provider & model</summary>
@@ -841,6 +843,19 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"></textarea>
       <div id="attach-row"><button type="button" id="attach" title="Attach files to your next message: saved into the discussion's files/ folder when you send it (25 MB at most each)">📎 Attach</button><input type="file" id="attach-input" multiple hidden><span id="attachments"></span><span id="pointed"></span></div>
     </div>
+  </div>
+  <div class="view" id="providers" hidden>
+    <form class="providers-panel" id="providers-form">
+      <p class="settings-hint" id="providers-hint"></p>
+      <h3 class="providers-heading">Discussion members</h3>
+      <div id="providers-agent-rows"></div>
+      <p class="settings-hint member-note" id="providers-member-note" hidden></p>
+      <h3 class="providers-heading">Worker</h3>
+      <div id="providers-worker-row"></div>
+      <p class="settings-hint">CLI default uses the provider’s settings. Custom model IDs require account access. Changes save automatically.</p>
+      <p class="settings-status" id="providers-status" role="status"></p>
+      <button type="button" id="providers-done">Go to the discussion</button>
+    </form>
   </div>
   <div class="view" id="work" hidden>
     <details class="agent-settings" id="work-settings">
@@ -994,14 +1009,17 @@ function statusEl(text, error) { const el = document.createElement('div'); el.cl
 // The two tabs. A worker reply while the Discussion tab is shown marks the Worker tab.
 function showTab(name) {
   tab = name;
-  $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work';
-  $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work');
+  $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work'; $('providers').hidden = name !== 'providers';
+  $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work'); $('tab-providers').classList.toggle('on', name === 'providers');
+  if (name === 'providers') { renderProviders(); updateReplicaView(); return; }
   if (name === 'work') { $('tab-work').classList.remove('news'); post('__workerinfo', {}).catch(() => {}); } // its branches' checks, again
   updateReplicaView();
   (name === 'work' ? wbox : box).focus();
 }
 $('tab-talk').onclick = () => showTab('talk');
 $('tab-work').onclick = () => showTab('work');
+$('tab-providers').onclick = () => showTab('providers');
+$('providers-done').onclick = () => showTab('talk');
 function workMessage(m, live) {
   if (m.note) return status(m.note, m.error, 'Worker'); // a marker (New discussion) or an error
   const el = bubble(m);
@@ -2277,7 +2295,7 @@ function setRoom(r) {
   if (changed) { peek = null; updateTabs(); }
   // The members panel follows the room: each agent's state, or the usual panel once a new discussion begins.
   if (membersModels && $('talk-settings').open) { if (!r?.fresh) renderMembers(); else $('talk-settings').ontoggle(); }
-  if (fresh) $('talk-settings').open = true;
+  if (fresh) { $('talk-settings').open = true; if (localInput) showTab('providers'); }
   renderAutoDev();
   $('room-name').textContent = r.folder?.replace(/[/]+$/, '').split('/').pop() || r.folder || 'agent-room';
   $('disc').textContent = r.discussion || '';
@@ -2473,6 +2491,50 @@ for (const scope of ['talk', 'work']) {
   form.onchange = saveChanges;
   form.onsubmit = (e) => { e.preventDefault(); saveChanges(); };
 }
+// The Providers tab: the defaults for new discussions, members and worker together, saved to the
+// shared defaults file (every room). Before this discussion starts they apply to it too. Shown
+// first on a new discussion; the Discussion and Worker tabs' own panels work as before.
+let providerRows = null;
+async function renderProviders() {
+  const status = $('providers-status'), agentsBox = $('providers-agent-rows'), workerBox = $('providers-worker-row'), note = $('providers-member-note');
+  status.textContent = ''; providerRows = null;
+  agentsBox.replaceChildren(); workerBox.replaceChildren();
+  try {
+    await settingsSave;
+    const res = await fetch('__settings');
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json(), sel = selectedSettings(data);
+    let agents;
+    if (sel.agents.length >= 2 && sel.agents.length <= 3) {
+      const plan = memberPlan(sel.agents, sel.worker), controls = [];
+      const refresh = () => { controls.forEach((c) => c.refresh()); note.hidden = !plan.rows.some((r, i) => plan.locked(i)); };
+      note.textContent = 'At least two members. To swap one, tick the new row first, then untick the old one.';
+      plan.rows.forEach((a, i) => controls.push(agentRow(agentsBox, a, data.models, 'Agent ' + (i + 1), {
+        provider: (p) => plan.setProvider(i, p), name: (n) => plan.setName(i, n),
+        toggle: (on) => plan.toggle(i, on), locked: () => plan.locked(i), refresh,
+      })));
+      agents = controls; refresh();
+    } else agents = sel.agents.map((a, i) => agentRow(agentsBox, a, data.models, 'Agent ' + (i + 1)));
+    providerRows = { agents, worker: agentRow(workerBox, sel.worker, data.models, 'Worker') };
+    $('providers-hint').textContent = data.started
+      ? 'Defaults for new discussions, in this room and every other. This discussion has started: it keeps its agents and worker (change those in its own tabs).'
+      : 'Defaults for new discussions, in this room and every other. This discussion hasn’t started, so they apply to it too.';
+  } catch (err) { status.textContent = 'Could not load settings: ' + err.message; }
+}
+function saveProviders() {
+  const status = $('providers-status');
+  if (!providerRows) return;
+  if ([...providerRows.agents, providerRows.worker].some((row) => row.incomplete())) { status.textContent = 'Enter a custom model ID to save this choice.'; return; }
+  const value = { agents: providerRows.agents.filter((row) => row.active()).map((row) => row.get()), worker: providerRows.worker.get(), scope: 'defaults' };
+  status.textContent = 'Saving…';
+  settingsSave = settingsSave.then(async () => {
+    const res = await post('__settings', value);
+    if (!res.ok) throw new Error(await res.text());
+    status.textContent = (await res.json()).applied ? 'Saved: the defaults, and this discussion.' : 'Saved as the defaults for new discussions.';
+  }).catch((err) => { status.textContent = 'Could not save: ' + err.message; });
+}
+$('providers-form').onchange = saveProviders;
+$('providers-form').onsubmit = (e) => { e.preventDefault(); saveProviders(); };
 // This server's rooms. Their addresses are paths on this page's host, so switching also works from
 // another LAN device.
 $('switchroom').onclick = async () => {

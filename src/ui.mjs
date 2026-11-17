@@ -139,6 +139,23 @@ function modelLabel(provider, model) {
   if (!model) return `${provider === 'agy' ? 'agy' : provider[0].toUpperCase() + provider.slice(1)} default`;
   return modelChoices()[provider]?.find((m) => m.id === model)?.label ?? model;
 }
+// The Providers tab: the shared defaults for discussion members and the worker together. Before
+// this discussion starts they also apply to it, as the tab panels' changes do then. After, they
+// change only the defaults (the file, and this room's for new discussions), never the running
+// agents or worker: those stay with the Discussion and Worker tabs' own panels.
+export async function saveDefaultSettings(ctx, value, file = defaultsFile()) {
+  const settings = validateSettings(value);
+  if (!settingsStarted(ctx)) return saveSettings(ctx, settings, file);
+  mkdirSync(dirname(file), { recursive: true });
+  const temp = `${file}.${process.pid}.tmp`;
+  writeFileSync(temp, JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 });
+  renameSync(temp, file);
+  const launch = roomDefaults(ctx);
+  launch.agents = settings.agents.map(specFor).join(',');
+  launch.worker = specFor(settings.worker);
+  showHeader(ctx);
+  return { applied: false, settings };
+}
 // Work in another open discussion must not change this discussion's settings boundary.
 const settingsStarted = (ctx) => !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length;
 export async function saveSettings(ctx, value, file = defaultsFile()) {
@@ -319,7 +336,7 @@ function wire(ctx) {
       launchDefaults: { agents: launch.agents.split(',').map((s) => parseSpec(s)), worker: parseSpec(launch.worker, true) },
       models: modelChoices(), started: settingsStarted(ctx) };
   };
-  ctx.screen.saveSettings = (value) => saveSettings(ctx, value);
+  ctx.screen.saveSettings = (value) => (value?.scope === 'defaults' ? saveDefaultSettings(ctx, value) : saveSettings(ctx, value));
   ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
   ctx.screen.cancelClose = (name) => cancelClose(ctx, name);
   ctx.screen.setAgentEnabled = (name, enabled, member) => setAgentEnabled(ctx, name, enabled, { member });

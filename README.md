@@ -425,6 +425,12 @@ speak. Untick a member only after ticking its replacement. Names suggested from 
 editable. If a discussion was launched with one or more than three agents, the panel keeps all its
 existing rows and lets you edit them; use `--agents` to choose a different count.
 
+The **Providers** tab (beside Discussion and Worker) holds the defaults for new discussions, the
+members and the worker together, and is shown first when a new discussion opens (**Go to the
+discussion** returns to the chat). Before the discussion starts, its changes apply to it too; after,
+they change only the defaults (for new discussions in this room and every other), never the running
+agents or worker. The two tabs' own panels below work as before.
+
 Defaults save automatically to `~/.config/agent-room/defaults.json`, shared across project
 folders and subsequent launches, including the Dock launcher. Dropdown selections save on change;
 text edits save when committed, such as by leaving the field. A custom model choice waits for
