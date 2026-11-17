@@ -134,6 +134,10 @@ agent's model and the worker's, as their panels list them ("<provider> default" 
     the message box, and your next message ends with one `[pointing at: …]` line naming the cell, its value,
     its row and column labels and its formula (✕ on a chip drops it; commands never carry it). A
     `[[D4]]` or `[[runs!D4]]` in the chat highlights that cell in the shown document while you hover it.
+  - **Diagrams.** A ```` ```mermaid ```` block is drawn as a diagram (Mermaid, loaded only for documents
+    that have one; a diagram with an error shows Mermaid's message). In a flowchart, click a box to point
+    at it the same way (`[pointing at: diagram box Worker ("The worker") in …]`), and `[[Worker]]` in the
+    chat highlights that box: a box's name is its id in the source (`Worker` in `Worker[The worker]`).
 - **Terminal** (below Explorer/Document, collapsed): a shell on this computer, in the room's
   folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening it starts a
   fresh shell; collapsing it, reloading the page or stopping the server ends it. It appears only

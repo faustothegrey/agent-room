@@ -135,6 +135,38 @@ test('a shown document highlights the cells a hovered [[reference]] names, only 
   assert.match(html, /d\.ref === td\.dataset\.cell \|\| d\.ref === sheet \+ '!' \+ td\.dataset\.cell/);
 });
 
+test('a ```mermaid block: its source is kept (escaped) for the page to draw, and only then is mermaid loaded', async () => {
+  const dir = fixture();
+  writeFileSync(join(dir, 'flow.md'), '# Flow\n\n```mermaid\nflowchart LR\n  A[<b>Room</b>] --> Worker\n```\n');
+  const s = await serve(dir);
+  const flow = await (await s.get('/flow.md')).text();
+  const plan = await (await s.get('/plan.md')).text();
+  const lib = await s.get('/__lib/mermaid.js');
+  const body = await lib.text();
+  const post = await fetch(s.base + '/__lib/mermaid.js', { method: 'POST' });
+  s.close();
+  assert.match(flow, /<div class="mermaid-box"><pre class="mermaid-src">flowchart LR\n {2}A\[&lt;b&gt;Room&lt;\/b&gt;\] --&gt; Worker<\/pre><\/div>/);
+  assert.match(flow, /<script src="\/__lib\/mermaid\.js"><\/script>/);
+  assert.ok(!plan.includes('__lib/mermaid.js')); // a document without a diagram doesn't load it
+  assert.match(lib.headers.get('content-type'), /text\/javascript/);
+  assert.ok(body.length > 1e6 && body.includes('mermaid'));
+  assert.equal(post.status, 405);
+});
+
+test('a document page\'s own script parses as served (it is written inside a template string)', async () => {
+  const dir = fixture();
+  writeFileSync(join(dir, 'both.md'), '```mermaid\nflowchart LR\n  A --> B\n```\n\n```csv\na,b\n```\n');
+  const s = await serve(dir);
+  const html = await (await s.get('/both.md')).text();
+  s.close();
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  assert.equal(scripts.length, 1);
+  assert.doesNotThrow(() => new Function(scripts[0]));
+  assert.match(scripts[0], /\/flowchart-\(\.\+\)-\\d\+\$\//); // the regular expression reaches the browser intact
+  assert.match(scripts[0], /'diagram box ' \+ box/);
+  assert.match(scripts[0], /for \(const g of document\.querySelectorAll\('\.mermaid-box g\.node'\)\)/);
+});
+
 test('files are served with their type; nothing outside proposal/ or hidden is', async () => {
   const s = await serve(fixture());
   const png = await s.get('/drawings/flow.png');

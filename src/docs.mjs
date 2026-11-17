@@ -60,9 +60,12 @@ const md = new Marked({
       if (!IMAGE.test(href)) return false;
       return `<a href="${esc(href)}">${this.parser.parseInline(tokens)}</a><img class="preview" src="${esc(href)}" alt="">`;
     },
-    // ```csv (or ```csv <name>) shows as a table: see csvTable().
+    // ```csv (or ```csv <name>) shows as a table: see csvTable(). ```mermaid is drawn in the page
+    // (page() loads mermaid only for a document that has one); until then, and without
+    // JavaScript, its source shows.
     code({ text, lang }) {
       const [kind, name] = String(lang ?? '').trim().split(/\s+/);
+      if (kind === 'mermaid') return `<div class="mermaid-box"><pre class="mermaid-src">${esc(text)}</pre></div>\n`;
       return kind === 'csv' ? csvTable(text, name) : false;
     },
   },
@@ -251,6 +254,8 @@ function discussionDirs(dir) {
   return found.sort();
 }
 
+const MERMAID_LIB = new URL('../node_modules/mermaid/dist/mermaid.min.js', import.meta.url);
+
 // The page polls the file's mtime and reloads when an agent changes it.
 // base: the room's address (/r/<id>/), so the page's links stay in its room.
 function page(title, body, watch, base = '/') {
@@ -268,9 +273,31 @@ table { border-collapse: collapse; } th, td { border: 1px solid #8886; padding: 
 .sheet td.formula { color: #2f6fde; } @media (prefers-color-scheme: dark) { .sheet td.formula { color: #7aa7ff; } }
 .sheet td { cursor: pointer; } .sheet td:hover { background: #2f6fde1f; }
 .sheet td.hl { outline: 2px solid #e07a10; outline-offset: -2px; background: #e07a1026; }
+.mermaid-box { margin: 1rem 0; overflow-x: auto; } .mermaid-box svg { max-width: 100%; height: auto; }
+.mermaid-box g.node { cursor: pointer; }
+.mermaid-box g.node:hover :is(rect, polygon, path, circle, ellipse) { stroke: #2f6fde !important; stroke-width: 2.5px !important; }
+.mermaid-box g.node.hl :is(rect, polygon, path, circle, ellipse) { stroke: #e07a10 !important; stroke-width: 3.5px !important; }
+.mermaid-error { color: #c33; white-space: pre-wrap; font: 13px ui-monospace, Menlo, monospace; }
 nav { font-size: .85rem; opacity: .7; margin-bottom: 1rem; }
 </style></head><body><nav>${home} · ${esc(title)}</nav><main>${body}</main>
+${body.includes('<div class="mermaid-box">') ? `<script src="${esc(base)}__lib/mermaid.js"></script>` : ''}
 <script>
+// Mermaid blocks: drawn here, with mermaid's strict security (no scripts or click handlers from
+// the source). A source with an error shows mermaid's message under it.
+if (window.mermaid) {
+  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default', flowchart: { htmlLabels: false } });
+  let n = 0;
+  for (const box of document.querySelectorAll('.mermaid-box')) {
+    const src = box.querySelector('.mermaid-src'), id = 'mermaid-' + (++n);
+    mermaid.render(id, src.textContent).then(({ svg }) => { box.innerHTML = svg; }).catch((err) => {
+      const stray = document.getElementById('d' + id); if (stray) stray.remove(); // mermaid's own error drawing, left at the end of the page
+      const p = document.createElement('p'); p.className = 'mermaid-error'; p.textContent = 'This diagram has an error: ' + ((err && err.message) || err);
+      box.append(p);
+    });
+  }
+}
+// A diagram box's name: its id in the source (Worker in "Worker[The worker]").
+const nodeName = (g) => g.dataset.id || (/flowchart-(.+)-\\d+$/.exec(g.id) || [])[1] || null;
 let last = null;
 setInterval(async () => {
   const t = await (await fetch(${JSON.stringify(mtime)} + encodeURIComponent(${JSON.stringify(watch)}), { cache: 'no-store' })).text();
@@ -288,12 +315,27 @@ addEventListener('message', (e) => {
     td.classList.toggle('hl', !!d.on && hit);
     if (hit && !first) first = td;
   }
+  for (const g of document.querySelectorAll('.mermaid-box g.node')) {
+    const hit = d.ref === nodeName(g);
+    g.classList.toggle('hl', !!d.on && hit);
+    if (hit && !first) first = g;
+  }
   if (d.on && first) first.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 });
-// Shown in the room page: a click on a table cell points at it there (a chip by the message box).
+// Shown in the room page: a click on a table cell or a diagram box points at it there (a chip by
+// the message box).
 document.addEventListener('click', (e) => {
-  const td = e.target.closest && e.target.closest('.sheet td[data-cell]');
-  if (!td || parent === window) return;
+  if (parent === window || !e.target.closest) return;
+  const g = e.target.closest('.mermaid-box g.node'), box = g && nodeName(g);
+  if (box) {
+    const label = g.textContent.trim().replace(/\\s+/g, ' ');
+    parent.postMessage({ type: 'agent-room:point', label: '↳ ' + box,
+      text: 'diagram box ' + box + (label && label !== box ? ' ("' + label + '")' : '') + ' in ' + ${JSON.stringify(watch)} }, location.origin);
+    g.classList.add('hl'); setTimeout(() => g.classList.remove('hl'), 1200);
+    return;
+  }
+  const td = e.target.closest('.sheet td[data-cell]');
+  if (!td) return;
   const table = td.closest('table'), sheet = table.dataset.sheet;
   const name = (sheet === 'table' ? '' : sheet + '!') + td.dataset.cell;
   const rowLabel = td.parentElement.querySelector('td').textContent, colLabel = table.tBodies[0].rows[0].cells[td.cellIndex].textContent;
@@ -3079,6 +3121,12 @@ export function handle(req, res, dir, screen, base = '/') {
   if (url.pathname.startsWith('/replica/') && (!ownHost(req.headers.host ?? '') || req.headers.origin)) return send(403, 'text/plain', 'Refused peer origin or Host.');
   if (url.pathname.startsWith('/replica/')) return screen?.replicaHandler ? screen.replicaHandler(req, res) : send(404, 'text/plain', 'This room doesn\'t replicate.');
   if (screen && handleScreen(req, res, url, dir, screen)) return;
+  // mermaid's browser bundle, straight from node_modules, for documents with ```mermaid blocks.
+  if (url.pathname === '/__lib/mermaid.js') {
+    if (req.method !== 'GET') return send(405, 'text/plain', 'Method Not Allowed');
+    res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'x-content-type-options': 'nosniff', 'cache-control': 'max-age=3600' });
+    return res.end(readFileSync(MERMAID_LIB));
+  }
   if (url.pathname === '/__mtime') {
     const rel = url.searchParams.get('f') ?? '';
     if (rel.startsWith('__received/')) return send(200, 'text/plain', 'fixed'); // a received snapshot never changes
