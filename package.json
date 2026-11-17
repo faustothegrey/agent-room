@@ -22,6 +22,9 @@
     "ghostty-web": "^0.4.0",
     "marked": "^18.1.1",
     "mermaid": "11.17.2",
+    "vega": "6.4.0",
+    "vega-embed": "7.3.0",
+    "vega-lite": "6.5.0",
     "ws": "^8.22.2"
   }
 }

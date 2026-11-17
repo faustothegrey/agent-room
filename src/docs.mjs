@@ -66,6 +66,7 @@ const md = new Marked({
     code({ text, lang }) {
       const [kind, name] = String(lang ?? '').trim().split(/\s+/);
       if (kind === 'mermaid') return `<div class="mermaid-box"><pre class="mermaid-src">${esc(text)}</pre></div>\n`;
+      if (kind === 'vega-lite') return `<div class="vl-box"><pre class="vl-src">${esc(text)}</pre></div>\n`;
       return kind === 'csv' ? csvTable(text, name) : false;
     },
   },
@@ -254,7 +255,11 @@ function discussionDirs(dir) {
   return found.sort();
 }
 
-const MERMAID_LIB = new URL('../node_modules/mermaid/dist/mermaid.min.js', import.meta.url);
+// Browser bundles a document page may load (/__lib/<name>), straight from node_modules.
+const LIBS = {
+  'mermaid.js': 'mermaid/dist/mermaid.min.js',
+  'vega.js': 'vega/build/vega.min.js', 'vega-lite.js': 'vega-lite/build/vega-lite.min.js', 'vega-embed.js': 'vega-embed/build/vega-embed.min.js',
+};
 
 // The page polls the file's mtime and reloads when an agent changes it.
 // base: the room's address (/r/<id>/), so the page's links stay in its room.
@@ -278,10 +283,43 @@ table { border-collapse: collapse; } th, td { border: 1px solid #8886; padding: 
 .mermaid-box g.node:hover :is(rect, polygon, path, circle, ellipse) { stroke: #2f6fde !important; stroke-width: 2.5px !important; }
 .mermaid-box g.node.hl :is(rect, polygon, path, circle, ellipse) { stroke: #e07a10 !important; stroke-width: 3.5px !important; }
 .mermaid-error { color: #c33; white-space: pre-wrap; font: 13px ui-monospace, Menlo, monospace; }
+.vl-box { margin: 1rem 0; width: 100%; overflow-x: auto; } .vl-box .vega-embed { width: 100%; }
+.vl-box .hl { stroke: #e07a10 !important; stroke-width: 3px !important; }
 nav { font-size: .85rem; opacity: .7; margin-bottom: 1rem; }
 </style></head><body><nav>${home} · ${esc(title)}</nav><main>${body}</main>
 ${body.includes('<div class="mermaid-box">') ? `<script src="${esc(base)}__lib/mermaid.js"></script>` : ''}
+${body.includes('<div class="vl-box">') ? ['vega', 'vega-lite', 'vega-embed'].map((l) => `<script src="${esc(base)}__lib/${l}.js"></script>`).join('') : ''}
 <script>
+// Vega-Lite blocks: drawn here as SVG. views keeps each chart, for pointing and highlighting.
+const views = [];
+if (window.vegaEmbed) for (const box of document.querySelectorAll('.vl-box')) {
+  const src = box.querySelector('.vl-src'), fail = (err) => {
+    const p = document.createElement('p'); p.className = 'mermaid-error'; p.textContent = 'This chart has an error: ' + ((err && err.message) || err);
+    box.append(p);
+  };
+  let spec;
+  try { spec = JSON.parse(src.textContent); } catch (err) { fail(err); continue; }
+  vegaEmbed(box, spec, { renderer: 'svg', actions: false, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : undefined })
+    .then(({ view }) => { views.push(view); view.addEventListener('click', (e, item) => pointAtDatum(item)); }).catch(fail);
+}
+// A chart item's plain fields, as "day: 16 Nov, runs: 42": not Vega's own (_x, and the
+// runs_start/runs_end it adds for stacking).
+const ownField = (d, k) => !k.startsWith('_') && !(/^(.+)_(start|end)$/.test(k) && k.replace(/_(start|end)$/, '') in d);
+const datumText = (d) => Object.keys(d).filter((k) => ownField(d, k) && d[k] !== null && typeof d[k] !== 'object')
+  .slice(0, 6).map((k) => k + ': ' + d[k]).join(', ');
+function pointAtDatum(item) {
+  if (parent === window || !item || !item.datum || !item.mark || item.mark.role !== 'mark') return;
+  const text = datumText(item.datum); if (!text) return;
+  parent.postMessage({ type: 'agent-room:point', label: '↳ ' + text.split(', ').slice(0, 2).map((p) => p.split(': ')[1]).join(': '),
+    text: 'chart point ' + text + ' in ' + ${JSON.stringify(watch)} }, location.origin);
+}
+// The drawn marks of every chart (items keep their SVG element in _svg, with the SVG renderer).
+function chartItems() {
+  const out = [];
+  const walk = (n) => { for (const c of (n && n.items) || []) { if (c.datum && c._svg && c.mark && c.mark.role === 'mark') out.push(c); walk(c); } };
+  for (const v of views) walk(v.scenegraph().root);
+  return out;
+}
 // Mermaid blocks: drawn here, with mermaid's strict security (no scripts or click handlers from
 // the source). A source with an error shows mermaid's message under it.
 if (window.mermaid) {
@@ -319,6 +357,11 @@ addEventListener('message', (e) => {
     const hit = d.ref === nodeName(g);
     g.classList.toggle('hl', !!d.on && hit);
     if (hit && !first) first = g;
+  }
+  for (const item of chartItems()) { // [[16 Nov]]: every mark with a field of that value
+    const hit = Object.keys(item.datum).some((k) => !k.startsWith('_') && String(item.datum[k]) === d.ref);
+    item._svg.classList.toggle('hl', !!d.on && hit);
+    if (hit && !first) first = item._svg;
   }
   if (d.on && first) first.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 });
@@ -3121,11 +3164,13 @@ export function handle(req, res, dir, screen, base = '/') {
   if (url.pathname.startsWith('/replica/') && (!ownHost(req.headers.host ?? '') || req.headers.origin)) return send(403, 'text/plain', 'Refused peer origin or Host.');
   if (url.pathname.startsWith('/replica/')) return screen?.replicaHandler ? screen.replicaHandler(req, res) : send(404, 'text/plain', 'This room doesn\'t replicate.');
   if (screen && handleScreen(req, res, url, dir, screen)) return;
-  // mermaid's browser bundle, straight from node_modules, for documents with ```mermaid blocks.
-  if (url.pathname === '/__lib/mermaid.js') {
+  // The browser bundles for documents with ```mermaid or ```vega-lite blocks (LIBS).
+  if (url.pathname.startsWith('/__lib/')) {
+    const lib = Object.hasOwn(LIBS, url.pathname.slice(7)) && LIBS[url.pathname.slice(7)];
+    if (!lib) return send(404, 'text/plain', 'Not found');
     if (req.method !== 'GET') return send(405, 'text/plain', 'Method Not Allowed');
     res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'x-content-type-options': 'nosniff', 'cache-control': 'max-age=3600' });
-    return res.end(readFileSync(MERMAID_LIB));
+    return res.end(readFileSync(new URL('../node_modules/' + lib, import.meta.url)));
   }
   if (url.pathname === '/__mtime') {
     const rel = url.searchParams.get('f') ?? '';

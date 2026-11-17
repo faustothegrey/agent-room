@@ -201,3 +201,4 @@ a shown document posts a table cell click to the room page, with its sheet, labe
 a shown document highlights the cells a hovered [[reference]] names, only when its room page asks
 a ```mermaid block: its source is kept (escaped) for the page to draw, and only then is mermaid loaded
 a document page's own script parses as served (it is written inside a template string)
+a ```vega-lite block: its spec is kept (escaped) for the page to draw, with Vega loaded only then; /__lib serves only its list

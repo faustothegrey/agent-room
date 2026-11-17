@@ -138,6 +138,11 @@ agent's model and the worker's, as their panels list them ("<provider> default" 
     that have one; a diagram with an error shows Mermaid's message). In a flowchart, click a box to point
     at it the same way (`[pointing at: diagram box Worker ("The worker") in …]`), and `[[Worker]]` in the
     chat highlights that box: a box's name is its id in the source (`Worker` in `Worker[The worker]`).
+  - **Charts.** A ```` ```vega-lite ```` block (a Vega-Lite JSON spec; its `data` can be inline `values` or a
+    `url` to a file next to the document) is drawn as an SVG chart, with Vega loaded only for documents
+    that have one; a spec with an error shows the message. Click a bar or point to point at it
+    (`[pointing at: chart point day: 16 Nov, runs: 42 in …]`), and `[[16 Nov]]` in the chat highlights
+    every mark with a field of that value.
 - **Terminal** (below Explorer/Document, collapsed): a shell on this computer, in the room's
   folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening it starts a
   fresh shell; collapsing it, reloading the page or stopping the server ends it. It appears only

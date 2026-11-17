@@ -155,7 +155,7 @@ test('a ```mermaid block: its source is kept (escaped) for the page to draw, and
 
 test('a document page\'s own script parses as served (it is written inside a template string)', async () => {
   const dir = fixture();
-  writeFileSync(join(dir, 'both.md'), '```mermaid\nflowchart LR\n  A --> B\n```\n\n```csv\na,b\n```\n');
+  writeFileSync(join(dir, 'both.md'), '```mermaid\nflowchart LR\n  A --> B\n```\n\n```csv\na,b\n```\n\n```vega-lite\n{"mark": "bar"}\n```\n');
   const s = await serve(dir);
   const html = await (await s.get('/both.md')).text();
   s.close();
@@ -165,6 +165,26 @@ test('a document page\'s own script parses as served (it is written inside a tem
   assert.match(scripts[0], /\/flowchart-\(\.\+\)-\\d\+\$\//); // the regular expression reaches the browser intact
   assert.match(scripts[0], /'diagram box ' \+ box/);
   assert.match(scripts[0], /for \(const g of document\.querySelectorAll\('\.mermaid-box g\.node'\)\)/);
+  assert.match(scripts[0], /'chart point ' \+ text \+ ' in ' \+ "both\.md"/);
+  assert.match(scripts[0], /for \(const item of chartItems\(\)\)/);
+});
+
+test('a ```vega-lite block: its spec is kept (escaped) for the page to draw, with Vega loaded only then; /__lib serves only its list', async () => {
+  const dir = fixture();
+  writeFileSync(join(dir, 'chart.md'), '```vega-lite\n{"mark": "bar", "title": "<i>runs</i>"}\n```\n');
+  const s = await serve(dir);
+  const chart = await (await s.get('/chart.md')).text();
+  const plan = await (await s.get('/plan.md')).text();
+  const libs = await Promise.all(['vega', 'vega-lite', 'vega-embed'].map(async (l) => {
+    const res = await s.get(`/__lib/${l}.js`); return [res.status, res.headers.get('content-type'), (await res.text()).length];
+  }));
+  const unknown = await Promise.all(['/__lib/constructor', '/__lib/../package.json', '/__lib/vega'].map(async (p) => (await s.get(p)).status));
+  s.close();
+  assert.match(chart, /<div class="vl-box"><pre class="vl-src">\{&quot;mark&quot;: &quot;bar&quot;, &quot;title&quot;: &quot;&lt;i&gt;runs&lt;\/i&gt;&quot;\}<\/pre><\/div>/);
+  assert.match(chart, /<script src="\/__lib\/vega\.js"><\/script><script src="\/__lib\/vega-lite\.js"><\/script><script src="\/__lib\/vega-embed\.js"><\/script>/);
+  assert.ok(!chart.includes('__lib/mermaid.js') && !plan.includes('__lib/vega'));
+  for (const [status, type, size] of libs) { assert.equal(status, 200); assert.match(type, /text\/javascript/); assert.ok(size > 30000); }
+  assert.deepEqual(unknown, [404, 404, 404]);
 });
 
 test('files are served with their type; nothing outside proposal/ or hidden is', async () => {
