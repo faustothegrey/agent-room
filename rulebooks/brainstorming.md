@@ -86,6 +86,8 @@ room can be of any kind.
   with inline `values` or a `url` to a data file beside the notes) is drawn as a chart. The User can
   click a bar or point, and you receive its fields (`day: 16 Nov, runs: 42`); `[[16 Nov]]` in chat
   highlights the marks with that value.
+  The User can also circle, draw over or point an arrow at these figures; you then receive a line
+  such as `a mark: circled diagram box Worker`.
 
 ## Sending work to the worker in steps
 This applies in discussions only (a brainstorm sends no work).
