@@ -189,6 +189,30 @@ test('a ```vega-lite block: its spec is kept (escaped) for the page to draw, wit
   assert.deepEqual(unknown, [404, 404, 404]);
 });
 
+test('the room page\'s script parses as served (it is written inside a template string)', async () => {
+  const s = await serve(fixture(), { clients: new Set(), transcript: [] });
+  const html = await (await s.get('/__room')).text();
+  s.close();
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  assert.ok(scripts.length >= 1);
+  for (const code of scripts) assert.doesNotThrow(() => new Function(code));
+  assert.match(html, /<input type="checkbox" id="follow"> Follow mentions/);
+  assert.equal((html.match(/<div class="mention-offer" hidden><\/div>/g) || []).length, 2); // by both message boxes
+});
+
+test('mentions: a path names a file of the room, as given or inside the current discussion', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const slice = source.slice(source.indexOf('function resolveMention('), source.indexOf('// Turns the known file paths'));
+  const resolve = (files, active) => new Function('mentionFiles', 'room', new Function('return `' + slice.replace(/`/g, '\\`') + '`')() + '; return resolveMention;')(files, { active });
+  const r = resolve(['README.md', 'discussions/a/notes.md', 'discussions/a/drawings/flow.svg', 'discussions/b/notes.md'], 'discussions/a');
+  assert.equal(r('notes.md'), 'discussions/a/notes.md'); // the current discussion's, not b's
+  assert.equal(r('./drawings/flow.svg'), 'discussions/a/drawings/flow.svg');
+  assert.equal(r('discussions/b/notes.md'), 'discussions/b/notes.md');
+  assert.equal(r('README.md'), 'README.md');
+  assert.equal(r('missing.md'), null);
+  assert.equal(resolve(null, 'discussions/a')('notes.md'), null); // before the list loads
+});
+
 test('files are served with their type; nothing outside proposal/ or hidden is', async () => {
   const s = await serve(fixture());
   const png = await s.get('/drawings/flow.png');

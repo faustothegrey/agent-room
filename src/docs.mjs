@@ -680,6 +680,10 @@ body.resizing iframe { pointer-events: none; } /* the document would swallow the
 #system-messages { flex: none; border-top: 1px solid var(--line); padding: .35rem .6rem; font-size: .75rem; line-height: 1.4; min-height: calc(2.8em + .7rem + 1px); }
 #system-messages .status { margin: 0; font-size: inherit; line-height: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer { border-top: 1px solid var(--line); padding: .6rem; }
+a.mention { text-decoration: underline dotted; cursor: pointer; }
+.mention-offer { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-bottom: .35rem; font-size: .8rem; }
+.mention-offer button { font-size: .8rem; }
+#follow-label { margin-left: auto; display: flex; align-items: center; gap: .3rem; white-space: nowrap; opacity: .8; }
 #attach-row { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-top: .35rem; font-size: .8rem; }
 #attach { font-size: .8rem; padding: .1rem .5rem; }
 .ref { font-family: ui-monospace, Menlo, monospace; font-size: .9em; background: #e07a1026; border: 1px solid transparent; border-radius: 4px; padding: 0 .25em; cursor: default; } .ref:hover { border-color: #e07a10; }
@@ -831,7 +835,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     </details>
     <div id="failed-agents" role="status" hidden></div>
     <div class="chat-wrap"><div class="chat" id="chat"></div><button class="scroll-end" id="talk-end" aria-label="Scroll to latest discussion messages" title="Scroll to latest messages" hidden>↓</button></div>
-    <div class="composer" id="composer">
+    <div class="composer" id="composer"><div class="mention-offer" hidden></div>
       <div id="remote-view" hidden></div>
       <div id="autodev" role="status" hidden></div>
       <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"></textarea>
@@ -851,7 +855,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     </details>
     <div id="winfo" aria-live="polite"></div>
     <div class="chat-wrap"><div class="chat" id="wchat"></div><button class="scroll-end" id="work-end" aria-label="Scroll to latest worker messages" title="Scroll to latest messages" hidden>↓</button></div>
-    <div class="composer" id="wcomposer">
+    <div class="composer" id="wcomposer"><div class="mention-offer" hidden></div>
       <textarea class="box" id="wbox" placeholder="Instructions for the worker (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands."></textarea>
       <div class="tools"><span class="hint" id="whint"></span></div>
     </div>
@@ -865,7 +869,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
   <div class="view" id="brainstorms" hidden><div id="brainstorms-pane"></div></div>
   <div class="view" id="explorer"><div id="pane"></div></div>
   <div class="view" id="document" hidden>
-    <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button></div>
+    <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button><label id="follow-label" title="When an agent or the worker names a file in a new message, show it here at once (this browser only)"><input type="checkbox" id="follow"> Follow mentions</label></div>
     <div id="docpane"></div>
   </div>
   <div id="notes" hidden><button id="notes-toggle" aria-expanded="false" title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder.">▸ Notes (this computer only)</button><div id="notes-body" hidden>
@@ -923,6 +927,68 @@ function bubble(m) {
   if (m.meta) { const meta = document.createElement('span'); meta.className = 'meta'; meta.textContent = ' · ' + m.meta; el.firstChild.append(meta); }
   return el;
 }
+// Files named in messages. A path the room has (notes.md or drawings/flow.svg in the current
+// discussion, or a full path from the root) becomes a link that shows it in Document. A new
+// message from an agent or the worker that names files offers them by the message box; with
+// Follow mentions on (this browser only, off by default) the first one is shown at once instead.
+let mentionFiles = null, mentionLoad = null;
+const loadMentionFiles = () => mentionLoad ??= fetch('__files').then((r) => r.json())
+  .then((f) => { mentionFiles = Array.isArray(f) ? f : []; }, () => { mentionFiles = mentionFiles || []; })
+  .finally(() => { mentionLoad = null; });
+function resolveMention(word) {
+  const w = word.replace(/^\\.\\//, '');
+  if (!mentionFiles) return null;
+  if (mentionFiles.includes(w)) return w;
+  const inDiscussion = room && room.active ? room.active + '/' + w : null;
+  return inDiscussion && mentionFiles.includes(inDiscussion) ? inDiscussion : null;
+}
+// Turns the known file paths in a message into links; returns the files found, in order.
+function linkMentions(el) {
+  const found = [], nodes = [];
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.parentElement.closest('a, pre, .who') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const node of nodes) {
+    const parts = node.textContent.split(/([\\w~+-][\\w~+./-]*\\.[A-Za-z0-9]{1,6})/);
+    if (parts.length < 2) continue;
+    let changed = false;
+    const frag = document.createDocumentFragment();
+    parts.forEach((part, i) => {
+      const file = i % 2 ? resolveMention(part) : null;
+      if (!file) { frag.append(part); return; }
+      const a = document.createElement('a'); a.href = '#'; a.className = 'mention'; a.textContent = part; a.title = 'Show ' + file + ' in Document';
+      a.onclick = (e) => { e.preventDefault(); showMention(file); };
+      frag.append(a); changed = true;
+      if (!found.includes(file)) found.push(file);
+    });
+    if (changed) node.replaceWith(frag);
+  }
+  return found;
+}
+const showMention = (file) => { clearMentionOffer(); post('__show', { file }).catch((err) => status(err.message, true)); };
+const followMentions = () => { try { return localStorage.getItem('agent-room.followMentions') === '1'; } catch { return false; } };
+$('follow').checked = followMentions();
+$('follow').onchange = (e) => { try { localStorage.setItem('agent-room.followMentions', e.target.checked ? '1' : '0'); } catch {} };
+function clearMentionOffer() { for (const bar of document.querySelectorAll('.mention-offer')) { bar.hidden = true; bar.replaceChildren(); } }
+function offerMentions(files) {
+  files = files.filter((f) => f !== doc).slice(0, 3);
+  if (!files.length) return;
+  if (followMentions()) return showMention(files[0]);
+  for (const bar of document.querySelectorAll('.mention-offer')) {
+    const close = document.createElement('button'); close.type = 'button'; close.textContent = '✕'; close.title = 'Dismiss'; close.onclick = clearMentionOffer;
+    bar.replaceChildren(...files.map((f) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = '📄 Show ' + f.split('/').pop(); b.title = 'Show ' + f + ' in Document';
+      b.onclick = () => showMention(f); return b;
+    }), close);
+    bar.hidden = false;
+  }
+}
+// Links a message's file paths; a new one (live) from an agent or the worker also offers them.
+function mention(el, m, live) {
+  const offer = live && m.speaker !== 'User' && m.speaker !== 'Relayed from discussion' && !m.error;
+  if (live && m.speaker === 'User') clearMentionOffer();
+  const run = () => { const found = linkMentions(el); if (offer) offerMentions(found); };
+  if (mentionFiles && !offer) run(); else loadMentionFiles().then(run); // a live message: the files again, it may name a new one
+}
 function statusEl(text, error) { const el = document.createElement('div'); el.className = 'status' + (error ? ' error' : ''); el.textContent = text; return el; }
 
 // The two tabs. A worker reply while the Discussion tab is shown marks the Worker tab.
@@ -941,6 +1007,7 @@ function workMessage(m, live) {
   const el = bubble(m);
   if (m.retryId) el.dataset.retryId = m.retryId;
   work.add(el);
+  mention(el, m, live);
   updateRetry();
   if (live && m.speaker !== 'User' && tab !== 'work') $('tab-work').classList.add('news');
 }
@@ -1093,11 +1160,13 @@ split.addEventListener('keydown', (e) => {
 });
 // A narrower window must not squeeze one side below MIN.
 window.addEventListener('resize', () => { if (document.body.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width); });
-function message(m) {
+function message(m, live = false) {
   localMessages.push(m);
   if (viewing) return;
   if (m.pass || m.hidden) return; // passes and summary turns are hidden, as in the terminal
-  talk.add(bubble(m));
+  const el = bubble(m);
+  talk.add(el);
+  mention(el, m, live);
   if (m.outcome) renderAutoDev();
 }
 // Auto dev (see ui.mjs): Start beside the latest agreed summary's instruction, or why it can't be
@@ -1316,7 +1385,7 @@ async function viewRemote(line) {
     viewing.messages.forEach((m) => { if (!m.pass && !m.hidden) talk.add(bubble(m)); });
     await openFiles();
   } else {
-    localMessages.forEach((m) => { if (!m.pass && !m.hidden) talk.add(bubble(m)); });
+    localMessages.forEach((m) => { if (!m.pass && !m.hidden) { const el = bubble(m); talk.add(el); mention(el, m, false); } });
     setThinking(localThinking); openFiles();
   }
 }
@@ -2787,7 +2856,7 @@ events.onmessage = (e) => {
   if (ev.type === 'reset') {
     localMessages = []; localInput = ev.input;
     talk.clear();
-    ev.messages.forEach(message);
+    ev.messages.forEach((m) => message(m, false));
     yourTurn = !ev.thinking; setThinking(ev.thinking); if (!viewing) { showDoc(ev.doc); openFiles(); }
     if (!ev.input) { $('composer').hidden = true; } // terminal mode: the page only watches
     work.clear();
@@ -2812,7 +2881,7 @@ events.onmessage = (e) => {
   if (ev.type === 'monitor') showMonitor(ev.monitor);
   if (ev.type === 'working') setWorking(ev.name);
   if (ev.type === 'workerinfo') showWorkerInfo(ev.info);
-  if (ev.type === 'message') message(ev.message);
+  if (ev.type === 'message') message(ev.message, true);
   if (ev.type === 'thinking') setThinking(ev.name);
   if (ev.type === 'busy') { commandBusy = ev.on; updateBusy(); }
   if (ev.type === 'turn') { yourTurn = true; status(ev.text); updateReplicaView(); }

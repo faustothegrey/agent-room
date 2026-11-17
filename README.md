@@ -147,6 +147,12 @@ agent's model and the worker's, as their panels list them ("<provider> default" 
     (clicking, as above), **Pen**, **Circle** and **Arrow** draw over the document, and each finished mark
     points at what it covers (an arrow: what its tip is on), as a chip such as "✎ circled Worker". Marks
     stay on the page until **Clear marks** or a reload, and are never saved. Esc returns to Point.
+  - **Files named in the chat.** A path the room has, written in a message (`notes.md` or
+    `drawings/flow.svg` for the current discussion's files, or a full path from the root), becomes a link
+    that shows it in Document. When a new message from an agent or the worker names files, buttons by the
+    message box offer them (**📄 Show notes.md**; ✕ dismisses, your next message clears them). With
+    **Follow mentions** on (Document's bar; off by default, remembered by this browser only), the first
+    file named is shown at once instead; otherwise the chosen document stays as it is.
 - **Terminal** (below Explorer/Document, collapsed): a shell on this computer, in the room's
   folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening it starts a
   fresh shell; collapsing it, reloading the page or stopping the server ends it. It appears only

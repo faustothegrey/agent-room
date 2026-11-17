@@ -202,3 +202,5 @@ a shown document highlights the cells a hovered [[reference]] names, only when i
 a ```mermaid block: its source is kept (escaped) for the page to draw, and only then is mermaid loaded
 a document page's own script parses as served (it is written inside a template string)
 a ```vega-lite block: its spec is kept (escaped) for the page to draw, with Vega loaded only then; /__lib serves only its list
+the room page's script parses as served (it is written inside a template string)
+mentions: a path names a file of the room, as given or inside the current discussion
