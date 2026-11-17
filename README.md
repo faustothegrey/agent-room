@@ -55,6 +55,11 @@ brainstorm is shown) and (on the screen) **Close discussion** (**Close brainstor
 as `<title> · Worker is working` (the shown discussion included). **Monitoring** (amber): the monitor panel, with the subscription usage gauges
 and a warning per provider (below).
 
+A thin **busy bar** on the header's bottom edge moves while an action you started on the screen is
+still going on: a request of this page, or a command (Resume, Close, Summarize, Reload…) that has
+been waiting or running for more than 0.3 seconds. It turns red for 1.5 seconds when the action
+fails; the error is shown as before. It is not shown for agents thinking or the worker working.
+
 The monitor panel watches agent-room's own Claude, Codex and agy programs and Claude and Codex login, for the room
 being viewed. A ⚠ right of a provider's name means a problem: **amber** when its login ends in 2
 days or less, its login status is unknown (the status command failed or its output couldn't be

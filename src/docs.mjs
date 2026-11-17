@@ -182,6 +182,7 @@ setInterval(async () => {
 // `screen` is plain state kept by the caller across reloads:
 // { clients: Set of open event streams, transcript: the room's entries, doc: file or null,
 //   thinking: name or null, status: the last round's end line or null,
+//   busy: a command from the screen has been waiting or running for a while (set by cli.mjs),
 //   room: { folder (the full root path), agents: [names], worker: name, discussion: its title,
 //     active: its folder under the root or null, started: first message sent (or a brainstorm),
 //     brainstorm: a brainstorm (active: brainstorms/<name>), transcript: this session's transcript,
@@ -238,7 +239,7 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: var(--left, 38%) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 /* The header: three zones, room (left), current discussion (middle), monitoring (right).
    Rare room and server actions sit in the ▾ menus; the gauges never shrink. */
-#header { grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(16rem, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
+#header { position: relative; grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(16rem, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
 .zone { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; border: 1.5px solid var(--zone); border-radius: 6px; padding: .3rem .6rem; align-self: stretch; justify-content: center; }
 #room-zone { --zone: #5a7bd8; padding-inline: 1.5rem; } #disc-zone { --zone: #4caf7a; } #server-zone { --zone: #d6a84c; }
 /* Details shown on hover or keyboard focus of the room name and of "Server" (not while their menu is open). */
@@ -311,6 +312,13 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #beat.on { animation: beat 1.2s ease-out; } /* restarted on every answer, so each pulse is a real heartbeat */
 @keyframes beat { 0% { transform: scale(1.4); box-shadow: 0 0 0 0 #22c55eaa; } 100% { transform: scale(1); box-shadow: 0 0 0 8px #22c55e00; } }
 @media (prefers-reduced-motion: reduce) { #beat.on { animation: none; } }
+/* The busy bar, on the header's bottom edge: moving while an action of this page runs, red when it failed. */
+#busy { position: absolute; left: 0; right: 0; bottom: -2px; height: 3px; z-index: 5; pointer-events: none; opacity: 0; transition: opacity .2s; }
+#busy[data-state] { opacity: 1; }
+#busy[data-state="on"] { background: linear-gradient(90deg, #3b82f633, #3b82f6, #a855f7, #3b82f6, #3b82f633) 0 0 / 200% 100%; animation: busy 1.4s linear infinite; }
+#busy[data-state="failed"] { background: #ef4444; }
+@keyframes busy { from { background-position: 200% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { #busy[data-state="on"] { animation: none; } }
 #files .hint { display: block; margin: 0 0 .8rem; }
 #gauges { display: contents; }
 .gauge { display: grid; grid-template-columns: 1.2rem 32px 1.8rem; gap: .2rem; align-items: center; line-height: 1.5; }
@@ -521,6 +529,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b id="room-name">agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
 <div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">New brainstorm</button><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
 <div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
+<div id="busy" aria-hidden="true"></div>
 </header>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button></div>
@@ -847,6 +856,28 @@ function status(text, error, source) {
   line.title = line.textContent; // Long messages keep their full text on hover.
   hub.append(line);
   while (hub.children.length > 2) hub.firstChild.remove();
+  if (error && source !== 'Worker') busyFailed();
+}
+// The busy bar: shown while a request of this page is in flight or the room still has a command
+// from the screen waiting or running (the busy event), once that has lasted BUSY_AFTER ms. It is
+// for actions of the screen only, not for agents thinking or the worker working. An error shown
+// during an action, or just after it, turns the bar red for BUSY_FAILED ms.
+const BUSY_AFTER = 300, BUSY_FAILED = 1500;
+let posting = 0, commandBusy = false, busyShow = null, busyFail = null, busyEnded = 0;
+const isBusy = () => posting > 0 || commandBusy;
+function updateBusy() {
+  const bar = $('busy');
+  if (isBusy()) { busyShow ??= setTimeout(() => { busyShow = null; if (!busyFail && isBusy()) bar.dataset.state = 'on'; }, BUSY_AFTER); return; }
+  busyEnded = Date.now();
+  clearTimeout(busyShow); busyShow = null;
+  if (!busyFail) delete bar.dataset.state;
+}
+function busyFailed() {
+  if (!isBusy() && Date.now() - busyEnded > BUSY_FAILED) return; // not an action of this page
+  const bar = $('busy');
+  bar.dataset.state = 'failed';
+  clearTimeout(busyFail);
+  busyFail = setTimeout(() => { busyFail = null; if (isBusy()) bar.dataset.state = 'on'; else delete bar.dataset.state; }, BUSY_FAILED);
 }
 function setThinking(name) {
   localThinking = name; if (name) yourTurn = false; updateReplicaView();
@@ -978,7 +1009,11 @@ setInterval(async () => {
   if (docStamp?.file === shown && docStamp.t !== t) $('doc')?.contentWindow.location.reload();
   docStamp = { file: shown, t };
 }, 2000);
-const post = (path, body) => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': viewClient }, body: JSON.stringify(body) });
+const post = (path, body) => {
+  posting++; updateBusy();
+  return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': viewClient }, body: JSON.stringify(body) })
+    .catch((err) => { busyFailed(); throw err; }).finally(() => { posting--; updateBusy(); });
+};
 // Each browser owns a leased View pin, independent of other browsers and local agents.
 async function viewRemote(line) {
   const res = await post('__view', line ? { discussion: line.discussion, node: line.node } : { back: true });
@@ -2421,6 +2456,7 @@ events.onmessage = (e) => {
     if (!ev.worker.length) work.add(statusEl('Give the worker instructions here. It works alongside the discussion and sees only what you send it.'));
     ev.worker.forEach((m) => workMessage(m, false));
     if (ev.status) status(ev.status);
+    commandBusy = !!ev.busy; updateBusy();
     setWorking(ev.working);
     if (!ev.workInput) { $('wcomposer').hidden = true; }
     showWorkerInfo(ev.workerInfo);
@@ -2440,6 +2476,7 @@ events.onmessage = (e) => {
   if (ev.type === 'workerinfo') showWorkerInfo(ev.info);
   if (ev.type === 'message') message(ev.message);
   if (ev.type === 'thinking') setThinking(ev.name);
+  if (ev.type === 'busy') { commandBusy = ev.on; updateBusy(); }
   if (ev.type === 'turn') { yourTurn = true; status(ev.text); updateReplicaView(); }
   if (ev.type === 'note') {
     status(ev.text, ev.error);
@@ -2457,7 +2494,7 @@ events.onmessage = (e) => {
   }
   if (ev.type === 'goto') { location.href = ev.url; return; } // this window switches discussion
   if (ev.type === 'ended') { ended = true; status('This room has ended. You can close this window.'); events.close(); box.disabled = true; wbox.disabled = true; }
-  if (ev.type === 'restarting') { restarting = true; status('Restarting the server: this page reloads when the new one answers.'); events.close(); box.disabled = true; wbox.disabled = true; }
+  if (ev.type === 'restarting') { restarting = true; commandBusy = true; updateBusy(); status('Restarting the server: this page reloads when the new one answers.'); events.close(); box.disabled = true; wbox.disabled = true; }
 };
 
 // The terminal pane (host-shell.mjs, after ghostty-web's demo): opening it fetches the token and
@@ -2839,7 +2876,7 @@ function handleScreen(req, res, url, dir, screen) {
 // page when a discussion is resumed or started afresh.
 export function resetEvent(screen) {
   return { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc,
-    thinking: screen.thinking, status: screen.status, input: !!screen.say,
+    thinking: screen.thinking, status: screen.status, busy: !!screen.busy, input: !!screen.say,
     room: screen.room ?? null, worker: screen.workerForPage?.() ?? screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
     quota: screen.quota, quotaAt: screen.quotaAt ?? null, monitor: screen.monitor ?? null, newRoom: !!screen.newRoom, page: PAGE,
     replica: screen.replica ?? null, replicaOff: screen.replicaOff ?? null, viewing: screen.viewing ?? null };

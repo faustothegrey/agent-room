@@ -125,6 +125,12 @@ test('the screen remembers "your turn" until the User speaks again', () => {
   assert.equal(screen.status, null);
 });
 
+test('a page that connects learns whether a command from the screen is still running (the busy bar)', async () => {
+  const docs = await import('../src/docs.mjs');
+  assert.equal(docs.resetEvent({ transcript: [] }).busy, false);
+  assert.equal(docs.resetEvent({ transcript: [], busy: true }).busy, true);
+});
+
 test('without a screen, /__room is just a missing file', async () => {
   const s = await serve(fixture());
   assert.equal((await s.get('/__room')).status, 404);

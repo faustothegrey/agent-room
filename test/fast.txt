@@ -188,3 +188,4 @@ only the final enabled agent draft needs the pending instructions reference
 Close asks only enabled discussion agents
 run: a program that exits 0 without reading its input rejects; a non-zero exit is reported as before
 run: with empty input, an error from stdin never fails a successful exit
+a page that connects learns whether a command from the screen is still running (the busy bar)

@@ -107,6 +107,7 @@ async function addRoom(folder, { launch = false, agents, worker, reopen, context
         const command = line.trim();
         if (command === '/restart' || command === '/shutdown') return endServer(command.slice(1), confirmed);
         if (command === '/quit') ctx.ui.quitRequested(ctx);
+        if (command.startsWith('/')) { ctx.commands = (ctx.commands ?? 0) + 1; setTimeout(() => showBusy(ctx), BUSY_AFTER_MS).unref(); }
         ctx.input.push(line);
       };
     }
@@ -128,6 +129,17 @@ async function addRoom(folder, { launch = false, agents, worker, reopen, context
 // Messages from this shell: on the room's screen too, when its loaded code can still show them.
 const report = (ctx, text) => { try { ctx.ui.note(ctx, text, true); } catch { console.log(text); } };
 
+// The screen's busy bar: a command (not a message) sent from the screen that is still waiting or
+// running after BUSY_AFTER_MS is told to the open pages, and again when no command is left. Quick
+// commands send nothing.
+const BUSY_AFTER_MS = 300;
+function showBusy(ctx) {
+  const on = ctx.commands > 0;
+  if (!ctx.screen || !!ctx.screen.busy === on) return;
+  ctx.screen.busy = on;
+  try { ctx.docs.broadcast(ctx.screen, { type: 'busy', on }); } catch {}
+}
+
 // The room's input, one line at a time: a line sent during a round waits for it to end.
 async function runRoom(ctx) {
   ctx.prompt();
@@ -143,6 +155,7 @@ async function runRoom(ctx) {
       // A bug in the loaded code must not end the room: report it, so it can be fixed and reloaded.
       try { await ctx.ui.handleLine(line, ctx); } catch (err) { report(ctx, `✗ ${err.stack}\n`); }
     }
+    if (ctx.commands && line.startsWith('/')) { ctx.commands--; showBusy(ctx); }
     ctx.prompt();
   }
   // Its running programs are stopped before its state goes (anything not stopped cleanly is reported).
