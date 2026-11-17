@@ -189,3 +189,7 @@ Close asks only enabled discussion agents
 run: a program that exits 0 without reading its input rejects; a non-zero exit is reported as before
 run: with empty input, an error from stdin never fails a successful exit
 a page that connects learns whether a command from the screen is still running (the busy bar)
+the closing statement is one turn of the given agent, with the worker reports
+a closing statement that is empty, a pass or without the pending instructions reference is refused; a failed turn is reported
+Close asks one agent with the worker's settings for the statement, never the discussion agents
+without a stand-in, Close's writer is a one-off agent with the worker's provider and model, in the room's folder

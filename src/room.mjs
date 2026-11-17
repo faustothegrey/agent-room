@@ -55,6 +55,24 @@ export function formatMessages(messages) {
   return messages.map((m) => `[${m.outcome ? `Summary, ${m.outcome}` : m.speaker}]: ${m.pass ? '(passed)' : m.text}`).join('\n\n');
 }
 
+// The closing statement of a discussion: one turn of `agent`, a one-off session with the worker's
+// provider and model (see closeNamedDiscussion in ui.mjs), which reads the discussion's folder. The
+// caller installs it only when this succeeds, so a failed attempt can't replace the previous one.
+export async function closingStatement(agent, { dir, workerReports = '' }) {
+  const task = [
+    `The User is closing this discussion. Write a complete closing statement for ${dir}/closing-statement.md.`,
+    `Read the discussion's notes and transcripts in ${dir}; they include decisions and worker reports.`,
+    'Describe the current decisions, unresolved questions, next steps and relevant context for a new session.',
+    'Point to pending-instructions.md for any unsent worker instructions; do not replace that file.',
+    workerReports ? `Recent worker reports:\n${workerReports}` : '',
+    'Reply with the complete statement only; do not write or rename any files.',
+  ].filter(Boolean).join('\n\n');
+  const statement = String(await agent.turn(task) ?? '').trim();
+  if (!statement || isPass(statement)) throw new Error(`${agent.name} did not provide a complete closing statement pointing to pending-instructions.md.`);
+  if (!statement.includes('pending-instructions.md')) throw new Error('The closing statement must point to pending-instructions.md.');
+  return statement;
+}
+
 export function createRoom(agents, state = { transcript: [], seen: new Map() }) {
   const names = new Set();
   for (const a of agents) {
@@ -120,41 +138,6 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
     transcript,
     agents,
     promptFor,
-    // Each agent contributes a complete version; the caller installs the final version only after
-    // all turns succeed. A failed attempt therefore cannot replace the previous statement.
-    async closingStatement({ dir, workerReports = '', onReset }) {
-      let statement = '';
-      const active = activeAgents();
-      if (!active.length) throw new Error('No enabled discussion agent is available to write the closing statement.');
-      for (const agent of active) {
-        const task = [
-          `The User is closing this discussion. Write a complete closing statement for ${dir}/closing-statement.md.`,
-          `Read the discussion's notes and transcripts in ${dir}; they include decisions and worker reports.`,
-          'Describe the current decisions, unresolved questions, next steps and relevant context for a new session.',
-          'Point to pending-instructions.md for any unsent worker instructions; do not replace that file.',
-          workerReports ? `Recent worker reports:\n${workerReports}` : '',
-          statement ? `Revise this draft, retaining the other agents' useful contributions:\n${statement}` : '',
-          'Reply with the complete statement only; do not write or rename any files.',
-        ].filter(Boolean).join('\n\n');
-        let text;
-        try { text = String(await agent.turn(promptFor(agent, task)) ?? '').trim(); }
-        catch (err) {
-          // A provider may have ended its session during a failed turn. On retry, start a new one
-          // with the introduction and the full chat; the task also directs it to the transcripts.
-          if (/\b(session|thread|conversation)\b[^\n]*(?:not found|does not exist|missing|expired|ended|invalid)/i.test(String(err?.message))) {
-            agent.reset?.();
-            seen.set(agent.name, 0);
-            onReset?.(agent, err);
-          }
-          throw err;
-        }
-        if (!text || isPass(text))
-          throw new Error(`${agent.name} did not provide a complete closing statement pointing to pending-instructions.md.`);
-        statement = text;
-      }
-      if (!statement.includes('pending-instructions.md')) throw new Error('The closing statement must point to pending-instructions.md.');
-      return statement;
-    },
     // Rejects on an unknown @name, before anything is recorded or sent. `speaker`: who the round's
     // first message is from (auto dev's "Worker report", sent to every agent), the User by default.
     async round(userText, { onTurnStart, onMessage, onNotice, speaker = 'User' } = {}) {

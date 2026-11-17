@@ -487,6 +487,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #files .inline-folder > :not(summary) { margin-left: 1.1rem; width: calc(100% - 1.1rem); }
 .file-columns { column-width: 14rem; column-gap: .6rem; }
 .local-label { color: var(--dim); font-size: .8rem; margin: .3rem 0; }
+.worker-pending { color: light-dark(#b45309, #f59e0b); font-size: .8rem; margin: .3rem 0; }
 .discussion-info { position: relative; display: inline-block; }
 .discussion-info > button { border: 0; background: none; color: #8fa8ee; padding: .15rem; }
 .info-detail { display: none; position: absolute; right: 0; top: 100%; z-index: 5; width: 15rem; padding: .5rem; background: Canvas; color: CanvasText; border: 1px solid var(--line); border-radius: 4px; font-size: .8rem; }
@@ -719,7 +720,9 @@ function showFailedAgents(agents) {
 const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a discussion to send work.';
 let workerInfoShown = null, workPlaceholder = null;
 function showWorkerInfo(info) {
+  const pendingChanged = JSON.stringify(info?.pending ?? []) !== JSON.stringify(workerPending);
   workerInfoShown = info;
+  if (pendingChanged) { workerPending = info?.pending ?? []; renderDiscussions(); } // its rows say which have worker work to merge or commit
   workPlaceholder ??= wbox.placeholder;
   if (room?.brainstorm) setWorkerInfo({ lines: [BRAINSTORM_NO_WORK], disabled: true });
   else {
@@ -768,7 +771,8 @@ function mergePreviewLine(line, open) {
 function setWorking(name) {
   localWorking = name; updateReplicaView();
   $('whint').textContent = name ? 'The worker is busy: what you send now waits for it to finish.' : '';
-  $('tab-work').textContent = name ? 'Worker …' : 'Worker';
+  $('tab-work').dataset.working = name ? '1' : '';
+  tabTitles();
 }
 
 // The divider between the chat and the document: drag it, or use ←/→ when it has focus. Neither
@@ -901,7 +905,7 @@ function showSub(name) {
   if ($('tab-brainstorms')) $('tab-brainstorms').classList.toggle('on', name === 'brainstorms');
   $('tab-explorer').classList.toggle('on', name === 'explorer'); $('tab-document').classList.toggle('on', name === 'document');
 }
-if ($('tab-discussions')) $('tab-discussions').onclick = () => showSub('discussions');
+if ($('tab-discussions')) $('tab-discussions').onclick = () => { showSub('discussions'); post('__workerinfo', {}).catch(() => {}); }; // its rows' worker work, checked again
 if ($('tab-brainstorms')) $('tab-brainstorms').onclick = () => showSub('brainstorms');
 $('tab-explorer').onclick = () => { showSub('explorer'); revealDoc(); };
 // Back to Explorer with a local file shown: if that file is inside the tree Explorer is showing now,
@@ -1391,6 +1395,9 @@ function discussionsIn(prefix) {
     .filter(isDiscussion).sort((a, b) => b.localeCompare(a));
 }
 
+// Worker work not yet in main, from the Worker tab's checks (showWorkerInfo): each lane's
+// { lane: its discussion or null for worker/main, branch, ahead: commits not in main, dirty }.
+let workerPending = [];
 function renderDiscussions() {
   const container = $('discussions-pane');
   if (!container) return;
@@ -1426,6 +1433,13 @@ function renderDiscussions() {
   } else if (room && !room.started && canAct) {
     list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Resume on its row.' + currentWorker));
   }
+
+  // Worker work not yet in main: on its discussion's row, or here when its branch is worker/main
+  // or belongs to no row of this list.
+  const pendingWork = workerPending;
+  const pendingText = (p) => [p.ahead && p.ahead + (p.ahead === 1 ? ' commit' : ' commits') + ' not merged into main', p.dirty && 'uncommitted changes'].filter(Boolean).join(' · ');
+  for (const p of pendingWork.filter((p) => !discussions.includes(p.lane)))
+    list.append(el('div', 'worker-pending', '⚠ ' + p.branch + ': ' + pendingText(p)));
 
   heading('Discussions');
   const canOrder = canAct && !!inOrder && discussions.length > 1;
@@ -1464,6 +1478,8 @@ function renderDiscussions() {
     if (openEntry?.working) statusText += ' · worker working';
     if (room?.closingDiscussions?.includes(d)) statusText += ' · closing, waiting for worker';
     block.append(el('div', 'local-label', statusText));
+    const work = pendingWork.find((p) => p.lane === d);
+    if (work) block.append(el('div', 'worker-pending', '⚠ Worker: ' + pendingText(work)));
     row.append(block);
 
     if (canAct) {
@@ -1895,6 +1911,7 @@ function setRoom(r) {
   const changed = room && r && room.active !== r.active;
   const fresh = r?.fresh && !room?.fresh; // a new discussion or brainstorm, or a page on one: its members are chosen first
   room = r;
+  tabTitles();
   for (const [target, sessions] of [['talk-sessions', r.cliSessions?.agents ?? []], ['work-sessions', r.cliSessions?.worker ? [r.cliSessions.worker] : []]]) {
     const el = $(target); if (!el) continue; el.replaceChildren();
     for (const session of sessions) {
@@ -1933,6 +1950,13 @@ function showVersion(c) {
   el.textContent = text; el.title = title;
 }
 let membersModels = null; // the model lists, while the members panel shows a started discussion's agents (renderMembers)
+// The tabs name the models in use: "Discussion (Claude default, Codex default)", "Worker (Opus)".
+function tabTitles() {
+  const models = (room?.members ?? []).filter((m) => m.enabled && m.modelLabel).map((m) => m.modelLabel);
+  const talk = $('tab-talk'), work = $('tab-work'); if (!talk || !work) return;
+  talk.textContent = 'Discussion' + (models.length ? ' (' + models.join(', ') + ')' : '');
+  work.textContent = 'Worker' + (room?.workerModel ? ' (' + room.workerModel + ')' : '') + (work.dataset.working ? ' …' : '');
+}
 // Settings stay outside the conversation; saving never changes an active CLI session.
 const settingsRows = {};
 let settingsSave = Promise.resolve();

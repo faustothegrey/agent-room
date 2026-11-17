@@ -56,13 +56,15 @@ async function scriptedCtx(replies) {
   const { mkdtempSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  const { createRoom } = await import('../src/room.mjs');
+  const { createRoom, closingStatement } = await import('../src/room.mjs');
   const docs = await import('../src/docs.mjs');
   const usage = await import('../src/usage.mjs');
   const fake = (name) => ({ name, provider: 'claude', turn: async (prompt) => prompt.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : replies.shift() ?? 'PASS' });
   const state = { transcript: [], seen: new Map() };
   return {
     state, room: createRoom([fake('A'), fake('B')], state), worker: fake('W'), docs, totals: {},
+    // Close's writer, in place of a real CLI (see load in ui.mjs).
+    closingStatement: (options, agent) => closingStatement(agent, options), closingAgent: () => fake('W'),
     usage: { ...usage, fetchQuota: async () => null }, // never the real meter
     screen: { clients: new Set(), transcript: state.transcript, worker: [] },
     logPath: join(mkdtempSync(join(tmpdir(), 'ui-test-')), 'room.md'), cwd: '/tmp',
@@ -1222,6 +1224,8 @@ async function savedRoom(cwd, tag) {
   Object.assign(ctx, await load(ctx, `?${tag}`));
   ctx.suggestTitle = async () => ({ title: 'Saved context' });
   for (const agent of ctx.room.agents) agent.turn = async () => 'PASS';
+  // Close's writer, in place of a real CLI: it answers as the room's last agent is scripted to.
+  ctx.closingAgent = () => ({ name: 'W', turn: (p) => ctx.room.agents.at(-1).turn(p) });
   return ctx;
 }
 
@@ -1453,19 +1457,19 @@ test('Close writes a statement and drops saved provider IDs only after the agent
   assert.ok(prompts.every((p) => p.includes('Decisions and pending-instructions.md')));
 });
 
-test('Close asks only enabled discussion agents', async () => {
+test('Close asks one agent with the worker\'s settings for the statement, never the discussion agents', async () => {
   const { readFileSync } = await import('node:fs');
-  const ctx = await savedRoom(await tmp('close-disabled-'), 'close-disabled');
+  const ctx = await savedRoom(await tmp('close-writer-'), 'close-writer');
   await handleLine('decide', ctx);
   const { name, dir } = ctx.discussion;
-  ctx.state.disabledAgents = ['B'];
-  let asked = 0;
-  ctx.room.agents[0].turn = async () => { asked++; return 'Statement: pending-instructions.md'; };
-  ctx.room.agents[1].turn = async () => { throw new Error('disabled agent was asked'); };
+  for (const agent of ctx.room.agents) agent.turn = async () => { throw new Error('a discussion agent was asked'); };
+  const prompts = [];
+  ctx.closingAgent = () => ({ name: 'W', turn: async (p) => { prompts.push(p); return 'Statement: pending-instructions.md'; } });
   await handleLine('/close', ctx);
-  assert.equal(asked, 1);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /The User is closing this discussion\./);
   assert.ok(ctx.screen.room.closedDiscussions.includes(name));
-  assert.match(readFileSync(`${dir}/closing-statement.md`, 'utf8'), /pending-instructions\.md/);
+  assert.equal(readFileSync(`${dir}/closing-statement.md`, 'utf8'), 'Statement: pending-instructions.md\n');
 });
 
 test('Close waits for queued work, refuses instructions and can be cancelled', async () => {

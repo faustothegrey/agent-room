@@ -134,6 +134,11 @@ export function modelChoices() {
   } catch {}
   return { claude: ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) })), codex, agy: agyModels() };
 }
+// A model's name for the tab titles: its label in the catalog (or its ID), "<Provider> default" for the CLI default.
+function modelLabel(provider, model) {
+  if (!model) return `${provider === 'agy' ? 'agy' : provider[0].toUpperCase() + provider.slice(1)} default`;
+  return modelChoices()[provider]?.find((m) => m.id === model)?.label ?? model;
+}
 // Work in another open discussion must not change this discussion's settings boundary.
 const settingsStarted = (ctx) => !!ctx.agentsStarted || !!ctx.logPath || !!ctx.state.transcript.length;
 export async function saveSettings(ctx, value, file = defaultsFile()) {
@@ -178,6 +183,7 @@ export async function saveSettings(ctx, value, file = defaultsFile()) {
   } else if (workerChanged) {
     ctx.worker = loaded.worker;
     ctx.makeWorker = loaded.makeWorker;
+    ctx.closingStatement = loaded.closingStatement;
     ctx.workerSpec = next.workerSpec;
     ctx.sessions.set(`worker:${worker.name}`, next.sessions.get(`worker:${worker.name}`));
     if (freshWorker) {
@@ -209,7 +215,7 @@ export async function load(ctx, v) {
   const instructions = readFileSync(new URL('../README-for-brainstorming-agents.md', import.meta.url), 'utf8');
   const workerInstructions = readFileSync(new URL('../README-for-worker-agents.md', import.meta.url), 'utf8');
   const { createAgent, claudeTitle, run, findLeftovers } = await import(`./agents.mjs${v}`);
-  const { createRoom } = await import(`./room.mjs${v}`);
+  const { createRoom, closingStatement } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
   const usage = await import(`./usage.mjs${v}`);
   // Replication is loaded only with --node.
@@ -256,6 +262,11 @@ export async function load(ctx, v) {
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
     makeWorker: (session) => createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
       timeoutMs: WORKER_TIMEOUT_MS, runner, session }),
+    // Close's closing statement, written by a one-off agent with the worker's provider and model, in
+    // the room's folder, with no rulebook and a session of its own (never the worker's session or
+    // worktree). `agent`: a stand-in for tests (ctx.closingAgent).
+    closingStatement: (options, agent = createAgent(wProvider, { name: wName, model: wModel, cwd: ctx.cwd, runner, session: {} })) =>
+      closingStatement(agent, options),
     suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }) };
 }
 
@@ -318,7 +329,10 @@ function wire(ctx) {
 // root), and whether this session has started (its first message sent, so its discussion is fixed).
 function header(ctx) {
   const d = ctx.discussion;
+  const specs = (ctx.agentSpecs ?? '').split(',').filter(Boolean).map((s) => parseSpec(s));
+  const workerSpec = ctx.workerSpec ? parseSpec(ctx.workerSpec, true) : null;
   return { folder: ctx.cwd, agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name,
+    workerModel: workerSpec ? modelLabel(workerSpec.provider, workerSpec.model) : null, // for the Worker tab's title
     cliSessions: sessionView(ctx),
     discussion: d ? d.title : ctx.state.brainstorm ? 'New brainstorm' : 'No discussion started',
     active: folderOf(ctx), started: !!ctx.logPath || !!ctx.state.brainstorm,
@@ -326,7 +340,8 @@ function header(ctx) {
     brainstorm: !!ctx.state.brainstorm, // a brainstorm, in brainstorms/<name>/ once started (see newBrainstorm)
     // The agents this discussion started with, for the members panel once it has started.
     members: ctx.room.agents.map((a) => ({ provider: a.provider, name: a.name,
-      model: (ctx.agentSpecs ?? '').split(',').filter(Boolean).map((s) => parseSpec(s)).find((s) => s.name === a.name)?.model ?? '',
+      model: specs.find((s) => s.name === a.name)?.model ?? '',
+      modelLabel: modelLabel(a.provider, specs.find((s) => s.name === a.name)?.model ?? ''), // for the Discussion tab's title
       enabled: !(ctx.state.disabledAgents ?? []).includes(a.name) })),
     failedAgents: ctx.room.agents.filter((a) => ctx.state.transcript.some((m) => m.error && m.speaker === a.name) || (ctx.state.disabledAgents ?? []).includes(a.name)).map((a) => ({ name: a.name, disabled: (ctx.state.disabledAgents ?? []).includes(a.name) })),
     autoDev: autoDevView(ctx), retryId: ctx.retryFailure?.available ? ctx.retryFailure.id : null,
@@ -1307,7 +1322,7 @@ async function defaultsForNew(ctx) {
   const state = { ...ctx.state, seen: new Map() };
   const next = { ...ctx, agentSpecs, workerSpec, sessions, state };
   const loaded = await load(next, '');
-  Object.assign(ctx, { room: loaded.room, worker: loaded.worker, makeWorker: loaded.makeWorker, agentSpecs, workerSpec, sessions, state });
+  Object.assign(ctx, { room: loaded.room, worker: loaded.worker, makeWorker: loaded.makeWorker, closingStatement: loaded.closingStatement, agentSpecs, workerSpec, sessions, state });
   wire(ctx);
 }
 async function newDiscussion(ctx) {
@@ -1534,10 +1549,10 @@ async function closeNamedDiscussion(ctx, name) {
     if (hold) throw new Error(`This can't be closed yet: ${hold}.`);
     if (target.checkpointError) throw new Error(`The latest checkpoint could not be saved: ${target.checkpointError}`);
     const reports = shop.log.filter((m) => m.owner === d.name && m.speaker).map((m) => `${m.speaker}: ${m.html ?? m.text ?? ''}`).join('\n\n');
-    let statement;
-    try { statement = await target.room.closingStatement({ dir: target.discussion.dir, workerReports: reports,
-      onReset: (agent, err) => note(ctx, `✗ ${agent.name}'s session could not be used (${err.message}); it was reset for a retry.`, true) }); }
-    catch (err) { captureRound(target); throw err; }
+    // Written by the worker's provider and model as set for this discussion, not by its discussion
+    // agents (`closingAgent`: a stand-in for tests).
+    if (!target.closingStatement) throw new Error('No agent is available to write the closing statement: Reload or Restart, then close again.');
+    const statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports }, target.closingAgent?.());
     const file = join(target.discussion.dir, 'closing-statement.md');
     const temp = `${file}.${process.pid}.tmp`;
     const previous = existsSync(file) ? readFileSync(file) : null;
@@ -2774,12 +2789,14 @@ async function workerInfo(ctx, seen = new Map(), own = null) {
   own ??= await lanePlace(ctx, laneOf(ctx));
   if (own.disabled) return { lines: [own.disabled], disabled: true };
   // A lane's lines, a one-line summary for the page, and whether it has something to review:
-  // { lines, summary, review }.
+  // { lines, summary, review }, with `pending` when it has: its discussion (lane; null for
+  // worker/main), branch, commits not in main and uncommitted edits, for the Discussions tab.
   const of = (place) => {
     if (!seen.has(place.path)) seen.set(place.path, (async () => {
       const s = await worktreeStatus(place);
       const checks = s.exists ? await laneChecks(place) : { lines: [], brief: [] };
-      return { lines: [...worktreeLines(place, s), ...checks.lines], summary: laneSummary(place, s, checks.brief), review: !!(s.ahead || s.treeDirty) };
+      return { lines: [...worktreeLines(place, s), ...checks.lines], summary: laneSummary(place, s, checks.brief), review: !!(s.ahead || s.treeDirty),
+        pending: { lane: place.lane ?? null, branch: place.branch, ahead: s.ahead || 0, dirty: !!s.treeDirty } };
     })());
     return seen.get(place.path);
   };
@@ -2792,7 +2809,8 @@ async function workerInfo(ctx, seen = new Map(), own = null) {
       const o = await of(other);
       if (o.review) { lines.push(...o.lines); lanes.push(o); }
     }
-    return { lines, lanes: lanes.map(({ lines, summary, own }) => ({ lines, summary, own: !!own })) };
+    return { lines, lanes: lanes.map(({ lines, summary, own }) => ({ lines, summary, own: !!own })),
+      pending: lanes.filter((l) => l.review).map((l) => l.pending) };
   } catch (err) { return { lines: [`✗ ${err.message}`], error: true }; }
 }
 

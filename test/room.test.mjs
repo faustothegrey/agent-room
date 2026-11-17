@@ -1,6 +1,6 @@
 import { test } from './helpers/test.mjs';
 import assert from 'node:assert/strict';
-import { createRoom, isPass } from '../src/room.mjs';
+import { closingStatement, createRoom, isPass } from '../src/room.mjs';
 
 // A fake agent that records every prompt it receives and answers from a script.
 function fakeAgent(name, replies = []) {
@@ -18,56 +18,21 @@ function fakeAgent(name, replies = []) {
   };
 }
 
-test('agents draft and revise a closing statement with worker reports, without changing the chat', async () => {
-  const a = fakeAgent('A', ['Draft: pending-instructions.md']);
-  const b = fakeAgent('B', ['Final: pending-instructions.md']);
-  const room = createRoom([a, b]);
-  const result = await room.closingStatement({ dir: '/project/discussions/topic', workerReports: 'worker finished' });
+test('the closing statement is one turn of the given agent, with the worker reports', async () => {
+  const writer = fakeAgent('W', ['Final: pending-instructions.md']);
+  const result = await closingStatement(writer, { dir: '/project/discussions/topic', workerReports: 'worker finished' });
   assert.equal(result, 'Final: pending-instructions.md');
-  assert.match(a.prompts[0], /worker finished/);
-  assert.match(b.prompts[0], /Draft: pending-instructions\.md/);
-  assert.deepEqual(room.transcript, []);
-  const failing = createRoom([fakeAgent('A', ['PASS'])]);
-  await assert.rejects(failing.closingStatement({ dir: '/topic' }), /did not provide a complete closing statement/);
+  assert.equal(writer.prompts.length, 1);
+  assert.match(writer.prompts[0], /The User is closing this discussion\./);
+  assert.match(writer.prompts[0], /\/project\/discussions\/topic\/closing-statement\.md/);
+  assert.match(writer.prompts[0], /worker finished/);
 });
 
-test('a closing turn that loses its provider session retries with the full chat', async () => {
-  const agent = fakeAgent('A', [new Error('session ended'), 'recovered: pending-instructions.md']);
-  let resets = 0;
-  agent.reset = () => { resets++; };
-  const state = { transcript: [{ speaker: 'User', text: 'a later decision' }], seen: new Map([['A', 1]]) };
-  const room = createRoom([agent], state);
-  const reported = [];
-  await assert.rejects(room.closingStatement({ dir: '/topic', onReset: (a, err) => reported.push([a.name, err.message]) }), /session ended/);
-  assert.equal(resets, 1);
-  assert.deepEqual(reported, [['A', 'session ended']]);
-  assert.equal(await room.closingStatement({ dir: '/topic' }), 'recovered: pending-instructions.md');
-  assert.match(agent.prompts[1], /\[User\]: a later decision/);
-  assert.deepEqual(state.transcript, [{ speaker: 'User', text: 'a later decision' }]);
-});
-
-test('a transient closing turn failure keeps the usable provider session', async () => {
-  const agent = fakeAgent('A', [new Error('quota')]);
-  let resets = 0;
-  agent.reset = () => { resets++; };
-  const state = { transcript: [], seen: new Map([['A', 2]]) };
-  await assert.rejects(createRoom([agent], state).closingStatement({ dir: '/topic' }), /quota/);
-  assert.equal(resets, 0);
-  assert.equal(state.seen.get('A'), 2);
-});
-
-test('only the final enabled agent draft needs the pending instructions reference', async () => {
-  const a = fakeAgent('A', ['Early draft']);
-  const b = fakeAgent('B', ['Final: pending-instructions.md']);
-  const disabled = fakeAgent('C');
-  const state = { transcript: [], seen: new Map(), disabledAgents: ['C'] };
-  const room = createRoom([a, b, disabled], state);
-  assert.equal(await room.closingStatement({ dir: '/topic' }), 'Final: pending-instructions.md');
-  assert.match(b.prompts[0], /Early draft/);
-  assert.deepEqual(disabled.prompts, []);
-  state.disabledAgents = ['A', 'B', 'C'];
-  await assert.rejects(room.closingStatement({ dir: '/topic' }), /No enabled discussion agent/);
-  await assert.rejects(createRoom([fakeAgent('A', ['No reference'])]).closingStatement({ dir: '/topic' }), /must point to pending-instructions\.md/);
+test('a closing statement that is empty, a pass or without the pending instructions reference is refused; a failed turn is reported', async () => {
+  await assert.rejects(closingStatement(fakeAgent('W', ['PASS']), { dir: '/topic' }), /W did not provide a complete closing statement/);
+  await assert.rejects(closingStatement(fakeAgent('W', ['  ']), { dir: '/topic' }), /W did not provide a complete closing statement/);
+  await assert.rejects(closingStatement(fakeAgent('W', ['No reference']), { dir: '/topic' }), /must point to pending-instructions\.md/);
+  await assert.rejects(closingStatement(fakeAgent('W', [new Error('quota')]), { dir: '/topic' }), /quota/);
 });
 
 test('a round is: user, then agents in order until all of them pass in a row', async () => {

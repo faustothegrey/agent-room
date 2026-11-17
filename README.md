@@ -90,6 +90,10 @@ of agent-room's checkout when the server started and its start time, such as `4c
 Reload it adds `· reloaded 12:41 (commit)`, again with `+` if needed. Both are snapshots taken
 then, never read live; hover for the full dates and the checkout's folder. Agent settings live inside their tabs.
 
+The **Discussion** and **Worker** tabs name the models in use, such as
+**Discussion (Claude default, Codex default)** and **Worker (Opus)**: each enabled discussion
+agent's model and the worker's, as their panels list them ("<provider> default" for CLI default).
+
 - **Discussion:** send messages to the brainstorming agents. Enter sends; Shift+Enter adds
   a line. Start with `@name` to address one agent. Agents take turns in the configured order,
   stopping when everyone passes consecutively, a turn fails, or the lap cap is reached (10 laps in a
@@ -119,7 +123,7 @@ then, never read live; hover for the full dates and the checkout's folder. Agent
     the folder, transcripts and drawings included, and the checkpoint: uncommitted files are lost for
     good; disabled while the brainstorm is open). No Archive or Defer. Clicking a title shows its
     files in Explorer, as for a discussion.
-  - In **Discussions**, browse discussions (the active one first), check their state, and manage them (Resume, Go to, Archive, Defer, and actions menu). Archived and deferred discussions are kept in their own sections; received discussions from peers show **Peek files** and **View chat** buttons. Rows show state and actions only, no inline files.
+  - In **Discussions**, browse discussions (the active one first), check their state, and manage them (Resume, Go to, Archive, Defer, and actions menu). Archived and deferred discussions are kept in their own sections; received discussions from peers show **Peek files** and **View chat** buttons. Rows show state and actions only, no inline files. A row whose worker branch has work not yet in main says so in amber under its state, such as **⚠ Worker: 2 commits not merged into main · uncommitted changes**; `worker/main`, or a branch whose discussion isn't in the active list, gets such a line above the list. These come from the Worker tab's checks, made again after each worker task and whenever the Discussions or Worker tab is clicked.
   - In **Explorer**, view one tree at a time, chosen with the bar `[ Discussion | Room checkout | Worker copy ]` (Worker copy is coming soon). Under the bar, a line shows the folder and branch. **Discussion** shows the active (or peeked) discussion's files. **Room checkout** shows the room's root checkout, excluding hidden and gitignored files (non-discussion files in `discussions/`, such as `discussions/README.md`, remain reachable). Code, config, and other text files open as plain text in Document; supported images and PDFs stay viewable; files that cannot be displayed are greyed out ("can't be shown here").
   - **Peek**: clicking another discussion's name in Discussions shows its files in Explorer without switching discussions. An orange banner ("Looking at <name> · Back to current") and an orange dot on the Explorer tab indicate the peek; Document's path line names the peeked discussion.
   - In **Document**, view the chosen file with its path. Each tab keeps its place when you switch; Document is disabled until a file is chosen. The chosen document stays selected when agents edit other files, and open documents check for changes every two seconds. Drag the divider to resize the panes. Browsing is available during agent turns and does not notify the agents.
@@ -237,8 +241,10 @@ one beside the one in use, which stays open (in place, when the one in use hasn'
 and Start fresh open any other discussion or brainstorm beside the open ones; several brainstorms
 can be open at once. **Close discussion** (in **Actions ▾**, or `/close`) also works on a paused
 discussion's row. It refuses new worker instructions and waits for its queued and running tasks;
-while waiting the row says **closing, waiting for worker** and offers **Cancel close**. The agents
-then draft a closing statement pointing to `pending-instructions.md`; agent-room writes the one
+while waiting the row says **closing, waiting for worker** and offers **Cancel close**. A one-off
+agent with the provider and model set in that discussion's **Worker · provider & model** panel
+(not the discussion agents, nor the worker's own session) then reads the discussion's notes and
+transcripts and writes a closing statement pointing to `pending-instructions.md`; agent-room writes the one
 current `closing-statement.md`, ends the sessions and marks the discussion closed. Unresolved worker
 edits still prevent Close. If Close fails or is cancelled, the discussion stays open or paused and
 can be retried. **Quit room** ends the room, and Restart brings back every open discussion and

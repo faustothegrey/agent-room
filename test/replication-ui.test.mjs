@@ -16,6 +16,8 @@ test('closed discussion lifecycle publishes only on Close', { timeout: 30000 }, 
     const ctx = { cwd, node, peers: [], port: 0, noScreen: true, hub: { rooms: new Map(), node },
       agentSpecs: 'claude:A', workerSpec: 'claude:W', sessions: new Map(), state: { transcript: [], seen: new Map() } };
     Object.assign(ctx, await ui.load(ctx, ''));
+    // Close's writer, in place of a real CLI: it answers as the room's agent is scripted to.
+    ctx.closingAgent = () => ({ name: 'W', turn: (p) => ctx.room.agents.at(-1).turn(p) });
     ctx.hub.rooms.set(ctx.key, ctx);
     ctx.usage = { ...ctx.usage, fetchQuota: async () => null };
     ctx.suggestTitle = async () => ({ title: 'Closed cycle' });
@@ -72,7 +74,9 @@ test('replication startup publishes a closed snapshot interrupted before its lin
     const cwd = join(root, node); await fs.mkdir(cwd, { recursive: true });
     const ctx = { cwd, node, peers, port: 0, noScreen: true, hub: { rooms: new Map(), node },
       agentSpecs: 'claude:A', workerSpec: 'claude:W', sessions: new Map(), state: { transcript: [], seen: new Map() } };
-    Object.assign(ctx, await ui.load(ctx, '')); ctx.hub.rooms.set(ctx.key, ctx);
+    Object.assign(ctx, await ui.load(ctx, ''));
+    // Close's writer, in place of a real CLI: it answers as the room's agent is scripted to.
+    ctx.closingAgent = () => ({ name: 'W', turn: (p) => ctx.room.agents.at(-1).turn(p) }); ctx.hub.rooms.set(ctx.key, ctx);
     ctx.usage = { ...ctx.usage, fetchQuota: async () => null };
     ctx.suggestTitle = async () => ({ title: 'Interrupted close' });
     await ui.start(ctx); rooms.push(ctx);
@@ -113,7 +117,9 @@ test('failed Close captures cannot reach peers, including after restart and retr
     const cwd = join(root, node); await fs.mkdir(cwd);
     const ctx = { cwd, node, peers: [], port: 0, noScreen: true, hub: { rooms: new Map(), node },
       agentSpecs: 'claude:A', workerSpec: 'claude:W', sessions: new Map(), state: { transcript: [], seen: new Map() } };
-    Object.assign(ctx, await ui.load(ctx, '')); ctx.hub.rooms.set(ctx.key, ctx);
+    Object.assign(ctx, await ui.load(ctx, ''));
+    // Close's writer, in place of a real CLI: it answers as the room's agent is scripted to.
+    ctx.closingAgent = () => ({ name: 'W', turn: (p) => ctx.room.agents.at(-1).turn(p) }); ctx.hub.rooms.set(ctx.key, ctx);
     ctx.usage = { ...ctx.usage, fetchQuota: async () => null };
     ctx.suggestTitle = async () => ({ title: 'Failed capture' });
     await ui.start(ctx); rooms.push(ctx);
@@ -171,6 +177,8 @@ test('two rooms: pairing, round hooks, independent browser pins, deletion and re
     const hub = {rooms:new Map(),node};
     const ctx = {cwd,node,peers:[],port:0,hub,launch:true,agentSpecs:'claude:A',workerSpec:'claude:W',sessions:new Map(),state:{transcript:[],seen:new Map()},say:()=>{throw new Error('View started agents');}};
     Object.assign(ctx, await ui.load(ctx, ''));
+    // Close's writer, in place of a real CLI: it answers as the room's agent is scripted to.
+    ctx.closingAgent = () => ({ name: 'W', turn: (p) => ctx.room.agents.at(-1).turn(p) });
     hub.rooms.set(ctx.key, ctx);
     ctx.usage={...ctx.usage,fetchQuota:async()=>null};
     ctx.room=createRoom([{name:'A',provider:'claude',turn:async(p)=>p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS'}],ctx.state);
@@ -253,6 +261,8 @@ test('every closed discussion of a --node launch room replicates, through the la
   const room = async (fields) => {
     const ctx = {port:0,agentSpecs:'claude:A',workerSpec:'claude:W',sessions:new Map(),state:{transcript:[],seen:new Map()},say:()=>{},...fields};
     Object.assign(ctx, await ui.load(ctx, ''));
+    // Close's writer, in place of a real CLI: it answers as the room's agent is scripted to.
+    ctx.closingAgent = () => ({ name: 'W', turn: (p) => ctx.room.agents.at(-1).turn(p) });
     ctx.hub.rooms.set(ctx.key, ctx);
     ctx.usage={...ctx.usage,fetchQuota:async()=>null};
     ctx.room=createRoom([{name:'A',provider:'claude',turn:async(p)=>p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS'}],ctx.state);
