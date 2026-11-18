@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import * as defaultInstructions from './instructions.mjs';
 
 // Claude: Bash and the file, web and sub-agent built-ins, plus the
 // look-and-click subset of Claude in Chrome (no JavaScript, forms, uploads or batches). The
@@ -180,11 +181,8 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, r
 
 // A short title for a new discussion, from the User's first message: one claude call with no tools
 // at all (so it can't write anything) and no saved session. Resolves to { title, usage }.
-export async function claudeTitle(message, { runner = run, cwd, timeoutMs = TITLE_TIMEOUT_MS } = {}) {
-  const prompt = [
-    'Suggest a short title, at most 6 words, for a discussion that starts with the message below.',
-    'Reply with the title only, with no quotes and no full stop.', '', 'Message:', message,
-  ].join('\n');
+export async function claudeTitle(message, { runner = run, cwd, timeoutMs = TITLE_TIMEOUT_MS } = {}, instr = defaultInstructions) {
+  const prompt = instr.titlePrompt(message);
   const args = ['-p', '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config', '--tools', ''];
   const result = JSON.parse(await runner('claude', args, { input: prompt, cwd, timeoutMs, agent: 'title' }));
   if (result.is_error) throw new Error(`claude: ${result.result || 'title failed'}`);

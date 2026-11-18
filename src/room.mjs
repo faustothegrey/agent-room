@@ -5,47 +5,11 @@
 // The transcript and `seen` live in `state`, owned by the caller, so they survive a code reload;
 // so does state.briefing, read when an agent gets its first prompt.
 
+import * as defaultInstructions from './instructions.mjs';
+
 export const MAX_LAPS = 10;
 export const BRAINSTORM_MAX_LAPS = 20;
 export const SUMMARY_TURNS_EACH = 3;
-
-// A brainstorm (state.brainstorm) has no notes: its summary leaves out the sentence about
-// pending-instructions.md, and an instruction for the worker lives only in the chat.
-const summaryFormat = (brainstorm) => [
-  'Write it briefly and by points, in this format (leave out a section that would be empty):',
-  '**Agreed**', '- …', '**Not agreed**', '- the point: each side\'s view, by name',
-  '**Next step**', '- Answer: a question / Send to the Worker: "the instruction, word for word" / Do: an action of the User\'s own',
-  'Next step contains exactly one action for the User, labelled Answer, Send to the Worker or Do as appropriate.',
-  'A long instruction may instead follow "- Send to the Worker:" alone on its line, as a block quote with every line starting with >.',
-  '**Later**', '- the remaining actions in order, one short line each, each saying what it waits for',
-  'Keep each instruction for the worker until the User confirms it was sent, replaced or withdrawn.',
-  ...(brainstorm ? ['Quote its latest version word for word when it is the Next step.'] : [
-    'Quote its latest version word for word when it is the Next step; under Later refer to it by name,',
-    'with its full text kept in the discussion\'s pending-instructions.md.']),
-  'At most 8 points in all under Agreed and Not agreed. Reply with the summary only.',
-].join('\n');
-// `extra`: more instructions for this summary only (auto dev's Outcome line, see ui.mjs).
-const draftTask = (brainstorm, extra) => [
-  'The User asked for a summary of the discussion since the last summary (or since the start).',
-  summaryFormat(brainstorm), ...(extra ? [extra] : []),
-].join('\n');
-const reviewTask = (author, brainstorm, extra) => [
-  `The User asked for a summary. The latest message from ${author} above is the current version.`,
-  'If you accept it as it is, reply exactly PASS. Otherwise reply with a complete revised summary',
-  '(not a list of changes); your revision counts as your acceptance of it.',
-  summaryFormat(brainstorm), ...(extra ? [extra] : []),
-].join('\n');
-
-export function introduction(agent, agents) {
-  const order = agents.map((a) => a.name).join(', then ');
-  return [
-    `You are ${agent.name}, one of several AI agents in a group conversation with a human user.`,
-    `Participants: the User, ${agents.map((a) => a.name).join(', ')}.`,
-    `After each User message, agents take turns in this order: ${order}, until all of them pass in a row.`,
-    'You are a brainstorming agent started by agent-room: your rulebook is rulebooks/brainstorming.md, in your system instructions.',
-    'When you have nothing to add, reply exactly PASS.',
-  ].join('\n');
-}
 
 export function isPass(text) {
   return /^PASS\.?$/.test(text.trim());
@@ -58,22 +22,16 @@ export function formatMessages(messages) {
 // The closing statement of a discussion: one turn of `agent`, a one-off session with the worker's
 // provider and model (see closeNamedDiscussion in ui.mjs), which reads the discussion's folder. The
 // caller installs it only when this succeeds, so a failed attempt can't replace the previous one.
-export async function closingStatement(agent, { dir, workerReports = '' }) {
-  const task = [
-    `The User is closing this discussion. Write a complete closing statement for ${dir}/closing-statement.md.`,
-    `Read the discussion's notes and transcripts in ${dir}; they include decisions and worker reports.`,
-    'Describe the current decisions, unresolved questions, next steps and relevant context for a new session.',
-    'Point to pending-instructions.md for any unsent worker instructions; do not replace that file.',
-    workerReports ? `Recent worker reports:\n${workerReports}` : '',
-    'Reply with the complete statement only; do not write or rename any files.',
-  ].filter(Boolean).join('\n\n');
+export async function closingStatement(agent, { dir, workerReports = '' }, instr = defaultInstructions) {
+  const task = instr.closingTask({ dir, workerReports });
   const statement = String(await agent.turn(task) ?? '').trim();
   if (!statement || isPass(statement)) throw new Error(`${agent.name} did not provide a complete closing statement pointing to pending-instructions.md.`);
   if (!statement.includes('pending-instructions.md')) throw new Error('The closing statement must point to pending-instructions.md.');
   return statement;
 }
 
-export function createRoom(agents, state = { transcript: [], seen: new Map() }) {
+export function createRoom(agents, state = { transcript: [], seen: new Map() }, instr = defaultInstructions) {
+  const { intro, summaryFormat, draftTask, reviewTask } = instr;
   const names = new Set();
   for (const a of agents) {
     if (names.has(a.name)) throw new Error(`Duplicate agent name "${a.name}"`);
@@ -98,7 +56,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }) 
   function promptFor(agent, task) {
     const parts = [];
     // state.briefing (set by ui.mjs once the discussion folder exists): where to write, and so on.
-    if (seen.get(agent.name) === 0) parts.push(introduction(agent, activeAgents()), ...(state.briefing ? [state.briefing] : []));
+    if (seen.get(agent.name) === 0) parts.push(intro(agent, activeAgents()), ...(state.briefing ? [state.briefing] : []));
     // After a Resume or Restart (ui.mjs): one sentence, in each agent's next prompt only.
     if (state.restored?.pending?.includes(agent.name)) parts.push(state.restored.text);
     parts.push('New messages since your last turn:', formatMessages(unseenFor(agent)));

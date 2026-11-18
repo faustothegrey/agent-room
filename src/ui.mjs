@@ -12,6 +12,7 @@ import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSyn
 import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as defaultInstructions from './instructions.mjs';
 
 export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--port 5566] [--no-screen] [--open] [--reopen NAME] [--dev]
                   [--node NAME [--peer NAME=http://ADDRESS:PORT ...]]
@@ -229,8 +230,9 @@ export async function load(ctx, v) {
     ctx.agentSpecs ??= saved ? saved.agents.map(specFor).join(',') : 'claude,codex';
     ctx.workerSpec ??= saved ? specFor(saved.worker) : 'claude:Worker';
   }
-  const instructions = readFileSync(new URL('../rulebooks/brainstorming.md', import.meta.url), 'utf8');
-  const workerInstructions = readFileSync(new URL('../rulebooks/worker.md', import.meta.url), 'utf8');
+  const instr = await import(`./instructions.mjs${v}`);
+  const instructions = readFileSync(instr.rulebookPath('brainstorming'), 'utf8');
+  const workerInstructions = readFileSync(instr.rulebookPath('worker'), 'utf8');
   const { createAgent, claudeTitle, run, findLeftovers } = await import(`./agents.mjs${v}`);
   const { createRoom, closingStatement } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
@@ -274,7 +276,7 @@ export async function load(ctx, v) {
   const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: shop?.log ?? [], working: shop && runningTasks(shop).some((t) => t.origin === ctx) ? wName : null };
   const roomShop = shop ?? newShop(screen.worker);
   roomShop.launchDefaults ??= { agents: ctx.agentSpecs, worker: ctx.workerSpec };
-  return { room: createRoom(agents, ctx.state), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
+  return { room: createRoom(agents, ctx.state, instr), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: roomShop,
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
     makeWorker: (session) => createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
@@ -283,8 +285,9 @@ export async function load(ctx, v) {
     // the room's folder, with no rulebook and a session of its own (never the worker's session or
     // worktree). `agent`: a stand-in for tests (ctx.closingAgent).
     closingStatement: (options, agent = createAgent(wProvider, { name: wName, model: wModel, cwd: ctx.cwd, runner, session: {} })) =>
-      closingStatement(agent, options),
-    suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }) };
+      closingStatement(agent, options, instr),
+    suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }, instr),
+    instructions: instr };
 }
 
 export const UPDATE_NEEDS_RESTART = 'This update changes the worker\'s queues: Restart to apply it (Reload can\'t).';
@@ -310,6 +313,18 @@ const log = (ctx, text) => {
 const describe = (room) => room.agents.map((a) => `${a.name} (${a.provider})`).join(', ');
 const when = (d) => d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 
+// The Instructions tab's content: the catalog from instructions.mjs, with each rulebook's ref
+// resolved to its current file text (read afresh, so an edited rulebook shows its new content).
+function instructionRegistry(ctx) {
+  const instr = ctx.instructions ?? defaultInstructions;
+  return instr.instructionSets.map((set) => ({
+    type: set.type,
+    pieces: set.pieces.map((piece) => piece.ref
+      ? { id: piece.id, intent: piece.intent, when: piece.when, content: readFileSync(instr.rulebookPath(piece.ref), 'utf8') }
+      : { id: piece.id, intent: piece.intent, when: piece.when, content: piece.content }),
+  }));
+}
+
 // Points the screen at the code loaded now (at start and after each reload): the header's names and,
 // in UI mode, the Worker tab's input.
 function wire(ctx) {
@@ -329,6 +344,7 @@ function wire(ctx) {
   };
   ctx.screen.newRoom = (body) => newRoom(ctx, body);
   ctx.screen.listRooms = async () => listRooms(ctx);
+  ctx.screen.instructions = () => instructionRegistry(ctx);
   if (!agyModelsWarmed) { agyModelsWarmed = true; agyModels(); } // start without delaying room startup
   ctx.screen.getSettings = () => {
     const launch = roomDefaults(ctx);
@@ -3043,38 +3059,22 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       }
       // The worker learns the active discussion's folder (for its notes) with its first instruction there.
       // After New discussion, until the next one exists, it learns only that the old one is closed.
+      const instr = ctx.instructions ?? defaultInstructions;
       const d = task.discussion;
-      // A brainstorm has no folder: it is told so once.
-      const brief = d && own.briefed !== d.dir
-        ? `The active discussion's folder is ${d.dir}: create, read and write this discussion's documents there, including your implementation notes and plans. The work itself goes in your worktree, ${place.cwd}.\n\n`
-        : !d && own.brainstorm && own.briefed !== 'brainstorm'
-          ? 'These instructions come from a brainstorm, which has no folder: keep your notes in your scratch folder only.\n\n'
-        : !d && own.briefed && own.briefed !== 'brainstorm'
-          ? `No discussion is active now: ${own.briefed} is no longer the active discussion's folder. You will be told the next one's folder once it exists.\n\n`
-          : '';
-      // And where it works, with its first instruction (again if that changes: a saved session that
-      // worked in the shared worktree before lanes, or a context moving between lanes, is told so).
-      const moved = own.tree && own.tree !== place.cwd
-        ? `Your worktree has changed: until now you worked in ${own.tree}; from now on you work in ${place.cwd}, on the branch ${place.branch}. Leave ${own.tree} alone from now on: it is another lane's. `
-        : '';
-      const tree = own.tree !== place.cwd
-        ? `${moved}Your working directory is ${place.cwd}, your own Git worktree of the project, on the branch ${place.branch}. Make your changes there, never in the room's root, ${ctx.cwd}: that is the User's working copy (only the discussion folder there is yours, for notes). Commit every completed task on ${place.branch}, labelled as each instruction says, and give the commit ID in your reply; the User reviews and merges it into main. Your scratch notes go in ${join(place.path, NOTES)}/<task>/, one folder per task: Git ignores them, never commit them, and delete them only when the User says "stage accepted". Plans and notes for the User's review still go in the discussion's folder.\n\n`
-        : '';
-      // Its origin's label for the commit, once per worker session (again if it changes); a recovery
-      // task also gets the first task's details.
-      const commit = own.label === label ? '' : `These instructions come from [${label}]. When a task is complete, commit it on ${place.branch} with a message starting "[${label}]" and give the commit ID in your reply.\n\n`;
-      const leftover = recovery
-        ? `Uncommitted edits are left in your worktree from the earlier task from [${label}] "${recovery.task}"${recovery.before ? ` (${place.branch} was at ${recovery.before.slice(0, 7)} when it started)` : ''}: this discussion's next worker tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those. Inspect and resolve any merge or revert already in progress before further work; never force it or start a fresh operation over it.\n\n`
-        : '';
+      // The worker learns the active discussion's folder, where it works, its commit label, and what
+      // to do before the instruction (merge, leftover edits, interruptions). These pieces come from
+      // instructions.mjs, the same catalog the Instructions tab shows.
+      const brief = instr.workerBrief(d, own, place);
+      const tree = instr.workerLocation(own, place, ctx, NOTES);
+      const commit = instr.workerCommit(own, label, place);
+      const leftover = recovery ? instr.workerLeftover(recovery, label, place) : '';
       const mainBehind = owedMain || !recovery && await gitOk(place.path, 'rev-parse', '--verify', 'main^{commit}') &&
         Number(await git(place.path, 'rev-list', '--count', 'HEAD..main')) > 0;
-      const merge = mainBehind ? (rollback
-        ? `Main has commits ${place.branch} lacks. Follow the rollback preflight below before merging or changing files.\n\n`
-        : `Before the instruction below, first merge main into ${place.branch} with a normal merge (git merge main). Label any merge commit "[${label}] catch up with main". If it clashes, do not force it or do the requested task: leave the state intact and report the conflict; this origin must resolve it before other worker tasks can run. After a successful merge, run the project's tests (npm test, if it has them) and report their real output, then end your reply with the line "Tested: <full commit ID of ${place.branch}> with main <full commit ID of main>: tests passed" (or "tests failed"), naming the commits you tested. Never merge into main or push.\n\n`) : '';
-      const interrupted = told.map((r) => `Your previous instruction "${firstLine(r.task)}" was interrupted by a Restart, Quit or a crash: check the worktree before continuing.\n\n`).join('');
+      const merge = instr.workerMerge(mainBehind, rollback, place, label);
+      const interrupted = instr.workerInterrupted(told);
       if (told.length) work.interrupted = work.interrupted.filter((r) => !told.includes(r));
       const retryBrief = t?.retry ? `Your earlier attempt at this instruction failed: ${t.retry.error}\nInspect the current worktree and Git state first, including uncommitted edits and any merge or revert in progress. Commits made since the failure:\n${t.retry.after ? (await git(place.path, 'log', '--format=%H %s', `${t.retry.after}..HEAD`).catch(() => '(could not read commits)') || '(none)') : '(the failure commit could not be determined)'}\n\n` : '';
-      entry = { speaker: worker.name, text: (await worker.turn(interrupted + brief + tree + commit + retryBrief + leftover + merge + (history ? `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n` : '') + text)) || '(no reply)' };
+      entry = { speaker: worker.name, text: (await worker.turn(interrupted + brief + tree + commit + retryBrief + leftover + merge + (history ? instr.workerHistory(history, text) : text))) || '(no reply)' };
       // Its briefing is now known to the session: the context's, or the seat of a discussion left
       // meanwhile (even if it was left while this turn ran).
       const now = worker === ctx.worker ? null : worker.seat;

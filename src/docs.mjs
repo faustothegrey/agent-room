@@ -790,6 +790,16 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .agent-settings { border-bottom: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--tint); padding: .5rem .8rem; max-height: 45%; overflow-y: auto; flex-shrink: 0; }
 .agent-settings summary { cursor: pointer; font-weight: 600; font-size: .85rem; }
 .providers-panel { padding: .6rem .9rem; overflow-y: auto; }
+/* The Instructions tab: prompt sets, each piece expandable, its content in a monospace block. */
+#instructions { overflow-y: auto; padding: .8rem 1rem; }
+.ins-set { margin-bottom: 1.3rem; }
+.ins-set > h3 { font-size: .85rem; margin: 0 0 .35rem; }
+.ins-piece { border: 1px solid var(--line); border-radius: 6px; margin: .35rem 0; }
+.ins-piece summary { cursor: pointer; padding: .4rem .6rem; display: flex; gap: .5rem; align-items: baseline; }
+.ins-piece summary b { font-size: .82rem; }
+.ins-piece .when { font-size: .7rem; color: var(--dim); margin-left: auto; white-space: nowrap; }
+.ins-intent { font-size: .76rem; color: var(--dim); padding: .1rem .6rem .45rem; }
+.ins-content { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .7rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; padding: .45rem .6rem; border-top: 1px solid var(--line); max-height: 42vh; overflow-y: auto; }
 .providers-heading { font-size: .85rem; margin: .9rem 0 .2rem; }
 .settings-hint, .settings-status { font-size: .8rem; margin: .5rem 0; }
 .settings-hint { color: var(--dim); }
@@ -822,7 +832,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <div id="busy" aria-hidden="true"></div>
 </header>
 <div id="left">
-  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button class="tab" id="tab-providers" role="tab" title="Default providers and models for new discussions: members and worker together">Providers</button></div>
+  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button class="tab" id="tab-providers" role="tab" title="Default providers and models for new discussions: members and worker together">Providers</button><button class="tab" id="tab-instructions" role="tab" title="The prompts and rulebooks sent to each agent, and when">Instructions</button></div>
   <div class="view" id="talk">
     <details class="agent-settings" id="talk-settings">
       <summary>Discussion members · <span id="talk-models">provider & model</span></summary>
@@ -857,6 +867,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <button type="button" id="providers-done">Go to the discussion</button>
     </form>
   </div>
+  <div class="view" id="instructions" hidden><div id="instructions-pane"></div></div>
   <div class="view" id="work" hidden>
     <details class="agent-settings" id="work-settings">
       <summary>Worker · <span id="work-models">provider & model</span></summary>
@@ -1009,9 +1020,10 @@ function statusEl(text, error) { const el = document.createElement('div'); el.cl
 // The two tabs. A worker reply while the Discussion tab is shown marks the Worker tab.
 function showTab(name) {
   tab = name;
-  $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work'; $('providers').hidden = name !== 'providers';
-  $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work'); $('tab-providers').classList.toggle('on', name === 'providers');
+  $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work'; $('providers').hidden = name !== 'providers'; $('instructions').hidden = name !== 'instructions';
+  $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work'); $('tab-providers').classList.toggle('on', name === 'providers'); $('tab-instructions').classList.toggle('on', name === 'instructions');
   if (name === 'providers') { renderProviders(); updateReplicaView(); return; }
+  if (name === 'instructions') { renderInstructions(); updateReplicaView(); return; }
   if (name === 'work') { $('tab-work').classList.remove('news'); post('__workerinfo', {}).catch(() => {}); } // its branches' checks, again
   updateReplicaView();
   (name === 'work' ? wbox : box).focus();
@@ -1019,7 +1031,39 @@ function showTab(name) {
 $('tab-talk').onclick = () => showTab('talk');
 $('tab-work').onclick = () => showTab('work');
 $('tab-providers').onclick = () => showTab('providers');
+$('tab-instructions').onclick = () => showTab('instructions');
 $('providers-done').onclick = () => showTab('talk');
+// The Instructions tab: the prompt catalog, fetched once and rendered as expandable pieces.
+let instructionsLoaded = false;
+async function renderInstructions() {
+  if (instructionsLoaded) return;
+  instructionsLoaded = true;
+  const pane = $('instructions-pane');
+  pane.textContent = '';
+  try {
+    const res = await fetch('__instructions');
+    if (!res.ok) throw new Error(await res.text());
+    renderInstructionSets(await res.json());
+  } catch (err) { pane.textContent = "Couldn't load the instructions: " + err.message; }
+}
+function renderInstructionSets(sets) {
+  const pane = $('instructions-pane');
+  for (const set of sets) {
+    const box = document.createElement('div'); box.className = 'ins-set';
+    const h = document.createElement('h3'); h.textContent = set.type; box.append(h);
+    for (const piece of set.pieces) {
+      const d = document.createElement('details'); d.className = 'ins-piece';
+      const s = document.createElement('summary');
+      const b = document.createElement('b'); b.textContent = piece.id;
+      const when = document.createElement('span'); when.className = 'when'; when.textContent = piece.when;
+      s.append(b, when); d.append(s);
+      const intent = document.createElement('div'); intent.className = 'ins-intent'; intent.textContent = piece.intent; d.append(intent);
+      const content = document.createElement('pre'); content.className = 'ins-content'; content.textContent = piece.content; d.append(content);
+      box.append(d);
+    }
+    pane.append(box);
+  }
+}
 function workMessage(m, live) {
   if (m.note) return status(m.note, m.error, 'Worker'); // a marker (New discussion) or an error
   const el = bubble(m);
@@ -3221,6 +3265,14 @@ function handleScreen(req, res, url, dir, screen) {
     if (!screen.listRooms) { send(409, 'text/plain', 'Room discovery is unavailable.'); return true; }
     screen.listRooms().then((rooms) => send(200, 'application/json', JSON.stringify(rooms)),
       (err) => send(500, 'text/plain; charset=utf-8', err.message));
+    return true;
+  }
+  // The Instructions tab: the prompt catalog, with each rulebook's current text.
+  if (url.pathname === '/__instructions') {
+    if (req.method !== 'GET') { send(405, 'text/plain', 'Use GET.'); return true; }
+    if (!screen.instructions) { send(409, 'text/plain', 'Instructions are unavailable in this room.'); return true; }
+    try { send(200, 'application/json', JSON.stringify(screen.instructions())); }
+    catch (err) { send(500, 'text/plain; charset=utf-8', err.message); }
     return true;
   }
   if (url.pathname === '/__files') {
