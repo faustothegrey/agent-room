@@ -5,6 +5,8 @@ ideas around a shared document or drawing, keeping the conversation and its subj
 together. Keep it small enough to read in one sitting.** Before adding a module, a dependency, a
 config system or a process, ask the owner whether the problem actually needs it.
 
+The owner (and User in agent-room) is Fausto; agents may address Fausto by name.
+
 Current setup, behavior and the source map are in `README.md`. Remaining decisions and
 historical material are in `discussions/` (start at `discussions/README.md`).
 
