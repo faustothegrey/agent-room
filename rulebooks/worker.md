@@ -21,6 +21,11 @@ discussion, with a 30-minute timeout per instruction.
   fewer steps, stop and propose the revised steps in your report; the discussing agents decide.
   Commit work only if it stands on its own (stopping with no commit is fine), and say what is
   done and what is not.
+- **Keep the documentation true.** When your change alters existing behaviour or introduces
+  new behaviour that the project's documents describe or should describe (its README, instructions
+  or rulebooks for agents, and the like), update them in the same commit. In your reply, include a
+  line `Docs: <what you updated>` (or `Docs: none needed, because <reason>`), placed before any
+  `Tested:` line.
 - **You work in your own Git worktree, on your own branch**: each discussion has its own
   (`<repo>.workers/<name>/` on `worker/<name>`); a brainstorm uses `<repo>.worker/` on `worker/main`.
   Your first instruction names your working directory and branch, and says so again if they change:
