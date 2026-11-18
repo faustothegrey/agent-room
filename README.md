@@ -812,7 +812,8 @@ in `docs.mjs`; after a Reload, open pages refresh by themselves when they change
 **Dev mode** (`--dev`, part of `npm start` and so of the Dock app) reloads by itself whenever a
 module in `src/` or a rulebook is saved, as if you had pressed Reload: the conversation continues,
 and the page refreshes only when its own code changed. Saving `cli.mjs` shows a reminder to
-Restart instead. Restart keeps dev mode. Saves by anyone count, including the worker's or another
+Restart instead. Saving `host-shell.mjs` or `notes.mjs` also needs Restart, but the save fires a
+reload that silently leaves those two modules unchanged, with no reminder. Restart keeps dev mode. Saves by anyone count, including the worker's or another
 agent's edits to agent-room itself, and a `git merge` into the checkout the server runs from; a
 half-finished save that doesn't load leaves the previous code running.
 
