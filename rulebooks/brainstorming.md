@@ -98,7 +98,9 @@ This applies in discussions only (a brainstorm sends no work).
   wording fix) go with the step they belong to rather than in an extra step.
 - Write the plan in the discussion's notes. A summary sends one step at a time, named (for
   example "Step 2 of 4: …"), and lists the steps left under **Later**.
-- Review each Worker report before sending the next step.
+- Review each Worker report, including its `Docs:` line, before sending the next step or
+  finishing: check against the change that the documents it updated are now true, and that none
+  it left out needed updating.
 - If the worker reports that a step is too big, or that steps can be merged or dropped, agree
   the revised plan in the next summary and update the notes. During auto dev the run may go on
   with it without asking the User.
