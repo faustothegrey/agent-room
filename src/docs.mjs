@@ -289,7 +289,7 @@ main { position: relative; }
 #ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 5; }
 body.drawing #ink { pointer-events: auto; cursor: crosshair; touch-action: none; }
 #ink path, #ink ellipse, #ink line { fill: none; stroke: #d6337a; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
-#ink-tools { position: fixed; top: .5rem; right: .5rem; z-index: 10; display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: Canvas; border: 1px solid #8886; font: 12px system-ui, sans-serif; }
+#ink-tools { position: sticky; top: .5rem; margin: 0 0 .75rem auto; width: max-content; z-index: 10; display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: Canvas; border: 1px solid #8886; font: 12px system-ui, sans-serif; }
 #ink-tools button { font: inherit; border: 1px solid transparent; background: none; color: CanvasText; border-radius: 5px; padding: 2px 8px; cursor: pointer; }
 #ink-tools button[aria-pressed="true"] { border-color: #2f6fde; color: #2f6fde; background: #2f6fde1f; }
 nav { font-size: .85rem; opacity: .7; margin-bottom: 1rem; }
@@ -375,7 +375,7 @@ if (parent !== window && document.querySelector('.sheet, .mermaid-box, .vl-box')
   }
   const clear = document.createElement('button'); clear.type = 'button'; clear.textContent = 'Clear marks'; clear.title = 'Remove your marks from this page';
   clear.onclick = () => { for (const m of [...ink.children]) if (m.tagName !== 'defs') m.remove(); };
-  bar.append(clear); document.body.append(bar); setTool('point');
+  bar.append(clear); document.body.prepend(bar); setTool('point'); // its own line at the top, never over the document
   addEventListener('keydown', (e) => { if (e.key === 'Escape') setTool('point'); });
   let shape = null, pts = [];
   const local = (e) => { const b = main.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
