@@ -7,7 +7,7 @@ Git worktree. It is domain-agnostic: a room is any folder, holding any kind of w
 through your installed Claude Code, Codex and Antigravity (`agy`) CLIs, using their existing authentication and
 subscriptions.
 
-The project stays deliberately small: nine source modules and four dependencies: `marked`, and for
+The project stays deliberately small: ten source modules and four dependencies: `marked`, and for
 the Terminal pane `@lydell/node-pty`, `ws` and `ghostty-web`. How it works (the two harnesses,
 the main loop, the core protocol, the summary contract, current restrictions) is described in
 [docs/architecture.md](docs/architecture.md); this README covers how to use it.
@@ -792,6 +792,7 @@ agent-room's source.
 |---|---|
 | `src/cli.mjs` | Arguments, the server's rooms, each room's context and input queue, Reload, Restart, Quit room and Shutdown. |
 | `src/agents.mjs` | CLI processes, the record of programs and its leftovers, session resumption, model arguments, title generation and usage parsing. |
+| `src/instructions.mjs` | The prompt catalog: every instruction sent to the discussion agents, the worker, the closing-statement agent and the title-generation call; the one source the runtime and the Instructions tab both read. |
 | `src/room.mjs` | Discussion turns, unseen messages, passes and summary agreement. |
 | `src/ui.mjs` | Room setup, persistent defaults, commands, discussions, worker queue, logging and launch integration. |
 | `src/docs.mjs` | Local HTTP server handlers, document rendering, browser UI and live events. |
@@ -804,8 +805,8 @@ Run `npm test` for the fast suite, `npm run test:slow` for the slow suite, or `n
 settings persistence across CLI restarts, and screen/terminal coordination; they do not establish
 live provider access or browser appearance.
 
-Edits outside `cli.mjs` can be loaded with Reload; both rulebooks are reread too. A failed load
-leaves the previous code running. `cli.mjs` changes require Restart. Browser assets are embedded
+Edits outside `cli.mjs`, `host-shell.mjs` and `notes.mjs` can be loaded with Reload; both rulebooks are reread too. A failed load
+leaves the previous code running. `cli.mjs`, `host-shell.mjs` and `notes.mjs` changes require Restart. Browser assets are embedded
 in `docs.mjs`; after a Reload, open pages refresh by themselves when they changed.
 
 **Dev mode** (`--dev`, part of `npm start` and so of the Dock app) reloads by itself whenever a
@@ -814,6 +815,61 @@ and the page refreshes only when its own code changed. Saving `cli.mjs` shows a 
 Restart instead. Restart keeps dev mode. Saves by anyone count, including the worker's or another
 agent's edits to agent-room itself, and a `git merge` into the checkout the server runs from; a
 half-finished save that doesn't load leaves the previous code running.
+
+### How hot reload works
+
+agent-room is split into a part that never reloads and a part that reloads wholesale. The part
+that never reloads is `src/cli.mjs`: it owns the arguments, the server's rooms, each room's
+context (`ctx`) and input queue, and the Reload, Restart and Quit commands; changes there need
+Restart. The reloadable part is `src/ui.mjs` and the modules it loads, which Reload swaps between
+rounds.
+
+The swap works around Node's module cache. A static `import './ui.mjs'` is cached forever, so an
+edited file would keep exporting its old values. Instead `cli.mjs` loads ui.mjs with a dynamic
+import that carries a fresh query string, `await import('./ui.mjs?v=<millis>')`: the `?v=` makes
+each load a different module to the loader. The tag is `Date.now()` at every Reload (and each
+room's first load), so each reload is a fresh module. `ui.mjs`'s `load()` then imports the other
+modules with the same tag — `instructions.mjs`, `agents.mjs`, `room.mjs`, `docs.mjs`, `usage.mjs`,
+and `replicate.mjs` under `--node` — so the whole set comes in fresh together. The runtime path
+never uses a static import for these, because a static import of a local module stays cached and a
+reload would silently miss it.
+
+Two modules are excluded by that rule and need Restart like `cli.mjs`: `host-shell.mjs` and
+`notes.mjs`, the Terminal and Notes panes. They are statically imported by `docs.mjs` without a
+version tag, so a reloaded `docs.mjs` still resolves them to their cached instances: the tag
+applies only to the module it is written on, never to that module's own static imports.
+
+What must survive a reload is not in a module at all: it lives in each room's `ctx`, owned by
+`cli.mjs`, so it is untouched by which module version is current — the conversation state (the
+transcript and seen-message positions), the provider sessions, the transcript file path, the
+viewer server and its clients, the worker queue and worktree, and the usage totals. `load()` builds
+a fresh room on top of the existing `ctx` and returns only the parts that can change; `cli.mjs`
+merges them back with `Object.assign`. A load that fails throws before anything is merged, so the
+previous code keeps running and the rooms report the error.
+
+The agent rulebooks are not modules. They are `.md` files (`rulebooks/brainstorming.md` and
+`rulebooks/worker.md`) reread from disk with `readFileSync` on every load, so an edit is picked up
+by the same Reload with no cache-busting.
+
+The prompt templates in `instructions.mjs` need the same freshness, but the turn logic in
+`room.mjs` and `agents.mjs` calls them through a static default import. The two are bridged by a
+default-parameter pattern: `createRoom(agents, state, instr = defaultInstructions)` and
+`claudeTitle(..., instr = defaultInstructions)` take the instructions as an argument. `ui.mjs`
+loads the version-tagged copy (`const instr = await import('./instructions.mjs?v=…')`) and passes
+it in, so the prompts reload with everything else, while the static import serves only as the
+fallback for the Instructions tab when no room has loaded a copy yet.
+
+Reload itself is a message through the input queue. `/reload` (and dev mode's watcher) imports the
+new `ui.mjs` once, swaps it into `cli.mjs`'s `ui`, and pushes `{ reload }` into every room's
+queue. Each room applies it between its own rounds, never mid-turn: a room busy in a discussion
+finishes the round with the code it started with, and only the next round uses the new code. The
+browser page is part of the reloaded code (its assets are embedded in `docs.mjs`), so an open page
+refreshes by itself when the page's own code changed, keeping what was typed.
+
+Dev mode (`--dev`, part of `npm start`) wraps this in a watcher: `fs.watch` on `src/` for `.mjs`
+files and on `../rulebooks/` for `.md` files, debounced 300 ms so an editor's burst of save events
+collapses into one reload. A save to `cli.mjs` is not reloaded — the room prints "Restart to apply
+it" — because the one file the watcher cannot swap is itself.
 
 For unfinished decisions, historical designs and deferred research, start at
 [the discussions index](discussions/README.md).
