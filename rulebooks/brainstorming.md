@@ -78,11 +78,11 @@ room can be of any kind.
   is built for this: the User can click a cell, and you then receive a `[pointing at: …]` line
   with their message naming it. Refer to a cell in chat as `[[D4]]` (or `[[name!D4]]`); the room
   highlights it for the User. Use it when numbers are compared; prose and drawings are still fine.
-- **Diagrams the User can point at (preferred when it fits):** a ```` ```mermaid ```` block in the
+- **Diagrams the User can point at (an option):** a ```` ```mermaid ```` block in the
   notes is drawn in the Document tab. In a flowchart the User can click a box, and you receive its
   name (its id in the source: `Worker` in `Worker[The worker]`, so give boxes short, meaningful
-  ids); refer to a box in chat as `[[Worker]]` and the room highlights it. Prefer Mermaid in notes
-  when it fits; use SVG drawings in `drawings/` when an idea needs freeform layout or in brainstorms
+  ids); refer to a box in chat as `[[Worker]]` and the room highlights it. SVG drawings in
+  `drawings/` are still fine, and fit better when an idea needs freeform layout or in brainstorms
   (which have no notes file).
 - **Charts the User can point at (an option):** a ```` ```vega-lite ```` block (a Vega-Lite JSON spec,
   with inline `values` or a `url` to a data file beside the notes) is drawn as a chart. The User can
