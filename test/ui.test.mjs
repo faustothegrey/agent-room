@@ -401,6 +401,29 @@ test('/peek shows a closed discussion read-only, in place, without reopening it'
   assert.ok(!existsSync(`${root}/2026-11-04-old`));
 });
 
+test('/peek then /peek restores the live discussion transcript', async () => {
+  const { mkdirSync, writeFileSync, realpathSync } = await import('node:fs');
+  const { dirname } = await import('node:path');
+  const ctx = await freshSession(['from A', 'from B'], async () => ({ title: 'Live' }));
+  await handleLine('hello', ctx);
+  const live = ctx.screen.transcript.map((m) => m.speaker);
+  assert.ok(live.length >= 1);
+
+  mkdirSync(`${ctx.cwd}/discussions/2026-11-01-closed`, { recursive: true });
+  const cp = await checkpointPath(ctx.cwd, '2026-11-01-closed');
+  mkdirSync(dirname(cp), { recursive: true });
+  writeFileSync(cp, JSON.stringify({ version: 1, root: realpathSync(ctx.cwd), discussion: { name: '2026-11-01-closed', title: 'Closed' }, state: { transcript: [{ speaker: 'User', text: 'x' }] } }));
+  await markClosed(ctx.cwd, '2026-11-01-closed');
+
+  await handleLine('/peek 2026-11-01-closed', ctx);
+  assert.equal(ctx.screen.peek.name, '2026-11-01-closed');
+  assert.deepEqual(ctx.docs.resetEvent(ctx.screen).messages.map((m) => m.speaker), ['User']);
+
+  await handleLine('/peek', ctx);
+  assert.equal(ctx.screen.peek, null);
+  assert.deepEqual(ctx.docs.resetEvent(ctx.screen).messages.map((m) => m.speaker), live);
+});
+
 test('Restart keeps the launch flags that matter: the same port, agents, worker and dev mode, in the discussion in use', () => {
   // The agents and worker are the room's current ones (ctx), not the launch flags.
   const ctx = { cwd: '/r', agentSpecs: 'claude:Ada', workerSpec: 'codex:W', discussion: { name: '2026-11-03-a-topic' } };

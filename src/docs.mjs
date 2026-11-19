@@ -2993,8 +2993,11 @@ events.onmessage = (e) => {
     localMessages = []; localInput = ev.input;
     peeking = ev.peek ?? null;
     talk.clear();
-    if (peeking) for (const m of ev.messages) if (!m.pass && !m.hidden) talk.add(bubble(m));
-    else ev.messages.forEach((m) => message(m, false));
+    if (peeking) {
+      for (const m of ev.messages) if (!m.pass && !m.hidden) talk.add(bubble(m));
+    } else {
+      ev.messages.forEach((m) => message(m, false));
+    }
     yourTurn = !ev.thinking; setThinking(ev.thinking); if (!viewing) { showDoc(ev.doc); openFiles(); }
     if (!ev.input) { $('composer').hidden = true; } // terminal mode: the page only watches
     work.clear();
