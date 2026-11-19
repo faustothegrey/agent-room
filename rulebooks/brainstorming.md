@@ -83,7 +83,8 @@ room can be of any kind.
   cells starting with `=` are formulas (`=C2/B2`, `=SUM(B2:B8)`, also AVERAGE, MIN, MAX). The room
   is built for this: the User can click a cell, and you then receive a `[pointing at: …]` line
   with their message naming it. Refer to a cell in chat as `[[D4]]` (or `[[name!D4]]`); the room
-  highlights it for the User. Use it when numbers are compared; prose and drawings are still fine.
+  highlights it for the User. Consider it whenever you write a table, of words or numbers; prose
+  and drawings are still fine.
 - **Diagrams the User can point at (preferred when it fits):** a ```` ```mermaid ```` block in the
   notes is drawn in the Document tab. In a flowchart the User can click a box, and you receive its
   name (its id in the source: `Worker` in `Worker[The worker]`, so give boxes short, meaningful
@@ -96,6 +97,10 @@ room can be of any kind.
   highlights the marks with that value.
   The User can also circle, draw over or point an arrow at these figures; you then receive a line
   such as `a mark: circled diagram box Worker`.
+- **Naming figures:** give flowchart boxes one or two CamelCase words naming the thing, not its
+  position (`Worker`, `AutoDev`; never `A`, `B`, `Step1`); name tables with one lowercase word for
+  what they hold (`costs`, `options`); keep chart category labels short and unique, so `[[…]]`
+  references stay readable and highlight cleanly.
 
 ## Sending work to the worker in steps
 This applies in discussions only (a brainstorm sends no work).
