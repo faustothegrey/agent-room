@@ -2629,6 +2629,29 @@ async function loadHealth(check = false) {
     for (const group of data.configured) showConfigured('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started'), group.agents);
     if (data.defaults) showConfigured('Saved defaults', data.defaults);
     else line('Saved defaults: none available');
+    line('Prompt tests use quota and prove only that the model answered at that moment.');
+    for (const provider of ['claude', 'codex', 'agy']) {
+      const row = document.createElement('p'), label = document.createElement('label'), select = document.createElement('select');
+      label.textContent = provider.toUpperCase() + ' model: ';
+      const choices = [...new Set(data.configured.flatMap((group) => group.agents.filter((a) => a.provider === provider && a.model).map((a) => a.model)))];
+      for (const model of ['', ...choices]) { const option = document.createElement('option'); option.value = model; option.textContent = model || 'CLI default'; select.append(option); }
+      label.append(select); row.append(label, ' ');
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Test prompt (uses quota)';
+      button.disabled = data.promptRunning.includes(provider);
+      const result = document.createElement('span');
+      button.onclick = async () => {
+        button.disabled = true; result.textContent = ' Running…';
+        try {
+          const res = await post('__prompt-test', { provider, model: select.value });
+          if (!res.ok) throw new Error(await res.text());
+          await loadHealth();
+        } catch (err) { result.textContent = ' Could not run test: ' + err.message; button.disabled = false; }
+      };
+      row.append(button, result); box.append(row);
+      for (const r of data.promptResults.filter((item) => item.provider === provider)) {
+        line(provider.toUpperCase() + ' · ' + (r.model || 'CLI default') + ' · ' + when(r.at) + ' · ' + (r.durationMs / 1000).toFixed(1) + ' s · ' + r.outcome + ' · reply: ' + (r.reply || '(none)') + (r.error ? ' · error: ' + r.error : ''));
+      }
+    }
     const table = (headings, rows) => {
       const t = document.createElement('table'), thead = t.createTHead(), tr = thead.insertRow();
       for (const h of headings) { const th = document.createElement('th'); th.scope = 'col'; th.textContent = h; tr.append(th); }
@@ -3379,6 +3402,14 @@ function handleScreen(req, res, url, dir, screen) {
     if (req.method !== 'GET' && (req.method !== 'POST' || !fromOwnPage(req))) { send(403, 'text/plain', 'Refused.'); return true; }
     Promise.resolve().then(() => req.method === 'GET' ? screen.providerHealth() : screen.checkProviderHealth()).then(
       (data) => send(200, 'application/json', JSON.stringify(data)), (err) => send(500, 'text/plain; charset=utf-8', err.message));
+    return true;
+  }
+  if (url.pathname === '/__prompt-test') {
+    if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain', 'Refused: only the room page can run a prompt test.'); return true; }
+    if (!screen.testPrompt) { send(409, 'text/plain', 'Prompt tests are unavailable in this room.'); return true; }
+    readJson(req).then((body) => screen.testPrompt(body)).then(
+      (result) => send(200, 'application/json', JSON.stringify(result)),
+      (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
   // The Instructions tab: the prompt catalog, with each rulebook's current text.

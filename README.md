@@ -86,7 +86,12 @@ the live provider and model for discussion turns, summaries, worker tasks, closi
 discussion titles, login checks and the quota meter. Closing statements use a new worker-provider
 session. The session tables list the provider session IDs known to agent-room and each member's and
 worker's last turn, with its outcome and latest error. A session is memory between turns, not a
-running program. Turn outcomes and latest errors are kept only in memory, not in a history or log.
+running program. Turn outcomes and latest errors are kept only in memory, not in a history or log. For each provider,
+**Test prompt (uses quota)** sends a tiny prompt with the chosen configured model or CLI default in a
+new session and temporary empty folder. It runs only on click, separately from Check now, and its
+latest result per provider and model is kept in memory. The result proves only that the model answered
+at that moment. Claude runs without tools or session persistence; Codex uses a read-only sandbox,
+no web search and an ephemeral session; Agy uses its sandbox and does not bypass permissions.
 
 A **leftover** is a program agent-room started that is still alive after a crash or a Restart.
 Each program is written, when it starts, to `~/.local/state/agent-room/programs/<pid>.json` (PID,

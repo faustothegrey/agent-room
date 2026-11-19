@@ -4016,3 +4016,44 @@ test('last-turn records stay in memory by session and retain the latest error af
   assert.equal(resets, 1);
   assert.equal(records.get(session), undefined);
 });
+
+test('prompt diagnostics use isolated calls, retain results and leave agent sessions alone', async () => {
+  const { runPromptTest } = await import('../src/ui.mjs');
+  const { parseCodexEvents, parseAgyOutput } = await import('../src/agents.mjs');
+  const { existsSync, readdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const agentSession = { threadId: 'existing-thread' }, workerSession = { conversationId: 'existing-worker' };
+  const ctx = { cwd: '/tmp', agentSpecs: 'codex:A:configured,claude:B:opus', workerSpec: 'agy:W:gemini',
+    room: { agents: [{ provider: 'codex' }, { provider: 'claude' }] }, worker: { provider: 'agy' }, usage: {},
+    sessions: new Map([['A', agentSession], ['worker:W', workerSession]]) };
+  ctx.hub = { rooms: new Map([['room', ctx]]) };
+  const parsers = { parseCodexEvents, parseAgyOutput }, calls = [], dirs = [];
+  const runner = async (provider, args, options) => {
+    calls.push({ provider, args, options }); dirs.push(options.cwd);
+    assert.ok(options.cwd.startsWith(tmpdir()));
+    assert.deepEqual(readdirSync(options.cwd), []);
+    assert.equal(options.timeoutMs, 30_000);
+    assert.equal(options.input, 'Reply with exactly OK.');
+    if (provider === 'codex') return '{"type":"thread.started","thread_id":"new-test-thread"}\n{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n';
+    if (provider === 'agy') return JSON.stringify({ status: 'SUCCESS', conversation_id: 'new-test-session', response: 'OK' });
+    return JSON.stringify({ result: 'X'.repeat(250), is_error: false });
+  };
+  const codex = await runPromptTest(ctx, 'codex', 'configured', runner, parsers);
+  assert.equal(codex.outcome, 'ok'); assert.equal(codex.reply, 'OK'); assert.ok(codex.at); assert.ok(codex.durationMs >= 0);
+  assert.ok(calls[0].args.includes('read-only')); assert.ok(calls[0].args.includes('web_search="disabled"'));
+  assert.ok(calls[0].args.includes('--ephemeral')); assert.ok(!calls[0].args.includes('resume'));
+  const claude = await runPromptTest(ctx, 'claude', 'opus', runner, parsers);
+  assert.equal(claude.reply.length, 200); assert.ok(calls[1].args.includes('--no-session-persistence'));
+  assert.deepEqual(calls[1].args.slice(-2), ['--tools', '']); assert.ok(calls[1].args.includes('opus'));
+  await runPromptTest(ctx, 'agy', 'gemini', runner, parsers);
+  assert.ok(calls[2].args.includes('--sandbox')); assert.ok(!calls[2].args.includes('--dangerously-skip-permissions'));
+  assert.ok(!calls[2].args.includes('--conversation'));
+  const failure = await runPromptTest(ctx, 'codex', 'configured', async () => { throw new Error('CLI failed'); }, parsers);
+  assert.equal(failure.outcome, 'failed'); assert.equal(failure.error, 'CLI failed'); assert.equal(failure.reply, '');
+  assert.equal(ctx.hub.promptResults.get('codex').get('configured'), failure);
+  assert.equal(ctx.hub.promptResults.get('claude').get('opus'), claude);
+  assert.deepEqual(agentSession, { threadId: 'existing-thread' });
+  assert.deepEqual(workerSession, { conversationId: 'existing-worker' });
+  assert.ok(dirs.every((dir) => !existsSync(dir)));
+  await assert.rejects(runPromptTest(ctx, 'codex', 'not-configured', runner, parsers), /configured/);
+});

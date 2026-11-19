@@ -213,3 +213,4 @@ model alignment distinguishes defaults, membership and unavailable lists
 scheduled login checks use only providers in open rooms, while explicit checks include all
 unread model catalogs differ from failed reads when checking alignment
 last-turn records stay in memory by session and retain the latest error after success
+prompt diagnostics use isolated calls, retain results and leave agent sessions alone

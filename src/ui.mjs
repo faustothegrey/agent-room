@@ -8,7 +8,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
-import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -280,7 +280,7 @@ export async function load(ctx, v) {
   const instr = await import(`./instructions.mjs${v}`);
   const instructions = readFileSync(instr.rulebookPath('brainstorming'), 'utf8');
   const workerInstructions = readFileSync(instr.rulebookPath('worker'), 'utf8');
-  const { createAgent, claudeTitle, run, findLeftovers } = await import(`./agents.mjs${v}`);
+  const { createAgent, claudeTitle, run, findLeftovers, parseCodexEvents, parseAgyOutput } = await import(`./agents.mjs${v}`);
   const { createRoom, closingStatement } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
   const usage = await import(`./usage.mjs${v}`);
@@ -329,6 +329,7 @@ export async function load(ctx, v) {
   roomShop.launchDefaults ??= { agents: ctx.agentSpecs, worker: ctx.workerSpec };
   return { room: createRoom(agents, ctx.state, instr), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: roomShop,
+    testPrompt: (room, provider, model) => runPromptTest(room, provider, model, runner, { parseCodexEvents, parseAgyOutput }),
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
     makeWorker,
     // Close's closing statement, written by a one-off agent with the worker's provider and model, in
@@ -403,6 +404,7 @@ function wire(ctx) {
       models: modelChoices(), started: settingsStarted(ctx) };
   };
   ctx.screen.providerHealth = () => healthView(ctx);
+  ctx.screen.testPrompt = (body) => ctx.testPrompt(ctx, body?.provider, body?.model);
   ctx.screen.checkProviderHealth = () => checkProviderHealth(ctx);
   ctx.screen.saveSettings = (value) => (value?.scope === 'defaults' ? saveDefaultSettings(ctx, value) : saveSettings(ctx, value));
   ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
@@ -2311,6 +2313,52 @@ export async function checkCli(hub, provider, run = commandOutput) {
     hub.monitor.cli[provider] = { path, version, checked: new Date().toISOString() };
   } catch (err) { hub.monitor.errors.cli[provider] = { ...errorAt(err), path: path ?? null }; }
 }
+// A diagnostic is a fresh provider invocation, separate from every agent's session and rulebook.
+export async function runPromptTest(ctx, provider, model, runner, parsers) {
+  const hub = hubOf(ctx), rooms = loadedRooms(hub);
+  if (!['claude', 'codex', 'agy'].includes(provider) || typeof model !== 'string') throw new Error('Choose a provider and model.');
+  const configured = rooms.flatMap((r) => { const s = currentSettings(r); return [...s.agents, s.worker]; });
+  if (model && !configured.some((a) => a.provider === provider && a.model === model)) throw new Error('Choose a model configured on this server.');
+  hub.promptRunning ??= new Set();
+  if (hub.promptRunning.has(provider)) throw new Error('A prompt test for this provider is already running.');
+  hub.promptRunning.add(provider);
+  const started = Date.now(), at = new Date(started).toISOString();
+  let dir, reply = '', error = null;
+  try {
+    dir = mkdtempSync(join(tmpdir(), 'agent-room-prompt-test-'));
+    let args;
+    if (provider === 'claude') {
+      args = ['-p', '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config'];
+      if (model) args.push('--model', model);
+      args.push('--tools', '');
+    } else if (provider === 'codex') {
+      args = ['exec', '--json', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', '-c', 'web_search="disabled"'];
+      if (model) args.push('-m', model);
+      args.push('-');
+    } else {
+      args = ['--output-format', 'json', '--sandbox'];
+      if (model) args.push('--model', model);
+    }
+    const output = await runner(provider, args, { input: 'Reply with exactly OK.', cwd: dir, timeoutMs: 30_000, agent: 'prompt test' });
+    if (provider === 'claude') {
+      const result = JSON.parse(output);
+      if (result.is_error) throw new Error(`claude: ${result.result || 'test failed'}`);
+      reply = String(result.result ?? '').trim();
+    } else if (provider === 'codex') reply = parsers.parseCodexEvents(output).text;
+    else reply = parsers.parseAgyOutput(output).text;
+    if (!reply) throw new Error(`${provider}: no reply`);
+  } catch (err) { error = err?.message ?? String(err); }
+  finally {
+    try { if (dir) rmSync(dir, { recursive: true, force: true }); }
+    catch (err) { error = [error, `Could not remove temporary folder: ${err.message}`].filter(Boolean).join('; '); }
+    hub.promptRunning.delete(provider);
+  }
+  const result = { provider, model, at, durationMs: Date.now() - started, outcome: error ? 'failed' : 'ok', reply: reply.slice(0, 200), error };
+  hub.promptResults ??= new Map();
+  if (!hub.promptResults.has(provider)) hub.promptResults.set(provider, new Map());
+  hub.promptResults.get(provider).set(model, result);
+  return result;
+}
 function healthView(ctx) {
   const hub = hubOf(ctx), m = hub.monitor;
   const rooms = loadedRooms(hub);
@@ -2324,7 +2372,8 @@ function healthView(ctx) {
     return { room: r.cwd, discussion: folderOf(r), agents: [
       ...view.agents.map((a) => entry(a, 'member', a.name)), entry(view.worker, 'worker', `worker:${view.worker.name}`) ] };
   });
-  return { sessions, scheduledProviders: [...new Set(rooms.flatMap(providersOf))], catalogs,
+  return { promptResults: [...(hub.promptResults?.values() ?? [])].flatMap((results) => [...results.values()]),
+    promptRunning: [...(hub.promptRunning ?? [])], sessions, scheduledProviders: [...new Set(rooms.flatMap(providersOf))], catalogs,
     configured: rooms.map((r) => ({ room: r.cwd, discussion: folderOf(r), agents: configured(currentSettings(r)).map((a) => ({ ...a, enabled: a.role === 'worker' || !(r.state.disabledAgents ?? []).includes(a.name) })) })),
     defaults: defaults ? configured(defaults) : null, login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
     leftovers: m.leftovers, leftoversChecked: m.leftoversChecked, nextLogin: m.nextLogin, nextLeftovers: m.nextLeftovers,
