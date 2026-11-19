@@ -206,3 +206,9 @@ the room page's script parses as served (it is written inside a template string)
 mentions: a path names a file of the room, as given or inside the current discussion
 Providers tab: members and worker together; before the start they apply too, after it only the defaults change
 /peek shows a closed discussion read-only, in place, without reopening it
+run gives `started` the process as soon as it is spawned (the worker's Stop now stops only its own)
+the Worker tab's stop buttons: /__stopworker reaches the room only from its page, with a known mode; each button asks to click again
+/peek then /peek restores the live discussion transcript
+Stop now while the worktree is prepared: the worker never starts, and the result is unknown
+Stop after this task: the running instruction finishes and is reported as usual; queued ones are cancelled; auto dev pauses; other discussions' workers go on
+a worker agent's programs: once its task is stopped, none starts

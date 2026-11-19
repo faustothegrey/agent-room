@@ -269,8 +269,16 @@ export async function load(ctx, v) {
   // The worktree its worker's task runs in (see refreshWorker): its own, as tasks of different
   // discussions run at the same time; by reference, so it survives reloads and settings copies.
   const workerDir = ctx.workerDir ??= { path: null };
-  const worker = createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
-    timeoutMs: WORKER_TIMEOUT_MS, runner, session: ctx.sessions.get(`worker:${wName}`) });
+  // A worker agent keeps the programs of its task in `programs`, so Stop now (stopWorker) stops only
+  // those; once that task is stopped, none starts. One worker session runs one task at a time.
+  const makeWorker = (session) => {
+    const programs = { running: new Set(), stopped: false };
+    const own = (command, args, options) => (programs.stopped ? Promise.reject(new Error('not started: the User stopped this instruction'))
+      : runner(command, args, { ...options, started: (p) => programs.running.add(p) }));
+    return Object.assign(createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
+      timeoutMs: WORKER_TIMEOUT_MS, runner: own, session }), { programs });
+  };
+  const worker = makeWorker(ctx.sessions.get(`worker:${wName}`));
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
   // ctx so they survive a reload.
   const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: shop?.log ?? [], working: shop && runningTasks(shop).some((t) => t.origin === ctx) ? wName : null };
@@ -279,8 +287,7 @@ export async function load(ctx, v) {
   return { room: createRoom(agents, ctx.state, instr), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: roomShop,
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
-    makeWorker: (session) => createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
-      timeoutMs: WORKER_TIMEOUT_MS, runner, session }),
+    makeWorker,
     // Close's closing statement, written by a one-off agent with the worker's provider and model, in
     // the room's folder, with no rulebook and a session of its own (never the worker's session or
     // worktree). `agent`: a stand-in for tests (ctx.closingAgent).
@@ -354,6 +361,7 @@ function wire(ctx) {
   };
   ctx.screen.saveSettings = (value) => (value?.scope === 'defaults' ? saveDefaultSettings(ctx, value) : saveSettings(ctx, value));
   ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
+  ctx.screen.stopWorker = (mode) => stopWorker(ctx, mode);
   ctx.screen.cancelClose = (name) => cancelClose(ctx, name);
   ctx.screen.setAgentEnabled = (name, enabled, member) => setAgentEnabled(ctx, name, enabled, { member });
 }
@@ -377,7 +385,7 @@ function header(ctx) {
       modelLabel: modelLabel(a.provider, specs.find((s) => s.name === a.name)?.model ?? ''), // for the Discussion tab's title
       enabled: !(ctx.state.disabledAgents ?? []).includes(a.name) })),
     failedAgents: ctx.room.agents.filter((a) => ctx.state.transcript.some((m) => m.error && m.speaker === a.name) || (ctx.state.disabledAgents ?? []).includes(a.name)).map((a) => ({ name: a.name, disabled: (ctx.state.disabledAgents ?? []).includes(a.name) })),
-    autoDev: autoDevView(ctx), retryId: ctx.retryFailure?.available ? ctx.retryFailure.id : null,
+    autoDev: autoDevView(ctx), workerStop: workerStopView(ctx), retryId: ctx.retryFailure?.available ? ctx.retryFailure.id : null,
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
     checkpoints: checkpoints(ctx), // the saved discussions, for Explorer's Resume (see "Checkpoints")
     closedDiscussions: closedDiscussions(ctx),
@@ -386,6 +394,12 @@ function header(ctx) {
     code: ctx.code ?? null, // the version this process runs (see codeInfo)
     rollbacks: [...(shopOf(ctx).rollbacks?.values() ?? [])].map(({ name, status, report, commit }) => ({ name, status, report, commit })),
     multi: multi(ctx), open: openList(ctx) }; // the folder's open discussions (see openList)
+}
+// The Worker tab's stop buttons: while this discussion's worker runs an instruction (see stopWorker).
+function workerStopView(ctx) {
+  if (!ctx.shop) return null;
+  const t = runningTasks(ctx.shop).find((x) => x.owner === ownerOf(ctx));
+  return t ? { after: !!t.stopAfter, now: !!t.stopNow } : null;
 }
 export function sessionView(ctx) {
   const id = (agent, key) => {
@@ -877,25 +891,37 @@ function restoreWork(ctx, name, saved) {
 }
 const clock = (iso) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? 'at an unknown time' : `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const firstLine = (text) => { const l = String(text).trim().split('\n')[0]; return l.length > 120 ? l.slice(0, 117) + '…' : l; };
+// What an interrupted task left in the worktree, as one line of a report. `stopped`: the User
+// stopped it (Stop now) rather than Restart, Quit or a crash; `preparing`: before its worker started.
+async function leftBehind(ctx, name, r, { stopped = false, preparing = false, place = null } = {}) {
+  const what = `[${name}] "${firstLine(r.task)}" (started ${clock(r.at)})`;
+  let s = null;
+  try { place ??= await lanePlace(ctx, r.lane ?? null); if (!place.disabled) s = await worktreeStatus(place); } catch {}
+  const found = !s ? 'it could not be inspected' : !s.exists ? 'it does not exist' : s.treeDirty ? 'it has uncommitted edits' : 'it is clean';
+  let commits = null;
+  if (r.before && s?.exists && !s.treeDirty) {
+    try { commits = (await labelledCommits(place.path, `${r.before}..HEAD`)).filter((c) => c.origin === name); } catch { commits = null; }
+  }
+  if (stopped) {
+    if (preparing || !r.before) return `Result unknown: ${what} was stopped by the User while its worktree was being prepared; its worker never started. Check the worktree (${found}).`;
+    if (!s?.exists || (!s.treeDirty && !commits)) return `Result unknown: ${what} was stopped by the User. Check the worktree (${found}).`;
+    if (s.treeDirty) return `Stopped by the User: ${what} left uncommitted edits in the worktree. Ask the worker to finish and commit them, or to abandon them.`;
+    if (commits.length) return `Stopped by the User after committing: ${what}: ${commits.map((c) => `${c.id.slice(0, 7)} (${c.files.join(', ') || 'no files changed'})`).join(' · ')}. Its reply was lost. Ask the worker to check whether the task is complete.`;
+    return `Stopped by the User: ${what} left no commits or edits in the worktree. It may still have written notes elsewhere, such as the discussion's folder. Send it again if still wanted.`;
+  }
+  if (!r.before) return `Result unknown: ${what} was interrupted before its starting point was recorded. Check the worktree (${found}).`;
+  if (!s?.exists || (!s.treeDirty && !commits)) return `Result unknown: ${what} was interrupted by Restart, Quit or a crash. Check the worktree (${found}).`;
+  if (s.treeDirty) return `Interrupted by Restart, Quit or a crash: ${what} left uncommitted edits in the worktree. Ask the worker to finish and commit them, or to abandon them.`;
+  if (commits.length) return `Interrupted after committing: ${what}: ${commits.map((c) => `${c.id.slice(0, 7)} (${c.files.join(', ') || 'no files changed'})`).join(' · ')}. Its reply was lost. Ask the worker to check whether the task is complete.`;
+  return `Interrupted: ${what} left no commits or edits in the worktree. It may still have written notes elsewhere, such as the discussion's folder. Send it again if still wanted.`;
+}
 // Each interrupted task, with what the worktree shows now; each task that never started. Shown in
 // the Worker tab, and as one agent-room message in the discussion's chat (so its agents learn it).
 async function reportWork(ctx, name, saved) {
   const w = restoreWork(ctx, name, saved);
   const lines = [];
   for (const r of w.interrupted.filter((x) => !x.reported)) {
-    const what = `[${name}] "${firstLine(r.task)}" (started ${clock(r.at)})`;
-    let place = null, s = null;
-    try { place = await lanePlace(ctx, r.lane ?? null); if (!place.disabled) s = await worktreeStatus(place); } catch {}
-    const found = !s ? 'it could not be inspected' : !s.exists ? 'it does not exist' : s.treeDirty ? 'it has uncommitted edits' : 'it is clean';
-    let commits = null;
-    if (r.before && s?.exists && !s.treeDirty) {
-      try { commits = (await labelledCommits(place.path, `${r.before}..HEAD`)).filter((c) => c.origin === name); } catch { commits = null; }
-    }
-    if (!r.before) lines.push(`Result unknown: ${what} was interrupted before its starting point was recorded. Check the worktree (${found}).`);
-    else if (!s?.exists || (!s.treeDirty && !commits)) lines.push(`Result unknown: ${what} was interrupted by Restart, Quit or a crash. Check the worktree (${found}).`);
-    else if (s.treeDirty) lines.push(`Interrupted by Restart, Quit or a crash: ${what} left uncommitted edits in the worktree. Ask the worker to finish and commit them, or to abandon them.`);
-    else if (commits.length) lines.push(`Interrupted after committing: ${what}: ${commits.map((c) => `${c.id.slice(0, 7)} (${c.files.join(', ') || 'no files changed'})`).join(' · ')}. Its reply was lost. Ask the worker to check whether the task is complete.`);
-    else lines.push(`Interrupted: ${what} left no commits or edits in the worktree. It may still have written notes elsewhere, such as the discussion's folder. Send it again if still wanted.`);
+    lines.push(await leftBehind(ctx, name, r));
     r.reported = true;
   }
   for (const r of w.notStarted) lines.push(`Not started: [${name}] "${firstLine(r.task)}" was still queued when the room stopped. Nothing was re-sent; send it again if still wanted.`);
@@ -1855,7 +1881,7 @@ async function pumpLane(shop, lane) {
       const recovery = lane.blockedBy?.owner && lane.blockedBy.owner === t.owner ? lane.blockedBy : null;
       try { t.before = await runWork(t.origin, t.text, t.run, t.cycle, recovery, t.rollback, t, recovery ? recovery.place : place); }
       catch (err) { note(t.origin, `✗ ${err.stack}\n`, true); }
-      finally { lane.running = null; }
+      finally { lane.running = null; showHeader(t.origin); } // its stop buttons go
       // After it: edits left uncommitted hold the lane; a recovery keeps the first task's details.
       try {
         const dirty = place.disabled ? false : await leftovers(t.origin, place);
@@ -1890,6 +1916,66 @@ function dropTask(shop, t) {
   t.origin.workPending--;
   t.origin.workSkipped = (t.origin.workSkipped ?? 0) + 1;
   t.done();
+}
+
+// ── Stopping a discussion's worker ──────────────────────────────────
+// The Worker tab's two buttons, for the shown discussion's worker while it runs an instruction
+// (other discussions' workers and the room's agents go on). Both cancel this discussion's queued
+// instructions at once (before anything awaits, so none can start meanwhile) and pause a running
+// auto dev. 'after' (Stop after this task): the running instruction finishes and is reported as
+// usual. 'now' (Stop now): its process group is killed, or, while its worktree is prepared, its
+// worker never starts; runWork then reports what it left (leftBehind), without Retry.
+export function stopWorker(ctx, mode) {
+  if (mode !== 'after' && mode !== 'now') throw new Error('Unknown stop: use "after" or "now".');
+  const shop = shopOf(ctx), owner = ownerOf(ctx);
+  const t = runningTasks(shop).find((x) => x.owner === owner);
+  const cancelled = queuedTasks(shop).filter((x) => x.owner === owner).sort((a, b) => a.sent - b.sent);
+  for (const x of cancelled) cancelTask(shop, x);
+  if (t && mode === 'after') t.stopAfter = true;
+  if (t && mode === 'now') {
+    t.stopNow = true;
+    if (t.programs) {
+      t.programs.stopped = true;
+      for (const p of t.programs.running) { try { (p.stopGroup ? p.stopGroup('SIGKILL') : p.kill('SIGKILL')); } catch {} } // one that never spawned has no group
+    }
+  }
+  const label = t?.label ?? originLabel(ctx);
+  workNote(ctx, !t ? `No instruction from [${label}] was running.${cancelled.length ? '' : ' Nothing was stopped.'}`
+    : mode === 'now' ? `Stop now: [${label}] "${firstLine(t.text)}" is being stopped; what it left follows.`
+      : `Stop after this task: [${label}] "${firstLine(t.text)}" finishes and is reported as usual; nothing more from this discussion runs after it.`, false, label, owner);
+  for (const x of cancelled) {
+    const view = { ...ctx.docs.messageView({ speaker: 'agent-room', text: `Not started, cancelled by the stop: [${x.label}] instruction sent ${x.record ? clock(x.record.at) : 'earlier'}. Its full text, to send again if still wanted:\n\n${x.retry?.text ?? x.text}` }), origin: x.label, owner };
+    shop.log.push(view);
+    toShop(ctx, { type: 'work', message: view });
+  }
+  if (ctx.autoDev?.status === 'running') pauseAutoDev(ctx, mode === 'now' ? 'you stopped the worker' : 'you asked the worker to stop after this task');
+  showHeader(ctx);
+}
+// A queued task the User's stop cancelled: reported at once (stopWorker), so not kept as "not started".
+function cancelTask(shop, t) {
+  const lane = laneState(shop, t.lane);
+  lane.tasks.splice(lane.tasks.indexOf(t), 1);
+  if (t.rollback) { t.rollback.status = 'needs review'; t.rollback.report = 'The rollback task was cancelled by a stop before it started.'; showHeader(t.origin); }
+  if (t.run && t.origin.autoDev === t.run) t.run.waiting = false;
+  if (t.record) {
+    const w = workOf(shop, t.workName);
+    w.queued = w.queued.filter((r) => r.id !== t.record.id);
+    persistWork(t.origin, t.workName);
+  }
+  t.origin.workPending--;
+  t.done();
+}
+// Stop now's report in the discussion's chat too (so its agents learn it), while it is shown. A
+// round in progress takes it in its own time (as reportBack's failures).
+function stopReport(ctx, owner, logPath, text) {
+  if (ownerOf(ctx) !== owner || ctx.logPath !== logPath || ctx.stopped) return;
+  const message = { speaker: 'agent-room', text };
+  if (ctx.busy && ctx.say) {
+    (ctx.workerFailures ??= []).push({ message, owner });
+    ctx.say(AUTO_DEV_FAILURE);
+  } else ctx.state.transcript.push(message);
+  log(ctx, `**${message.speaker}**\n\n${text}\n\n`);
+  toScreen(ctx, { type: 'message', message: ctx.docs.messageView(message) });
 }
 
 // ── Auto dev ────────────────────────────────────────────────────────
@@ -3035,7 +3121,10 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     work.running = { ...record, at: new Date().toISOString(), before: null, lane: lane?.lane ?? null };
     persistWork(ctx, t.workName);
   }
-  // Tasks of this discussion interrupted earlier: the worker is told once, with this one.
+  // Stop now (stopWorker) stops only this task's programs: the worker's set, empty as it starts.
+  if (t) t.programs = worker.programs ?? null;
+  if (t?.programs) { t.programs.running.clear(); t.programs.stopped = !!t.stopNow; }
+  // Tasks of this discussion interrupted (or stopped) earlier: the worker is told once, with this one.
   const told = work ? [...work.interrupted] : [];
   if (!rollback && recovery && shop.rollbacks?.get(label)?.task === recovery.task) rollback = shop.rollbacks.get(label);
   if (rollback) { rollback.status = 'running'; showHeader(ctx); }
@@ -3106,7 +3195,11 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       const interrupted = instr.workerInterrupted(told);
       if (told.length) work.interrupted = work.interrupted.filter((r) => !told.includes(r));
       const retryBrief = t?.retry ? `Your earlier attempt at this instruction failed: ${t.retry.error}\nInspect the current worktree and Git state first, including uncommitted edits and any merge or revert in progress. Commits made since the failure:\n${t.retry.after ? (await git(place.path, 'log', '--format=%H %s', `${t.retry.after}..HEAD`).catch(() => '(could not read commits)') || '(none)') : '(the failure commit could not be determined)'}\n\n` : '';
-      entry = { speaker: worker.name, text: (await worker.turn(interrupted + brief + tree + commit + retryBrief + leftover + merge + (history ? instr.workerHistory(history, text) : text))) || '(no reply)' };
+      const prompt = interrupted + brief + tree + commit + retryBrief + leftover + merge + (history ? instr.workerHistory(history, text) : text);
+      // Stopped while its worktree was prepared: its worker never starts.
+      if (t?.stopNow) throw new Error('stopped by the User before the worker started');
+      if (t) t.turnStarted = true;
+      entry = { speaker: worker.name, text: (await worker.turn(prompt)) || '(no reply)' };
       // Its briefing is now known to the session: the context's, or the seat of a discussion left
       // meanwhile (even if it was left while this turn ran).
       const now = worker === ctx.worker ? null : worker.seat;
@@ -3124,10 +3217,17 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     } catch (err) {
       entry = { speaker: worker.name, text: err.message, error: true };
     }
+    // Stopped by the User (Stop now): what it left in the worktree is its reply, and in the chat.
+    // A reply that came before the stop took effect is kept as it is.
+    const stopped = !!(t?.stopNow && entry.error);
+    if (stopped) {
+      const r = { task: text, at: work?.running?.at ?? new Date(t0).toISOString(), before, lane: t.lane ?? null };
+      entry.text = await leftBehind(ctx, label, r, { stopped: true, preparing: !t.turnStarted, place: lane?.path ? lane : null });
+    }
     const meta = [`${Math.round((Date.now() - t0) / 1000)}s`, entry.error ? '' : ctx.usage.formatUsage(worker.lastUsage)].filter(Boolean).join(' · ');
     workLog(`**${worker.name}** (worker${entry.error ? ', failed' : ''}, ${meta})\n\n${entry.text}\n\n`);
     out(ctx, entry.error ? red(`\n✗ ${worker.name} (worker) failed: ${entry.text}\n`) : `\n${bold(worker.name)}${dim(` (worker, ${meta})`)} › ${entry.text}\n`);
-    if (entry.error && !ctx.stopped && record && ownerOf(ctx) === owner) {
+    if (entry.error && !stopped && !ctx.stopped && record && ownerOf(ctx) === owner) {
       const id = randomBytes(6).toString('hex');
       ctx.retryFailure = { id, available: true, text: t.retry?.text ?? text, error: entry.text, after: lane?.path ? await git(lane.path, 'rev-parse', 'HEAD').catch(() => null) : null, sent: t.retry?.sent ?? t.sent, cycle, run, rollback };
       entry.retryId = id;
@@ -3144,13 +3244,16 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       if (unlabelled.length) workNote(ctx, `✗ Commits without the [${label}] label: ${unlabelled.join(' · ')}.`, true, label, owner);
     }
     if (record && work.running?.id === record.id) {
+      // Stopped by the User: already reported; its worker is told with the next instruction.
+      if (stopped) work.interrupted.push({ ...work.running, stopped: true, reported: true });
       // Stopped by Quit or Restart: kept as interrupted, to report on Resume.
-      if (ctx.stopped && entry.error) work.interrupted.push(work.running);
+      else if (ctx.stopped && entry.error) work.interrupted.push(work.running);
       work.running = null;
       persistWork(ctx, t.workName);
     }
     if (rollback) await rollbackReport(ctx, rollback, entry, worker === ctx.worker ? null : worker.seat);
-    if (run && ownerOf(ctx) === owner) reportBack(ctx, run, entry, !!t?.retry);
+    if (stopped) stopReport(ctx, owner, started, entry.text);
+    else if (run && ownerOf(ctx) === owner) reportBack(ctx, run, entry, !!t?.retry);
   } finally {
     if (ctx.workingIn) shop.writing.delete(ctx.workingIn);
     ctx.workingIn = null;

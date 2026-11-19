@@ -373,3 +373,10 @@ test('agy non-JSON diagnostics are short and do not echo authentication data', (
   }
   assert.throws(() => parseAgyOutput('Network connection failed'), /connection error/);
 });
+
+test('run gives `started` the process as soon as it is spawned (the worker\'s Stop now stops only its own)', async () => {
+  let started = null;
+  const turn = run('sh', ['-c', 'echo ok'], { started: (p) => { started = p; } });
+  assert.equal(typeof started?.stopGroup, 'function'); // already, before the program ends
+  assert.equal(await turn, 'ok\n');
+});

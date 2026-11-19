@@ -115,6 +115,20 @@ worker's, as their panels list them ("<provider> default" for CLI default).
   [The worker's worktrees](#the-workers-worktrees)). A discussion's instructions run one at a time,
   in the order sent, alongside the discussion and alongside other discussions' (at most two
   worker tasks at once in a folder), with a 30-minute timeout per instruction.
+  While the shown discussion's worker runs an instruction, the tab offers two stop buttons; each
+  asks you to click it again to confirm, as Close discussion does. They act only on this
+  discussion's worker: other discussions' workers and the room's agents keep running. Both cancel
+  this discussion's queued instructions at once (none can start in between), listing each in the
+  tab as not started, cancelled by the stop, with its full text to copy and send again, and pause
+  auto dev if it is running.
+  - **Stop after this task:** the running instruction finishes and is reported as usual.
+  - **Stop now:** the running instruction's process group (only that task's programs) is killed
+    at once. Its reply, in the Worker tab and in the chat, says what it left: uncommitted edits,
+    commits whose reply was lost, or nothing in the worktree ("Stopped by the User: …"). Stopped
+    while its worktree was being prepared, its worker never starts, and the result is reported
+    as unknown. No Retry is offered; the discussion's next instruction tells the worker once that
+    its previous one was stopped. Uncommitted edits hold the worktree for this discussion, as
+    below.
 - **Discussions**, **Brainstorms**, **Explorer** and **Document** (right pane, four tabs):
   - In **Brainstorms**, the room's brainstorms, each by its title, in your order (drag the ⠿ handle,
     or **Move up** / **Move down**; kept in this browser per room, apart from the Discussions order;

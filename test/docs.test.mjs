@@ -405,6 +405,23 @@ test('showing the Worker tab asks the room to recheck its branches, only from th
   assert.match(showTab, /if \(name === 'work'\) \{[^}]*post\('__workerinfo', \{\}\)/);
 });
 
+test('the Worker tab\'s stop buttons: /__stopworker reaches the room only from its page, with a known mode; each button asks to click again', async () => {
+  const calls = [];
+  const s = await serve(fixture(), { clients: new Set(), transcript: [], stopWorker: (mode) => { if (mode !== 'after' && mode !== 'now') throw new Error('Unknown stop'); calls.push(mode); } });
+  try {
+    assert.equal((await postFrom(s, '/__stopworker', { mode: 'after' })).status, 204);
+    assert.equal((await postFrom(s, '/__stopworker', { mode: 'now' })).status, 204);
+    assert.equal((await postFrom(s, '/__stopworker', { mode: 'now' }, { origin: 'https://evil.example' })).status, 403);
+    assert.equal((await postFrom(s, '/__stopworker', { mode: 'later' })).status, 400);
+    assert.deepEqual(calls, ['after', 'now']);
+  } finally { s.close(); }
+  const off = await serve(fixture(), { clients: new Set(), transcript: [] });
+  try { assert.equal((await postFrom(off, '/__stopworker', { mode: 'now' })).status, 409); } finally { off.close(); }
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  assert.match(source, /confirmed\(\$\('wstop-after'\), \(\) => stopWorker\('after'\), 'Click again: [^']+', \(\) => true\)/);
+  assert.match(source, /confirmed\(\$\('wstop-now'\), \(\) => stopWorker\('now'\), 'Click again: [^']+', \(\) => true\)/);
+});
+
 test('without a worker input (terminal mode), /__work is refused', async () => {
   const s = await serve(fixture(), { clients: new Set(), transcript: [] });
   assert.equal((await postFrom(s, '/__work', { text: 'hi' })).status, 409);

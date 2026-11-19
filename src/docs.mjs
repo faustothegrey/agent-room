@@ -883,7 +883,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <div class="chat-wrap"><div class="chat" id="wchat"></div><button class="scroll-end" id="work-end" aria-label="Scroll to latest worker messages" title="Scroll to latest messages" hidden>↓</button></div>
     <div class="composer" id="wcomposer"><div class="mention-offer" hidden></div>
       <textarea class="box" id="wbox" placeholder="Instructions for the worker (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands."></textarea>
-      <div class="tools"><span class="hint" id="whint"></span></div>
+      <div class="tools"><span class="hint" id="whint"></span><span id="wstop" hidden><button id="wstop-after" title="The running instruction finishes and is reported as usual; this discussion's queued instructions are cancelled, and auto dev pauses">Stop after this task</button> <button id="wstop-now" title="The running instruction's programs are stopped at once; this discussion's queued instructions are cancelled, auto dev pauses, and what it left in the worktree is reported">Stop now</button></span></div>
     </div>
   </div>
   <div id="system-messages" role="log" aria-label="System messages" aria-live="polite" aria-relevant="additions"></div>
@@ -1233,6 +1233,19 @@ function message(m, live = false) {
 }
 // Auto dev (see ui.mjs): Start beside the latest agreed summary's instruction, or why it can't be
 // sent; while a run is going or paused, its line above the message box, with Restart when paused.
+// The stop buttons (see stopWorker in ui.mjs): while this discussion's worker runs an instruction.
+// Each takes a second click to confirm, as Close discussion does.
+function renderWorkerStop() {
+  const w = room?.workerStop;
+  $('wstop').hidden = !w || w.now || viewing || !localInput;
+  $('wstop-after').disabled = !!w?.after;
+}
+async function stopWorker(mode) {
+  try { const res = await post('__stopworker', { mode }); if (!res.ok) throw new Error(await res.text()); }
+  catch (err) { status(err.message, true, 'Worker'); }
+}
+confirmed($('wstop-after'), () => stopWorker('after'), 'Click again: stop after this task; queued instructions are cancelled', () => true);
+confirmed($('wstop-now'), () => stopWorker('now'), 'Click again: stop now; partial edits may be left', () => true);
 function renderAutoDev() {
   document.querySelectorAll('.autodev-offer').forEach((e) => e.remove());
   const a = room?.autoDev, el = $('autodev');
@@ -3010,13 +3023,13 @@ events.onmessage = (e) => {
     showWorkerInfo(ev.workerInfo);
     monitor = ev.monitor ?? {};
     showQuota(ev.quota, ev.quotaAt);
-    if (ev.room) { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); showWorkerInfo(workerInfoShown); }
+    if (ev.room) { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); renderWorkerStop(); showWorkerInfo(workerInfoShown); }
     $('newroom').hidden = !ev.newRoom;
     replicaOff = ev.replicaOff ?? null;
     showReplica(ev.replica);
   }
   if (ev.type === 'replica') showReplica(ev.replica);
-  if (ev.type === 'room') { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); showWorkerInfo(workerInfoShown); openFiles(); } // its buttons and "in use" follow (a brainstorm: no work)
+  if (ev.type === 'room') { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); renderWorkerStop(); showWorkerInfo(workerInfoShown); openFiles(); } // its buttons and "in use" follow (a brainstorm: no work)
   if (ev.type === 'work') workMessage(ev.message, true);
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
   if (ev.type === 'monitor') showMonitor(ev.monitor);
@@ -3351,7 +3364,7 @@ function handleScreen(req, res, url, dir, screen) {
       (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
-  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom', '/__retry', '/__agent-enabled', '/__cancelclose'].includes(url.pathname)) {
+  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom', '/__retry', '/__agent-enabled', '/__cancelclose', '/__stopworker'].includes(url.pathname)) {
     if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain; charset=utf-8', 'Refused: only the room page can send input.'); return true; }
     readJson(req, url.pathname === '/__say' ? ATTACH_TOTAL * 1.4 : undefined).then((body) => {
       if (url.pathname === '/__newroom') {
@@ -3384,6 +3397,12 @@ function handleScreen(req, res, url, dir, screen) {
       if (url.pathname === '/__retry') {
         if (!screen.retryWork) return send(409, 'text/plain', 'Retry is unavailable.');
         return Promise.resolve(screen.retryWork(body?.id, body?.settings)).then(() => send(204, 'text/plain', ''), (err) => send(400, 'text/plain', err.message));
+      }
+      if (url.pathname === '/__stopworker') {
+        if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before stopping the worker.');
+        if (!screen.stopWorker) return send(409, 'text/plain', 'Stopping the worker is unavailable.');
+        try { screen.stopWorker(body?.mode); } catch (err) { return send(400, 'text/plain', err.message); }
+        return send(204, 'text/plain', '');
       }
       if (url.pathname === '/__work') {
         if (!screen.work) return send(409, 'text/plain; charset=utf-8', 'This room has no worker input; the page only watches.');

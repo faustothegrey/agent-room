@@ -32,8 +32,9 @@ const at = (cwd) => (typeof cwd === 'function' ? cwd() : cwd);
 // or if it exits 0 before all of a non-empty input was sent.
 // `procs` (a Set, optional) holds the process while it runs, so its room can stop it (Quit room).
 // `record` ({ agent, room, dir? }, optional) writes the program in the record of programs (below)
-// until its process group ends.
-export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOUT_MS, procs, record } = {}) {
+// until its process group ends. `started` (optional) is given the process as soon as it is spawned
+// (the worker's Stop now stops only its own task's).
+export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOUT_MS, procs, record, started } = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, { cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     proc.provider = command;
@@ -43,6 +44,7 @@ export function run(command, args, { input = '', cwd, timeoutMs = DEFAULT_TIMEOU
     // Keep the group tracked even if the provider exits before its commands.
     proc.stopGroup = (signal) => { try { process.kill(-proc.pid, signal); } catch (e) { if (e.code !== 'ESRCH') throw e; } };
     proc.groupAlive = () => { try { process.kill(-proc.pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
+    started?.(proc);
     proc.on('close', () => { if (!proc.groupAlive()) { procs?.delete(proc); forget(); } });
     let stdout = '';
     let stderr = '';

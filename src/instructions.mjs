@@ -159,9 +159,10 @@ export function workerMerge(mainBehind, rollback, place, label) {
 export const WORKER_MERGE = `Before the instruction below, first merge main into {branch} with a normal merge (git merge main). Label any merge commit "[{label}] catch up with main". If it clashes, do not force it or do the requested task: leave the state intact and report the conflict; this origin must resolve it before other worker tasks can run. After a successful merge, run the project's tests (npm test, if it has them) and report their real output, then end your reply with the line "Tested: <full commit ID of {branch}> with main <full commit ID of main>: tests passed" (or "tests failed"), naming the commits you tested. Never merge into main or push.`;
 
 export function workerInterrupted(told) {
-  return told.map((r) => `Your previous instruction "${firstLine(r.task)}" was interrupted by a Restart, Quit or a crash: check the worktree before continuing.\n\n`).join('');
+  return told.map((r) => `Your previous instruction "${firstLine(r.task)}" was ${r.stopped ? 'stopped by the User (Stop now)' : 'interrupted by a Restart, Quit or a crash'}: check the worktree before continuing.\n\n`).join('');
 }
 export const WORKER_INTERRUPTED = `Your previous instruction "{task}" was interrupted by a Restart, Quit or a crash: check the worktree before continuing.`;
+export const WORKER_STOPPED = `Your previous instruction "{task}" was stopped by the User (Stop now): check the worktree before continuing.`;
 
 export function workerHistory(history, text) {
   return `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n${text}`;
@@ -217,6 +218,7 @@ export const instructionSets = [
       { id: 'commit-label', intent: 'The origin label every commit must carry.', when: 'once per worker session (again if the label changes)', content: WORKER_COMMIT },
       { id: 'catch-up', intent: 'Merge main into its branch first, run the tests, and report with a Tested line.', when: 'when its branch is behind main', content: WORKER_MERGE },
       { id: 'interrupted', intent: 'That its previous instruction was interrupted and to check the worktree.', when: 'once, after Restart, Quit or a crash', content: WORKER_INTERRUPTED },
+      { id: 'stopped', intent: 'That the User stopped its previous instruction and to check the worktree.', when: 'once, after Stop now', content: WORKER_STOPPED },
       { id: 'retry', intent: 'That its earlier attempt failed, and the commits made since.', when: 'when retrying a failed instruction', content: WORKER_RETRY },
       { id: 'recovery', intent: 'To finish or abandon the leftover uncommitted edits from an interrupted task.', when: 'when recovering a held lane', content: WORKER_LEFTOVER },
       { id: 'history', intent: 'The previous Worker-tab conversation as background, then the current instruction.', when: 'when there is earlier worker chat', content: WORKER_HISTORY },

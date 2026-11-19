@@ -3886,3 +3886,129 @@ test('the members panel leaves any agent of a started discussion out, from its n
   await handleLine('only B', ctx);
   assert.equal(a, 4); assert.equal(b, 3);
 });
+
+// ── Stopping a discussion's worker (the Worker tab's two buttons) ──
+// A worker turn as a program: it registers in the worker's own programs; stopping its group fails the turn.
+const stoppableTurn = (ctx, during = () => {}) => () => new Promise((_, fail) => {
+  const proc = { stopped: null, stopGroup: (signal) => { proc.stopped = signal; fail(new Error(`claude was stopped (${signal})`)); } };
+  ctx.worker.programs.running.add(proc);
+  during(proc);
+});
+
+test('Stop now: only this task\'s programs are killed, queued instructions are cancelled with their full text, the report says what it left, no Retry, and the next instruction is told once', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { queueWork, stopWorker } = await import('../src/ui.mjs');
+  const cwd = await tmp('stop-now-');
+  await gitRoom(cwd);
+  const ctx = await savedRoom(cwd, 'stop-now');
+  Object.assign(ctx.sessions.get('B'), { threadId: 'codex-thread' });
+  await handleLine('plan it', ctx);
+  const name = ctx.discussion.name;
+  let proc = null;
+  ctx.worker.turn = stoppableTurn(ctx, (p) => { writeFileSync(join(ctx.workerDir.path, 'half.txt'), 'half'); proc = p; });
+  // An agent's program of the same room: Stop now leaves it alone.
+  const agentProc = { stopped: null, stopGroup: (signal) => { agentProc.stopped = signal; } };
+  ctx.programs.running.add(agentProc);
+  queueWork(ctx, 'long task');
+  queueWork(ctx, 'waiting task\nsecond line\nthird line');
+  queueWork(ctx, 'another one');
+  await eventually(() => !!proc);
+  assert.deepEqual(ctx.screen.room.workerStop, { after: false, now: false });
+  stopWorker(ctx, 'now');
+  // At once: the queue is empty and nothing more starts.
+  assert.deepEqual(workerLane(ctx).tasks, []);
+  assert.equal(proc.stopped, 'SIGKILL');
+  assert.equal(agentProc.stopped, null);
+  await ctx.workQueue;
+  ctx.programs.running.delete(agentProc);
+  const log = ctx.screen.worker;
+  const cancelled = log.filter((m) => m.speaker === 'agent-room').map((m) => m.html);
+  assert.equal(cancelled.length, 2);
+  assert.match(cancelled[0], /Not started, cancelled by the stop: \[[^\]]+\] instruction sent \d\d:\d\d[\s\S]*waiting task\nsecond line\nthird line/);
+  assert.match(cancelled[1], /another one/);
+  const reply = log.filter((m) => m.speaker === 'W').at(-1);
+  assert.equal(reply.error, true);
+  assert.equal(reply.retryId, undefined); // no Retry for a stopped instruction
+  assert.equal(ctx.screen.room.retryId, null);
+  const expected = new RegExp(`^Stopped by the User: \\[${name}\\] "long task" \\(started \\d\\d:\\d\\d\\) left uncommitted edits in the worktree\\. Ask the worker to finish and commit them, or to abandon them\\.`);
+  assert.match(reply.html, /^<p>Stopped by the User: /);
+  const chat = ctx.state.transcript.at(-1);
+  assert.equal(chat.speaker, 'agent-room');
+  assert.match(chat.text, expected);
+  assert.equal(ctx.screen.room.workerStop, null);
+  const work = await savedWork(cwd, name);
+  assert.deepEqual([work.running, work.queued, work.notStarted, work.interrupted.map((r) => [r.task, r.stopped, r.reported])],
+    [null, [], [], [['long task', true, true]]]);
+  // Its own discussion's next instruction (its edits hold the lane for it) is told once.
+  const prompts = [];
+  ctx.worker.turn = async (p) => { prompts.push(p); return 'ok'; };
+  queueWork(ctx, 'finish it');
+  await ctx.workQueue;
+  queueWork(ctx, 'and then');
+  await ctx.workQueue;
+  assert.match(prompts[0], /^Your previous instruction "long task" was stopped by the User \(Stop now\): check the worktree before continuing\./);
+  assert.doesNotMatch(prompts[1], /was stopped by the User/);
+});
+
+test('Stop now while the worktree is prepared: the worker never starts, and the result is unknown', async () => {
+  const { queueWork, stopWorker } = await import('../src/ui.mjs');
+  const cwd = await tmp('stop-early-');
+  await gitRoom(cwd);
+  const ctx = await savedRoom(cwd, 'stop-early');
+  await handleLine('plan it', ctx);
+  const name = ctx.discussion.name;
+  let started = false;
+  ctx.worker.turn = async () => { started = true; return 'ran'; };
+  // Stopped the moment it is taken from the queue, before its worktree is prepared.
+  const lane = workerLane(ctx);
+  let running = null;
+  Object.defineProperty(lane, 'running', { configurable: true, get: () => running, set: (t) => { running = t; if (t) stopWorker(ctx, 'now'); } });
+  queueWork(ctx, 'early task');
+  await ctx.workQueue;
+  delete lane.running;
+  assert.equal(started, false);
+  const reply = ctx.screen.worker.filter((m) => m.speaker === 'W').at(-1);
+  assert.match(ctx.state.transcript.at(-1).text, new RegExp(`^Result unknown: \\[${name}\\] "early task" \\(started \\d\\d:\\d\\d\\) was stopped by the User while its worktree was being prepared; its worker never started\\. Check the worktree \\(it is clean\\)\\.$`));
+  assert.match(reply.html, /^<p>Result unknown: /);
+  assert.equal(reply.retryId, undefined);
+});
+
+test('Stop after this task: the running instruction finishes and is reported as usual; queued ones are cancelled; auto dev pauses; other discussions\' workers go on', async () => {
+  const { queueWork, stopWorker } = await import('../src/ui.mjs');
+  const cwd = await tmp('stop-after-');
+  await gitRoom(cwd);
+  const ctx = await savedRoom(cwd, 'stop-after');
+  await handleLine('plan it', ctx);
+  let finish;
+  ctx.worker.turn = () => new Promise((done) => { finish = done; });
+  ctx.autoDev = { status: 'running', cycle: 1, limit: 4, reason: null, waiting: true };
+  queueWork(ctx, 'current task');
+  queueWork(ctx, 'next task');
+  // Another discussion's queued task, in its own lane: not cancelled.
+  const other = { owner: 'someone-else', label: 'someone-else', lane: 'someone-else', text: 'theirs', sent: 0, origin: { stopped: false }, done: () => {} };
+  workerLane(ctx, 'someone-else').tasks.push(other);
+  await eventually(() => !!finish);
+  stopWorker(ctx, 'after');
+  assert.deepEqual(workerLane(ctx).tasks, []);
+  assert.deepEqual(workerLane(ctx, 'someone-else').tasks, [other]);
+  workerLane(ctx, 'someone-else').tasks.length = 0;
+  assert.equal(ctx.autoDev.status, 'paused');
+  assert.deepEqual(ctx.screen.room.workerStop, { after: true, now: false });
+  finish('all done');
+  await ctx.workQueue;
+  const reply = ctx.screen.worker.filter((m) => m.speaker === 'W').at(-1);
+  assert.equal(reply.error, false);
+  assert.match(reply.html, /all done/);
+  assert.match(ctx.screen.worker.find((m) => m.speaker === 'agent-room').html, /cancelled by the stop[\s\S]*next task/);
+  assert.equal(ctx.screen.room.workerStop, null);
+});
+
+test('a worker agent\'s programs: once its task is stopped, none starts', async () => {
+  const ctx = { ...freshCtx(), workerSpec: 'claude:W', noScreen: true };
+  Object.assign(ctx, await load(ctx, '?stop-gate'));
+  assert.deepEqual([ctx.worker.programs.running.size, ctx.worker.programs.stopped], [0, false]);
+  ctx.worker.programs.stopped = true;
+  await assert.rejects(ctx.worker.turn('hi'), /not started: the User stopped this instruction/);
+  assert.equal(ctx.programs.running.size, 0);
+});
