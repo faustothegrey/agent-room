@@ -1422,7 +1422,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
     'const notesDirty = () => notes.editing && noteText.value !== notes.base;\n' +
     code + '\n' +
     notesCode + '\n' +
-    'return { setRoom, renderDiscussions, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
+    'return { setRoom, renderDiscussions, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; }, setPeeking: (p) => { peeking = p; } };'
   )($, document, location, null, null, () => {}, (cb) => cb(), () => {}, (cmd) => sent.push(cmd), notes, noteText, () => { notes.open = true; openedNotes++; });
 
   harness.setFiles([
@@ -1513,6 +1513,21 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   resumeBtn('2026-11-14-closed').onclick({ stopPropagation() {} });
   assert.equal(location.href, '/r/current-id/__room');
   assert.deepEqual(sent, ['/resume 2026-11-14-closed']);
+
+  // 4. While peeking, the current discussion offers Unpeek to return to it.
+  const freshRow = (name) => els['discussions-pane'].firstChild.children
+    .filter((c) => c.tag === 'div' && c.className?.includes('discussion-row'))
+    .find((r) => r.children.find((c) => c.className === 'discussion-block')?.children[0].textContent === name);
+  harness.setPeeking({ title: '2026-11-14-closed' });
+  harness.renderDiscussions();
+  const unpeek = freshRow('2026-11-15-current').children.find((c) => c.tag === 'button' && c.textContent === 'Unpeek');
+  assert.ok(unpeek);
+  unpeek.onclick({ stopPropagation() {} });
+  assert.deepEqual(sent, ['/resume 2026-11-14-closed', '/peek']);
+  harness.setPeeking(null);
+  harness.renderDiscussions();
+  assert.ok(!freshRow('2026-11-15-current').children.some((c) => c.tag === 'button' && c.textContent === 'Unpeek'));
+
   harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-15-current', started: false, open: [] });
   harness.renderDiscussions();
   const current = els['discussions-pane'].firstChild.children.find((r) => r.className?.includes('discussion-row') && r.children.find((c) => c.className === 'discussion-block')?.children[0].textContent === '2026-11-15-current');

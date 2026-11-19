@@ -1929,6 +1929,12 @@ function renderDiscussions() {
           p.onclick = (e) => { e.stopPropagation(); send('/peek ' + d); };
           row.append(p);
         }
+      } else if (peeking) {
+        // While peeking another discussion, the one in use offers the way back.
+        const back = el('button', 'reopen primary', 'Unpeek');
+        back.title = 'Return to this discussion: leave the peek.';
+        back.onclick = (e) => { e.stopPropagation(); send('/peek'); };
+        row.append(back);
       }
       const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
       menu.append(el('summary', '', 'Actions'), items);
