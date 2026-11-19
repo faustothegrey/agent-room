@@ -790,7 +790,11 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #header, #bar { background: #88808; }
 .agent-settings { border-bottom: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--tint); padding: .5rem .8rem; max-height: 45%; overflow-y: auto; flex-shrink: 0; }
 .agent-settings summary { cursor: pointer; font-weight: 600; font-size: .85rem; }
-.providers-panel { padding: .6rem .9rem; overflow-y: auto; }
+#providers { display: block; overflow-y: auto; }
+#providers[hidden] { display: none; }
+.providers-panel { padding: .6rem .9rem; }
+#health-details > summary { cursor: pointer; font-weight: 600; }
+#health-warning { color: light-dark(#b45309, #d6a84c); }
 #provider-health table { border-collapse: collapse; margin: .5rem 0; }
 #provider-health th, #provider-health td { border: 1px solid var(--line); padding: .3rem .5rem; text-align: left; vertical-align: top; }
 /* The Instructions tab: prompt sets, each piece expandable, its content in a monospace block. */
@@ -858,7 +862,6 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     </div>
   </div>
   <div class="view" id="providers" hidden>
-    <section class="providers-panel"><h3>Provider health · all rooms on this server</h3><button type="button" id="health-check">Check now</button><div id="provider-health" role="status"></div></section>
     <form class="providers-panel" id="providers-form">
       <p class="settings-hint" id="providers-hint"></p>
       <h3 class="providers-heading">Discussion members</h3>
@@ -870,6 +873,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <p class="settings-status" id="providers-status" role="status"></p>
       <button type="button" id="providers-done">Go to the discussion</button>
     </form>
+    <details class="providers-panel" id="health-details"><summary>Provider health · all rooms on this server <span id="health-warning" hidden>⚠</span></summary><button type="button" id="health-check">Check now</button><div id="provider-health" role="status"></div></details>
   </div>
   <div class="view" id="instructions" hidden><div id="instructions-pane"></div></div>
   <div class="view" id="work" hidden>
@@ -2575,7 +2579,7 @@ for (const scope of ['talk', 'work']) {
 let providerRows = null;
 async function renderProviders() {
   const status = $('providers-status'), agentsBox = $('providers-agent-rows'), workerBox = $('providers-worker-row'), note = $('providers-member-note');
-  loadHealth();
+  if ($('health-details').open) loadHealth();
   status.textContent = ''; providerRows = null;
   agentsBox.replaceChildren(); workerBox.replaceChildren();
   try {
@@ -2691,6 +2695,7 @@ async function loadHealth(check = false) {
   } catch (err) { box.textContent = 'Could not load provider health: ' + err.message; }
   finally { button.disabled = false; }
 }
+$('health-details').ontoggle = () => { if ($('health-details').open) loadHealth(); };
 $('health-check').onclick = () => loadHealth(true);
 function saveProviders() {
   const status = $('providers-status');
@@ -2952,13 +2957,14 @@ function providerName(provider, display = provider, health = true) {
   const b = document.createElement('b'); b.textContent = display;
   const h = health ? providerHealth(provider) : null;
   if (!health) return b;
-  b.tabIndex = 0; b.setAttribute('role', 'button'); b.onclick = () => showTab('providers');
-  b.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showTab('providers'); } };
+  const openHealth = () => { showTab('providers'); $('health-details').open = true; $('health-details').scrollIntoView({ block: 'start' }); };
+  b.tabIndex = 0; b.setAttribute('role', 'button'); b.onclick = openHealth;
+  b.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openHealth(); } };
   if (h?.level) { const a = document.createElement('span'); a.className = 'alert' + (h.level === 'red' ? ' red' : ''); a.textContent = '⚠'; b.append(a); }
   if (h) b.append(h.box);
   return b;
 }
-function showMonitor(view) { monitor = view ?? {}; showQuota(...lastQuota); }
+function showMonitor(view) { monitor = view ?? {}; $('health-warning').hidden = !Object.keys(monitor).some((p) => providerHealth(p)?.level); showQuota(...lastQuota); }
 function showQuota(gauges, at) {
   lastQuota = [gauges, at];
   const box = $('gauges');
@@ -3106,7 +3112,7 @@ events.onmessage = (e) => {
     setWorking(ev.working);
     if (!ev.workInput) { $('wcomposer').hidden = true; }
     showWorkerInfo(ev.workerInfo);
-    monitor = ev.monitor ?? {};
+    showMonitor(ev.monitor);
     showQuota(ev.quota, ev.quotaAt);
     if (ev.room) { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); showWorkerInfo(workerInfoShown); }
     $('newroom').hidden = !ev.newRoom;

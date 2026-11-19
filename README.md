@@ -69,8 +69,8 @@ login (for Claude, "Claude reports login ends …", from `loginExpiresAt` in `cl
 Codex "logged in, no expiry given", from `codex login status`) and how many of this room's
 programs are running now. Login is checked once per server, at startup and every 10 minutes.
 
-Click a provider name or its ⚠ to open **Providers**, whose health section covers every room on
-this server. It lists running and leftover programs, each room's quota meter status and its measured
+Click a provider name or its ⚠ to open **Providers** and expand its health section, which covers every room on
+this server. The folded health section shows ⚠ when this room’s header reports a provider problem. It lists running and leftover programs, each room's quota meter status and its measured
 and checked times, and login results with the next scheduled check. **Check now** checks all three
 CLI paths and versions, logins, leftovers and quota meters together; CLI checks run only on request.
 For CLI, login and leftover checks, the latest error and its time remain visible separately from the
@@ -453,7 +453,8 @@ The **Providers** tab (beside Discussion and Worker) holds the defaults for new 
 members and the worker together, and is shown first when a new discussion opens (**Go to the
 discussion** returns to the chat). Before the discussion starts, its changes apply to it too; after,
 they change only the defaults (for new discussions in this room and every other), never the running
-agents or worker. The two tabs' own panels below work as before.
+agents or worker. Below the settings, the Provider health section is folded until opened; the whole
+tab scrolls as one column. The two tabs' own panels below work as before.
 
 Defaults save automatically to `~/.config/agent-room/defaults.json`, shared across project
 folders and subsequent launches, including the Dock launcher. Dropdown selections save on change;
