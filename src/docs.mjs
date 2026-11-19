@@ -617,6 +617,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .quota .gauge { grid-column: 2; }
 /* A provider's name and each gauge: hover or focus shows details; a ⚠ right of the name on a problem. */
 .quota b, .gauge { position: relative; cursor: default; }
+.quota b[role=button] { cursor: pointer; }
 .quota b .alert { margin-left: .25rem; font-weight: 700; color: light-dark(#b45309, #d6a84c); }
 .quota b .alert.red { color: #ef4444; }
 .quota b .hover-detail, .gauge .hover-detail { left: auto; right: 0; text-transform: none; font-weight: 400; white-space: normal; }
@@ -855,6 +856,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     </div>
   </div>
   <div class="view" id="providers" hidden>
+    <section class="providers-panel"><h3>Provider health · all rooms on this server</h3><button type="button" id="health-check">Check now</button><div id="provider-health" role="status"></div></section>
     <form class="providers-panel" id="providers-form">
       <p class="settings-hint" id="providers-hint"></p>
       <h3 class="providers-heading">Discussion members</h3>
@@ -2571,6 +2573,7 @@ for (const scope of ['talk', 'work']) {
 let providerRows = null;
 async function renderProviders() {
   const status = $('providers-status'), agentsBox = $('providers-agent-rows'), workerBox = $('providers-worker-row'), note = $('providers-member-note');
+  loadHealth();
   status.textContent = ''; providerRows = null;
   agentsBox.replaceChildren(); workerBox.replaceChildren();
   try {
@@ -2595,6 +2598,33 @@ async function renderProviders() {
       : 'Defaults for new discussions, in this room and every other. This discussion hasn’t started, so they apply to it too.';
   } catch (err) { status.textContent = 'Could not load settings: ' + err.message; }
 }
+async function loadHealth(check = false) {
+  const box = $('provider-health'), button = $('health-check');
+  button.disabled = true;
+  try {
+    const res = check ? await post('__provider-health', {}) : await fetch('__provider-health');
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    box.replaceChildren();
+    const line = (text) => { const p = document.createElement('p'); p.textContent = text; box.append(p); };
+    const when = (t) => t ? longDate(t) : 'not yet';
+    const error = (e) => e ? ' · latest error ' + when(e.at) + ': ' + e.message : '';
+    for (const provider of ['claude', 'codex', 'agy']) {
+      const cli = data.cli[provider], login = data.login[provider];
+      line(provider.toUpperCase() + ' · CLI: ' + (cli ? cli.path + ' · ' + cli.version + ' · last success ' + when(cli.checked) : (data.errors.cli[provider]?.path ? 'found at ' + data.errors.cli[provider].path + ', version unavailable' : 'not checked successfully')) + error(data.errors.cli[provider]));
+      line('Login: ' + (provider === 'agy' ? 'not monitored' : login ? login.state + (login.expiresAt ? ' · ends ' + when(login.expiresAt) : '') + ' · last success ' + when(login.checked) : 'not checked successfully') + error(data.errors.login[provider]) + (provider === 'agy' ? '' : ' · next scheduled check ' + when(data.nextLogin)));
+    }
+    line('Leftovers: last success ' + when(data.leftoversChecked) + error(data.errors.leftovers) + ' · next scheduled check ' + when(data.nextLeftovers));
+    const age = (started) => started ? Math.max(0, Math.floor((Date.now() - new Date(started)) / 60000)) + ' min' : 'unknown';
+    for (const [label, programs] of [['Running', data.running], ['Leftover', data.leftovers]]) {
+      if (!programs.length) line(label + ': none in last available results');
+      for (const p of programs) line(label + ': PID ' + p.pid + ' · ' + p.provider + ' · ' + p.agent + ' · room ' + p.room + ' · age ' + age(p.started) + (p.unverified ? ' · unverified' : ''));
+    }
+    for (const q of data.quota) line('Quota meter · room ' + q.room + ': ' + (q.reachable === null ? 'not checked' : q.reachable ? 'reachable' : 'not reachable') + ' · measured ' + (q.measured || 'unknown') + ' · checked ' + when(q.checked));
+  } catch (err) { box.textContent = 'Could not load provider health: ' + err.message; }
+  finally { button.disabled = false; }
+}
+$('health-check').onclick = () => loadHealth(true);
 function saveProviders() {
   const status = $('providers-status');
   if (!providerRows) return;
@@ -2854,10 +2884,11 @@ function providerHealth(provider) {
 function providerName(provider, display = provider, health = true) {
   const b = document.createElement('b'); b.textContent = display;
   const h = health ? providerHealth(provider) : null;
-  if (!h) return b;
-  b.tabIndex = 0;
-  if (h.level) { const a = document.createElement('span'); a.className = 'alert' + (h.level === 'red' ? ' red' : ''); a.textContent = '⚠'; b.append(a); }
-  b.append(h.box);
+  if (!health) return b;
+  b.tabIndex = 0; b.setAttribute('role', 'button'); b.onclick = () => showTab('providers');
+  b.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showTab('providers'); } };
+  if (h?.level) { const a = document.createElement('span'); a.className = 'alert' + (h.level === 'red' ? ' red' : ''); a.textContent = '⚠'; b.append(a); }
+  if (h) b.append(h.box);
   return b;
 }
 function showMonitor(view) { monitor = view ?? {}; showQuota(...lastQuota); }
@@ -3297,6 +3328,13 @@ function handleScreen(req, res, url, dir, screen) {
     if (!screen.listRooms) { send(409, 'text/plain', 'Room discovery is unavailable.'); return true; }
     screen.listRooms().then((rooms) => send(200, 'application/json', JSON.stringify(rooms)),
       (err) => send(500, 'text/plain; charset=utf-8', err.message));
+    return true;
+  }
+  if (url.pathname === '/__provider-health') {
+    if (!screen.providerHealth || !screen.checkProviderHealth) { send(409, 'text/plain', 'Provider health is unavailable.'); return true; }
+    if (req.method !== 'GET' && (req.method !== 'POST' || !fromOwnPage(req))) { send(403, 'text/plain', 'Refused.'); return true; }
+    Promise.resolve().then(() => req.method === 'GET' ? screen.providerHealth() : screen.checkProviderHealth()).then(
+      (data) => send(200, 'application/json', JSON.stringify(data)), (err) => send(500, 'text/plain; charset=utf-8', err.message));
     return true;
   }
   // The Instructions tab: the prompt catalog, with each rulebook's current text.

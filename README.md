@@ -69,6 +69,14 @@ login (for Claude, "Claude reports login ends …", from `loginExpiresAt` in `cl
 Codex "logged in, no expiry given", from `codex login status`) and how many of this room's
 programs are running now. Login is checked once per server, at startup and every 10 minutes.
 
+Click a provider name or its ⚠ to open **Providers**, whose health section covers every room on
+this server. It lists running and leftover programs, each room's quota meter status and its measured
+and checked times, and login results with the next scheduled check. **Check now** checks all three
+CLI paths and versions, logins, leftovers and quota meters together; CLI checks run only on request.
+For CLI, login and leftover checks, the latest error and its time remain visible separately from the
+last successful result. Agy login is not monitored. Login and leftover scheduled checks continue at
+their usual intervals; opening the tab does not run them.
+
 A **leftover** is a program agent-room started that is still alive after a crash or a Restart.
 Each program is written, when it starts, to `~/.local/state/agent-room/programs/<pid>.json` (PID,
 start time, provider, agent name, room folder, and the PID and start time of the server that

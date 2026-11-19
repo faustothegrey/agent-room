@@ -3886,3 +3886,35 @@ test('the members panel leaves any agent of a started discussion out, from its n
   await handleLine('only B', ctx);
   assert.equal(a, 4); assert.equal(b, 3);
 });
+
+test('provider health retains the latest errors separately from successful checks', async () => {
+  const { checkCli, checkLogins, checkLeftovers } = await import('../src/ui.mjs');
+  const monitor = { login: {}, cli: {}, leftovers: [], errors: { login: {}, cli: {}, leftovers: null } };
+  const room = { room: { agents: [{ provider: 'claude' }] }, worker: { provider: 'codex' },
+    usage: { checkLogin: async () => ({ state: 'ok' }) }, findLeftovers: async () => [{ pid: 1 }], programs: { running: new Set() } };
+  const hub = { monitor, rooms: new Map([['room', room]]) };
+  await checkLogins(hub, true, ['claude']);
+  await checkLeftovers(hub);
+  await checkCli(hub, 'claude', async (command) => command === 'which' ? '/bin/claude' : '1.0');
+  const login = monitor.login.claude, leftovers = monitor.leftovers, cli = monitor.cli.claude;
+  room.usage.checkLogin = async () => ({ state: 'unknown', error: 'unreadable' });
+  room.findLeftovers = async () => { throw new Error('scan failed'); };
+  await checkLogins(hub, true, ['claude']);
+  await checkLeftovers(hub);
+  await checkCli(hub, 'claude', async () => { throw new Error('missing'); });
+  assert.equal(monitor.login.claude, login);
+  assert.equal(monitor.leftovers, leftovers);
+  assert.equal(monitor.cli.claude, cli);
+  for (const e of [monitor.errors.login.claude, monitor.errors.leftovers, monitor.errors.cli.claude]) assert.ok(e.at);
+  assert.equal(monitor.errors.login.claude.message, 'unreadable');
+  assert.equal(monitor.loginCurrent.claude.state, 'unknown');
+  assert.equal(monitor.errors.leftovers.message, 'scan failed');
+  assert.equal(monitor.errors.cli.claude.message, 'missing');
+  room.usage.checkLogin = async () => { throw new Error('login failed'); };
+  await checkLogins(hub, true, ['claude']);
+  assert.equal(monitor.errors.login.claude.message, 'login failed');
+  room.usage.checkLogin = async () => ({ state: 'out' });
+  await checkLogins(hub, true, ['claude']);
+  assert.equal(monitor.login.claude.state, 'out');
+  assert.equal(monitor.errors.login.claude.message, 'login failed');
+});

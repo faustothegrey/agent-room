@@ -250,6 +250,7 @@ export async function load(ctx, v) {
   const runner = (command, args, options) => {
     if (programs.stopping) return Promise.reject(new Error('not started: the room is quitting'));
     const turn = run(command, args, { ...options, procs: programs.running, record: { agent: options?.agent ?? command, room: ctx.cwd } });
+    for (const proc of programs.running) if (!proc.monitorInfo) proc.monitorInfo = { agent: options?.agent ?? command, room: ctx.cwd, started: new Date().toISOString() };
     ctx.showMonitor?.();
     turn.then(() => ctx.showMonitor?.(), () => ctx.showMonitor?.());
     return turn;
@@ -352,6 +353,8 @@ function wire(ctx) {
       launchDefaults: { agents: launch.agents.split(',').map((s) => parseSpec(s)), worker: parseSpec(launch.worker, true) },
       models: modelChoices(), started: settingsStarted(ctx) };
   };
+  ctx.screen.providerHealth = () => healthView(ctx);
+  ctx.screen.checkProviderHealth = () => checkProviderHealth(ctx);
   ctx.screen.saveSettings = (value) => (value?.scope === 'defaults' ? saveDefaultSettings(ctx, value) : saveSettings(ctx, value));
   ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
   ctx.screen.cancelClose = (name) => cancelClose(ctx, name);
@@ -2206,33 +2209,71 @@ const providersOf = (ctx) => [...new Set([...ctx.room.agents, ctx.worker].map((a
 function watchMonitor(ctx) {
   const hub = hubOf(ctx);
   hub.monitor ??= { login: {}, leftovers: [] };
-  hub.checkLogins = (all) => checkLogins(hub, all).catch(() => {});
-  hub.checkLeftovers = () => checkLeftovers(hub).catch(() => {});
+  hub.monitor.errors ??= { login: {}, leftovers: null, cli: {} };
+  hub.monitor.cli ??= {};
+  hub.checkLogins = (all, requested) => checkLogins(hub, all, requested);
+  hub.checkLeftovers = () => checkLeftovers(hub);
   ctx.showMonitor = () => showMonitor(ctx);
   if (!hub.monitorTimers) {
-    hub.monitorTimers = [setInterval(() => hub.checkLogins(true), LOGIN_EVERY_MS).unref(),
-      setInterval(() => hub.checkLeftovers(), LEFTOVERS_EVERY_MS).unref()];
+    hub.monitor.nextLogin = new Date(Date.now() + LOGIN_EVERY_MS).toISOString();
+    hub.monitor.nextLeftovers = new Date(Date.now() + LEFTOVERS_EVERY_MS).toISOString();
+    hub.monitorTimers = [setInterval(() => { hub.monitor.nextLogin = new Date(Date.now() + LOGIN_EVERY_MS).toISOString(); hub.checkLogins(true, ['claude', 'codex', 'agy']); }, LOGIN_EVERY_MS).unref(),
+      setInterval(() => { hub.monitor.nextLeftovers = new Date(Date.now() + LEFTOVERS_EVERY_MS).toISOString(); hub.checkLeftovers(); }, LEFTOVERS_EVERY_MS).unref()];
     hub.checkLeftovers();
   }
-  hub.checkLogins(false); // this room's providers not checked yet
+  hub.checkLogins(false);
 }
-// Every provider in use on the server (all), or only those not checked yet. null: being checked.
-async function checkLogins(hub, all) {
+const errorAt = (err) => ({ message: err?.message ?? String(err), at: new Date().toISOString() });
+// Preserve the last success separately from the latest failure, including unreadable login output.
+export async function checkLogins(hub, all, requested) {
   const rooms = loadedRooms(hub);
-  const providers = [...new Set(rooms.flatMap(providersOf))].filter((p) => all || !(p in hub.monitor.login));
-  if (!providers.length) return;
-  for (const p of providers) if (!(p in hub.monitor.login)) hub.monitor.login[p] = null;
+  if (!rooms.length) return;
+  const providers = (requested ?? [...new Set(rooms.flatMap(providersOf))]).filter((p) => all || !(p in hub.monitor.login));
   await Promise.all(providers.map(async (p) => {
-    hub.monitor.login[p] = { ...await rooms[0].usage.checkLogin(p), checked: new Date().toISOString() };
+    try {
+      const result = await rooms[0].usage.checkLogin(p), checked = new Date().toISOString();
+      if (result.state === 'unknown') hub.monitor.errors.login[p] = { message: result.error, at: checked };
+      else hub.monitor.login[p] = { ...result, checked };
+      hub.monitor.loginCurrent ??= {};
+      hub.monitor.loginCurrent[p] = { ...result, checked };
+    } catch (err) {
+      hub.monitor.errors.login[p] = errorAt(err);
+      (hub.monitor.loginCurrent ??= {})[p] = { state: 'unknown', error: hub.monitor.errors.login[p].message, checked: hub.monitor.errors.login[p].at };
+    }
   }));
   for (const r of loadedRooms(hub)) showMonitor(r);
 }
-async function checkLeftovers(hub) {
+export async function checkLeftovers(hub) {
   const rooms = loadedRooms(hub);
   if (!rooms.length) return;
-  const tracked = new Set(rooms.flatMap((r) => [...(r.programs?.running ?? [])].map((p) => p.pid)));
-  hub.monitor.leftovers = await rooms[0].findLeftovers(tracked);
+  try {
+    const tracked = new Set(rooms.flatMap((r) => [...(r.programs?.running ?? [])].map((p) => p.pid)));
+    hub.monitor.leftovers = await rooms[0].findLeftovers(tracked);
+    hub.monitor.leftoversChecked = new Date().toISOString();
+  } catch (err) { hub.monitor.errors.leftovers = errorAt(err); }
   for (const r of loadedRooms(hub)) showMonitor(r);
+}
+const commandOutput = (command, args) => new Promise((resolve, reject) => execFile(command, args, { timeout: 20_000 }, (err, out) => err ? reject(err) : resolve(String(out).trim())));
+export async function checkCli(hub, provider, run = commandOutput) {
+  let path;
+  try {
+    path = await run('which', [provider]);
+    const version = await run(path, ['--version']);
+    hub.monitor.cli[provider] = { path, version, checked: new Date().toISOString() };
+  } catch (err) { hub.monitor.errors.cli[provider] = { ...errorAt(err), path: path ?? null }; }
+}
+function healthView(ctx) {
+  const hub = hubOf(ctx), m = hub.monitor;
+  return { login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
+    leftovers: m.leftovers, leftoversChecked: m.leftoversChecked, nextLogin: m.nextLogin, nextLeftovers: m.nextLeftovers,
+    running: loadedRooms(hub).flatMap((r) => [...(r.programs?.running ?? [])].map((p) => ({ pid: p.pid, provider: p.provider, ...p.monitorInfo }))),
+    quota: loadedRooms(hub).map((r) => ({ room: r.cwd, reachable: r.screen.quota === undefined ? null : r.screen.quota !== null, ...r.screen.quotaAt })) };
+}
+async function checkProviderHealth(ctx) {
+  const hub = hubOf(ctx);
+  await Promise.all([checkLogins(hub, true, ['claude', 'codex', 'agy']), checkLeftovers(hub),
+    ...['claude', 'codex', 'agy'].map((p) => checkCli(hub, p)), ...loadedRooms(hub).map((r) => refreshQuota(r).catch(() => null))]);
+  return healthView(ctx);
 }
 // What this room's panel shows, per provider: its login, how many of this room's programs are in its
 // procs, and the leftovers of this room, or of a room not open on this server. A provider with a
@@ -2244,7 +2285,7 @@ export function monitorView(ctx) {
   const running = [...(ctx.programs?.running ?? [])];
   const view = {};
   for (const p of new Set([...providersOf(ctx), ...leftovers.map((l) => l.provider)])) {
-    view[p] = { login: hub.monitor?.login[p] ?? null, running: running.filter((r) => r.provider === p).length,
+    view[p] = { login: hub.monitor?.loginCurrent?.[p] ?? hub.monitor?.login[p] ?? null, running: running.filter((r) => r.provider === p).length,
       leftovers: leftovers.filter((l) => l.provider === p), inRoom: providersOf(ctx).includes(p) };
   }
   return view;
