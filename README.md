@@ -74,8 +74,14 @@ this server. It lists running and leftover programs, each room's quota meter sta
 and checked times, and login results with the next scheduled check. **Check now** checks all three
 CLI paths and versions, logins, leftovers and quota meters together; CLI checks run only on request.
 For CLI, login and leftover checks, the latest error and its time remain visible separately from the
-last successful result. Agy login is not monitored. Login and leftover scheduled checks continue at
-their usual intervals; opening the tab does not run them.
+last successful result. Agy login is not monitored. The 10-minute login schedule covers only providers used in an open room; other providers are checked
+only with Check now. Leftover checks continue at their usual interval; opening the tab does not run
+them. The health section also shows each provider's model list source, availability, count and latest
+error. Claude's list is agent-room's fixed list, Codex's is `models_cache.json`, and Agy's comes from
+`agy models`. Check now reloads all three lists, bypassing Agy's five-minute refresh limit. It compares
+each open discussion member and worker, and the saved defaults, with those lists: CLI default, in
+list, not in list or list unavailable. Claude's list is agent-room's own, so inclusion proves little
+about availability. These checks do not change configured models.
 
 A **leftover** is a program agent-room started that is still alive after a crash or a Restart.
 Each program is written, when it starts, to `~/.local/state/agent-room/programs/<pid>.json` (PID,

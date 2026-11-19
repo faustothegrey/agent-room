@@ -108,32 +108,61 @@ function currentSettings(ctx) {
 // Refresh in the background at most once every five minutes, including after a failed lookup.
 // Keep the previous list while refreshing; an unavailable catalog still allows a custom ID.
 export function agyModelCatalog(exec = execFile, now = Date.now) {
-  let models = [], lastAttempt = -Infinity, pending = false;
-  return () => {
-    if (!pending && now() - lastAttempt >= 5 * 60_000) {
-      lastAttempt = now();
-      pending = true;
-      exec('agy', ['models'], { timeout: 5000 }, (err, stdout = '') => {
-        if (!err) models = String(stdout).split('\n').flatMap((line) => {
+  let models = [], lastAttempt = -Infinity, pending = null, loaded = false, lastError = null, checked = null;
+  const start = () => {
+    lastAttempt = now();
+    let finish;
+    pending = new Promise((resolve) => { finish = resolve; });
+    const done = (err, stdout = '') => {
+      checked = new Date(now()).toISOString();
+      if (err) { loaded = false; lastError = { message: err.message ?? String(err), at: checked }; }
+      else {
+        models = String(stdout).split('\n').flatMap((line) => {
           const [id, label] = line.trim().split('\t');
           return label && /^[A-Za-z0-9._[\]()-]+$/.test(id) ? [{ id, label: label.trim() }] : [];
         });
-        pending = false;
-      });
-    }
+        loaded = true;
+      }
+      pending = null;
+      finish();
+    };
+    const result = pending;
+    try { exec('agy', ['models'], { timeout: 5000 }, done); } catch (err) { done(err); }
+    return result;
+  };
+  const catalog = () => {
+    if (!pending && now() - lastAttempt >= 5 * 60_000) start();
     return models;
   };
+  catalog.status = () => ({ models, loaded, checked, error: lastError });
+  catalog.refresh = async () => { if (pending) await pending; await start(); };
+  return catalog;
 }
 const agyModels = agyModelCatalog();
 let agyModelsWarmed = false;
+export function codexModelCatalog(read = readFileSync, now = Date.now) {
+  let models = [], loaded = false, checked = null, error = null;
+  const refresh = () => {
+    checked = new Date(now()).toISOString();
+    try {
+      const cache = JSON.parse(read(join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'models_cache.json'), 'utf8'));
+      models = cache.models.filter((m) => m.visibility === 'list' && typeof m.slug === 'string').map((m) => ({ id: m.slug, label: m.display_name || m.slug }));
+      loaded = true;
+    } catch (err) { loaded = false; error = { message: err.message ?? String(err), at: checked }; }
+    return loaded ? models : [];
+  };
+  refresh.status = () => ({ models, loaded, checked, error });
+  return refresh;
+}
+const codexModels = codexModelCatalog();
+const claudeModels = ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
 export function modelChoices() {
-  // Codex maintains this catalog itself; unavailable catalogs still allow a custom model ID.
-  let codex = [];
-  try {
-    const cache = JSON.parse(readFileSync(join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'models_cache.json'), 'utf8'));
-    codex = cache.models.filter((m) => m.visibility === 'list' && typeof m.slug === 'string').map((m) => ({ id: m.slug, label: m.display_name || m.slug }));
-  } catch {}
-  return { claude: ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) })), codex, agy: agyModels() };
+  return { claude: claudeModels, codex: codexModels(), agy: agyModels() };
+}
+export function modelAlignment(model, catalog) {
+  if (!model) return 'CLI default';
+  if (!catalog.loaded) return 'list unavailable';
+  return catalog.models.some((m) => m.id === model) ? 'in list' : 'not in list';
 }
 // A model's name for the tab titles: its label in the catalog (or its ID), "<Provider> default" for the CLI default.
 function modelLabel(provider, model) {
@@ -2217,7 +2246,7 @@ function watchMonitor(ctx) {
   if (!hub.monitorTimers) {
     hub.monitor.nextLogin = new Date(Date.now() + LOGIN_EVERY_MS).toISOString();
     hub.monitor.nextLeftovers = new Date(Date.now() + LEFTOVERS_EVERY_MS).toISOString();
-    hub.monitorTimers = [setInterval(() => { hub.monitor.nextLogin = new Date(Date.now() + LOGIN_EVERY_MS).toISOString(); hub.checkLogins(true, ['claude', 'codex', 'agy']); }, LOGIN_EVERY_MS).unref(),
+    hub.monitorTimers = [setInterval(() => { hub.monitor.nextLogin = new Date(Date.now() + LOGIN_EVERY_MS).toISOString(); hub.checkLogins(true); }, LOGIN_EVERY_MS).unref(),
       setInterval(() => { hub.monitor.nextLeftovers = new Date(Date.now() + LEFTOVERS_EVERY_MS).toISOString(); hub.checkLeftovers(); }, LEFTOVERS_EVERY_MS).unref()];
     hub.checkLeftovers();
   }
@@ -2264,14 +2293,22 @@ export async function checkCli(hub, provider, run = commandOutput) {
 }
 function healthView(ctx) {
   const hub = hubOf(ctx), m = hub.monitor;
-  return { login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
+  const rooms = loadedRooms(hub);
+  const catalogs = { claude: { models: claudeModels, loaded: true, error: null }, codex: codexModels.status(), agy: agyModels.status() };
+  const configured = (settings) => [...settings.agents.map((a) => ({ ...a, role: 'member' })), { ...settings.worker, role: 'worker' }]
+    .map((a) => ({ ...a, alignment: modelAlignment(a.model, catalogs[a.provider]) }));
+  const defaults = readDefaults();
+  return { scheduledProviders: [...new Set(rooms.flatMap(providersOf))], catalogs,
+    configured: rooms.map((r) => ({ room: r.cwd, discussion: folderOf(r), agents: configured(currentSettings(r)) })),
+    defaults: defaults ? configured(defaults) : null, login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
     leftovers: m.leftovers, leftoversChecked: m.leftoversChecked, nextLogin: m.nextLogin, nextLeftovers: m.nextLeftovers,
     running: loadedRooms(hub).flatMap((r) => [...(r.programs?.running ?? [])].map((p) => ({ pid: p.pid, provider: p.provider, ...p.monitorInfo }))),
     quota: loadedRooms(hub).map((r) => ({ room: r.cwd, reachable: r.screen.quota === undefined ? null : r.screen.quota !== null, ...r.screen.quotaAt })) };
 }
 async function checkProviderHealth(ctx) {
   const hub = hubOf(ctx);
-  await Promise.all([checkLogins(hub, true, ['claude', 'codex', 'agy']), checkLeftovers(hub),
+  codexModels();
+  await Promise.all([agyModels.refresh(), checkLogins(hub, true, ['claude', 'codex', 'agy']), checkLeftovers(hub),
     ...['claude', 'codex', 'agy'].map((p) => checkCli(hub, p)), ...loadedRooms(hub).map((r) => refreshQuota(r).catch(() => null))]);
   return healthView(ctx);
 }

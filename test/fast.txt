@@ -208,3 +208,6 @@ Providers tab: members and worker together; before the start they apply too, aft
 /peek shows a closed discussion read-only, in place, without reopening it
 /peek then /peek restores the live discussion transcript
 provider health retains the latest errors separately from successful checks
+model catalogs retain their latest error and Check now bypasses the Agy throttle
+model alignment distinguishes defaults, membership and unavailable lists
+scheduled login checks use only providers in open rooms, while explicit checks include all

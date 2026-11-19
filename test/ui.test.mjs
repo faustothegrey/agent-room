@@ -3918,3 +3918,61 @@ test('provider health retains the latest errors separately from successful check
   assert.equal(monitor.login.claude.state, 'out');
   assert.equal(monitor.errors.login.claude.message, 'login failed');
 });
+
+test('model catalogs retain their latest error and Check now bypasses the Agy throttle', async () => {
+  const { agyModelCatalog, codexModelCatalog } = await import('../src/ui.mjs');
+  let time = 0, finish, calls = 0;
+  const agy = agyModelCatalog((cmd, args, opts, done) => { calls++; finish = done; }, () => time);
+  agy(); finish(new Error('agy missing'));
+  assert.equal(agy.status().loaded, false);
+  assert.deepEqual(agy.status().error, { message: 'agy missing', at: new Date(0).toISOString() });
+  time = 1000;
+  const forced = agy.refresh();
+  assert.equal(calls, 2);
+  finish(null, 'gemini-one\tGemini One\n');
+  await forced;
+  assert.equal(agy.status().loaded, true);
+  assert.equal(agy.status().models.length, 1);
+  assert.equal(agy.status().error.message, 'agy missing');
+  const forcedFailure = agy.refresh();
+  finish(new Error('agy failed again'));
+  await forcedFailure;
+  assert.equal(agy.status().loaded, false);
+  assert.equal(agy.status().models.length, 1);
+  assert.equal(agy.status().error.message, 'agy failed again');
+
+  let cache = '{"models":[{"visibility":"list","slug":"one"}]}';
+  const codex = codexModelCatalog(() => { if (cache instanceof Error) throw cache; return cache; }, () => time);
+  assert.equal(codex().length, 1);
+  cache = new Error('cache missing'); time = 2000;
+  assert.deepEqual(codex(), []);
+  assert.equal(codex.status().loaded, false);
+  assert.equal(codex.status().models.length, 1);
+  assert.deepEqual(codex.status().error, { message: 'cache missing', at: new Date(time).toISOString() });
+  cache = '{"models":[]}';
+  codex();
+  assert.equal(codex.status().loaded, true);
+  assert.equal(codex.status().error.message, 'cache missing');
+});
+
+test('model alignment distinguishes defaults, membership and unavailable lists', async () => {
+  const { modelAlignment } = await import('../src/ui.mjs');
+  const loaded = { loaded: true, models: [{ id: 'one' }] }, unavailable = { loaded: false, models: [{ id: 'one' }] };
+  assert.equal(modelAlignment('', unavailable), 'CLI default');
+  assert.equal(modelAlignment('one', loaded), 'in list');
+  assert.equal(modelAlignment('two', loaded), 'not in list');
+  assert.equal(modelAlignment('one', unavailable), 'list unavailable');
+});
+
+test('scheduled login checks use only providers in open rooms, while explicit checks include all', async () => {
+  const { checkLogins } = await import('../src/ui.mjs');
+  const called = [];
+  const room = { room: { agents: [{ provider: 'claude' }] }, worker: { provider: 'claude' },
+    usage: { checkLogin: async (provider) => { called.push(provider); return { state: 'ok' }; } } };
+  const hub = { rooms: new Map([['room', room]]), monitor: { login: {}, errors: { login: {} } } };
+  await checkLogins(hub, true);
+  assert.deepEqual(called, ['claude']);
+  called.length = 0;
+  await checkLogins(hub, true, ['claude', 'codex', 'agy']);
+  assert.deepEqual(called, ['claude', 'codex', 'agy']);
+});

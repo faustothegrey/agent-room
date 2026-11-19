@@ -2612,8 +2612,21 @@ async function loadHealth(check = false) {
     for (const provider of ['claude', 'codex', 'agy']) {
       const cli = data.cli[provider], login = data.login[provider];
       line(provider.toUpperCase() + ' · CLI: ' + (cli ? cli.path + ' · ' + cli.version + ' · last success ' + when(cli.checked) : (data.errors.cli[provider]?.path ? 'found at ' + data.errors.cli[provider].path + ', version unavailable' : 'not checked successfully')) + error(data.errors.cli[provider]));
-      line('Login: ' + (provider === 'agy' ? 'not monitored' : login ? login.state + (login.expiresAt ? ' · ends ' + when(login.expiresAt) : '') + ' · last success ' + when(login.checked) : 'not checked successfully') + error(data.errors.login[provider]) + (provider === 'agy' ? '' : ' · next scheduled check ' + when(data.nextLogin)));
+      line('Login: ' + (provider === 'agy' ? 'not monitored' : login ? login.state + (login.expiresAt ? ' · ends ' + when(login.expiresAt) : '') + ' · last success ' + when(login.checked) : 'not checked successfully') + error(data.errors.login[provider]) + (data.scheduledProviders.includes(provider) ? ' · next scheduled check ' + when(data.nextLogin) : ' · not on the 10-minute schedule (Check now only)'));
     }
+    const sources = { claude: "agent-room's fixed list in modelChoices", codex: 'models_cache.json', agy: 'agy models' };
+    for (const provider of ['claude', 'codex', 'agy']) {
+      const c = data.catalogs[provider];
+      line(provider.toUpperCase() + ' model list · ' + sources[provider] + ' · ' + (c.loaded ? 'loaded' : 'unavailable') + ' · ' + c.models.length + ' models' + (c.checked ? ' · last attempt ' + when(c.checked) : '') + error(c.error));
+    }
+    line("Claude's list is agent-room's own; being in that list proves little about availability.");
+    const showConfigured = (label, agents) => {
+      line(label);
+      for (const a of agents) line(a.role + ' ' + a.name + ' · ' + a.provider + ' · ' + (a.model || 'CLI default') + ' · ' + a.alignment);
+    };
+    for (const group of data.configured) showConfigured('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started'), group.agents);
+    if (data.defaults) showConfigured('Saved defaults', data.defaults);
+    else line('Saved defaults: none available');
     line('Leftovers: last success ' + when(data.leftoversChecked) + error(data.errors.leftovers) + ' · next scheduled check ' + when(data.nextLeftovers));
     const age = (started) => started ? Math.max(0, Math.floor((Date.now() - new Date(started)) / 60000)) + ' min' : 'unknown';
     for (const [label, programs] of [['Running', data.running], ['Leftover', data.leftovers]]) {
