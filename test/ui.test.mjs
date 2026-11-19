@@ -3957,7 +3957,7 @@ test('model catalogs retain their latest error and Check now bypasses the Agy th
 
 test('model alignment distinguishes defaults, membership and unavailable lists', async () => {
   const { modelAlignment } = await import('../src/ui.mjs');
-  const loaded = { loaded: true, models: [{ id: 'one' }] }, unavailable = { loaded: false, models: [{ id: 'one' }] };
+  const loaded = { loaded: true, models: [{ id: 'one' }] }, unavailable = { loaded: false, checked: '2026-01-01T00:00:00.000Z', models: [{ id: 'one' }] };
   assert.equal(modelAlignment('', unavailable), 'CLI default');
   assert.equal(modelAlignment('one', loaded), 'in list');
   assert.equal(modelAlignment('two', loaded), 'not in list');
@@ -3975,4 +3975,44 @@ test('scheduled login checks use only providers in open rooms, while explicit ch
   called.length = 0;
   await checkLogins(hub, true, ['claude', 'codex', 'agy']);
   assert.deepEqual(called, ['claude', 'codex', 'agy']);
+});
+
+
+test('unread model catalogs differ from failed reads when checking alignment', async () => {
+  const { agyModelCatalog, codexModelCatalog, modelAlignment } = await import('../src/ui.mjs');
+  const agy = agyModelCatalog(() => {}, () => 0), codex = codexModelCatalog(() => { throw new Error('missing'); }, () => 0);
+  for (const catalog of [agy.status(), codex.status()]) {
+    assert.equal(catalog.checked, null);
+    assert.equal(modelAlignment('example', catalog), 'list not read yet');
+    assert.equal(modelAlignment('', catalog), 'CLI default');
+  }
+  codex();
+  assert.equal(modelAlignment('example', codex.status()), 'list unavailable');
+});
+
+test('last-turn records stay in memory by session and retain the latest error after success', async () => {
+  const { monitorAgentTurns } = await import('../src/ui.mjs');
+  const records = new WeakMap(), session = {}, other = {};
+  let failure = null, resets = 0;
+  const agent = monitorAgentTurns({ turn: async (value) => { if (failure) throw failure; return value; }, reset: () => { resets++; } }, session, records);
+  assert.equal(records.get(session), undefined);
+  assert.equal(await agent.turn('reply'), 'reply');
+  assert.equal(records.get(session).outcome, 'ok');
+  assert.ok(records.get(session).ended);
+  failure = new Error('first failure');
+  await assert.rejects(agent.turn('again'), /first failure/);
+  assert.equal(records.get(session).outcome, 'error');
+  assert.equal(records.get(session).error.message, 'first failure');
+  assert.equal(records.get(session).error.at, records.get(session).ended);
+  failure = new Error('latest failure');
+  await assert.rejects(agent.turn('again'), /latest failure/);
+  failure = null;
+  await agent.turn('recovered');
+  assert.equal(records.get(session).outcome, 'ok');
+  assert.equal(records.get(session).error.message, 'latest failure');
+  assert.equal(records.get(other), undefined);
+  assert.deepEqual(session, {});
+  agent.reset();
+  assert.equal(resets, 1);
+  assert.equal(records.get(session), undefined);
 });

@@ -791,6 +791,8 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .agent-settings { border-bottom: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--tint); padding: .5rem .8rem; max-height: 45%; overflow-y: auto; flex-shrink: 0; }
 .agent-settings summary { cursor: pointer; font-weight: 600; font-size: .85rem; }
 .providers-panel { padding: .6rem .9rem; overflow-y: auto; }
+#provider-health table { border-collapse: collapse; margin: .5rem 0; }
+#provider-health th, #provider-health td { border: 1px solid var(--line); padding: .3rem .5rem; text-align: left; vertical-align: top; }
 /* The Instructions tab: prompt sets, each piece expandable, its content in a monospace block. */
 #instructions { overflow-y: auto; padding: .8rem 1rem; }
 .ins-set { margin-bottom: 1.3rem; }
@@ -2612,12 +2614,12 @@ async function loadHealth(check = false) {
     for (const provider of ['claude', 'codex', 'agy']) {
       const cli = data.cli[provider], login = data.login[provider];
       line(provider.toUpperCase() + ' · CLI: ' + (cli ? cli.path + ' · ' + cli.version + ' · last success ' + when(cli.checked) : (data.errors.cli[provider]?.path ? 'found at ' + data.errors.cli[provider].path + ', version unavailable' : 'not checked successfully')) + error(data.errors.cli[provider]));
-      line('Login: ' + (provider === 'agy' ? 'not monitored' : login ? login.state + (login.expiresAt ? ' · ends ' + when(login.expiresAt) : '') + ' · last success ' + when(login.checked) : 'not checked successfully') + error(data.errors.login[provider]) + (data.scheduledProviders.includes(provider) ? ' · next scheduled check ' + when(data.nextLogin) : ' · not on the 10-minute schedule (Check now only)'));
+      line('Login: ' + (provider === 'agy' ? 'not monitored' : login ? login.state + (login.expiresAt ? ' · ends ' + when(login.expiresAt) : '') + ' · last success ' + when(login.checked) : 'not checked successfully') + error(data.errors.login[provider]) + (provider === 'agy' ? '' : data.scheduledProviders.includes(provider) ? ' · next scheduled check ' + when(data.nextLogin) : ' · not on the 10-minute schedule (Check now only)'));
     }
     const sources = { claude: "agent-room's fixed list in modelChoices", codex: 'models_cache.json', agy: 'agy models' };
     for (const provider of ['claude', 'codex', 'agy']) {
       const c = data.catalogs[provider];
-      line(provider.toUpperCase() + ' model list · ' + sources[provider] + ' · ' + (c.loaded ? 'loaded' : 'unavailable') + ' · ' + c.models.length + ' models' + (c.checked ? ' · last attempt ' + when(c.checked) : '') + error(c.error));
+      line(provider.toUpperCase() + ' model list · ' + sources[provider] + ' · ' + (c.loaded ? 'loaded' : c.checked ? 'unavailable' : 'not read yet') + ' · ' + c.models.length + ' models' + (c.checked ? ' · last attempt ' + when(c.checked) : '') + error(c.error));
     }
     line("Claude's list is agent-room's own; being in that list proves little about availability.");
     const showConfigured = (label, agents) => {
@@ -2627,6 +2629,35 @@ async function loadHealth(check = false) {
     for (const group of data.configured) showConfigured('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started'), group.agents);
     if (data.defaults) showConfigured('Saved defaults', data.defaults);
     else line('Saved defaults: none available');
+    const table = (headings, rows) => {
+      const t = document.createElement('table'), thead = t.createTHead(), tr = thead.insertRow();
+      for (const h of headings) { const th = document.createElement('th'); th.scope = 'col'; th.textContent = h; tr.append(th); }
+      const body = t.createTBody();
+      for (const row of rows) { const r = body.insertRow(); for (const cell of row) r.insertCell().textContent = cell; }
+      box.append(t);
+    };
+    line('Operations · provider and model used now');
+    for (const group of data.configured) {
+      line('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started'));
+      const members = group.agents.filter((a) => a.role === 'member'), worker = group.agents.find((a) => a.role === 'worker');
+      const model = (a) => a.model || 'CLI default';
+      const rows = members.map((a) => ['Discussion turn · ' + a.name + (a.enabled ? '' : ' (disabled)'), a.provider, model(a)]);
+      rows.push(...members.filter((a) => a.enabled).map((a) => ['Summary · ' + a.name, a.provider, model(a)]));
+      rows.push(['Worker tasks · ' + worker.name, worker.provider, model(worker)],
+        ['Closing statement · new session', worker.provider, model(worker)],
+        ['Discussion title', 'Claude', 'CLI default'],
+        ['Login check · claude auth status', 'Claude', 'not applicable'],
+        ['Login check · codex login status', 'Codex', 'not applicable'],
+        ['Login check', 'Agy', 'not monitored'], ['Quota meter', 'quota meter', 'not applicable']);
+      table(['Operation', 'Provider', 'Model'], rows);
+    }
+    line('Sessions are memory between turns, not running programs. This list covers only sessions known to agent-room.');
+    for (const group of data.sessions) {
+      line('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started'));
+      table(['Agent', 'Provider', 'Session ID', 'Last turn', 'Latest error'], group.agents.map((a) => [
+        a.role + ' ' + a.name, a.provider, a.id || 'none yet', a.lastTurn ? when(a.lastTurn.ended) + ' · ' + a.lastTurn.outcome : 'none yet',
+        a.lastTurn?.error ? when(a.lastTurn.error.at) + ' · ' + a.lastTurn.error.message : 'none' ]));
+    }
     line('Leftovers: last success ' + when(data.leftoversChecked) + error(data.errors.leftovers) + ' · next scheduled check ' + when(data.nextLeftovers));
     const age = (started) => started ? Math.max(0, Math.floor((Date.now() - new Date(started)) / 60000)) + ' min' : 'unknown';
     for (const [label, programs] of [['Running', data.running], ['Leftover', data.leftovers]]) {

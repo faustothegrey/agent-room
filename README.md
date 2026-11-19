@@ -80,8 +80,13 @@ them. The health section also shows each provider's model list source, availabil
 error. Claude's list is agent-room's fixed list, Codex's is `models_cache.json`, and Agy's comes from
 `agy models`. Check now reloads all three lists, bypassing Agy's five-minute refresh limit. It compares
 each open discussion member and worker, and the saved defaults, with those lists: CLI default, in
-list, not in list or list unavailable. Claude's list is agent-room's own, so inclusion proves little
-about availability. These checks do not change configured models.
+list, not in list, list not read yet or list unavailable. Claude's list is agent-room's own, so inclusion proves little
+about availability. These checks do not change configured models. Per-room operation tables show
+the live provider and model for discussion turns, summaries, worker tasks, closing statements,
+discussion titles, login checks and the quota meter. Closing statements use a new worker-provider
+session. The session tables list the provider session IDs known to agent-room and each member's and
+worker's last turn, with its outcome and latest error. A session is memory between turns, not a
+running program. Turn outcomes and latest errors are kept only in memory, not in a history or log.
 
 A **leftover** is a program agent-room started that is still alive after a crash or a Restart.
 Each program is written, when it starts, to `~/.local/state/agent-room/programs/<pid>.json` (PID,

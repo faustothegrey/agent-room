@@ -161,7 +161,7 @@ export function modelChoices() {
 }
 export function modelAlignment(model, catalog) {
   if (!model) return 'CLI default';
-  if (!catalog.loaded) return 'list unavailable';
+  if (!catalog.loaded) return catalog.checked ? 'list unavailable' : 'list not read yet';
   return catalog.models.some((m) => m.id === model) ? 'in list' : 'not in list';
 }
 // A model's name for the tab titles: its label in the catalog (or its ID), "<Provider> default" for the CLI default.
@@ -245,6 +245,24 @@ export async function saveSettings(ctx, value, file = defaultsFile()) {
   return { applied, workerApplied: true, settings: saved };
 }
 
+// Turn records live only in memory, keyed by the actual provider session, never in checkpoints.
+export function monitorAgentTurns(agent, session, records) {
+  const turn = agent.turn.bind(agent), reset = agent.reset?.bind(agent);
+  agent.turn = async (...args) => {
+    try {
+      const result = await turn(...args);
+      records.set(session, { ...records.get(session), ended: new Date().toISOString(), outcome: 'ok' });
+      return result;
+    } catch (err) {
+      const ended = new Date().toISOString();
+      records.set(session, { ended, outcome: 'error', error: { message: err?.message ?? String(err), at: ended } });
+      throw err;
+    }
+  };
+  if (reset) agent.reset = (...args) => { records.delete(session); return reset(...args); };
+  return agent;
+}
+
 // Imports fresh copies of the modules and the two rulebooks and builds a room on ctx.state, and the worker. Returns
 // the parts to put into ctx; if anything fails it throws, leaving ctx as it was (at most an
 // unused empty session added).
@@ -284,10 +302,12 @@ export async function load(ctx, v) {
     turn.then(() => ctx.showMonitor?.(), () => ctx.showMonitor?.());
     return turn;
   };
+  const turnRecords = ctx.turnRecords ??= new WeakMap();
   const agents = ctx.agentSpecs.split(',').map((spec) => {
     const { provider, name, model } = parseSpec(spec);
     if (!ctx.sessions.has(name)) ctx.sessions.set(name, {});
-    return createAgent(provider, { name, model, cwd: ctx.cwd, instructions, runner, session: ctx.sessions.get(name) });
+    const session = ctx.sessions.get(name);
+    return monitorAgentTurns(createAgent(provider, { name, model, cwd: ctx.cwd, instructions, runner, session }), session, turnRecords);
   });
   // The worker's session is kept under its own key, so it never mixes with a room agent's.
   const { provider: wProvider, name: wName, model: wModel } = parseSpec(ctx.workerSpec, true);
@@ -299,8 +319,9 @@ export async function load(ctx, v) {
   // The worktree its worker's task runs in (see refreshWorker): its own, as tasks of different
   // discussions run at the same time; by reference, so it survives reloads and settings copies.
   const workerDir = ctx.workerDir ??= { path: null };
-  const worker = createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
-    timeoutMs: WORKER_TIMEOUT_MS, runner, session: ctx.sessions.get(`worker:${wName}`) });
+  const makeWorker = (session) => monitorAgentTurns(createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
+    timeoutMs: WORKER_TIMEOUT_MS, runner, session }), session, turnRecords);
+  const worker = makeWorker(ctx.sessions.get(`worker:${wName}`));
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
   // ctx so they survive a reload.
   const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: shop?.log ?? [], working: shop && runningTasks(shop).some((t) => t.origin === ctx) ? wName : null };
@@ -309,8 +330,7 @@ export async function load(ctx, v) {
   return { room: createRoom(agents, ctx.state, instr), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: roomShop,
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
-    makeWorker: (session) => createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
-      timeoutMs: WORKER_TIMEOUT_MS, runner, session }),
+    makeWorker,
     // Close's closing statement, written by a one-off agent with the worker's provider and model, in
     // the room's folder, with no rulebook and a session of its own (never the worker's session or
     // worktree). `agent`: a stand-in for tests (ctx.closingAgent).
@@ -2298,8 +2318,14 @@ function healthView(ctx) {
   const configured = (settings) => [...settings.agents.map((a) => ({ ...a, role: 'member' })), { ...settings.worker, role: 'worker' }]
     .map((a) => ({ ...a, alignment: modelAlignment(a.model, catalogs[a.provider]) }));
   const defaults = readDefaults();
-  return { scheduledProviders: [...new Set(rooms.flatMap(providersOf))], catalogs,
-    configured: rooms.map((r) => ({ room: r.cwd, discussion: folderOf(r), agents: configured(currentSettings(r)) })),
+  const sessions = rooms.map((r) => {
+    const view = sessionView(r);
+    const entry = (agent, role, key) => ({ ...agent, role, lastTurn: r.turnRecords?.get(r.sessions.get(key)) ?? null });
+    return { room: r.cwd, discussion: folderOf(r), agents: [
+      ...view.agents.map((a) => entry(a, 'member', a.name)), entry(view.worker, 'worker', `worker:${view.worker.name}`) ] };
+  });
+  return { sessions, scheduledProviders: [...new Set(rooms.flatMap(providersOf))], catalogs,
+    configured: rooms.map((r) => ({ room: r.cwd, discussion: folderOf(r), agents: configured(currentSettings(r)).map((a) => ({ ...a, enabled: a.role === 'worker' || !(r.state.disabledAgents ?? []).includes(a.name) })) })),
     defaults: defaults ? configured(defaults) : null, login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
     leftovers: m.leftovers, leftoversChecked: m.leftoversChecked, nextLogin: m.nextLogin, nextLeftovers: m.nextLeftovers,
     running: loadedRooms(hub).flatMap((r) => [...(r.programs?.running ?? [])].map((p) => ({ pid: p.pid, provider: p.provider, ...p.monitorInfo }))),
