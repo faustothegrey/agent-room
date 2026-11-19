@@ -52,7 +52,7 @@ Type a message to start a round; start it with @name to address one agent.
 Commands: /resume <name> (continue that discussion where it stopped: the same agent and worker
 sessions, and its chat; from its handoff if it was never saved; one in archive/ or deferred/ is made
 active first), /fresh <name> (Start fresh: new sessions there, from its handoff and notes and its
-latest saved summary; its saved sessions are discarded), /docs (pick a document to view in the
+latest saved summary; its saved sessions are discarded), /peek <name> (a closed discussion's conversation and notes, read-only, without reopening it; /peek alone returns), /docs (pick a document to view in the
 browser), /new (end this session; your next message starts a new discussion; the worker
 carries on), /brainstorm (New brainstorm: its first message names it, in DIR/brainstorms/<date>-<title>/,
 saved like a discussion but sending no work; /resume brainstorms/<name> and /fresh brainstorms/<name> as
@@ -1050,6 +1050,35 @@ function saveLeftWorker(ctx, worker, usage = null) {
   } catch (err) { note(ctx, `✗ Couldn't save ${d.name}'s worker session in its checkpoint: ${err.message}`, true); }
 }
 
+// /peek <name> (Peek): a closed discussion's conversation and notes, read-only, without reopening it:
+// no agent or worker session is touched, and it stays closed. /peek alone (or Back on the screen)
+// returns to the discussion in use. One in archive/ or deferred/ is peeked in place (it is never made
+// active). In the terminal the conversation is printed instead.
+function peekDiscussion(ctx, ref) {
+  const parent = join(ctx.cwd, 'discussions');
+  if (!ref) {
+    ctx.screen.peek = null;
+    toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
+    return note(ctx, 'Back to the discussion in use.');
+  }
+  if (ref.startsWith(`${BRAINSTORMS}/`)) return note(ctx, '✗ Peek is for closed discussions, not brainstorms.', true);
+  const d = discussionRef(parent, ref);
+  if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent}.`, true);
+  if (shopOf(ctx).closing?.has(d.name)) return note(ctx, `✗ ${d.name} is closing.`, true);
+  if (!closedDiscussions(ctx).includes(d.name)) return note(ctx, `✗ ${d.name} is not closed. Peek is for closed discussions: the open ones are already on screen.`, true);
+  const saved = readCheckpoint(ctx, d.name);
+  const transcript = Array.isArray(saved?.state?.transcript) ? saved.state.transcript : [];
+  if (ctx.noScreen) {
+    const body = transcript.length ? transcript.map((m) => `**${m.speaker}**\n\n${m.text ?? ''}`).join('\n\n') : 'This discussion has no saved conversation.';
+    return note(ctx, `${d.name}\n\n${body}\n`);
+  }
+  const dir = join(parent, d.section ?? '', d.name);
+  const notes = existsSync(join(dir, 'notes.md')) ? relative(ctx.cwd, join(dir, 'notes.md')).split(sep).join('/') : null;
+  ctx.screen.peek = { name: d.name, title: saved?.discussion?.title ?? d.name, messages: transcript.map(ctx.docs.messageView), doc: notes };
+  toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
+  return note(ctx, `Peeking at ${d.name} — read-only. Back (or /peek) returns to the discussion in use.`);
+}
+
 // /resume <name> (Resume): a discussion that isn't on screen. Open in another context of this folder,
 // it is only shown there, as it is. Otherwise it continues from its checkpoint (the same agent and
 // worker sessions, and its chat), or, with none, starts from its handoff: a fresh session at the
@@ -1331,6 +1360,7 @@ function endSession(ctx, why, onReset = null) {
 function switchTo(ctx, next) {
   const was = ctx.discussion;
   ctx.closedBriefing = false;
+  ctx.screen.peek = null; // a peek ends when a discussion becomes the one in use
   if (was && was.dir !== next?.dir) ctx.previous = { name: was.name, title: was.title };
   if (next && ctx.previous?.name === next.name) ctx.previous = null; // went back to it
   ctx.discussion = next;
@@ -2421,6 +2451,8 @@ export async function handleLine(line, ctx) {
   if (resume) return resumeDiscussion(ctx, (resume[1] ?? '').trim());
   const fresh = /^\/fresh(?:\s+(.*))?$/.exec(line);
   if (fresh) return startFresh(ctx, (fresh[1] ?? '').trim());
+  const peek = /^\/peek(?:\s+(.*))?$/.exec(line);
+  if (peek) return peekDiscussion(ctx, (peek[1] ?? '').trim());
   if (line === '/new') return multi(ctx) ? newDiscussionBeside(ctx) : newDiscussion(ctx);
   if (line === '/brainstorm') return multi(ctx) ? newBrainstormBeside(ctx) : newBrainstorm(ctx);
   if (line === '/close') return closeDiscussion(ctx);

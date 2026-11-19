@@ -205,3 +205,4 @@ a ```vega-lite block: its spec is kept (escaped) for the page to draw, with Vega
 the room page's script parses as served (it is written inside a template string)
 mentions: a path names a file of the room, as given or inside the current discussion
 Providers tab: members and worker together; before the start they apply too, after it only the defaults change
+/peek shows a closed discussion read-only, in place, without reopening it

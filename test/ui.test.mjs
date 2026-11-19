@@ -353,6 +353,54 @@ test('archive and defer require a closed discussion, and Make active keeps it cl
   assert.ok(existsSync(`${root}/deferred/${name}`));
 });
 
+test('/peek shows a closed discussion read-only, in place, without reopening it', async () => {
+  const { mkdirSync, writeFileSync, existsSync, realpathSync } = await import('node:fs');
+  const { dirname, basename, join } = await import('node:path');
+  const ctx = await freshSession([], async () => ({ title: 'Peek me' }));
+  const root = `${ctx.cwd}/discussions`;
+  const marker = async (name) => { const cp = await checkpointPath(ctx.cwd, name); return join(dirname(cp), 'closed', basename(cp, '.json')); };
+  mkdirSync(`${root}/2026-11-01-closed`, { recursive: true });
+  writeFileSync(`${root}/2026-11-01-closed/notes.md`, '# notes\n');
+  const closedCp = await checkpointPath(ctx.cwd, '2026-11-01-closed');
+  mkdirSync(dirname(closedCp), { recursive: true });
+  writeFileSync(closedCp, JSON.stringify({
+    version: 1, root: realpathSync(ctx.cwd), discussion: { name: '2026-11-01-closed', title: 'Peek me' },
+    state: { transcript: [{ speaker: 'User', text: 'hi' }, { speaker: 'A', text: 'yo' }] },
+  }));
+  await markClosed(ctx.cwd, '2026-11-01-closed');
+
+  await handleLine('/peek 2026-11-01-closed', ctx);
+  assert.equal(ctx.screen.peek.name, '2026-11-01-closed');
+  assert.equal(ctx.screen.peek.title, 'Peek me');
+  assert.equal(ctx.screen.peek.doc, 'discussions/2026-11-01-closed/notes.md');
+  assert.deepEqual(ctx.screen.peek.messages.map((m) => m.speaker), ['User', 'A']);
+  assert.equal(ctx.discussion, undefined); // not resumed
+  assert.ok(existsSync(await marker('2026-11-01-closed'))); // still closed
+
+  await handleLine('/peek', ctx);
+  assert.equal(ctx.screen.peek, null);
+
+  // Not closed, unknown, and brainstorms are refused.
+  mkdirSync(`${root}/2026-11-02-open`, { recursive: true });
+  await handleLine('/peek 2026-11-02-open', ctx);
+  await handleLine('/peek brainstorms/2026-11-03-b', ctx);
+  assert.equal(ctx.screen.peek, null);
+
+  // An archived discussion is peeked in place, never moved back to active.
+  mkdirSync(`${root}/archive/2026-11-04-old`, { recursive: true });
+  const oldCp = await checkpointPath(ctx.cwd, '2026-11-04-old');
+  mkdirSync(dirname(oldCp), { recursive: true });
+  writeFileSync(oldCp, JSON.stringify({
+    version: 1, root: realpathSync(ctx.cwd), discussion: { name: '2026-11-04-old', title: 'Archived' }, state: { transcript: [] },
+  }));
+  await markClosed(ctx.cwd, '2026-11-04-old');
+  await handleLine('/peek archive/2026-11-04-old', ctx);
+  assert.equal(ctx.screen.peek.name, '2026-11-04-old');
+  assert.deepEqual(ctx.screen.peek.messages, []);
+  assert.ok(existsSync(`${root}/archive/2026-11-04-old`));
+  assert.ok(!existsSync(`${root}/2026-11-04-old`));
+});
+
 test('Restart keeps the launch flags that matter: the same port, agents, worker and dev mode, in the discussion in use', () => {
   // The agents and worker are the room's current ones (ctx), not the launch flags.
   const ctx = { cwd: '/r', agentSpecs: 'claude:Ada', workerSpec: 'codex:W', discussion: { name: '2026-11-03-a-topic' } };
@@ -2110,8 +2158,8 @@ test('auto dev: while a run is active, the status under the title says so instea
   const { readFileSync } = await import('node:fs');
   const page = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
   const code = page.slice(page.indexOf('function talkStatus('), page.indexOf('function updateReplicaView('));
-  const status = (room, more = {}) => new Function('tab', 'localWorking', 'room', 'viewing', 'localThinking', 'yourTurn', `${code}; return talkStatus();`)(
-    more.tab ?? 'talk', more.working ?? null, room, null, more.thinking ?? null, true);
+  const status = (room, more = {}) => new Function('tab', 'localWorking', 'room', 'viewing', 'peeking', 'localThinking', 'yourTurn', `${code}; return talkStatus();`)(
+    more.tab ?? 'talk', more.working ?? null, room, null, null, more.thinking ?? null, true);
   const started = { started: true, paused: false };
   assert.equal(status({ ...started, autoDev: { status: null } }), 'your turn');
   assert.equal(status({ ...started, autoDev: { status: 'running' } }), 'Auto dev running');

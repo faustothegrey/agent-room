@@ -967,7 +967,7 @@ test('peek lifecycle: tab indicator, banner, Back to current, revealDoc immunity
     'replica-header': node('span'),
   };
   const document = { createElement: node, title: '' };
-  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
     'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
     'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
     'const renderAttachments = () => {};\n' +
@@ -978,7 +978,7 @@ test('peek lifecycle: tab indicator, banner, Back to current, revealDoc immunity
     '  getDoc: () => doc, getSubtab: () => subtab ' +
     '};'
   )(
-    (id) => els[id] || (els[id] = node(id)), document, { href: '' }, null, () => {}, (cb) => cb(), () => {}
+    (id) => els[id] || (els[id] = node(id)), document, { href: '' }, null, null, () => {}, (cb) => cb(), () => {}
   );
 
   // Initialize room with active discussion
@@ -1071,7 +1071,7 @@ test('Room checkout in Explorer lists root files including discussions/README.md
     'replica-header': node('span'),
   };
   const document = { createElement: node, title: '' };
-  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
     'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
     'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
     'const renderAttachments = () => {};\n' +
@@ -1081,7 +1081,7 @@ test('Room checkout in Explorer lists root files including discussions/README.md
     '  setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } ' +
     '};'
   )(
-    (id) => els[id] || (els[id] = node(id)), document, { href: '' }, null, () => {}, (cb) => cb(), () => {}
+    (id) => els[id] || (els[id] = node(id)), document, { href: '' }, null, null, () => {}, (cb) => cb(), () => {}
   );
 
   harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-13-current', discussion: 'Current' });
@@ -1165,7 +1165,7 @@ test('Explorer marks the shown file with .shown and aria-current, and wraps leve
     'replica-header': node('span'),
   };
   const document = { createElement: node, title: '' };
-  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
     'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
     'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
     'const renderAttachments = () => {};\n' +
@@ -1175,7 +1175,7 @@ test('Explorer marks the shown file with .shown and aria-current, and wraps leve
     '  setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } ' +
     '};'
   )(
-    (id) => els[id] || (els[id] = node(id)), document, { href: '' }, null, () => {}, (cb) => cb(), () => {}
+    (id) => els[id] || (els[id] = node(id)), document, { href: '' }, null, null, () => {}, (cb) => cb(), () => {}
   );
 
   // 10 root files + 12 files in src/: root files stay direct children; src/ files wrap in .file-columns
@@ -1246,14 +1246,14 @@ test('Discussions tab: active discussions keep the User\'s order in localStorage
   const localStorage = { getItem: (k) => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)) };
   let fetchAnswer = null;
   const fetch = async () => fetchAnswer();
-  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'localStorage', 'fetch',
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'localStorage', 'fetch',
     'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
     'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
     'const renderAttachments = () => {}, closeMenus = () => {}, send = () => {};\n' +
     code + '\n' +
     'return { setRoom, renderDiscussions, openFiles, forgetOrder, ' +
     '  setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
-  )((id) => els[id] || (els[id] = node(id)), { createElement: node, title: '' }, { href: '' }, null, () => {}, (cb) => cb(), () => {}, localStorage, fetch);
+  )((id) => els[id] || (els[id] = node(id)), { createElement: node, title: '' }, { href: '' }, null, null, () => {}, (cb) => cb(), () => {}, localStorage, fetch);
 
   const KEY = 'agent-room.discussion-order:/tmp/project';
   const filesFor = (names) => ['discussions/README.md', ...names.map((n) => 'discussions/' + n + '/notes.md'), 'discussions/archive/2026-11-01-old/notes.md'];
@@ -1415,7 +1415,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   const noteText = $('notes-text');
   let openedNotes = 0;
 
-  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'send', 'notes', 'noteText', 'openNotes',
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'send', 'notes', 'noteText', 'openNotes',
     'let tab = "talk", replica = null, localThinking = "Claude", yourTurn = false, localInput = true, box = { hidden: false }, wbox = {};\n' +
     'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
     'const renderAttachments = () => {};\n' +
@@ -1423,7 +1423,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
     code + '\n' +
     notesCode + '\n' +
     'return { setRoom, renderDiscussions, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
-  )($, document, location, null, () => {}, (cb) => cb(), () => {}, (cmd) => sent.push(cmd), notes, noteText, () => { notes.open = true; openedNotes++; });
+  )($, document, location, null, null, () => {}, (cb) => cb(), () => {}, (cmd) => sent.push(cmd), notes, noteText, () => { notes.open = true; openedNotes++; });
 
   harness.setFiles([
     'discussions/2026-11-15-current/notes.md',
@@ -1583,7 +1583,7 @@ test('Brainstorms tab: rows by title with their actions, and an order of their o
   });
   const els = {}, store = new Map(), sent = [], location = { href: '' };
   const localStorage = { getItem: (k) => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)) };
-  const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'localStorage', 'fetch', 'send',
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'localStorage', 'fetch', 'send',
     'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
     'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
     'let attaching = false, pending = [];\n' +
@@ -1591,7 +1591,7 @@ test('Brainstorms tab: rows by title with their actions, and an order of their o
     code + '\n' +
     'return { setRoom, renderBrainstorms, renderDiscussions, forgetOrder, ' +
     '  setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
-  )((id) => els[id] || (els[id] = node(id)), { createElement: node, title: '' }, location, null, () => {}, (cb) => cb(), () => {}, localStorage, async () => ({ ok: false }),
+  )((id) => els[id] || (els[id] = node(id)), { createElement: node, title: '' }, location, null, null, () => {}, (cb) => cb(), () => {}, localStorage, async () => ({ ok: false }),
     (line) => sent.push(line));
 
   const KEY = 'agent-room.brainstorm-order:/tmp/project', DKEY = 'agent-room.discussion-order:/tmp/project';

@@ -909,7 +909,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 const $ = (id) => document.getElementById(id);
 const pane = $('pane'), docpane = $('docpane'), box = $('box'), wbox = $('wbox');
 let pending = [], attaching = false; // attachments waiting for the next message (see sendWithFiles)
-let replica = null, replicaOff = null, viewing = null, localMessages = [], localInput = true, localThinking = null, yourTurn = false, localWorking = null, viewExpired = false, viewNotice = null;
+let replica = null, replicaOff = null, viewing = null, peeking = null, localMessages = [], localInput = true, localThinking = null, yourTurn = false, localWorking = null, viewExpired = false, viewNotice = null;
 // crypto.randomUUID exists only in secure contexts (HTTPS or localhost); over plain HTTP from another machine, use random bytes.
 const viewClient = crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 let ended = false, doc = null, tab = 'talk', page = null;
@@ -1224,7 +1224,7 @@ split.addEventListener('keydown', (e) => {
 window.addEventListener('resize', () => { if (document.body.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width); });
 function message(m, live = false) {
   localMessages.push(m);
-  if (viewing) return;
+  if (viewing || peeking) return;
   if (m.pass || m.hidden) return; // passes and summary turns are hidden, as in the terminal
   const el = bubble(m);
   talk.add(el);
@@ -1299,7 +1299,7 @@ function busyFailed() {
 }
 function setThinking(name) {
   localThinking = name; if (name) yourTurn = false; updateReplicaView();
-  if (viewing) return;
+  if (viewing || peeking) return;
   talk.think(name ? '… ' + name + ' is thinking' : null);
 }
 const urlFor = (file) => file.split('/').map(encodeURIComponent).join('/');
@@ -1479,6 +1479,7 @@ function updateReplicaHeader() {
 function talkStatus() {
   if (tab === 'work') return localWorking ? localWorking + ' is working' : 'idle';
   if (!room) return '';
+  if (peeking) return 'peeking at ' + peeking.title + ' · read-only';
   if (viewing) return 'read-only';
   if (localThinking) return localThinking + ' is thinking';
   if (room.autoDev?.status === 'running') return 'Auto dev running';
@@ -1502,23 +1503,24 @@ function updateReplicaView() {
   updateDiscWorkers();
   updateReplicaHeader();
   renderAutoDev();
-  if (room) { $('disc').textContent = viewing ? viewing.title : room.discussion; $('disc').dataset.active = !viewing && room.active ? 'true' : 'false'; }
+  const readOnly = !!(viewing || peeking);
+  if (room) { $('disc').textContent = viewing ? viewing.title : peeking ? peeking.title : room.discussion; $('disc').dataset.active = !readOnly && room.active ? 'true' : 'false'; }
   // Under the title, show the activity of the selected tab.
   $('disc-status').textContent = talkStatus();
-  const panel = $('remote-view'); panel.hidden = !viewing; panel.replaceChildren();
-  $('composer').hidden = !viewing && !localInput;
-  box.hidden = !!viewing;
+  const panel = $('remote-view'); panel.hidden = !readOnly; panel.replaceChildren();
+  $('composer').hidden = !readOnly && !localInput;
+  box.hidden = readOnly;
   // Attach: in discussions only (disabled until the first message creates the folder), not in brainstorms.
-  $('attach-row').hidden = !!viewing || !room || !!room.brainstorm;
+  $('attach-row').hidden = readOnly || !room || !!room.brainstorm;
   if ($('attach-row').hidden && !attaching) pending = [];
   $('attach').title = room?.active ? "Attach files to your next message: saved into the discussion's files/ folder when you send it (25 MB at most each)" : 'Send a first message to start the discussion; then you can attach files';
   renderAttachments();
-  $('talk-settings').hidden = !!viewing;
-  $('summary').hidden = !!viewing;
-  $('reload').hidden = !!viewing;
+  $('talk-settings').hidden = readOnly;
+  $('summary').hidden = readOnly;
+  $('reload').hidden = readOnly;
   // New discussion (in the header): ends this session (in the terminal); the next message starts the new one.
   // New brainstorm, beside it, is always offered (it ends a session or a brainstorm the same way).
-  $('new-discussion').hidden = !(room && localInput && !viewing);
+  $('new-discussion').hidden = !(room && localInput && !readOnly);
   $('newdisc').hidden = !(room?.active || room?.brainstorm);
   // Turn into a discussion: a brainstorm once its first message has named it.
   $('convert').hidden = !(room?.brainstorm && room.active);
@@ -1531,6 +1533,13 @@ function updateReplicaView() {
     $('newbrainstorm').title = 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.';
   }
   $('actions-menu').hidden = ['summary', 'new-discussion'].every((id) => $(id).hidden);
+  if (peeking && !viewing) {
+    const label = document.createElement('p');
+    label.textContent = 'Peeking at ' + peeking.title + '. Read-only.' + (peeking.doc ? '' : ' No notes to show.');
+    panel.append(label);
+    const back = document.createElement('button'); back.textContent = 'Back to the discussion in use'; back.onclick = () => send('/peek'); panel.append(back);
+    return;
+  }
   if (!viewing) return;
   const label = document.createElement('p');
   label.textContent = viewExpired ? 'View expired. Select the received line again.' : viewing.node + "'s line, round " + viewing.round + ', received ' + receivedTime(viewing.receivedAt) + '. Read-only.';
@@ -1914,6 +1923,12 @@ function renderDiscussions() {
         b.title = resumeTip(d, openHere, null);
         b.onclick = (e) => { e.stopPropagation(); if (openHere) notesGuard(() => { location.href = openHere.url; }); else send('/resume ' + d); };
         row.append(b);
+        if (room?.closedDiscussions?.includes(d)) {
+          const p = el('button', 'reopen', 'Peek');
+          p.title = 'Look at this closed discussion read-only: its conversation and notes, without reopening it.';
+          p.onclick = (e) => { e.stopPropagation(); send('/peek ' + d); };
+          row.append(p);
+        }
       }
       const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
       menu.append(el('summary', '', 'Actions'), items);
@@ -2025,6 +2040,12 @@ function renderDiscussions() {
         b.title = 'Resume: makes it active first';
         b.onclick = (e) => { e.stopPropagation(); send('/resume ' + s + '/' + d); };
         row.append(b);
+        if (room?.closedDiscussions?.includes(d)) {
+          const p = el('button', 'reopen', 'Peek');
+          p.title = 'Look at this closed discussion read-only: its conversation and notes, without reopening it.';
+          p.onclick = (e) => { e.stopPropagation(); send('/peek ' + s + '/' + d); };
+          row.append(p);
+        }
 
         const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
         menu.append(el('summary', '', 'Actions'), items);
@@ -2964,8 +2985,10 @@ events.onmessage = (e) => {
   }
   if (ev.type === 'reset') {
     localMessages = []; localInput = ev.input;
+    peeking = ev.peek ?? null;
     talk.clear();
-    ev.messages.forEach((m) => message(m, false));
+    if (peeking) for (const m of ev.messages) if (!m.pass && !m.hidden) talk.add(bubble(m));
+    else ev.messages.forEach((m) => message(m, false));
     yourTurn = !ev.thinking; setThinking(ev.thinking); if (!viewing) { showDoc(ev.doc); openFiles(); }
     if (!ev.input) { $('composer').hidden = true; } // terminal mode: the page only watches
     work.clear();
@@ -3399,11 +3422,13 @@ function handleScreen(req, res, url, dir, screen) {
 // Everything a page shows, to start over from: sent to a page that (re)connects, and to every open
 // page when a discussion is resumed or started afresh.
 export function resetEvent(screen) {
-  return { type: 'reset', messages: screen.transcript.map(messageView), doc: screen.doc,
+  const peek = screen.peek ?? null;
+  return { type: 'reset', messages: peek ? peek.messages : screen.transcript.map(messageView),
+    doc: peek ? peek.doc : screen.doc,
     thinking: screen.thinking, status: screen.status, busy: !!screen.busy, input: !!screen.say,
     room: screen.room ?? null, worker: screen.workerForPage?.() ?? screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
     quota: screen.quota, quotaAt: screen.quotaAt ?? null, monitor: screen.monitor ?? null, newRoom: !!screen.newRoom, page: PAGE,
-    replica: screen.replica ?? null, replicaOff: screen.replicaOff ?? null, viewing: screen.viewing ?? null };
+    replica: screen.replica ?? null, replicaOff: screen.replicaOff ?? null, viewing: screen.viewing ?? null, peek };
 }
 
 // What the page can still send while viewing another node's line.
