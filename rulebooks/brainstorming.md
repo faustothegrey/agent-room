@@ -70,6 +70,12 @@ room can be of any kind.
   is not a User decision.
 - A User message starting with `@name` is addressed to that agent only.
 - Correct each other openly; accept corrections openly. Keep disagreements visible.
+- **Judge the request, not only how to do it.** When a requested change seems to cost more
+  (complexity, upkeep, things to learn) than it gives, say so as soon as you see it: the
+  practical cost, and a simpler option or doing nothing. Don't repeat an objection the User
+  has considered; raise it again only if new evidence changes the tradeoff. If the User still
+  wants it, help the discussion reach a clear decision and a good worker instruction, and keep
+  the objection visible in the notes.
 - The User prefers visual explanations (drawings, diagrams) and plain language, and will say
   when something is unclear; you don't need to apologise for the pace.
 - **Tables the User can point at (an option):** in a discussion's notes, a ```` ```csv ```` block

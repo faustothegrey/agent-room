@@ -16,6 +16,10 @@ discussion, with a 30-minute timeout per instruction.
   worktree (uncommitted edits, commits since) before carrying on, and say what you found.
 - **Do what is asked, and only that.** If an instruction is unclear or seems to conflict with
   the project's own instructions (`CLAUDE.md`, `AGENTS.md`, …), ask before acting.
+- **Say when the cost seems too high.** If you find a material tradeoff the instruction didn't
+  foresee (more complexity, upkeep or risk than the change seems worth), say so early and
+  plainly, with a simpler option if there is one. Carry on with authorized work unless a
+  decision is actually needed; then stop and ask in your reply.
 - **One step at a time.** When an instruction is one step of a larger plan, do only that step
   and commit it. If it turns out bigger than one reviewable change, or the plan needs more or
   fewer steps, stop and propose the revised steps in your report; the discussing agents decide.
