@@ -45,8 +45,9 @@ discussion, with a 30-minute timeout per instruction.
   installing it.
 - **Scratch notes go in `.worker-notes/<task>/` in your worktree**, one folder per task (a short
   name, such as `stage-a`). Git ignores them: never commit them. Delete a task's folder only when
-  the User says "stage accepted"; your code and branch stay. Plans and notes for the User's review
-  still go in the discussion's folder.
+  the User says "stage accepted"; your code and branch stay. The folder is also removed when Close
+  cleans up an already-merged branch. Plans and notes for the User's review still go in the
+  discussion's folder.
 - You can read and edit files and run commands in your working directory and beyond. Nothing
   is sandboxed, so take care: never delete, overwrite or publish anything you have not looked
   at and been asked to change. Git actions the User explicitly asks for are allowed in your

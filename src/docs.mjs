@@ -1684,8 +1684,13 @@ function showMergeDialog(name, initialPreview, initialChanged) {
       dialog.append(w);
     }
     const note = document.createElement('p'); note.className = 'discard-note';
-    note.textContent = 'After merging, the worktree and branch will be removed and the discussion closed. Any untracked and ignored files in the worktree will be deleted for good.';
+    note.textContent = 'After merging, the worktree and branch will be removed and the discussion closed.';
     dialog.append(note);
+    if (preview.untracked?.length) {
+      const u = document.createElement('p'); u.className = 'discard-note';
+      u.textContent = 'Untracked files in the worktree will be deleted for good: ' + preview.untracked.join(', ');
+      dialog.append(u);
+    }
     if (preview.activeNotice) {
       const act = document.createElement('p'); act.className = 'discard-note';
       act.textContent = preview.activeNotice;
@@ -1699,8 +1704,6 @@ function showMergeDialog(name, initialPreview, initialChanged) {
       dialog.append(ul);
     };
     section('Commits to merge', preview.commits.map((c) => c.hash + ' ' + c.subject));
-    section('Untracked files deleted on cleanup', preview.untracked);
-    section('Ignored files deleted on cleanup (by top-level folder)', preview.ignored.map((i) => i.label));
     const errEl = document.createElement('p'); errEl.className = 'discard-err'; errEl.textContent = errMsg;
     if (errMsg) dialog.append(errEl);
     const buttons = document.createElement('div'); buttons.className = 'discard-buttons';

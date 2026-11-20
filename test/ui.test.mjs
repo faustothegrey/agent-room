@@ -4704,15 +4704,18 @@ test('Close and Merge: greyed-out reasons, Catch up when main moved, change betw
   assert.equal(git('rev-parse', 'main'), mainAfterMove);
   assert.equal(existsSync(tree), true);
 
-  // 3. Two-click preview + change between clicks (ignored file added in worktree).
+  // 3. Two-click preview: ignored files are omitted and changes to them do not invalidate the snapshot;
+  // a real change (such as a new commit on the branch) returns { changed: true } without merging.
   mkdirSync(`${tree}/cache`, { recursive: true });
   writeFileSync(`${tree}/cache/c1.bin`, 'abc');
   const p1 = await closeMergePreview(first, name);
   assert.equal(p1.ok, true);
   assert.equal(p1.preview.title, `Merge worker/${name} into main`);
-  assert.ok(p1.preview.ignored.some((i) => i.label === 'cache/ 1 file'));
+  assert.equal(p1.preview.ignored, undefined);
   writeFileSync(`${tree}/cache/c2.bin`, 'def');
-  const changed = await closeAndMerge(first, name, p1.preview.snapshot);
+  const p1AfterIgnored = await closeMergePreview(first, name);
+  assert.equal(p1AfterIgnored.preview.snapshot, p1.preview.snapshot, 'ignored-file change must not change merge snapshot');
+  const changed = await closeAndMerge(first, name, 'stale-snapshot');
   assert.equal(changed.changed, true);
   assert.equal(git('rev-parse', 'main'), mainAfterMove, 'must not merge when snapshot changed');
 
@@ -4837,4 +4840,146 @@ test('Close and Merge active-work notice and shared room lock with Close and Dis
   // Subsequent discardPreview succeeds immediately now that the lock is free.
   const afterFail = await discardPreview(second, nameB);
   assert.equal(afterFail.ok, true);
+});
+
+test('plain Close implicitly cleans up an already-merged clean branch (removing .worker-notes/ and node_modules/), hides Close and Discard when nothing would be lost, keeps unmerged/untracked work, and reports when the shared lock is held', async () => {
+  const { writeFileSync, mkdirSync, readFileSync, existsSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, refreshWorker } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  // 1. Merged clean branch with .worker-notes/ and node_modules/ -> Close and Discard hidden; plain Close removes worktree & branch.
+  {
+    const { first, git } = await multiRoom({ worker: (ctx) => {
+      writeFileSync(`${ctx.workerDir.path}/done.txt`, 'ok\n');
+      inTree(ctx.workerDir.path, 'add', 'done.txt');
+      inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.discussion.name}] done`);
+      return 'ok';
+    } });
+    writeFileSync(`${first.cwd}/.gitignore`, 'node_modules/\n');
+    git('add', '.gitignore'); git('commit', '-q', '-m', 'ignore node_modules');
+    await handleLine('merged-clean', first);
+    const { name, dir } = first.discussion;
+    queueWork(first, 'do work');
+    await first.workQueue;
+    const tree = first.workerDir.path;
+
+    // Before merging: has unmerged commit -> Close and Discard IS offered.
+    await refreshWorker(first);
+    assert.ok(first.screen.workerInfo.discardable.includes(name));
+
+    // Merge into main, and add gitignored .worker-notes/ and node_modules/ in the worktree.
+    git('merge', '--no-ff', '-q', `worker/${name}`, '-m', 'merge manually');
+    mkdirSync(`${tree}/.worker-notes/stage-1`, { recursive: true });
+    writeFileSync(`${tree}/.worker-notes/stage-1/scratch.md`, 'scratch\n');
+    mkdirSync(`${tree}/node_modules/pkg`, { recursive: true });
+    writeFileSync(`${tree}/node_modules/pkg/index.js`, 'module.exports = 1;\n');
+
+    // Now merged & clean (only ignored files): Close and Discard is NOT offered.
+    await refreshWorker(first);
+    assert.ok(!first.screen.workerInfo.discardable.includes(name));
+
+    // Plain Close cleans up automatically and writes the closing-statement line.
+    await handleLine('/close', first);
+    assert.equal(existsSync(tree), false, 'merged worktree removed on Close');
+    assert.throws(() => git('rev-parse', '--verify', `refs/heads/worker/${name}`), 'merged branch deleted on Close');
+    const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
+    assert.ok(stmt.includes('Worker worktree and branch removed (already merged).'));
+  }
+
+  // 2. Unmerged commit or untracked file -> Close keeps everything, Close and Discard stays offered.
+  {
+    const { first, git } = await multiRoom({ worker: (ctx) => {
+      writeFileSync(`${ctx.workerDir.path}/done.txt`, 'ok\n');
+      inTree(ctx.workerDir.path, 'add', 'done.txt');
+      inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.discussion.name}] done`);
+      return 'ok';
+    } });
+    await handleLine('merged-untracked', first);
+    const { name, dir } = first.discussion;
+    queueWork(first, 'do work');
+    await first.workQueue;
+    const tree = first.workerDir.path;
+    git('merge', '--no-ff', '-q', `worker/${name}`, '-m', 'merge manually');
+    writeFileSync(`${tree}/untracked-note.txt`, 'keep me\n');
+
+    await refreshWorker(first);
+    assert.ok(first.screen.workerInfo.discardable.includes(name), 'Close and Discard offered for untracked file');
+    await handleLine('/close', first);
+    assert.equal(existsSync(`${tree}/untracked-note.txt`), true, 'untracked file kept on Close');
+    assert.ok(git('rev-parse', '--verify', `refs/heads/worker/${name}`), 'branch kept on Close');
+    const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
+    assert.doesNotMatch(stmt, /Worker worktree and branch removed/);
+    assert.match(stmt, /Worker work pending on/);
+  }
+
+  // 3. Shared lock held by another operation -> cleanup skipped, discussion still closes, reported in room and closing statement.
+  {
+    const { first, git } = await multiRoom({ worker: () => 'ok' });
+    await handleLine('locked-clean', first);
+    const { name, dir } = first.discussion;
+    queueWork(first, 'create worktree');
+    await first.workQueue;
+    const tree = first.workerDir.path;
+
+    first.shop.merging = 'Close and Merge for other-disc';
+    try {
+      await handleLine('/close', first);
+    } finally {
+      first.shop.merging = null;
+    }
+    assert.ok(first.screen.room.closedDiscussions.includes(name), 'discussion still closes when lock is held');
+    assert.equal(existsSync(tree), true, 'worktree left untouched when lock is held');
+    assert.ok(git('rev-parse', '--verify', `refs/heads/worker/${name}`), 'branch left untouched when lock is held');
+    assert.ok(first.notes.some((n) => /not removed.*Close and Merge for other-disc was in progress/.test(n)));
+    const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
+    assert.match(stmt, /Worker worktree and branch not removed \(Close and Merge for other-disc was in progress\): nothing removed\./);
+  }
+});
+
+test('after a worker task ends, refreshed workerInfo clears the finished task so Close and Merge is enabled without clicking Worker tab, and reflects holds for uncommitted edits', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  let mode = 'clean-pass';
+  const { first, git } = await multiRoom({ worker: (ctx) => {
+    const tree = ctx.workerDir.path;
+    if (mode === 'clean-pass') {
+      writeFileSync(`${tree}/feat.txt`, 'ok\n');
+      inTree(tree, 'add', 'feat.txt');
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] add feat`);
+      return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+    }
+    if (mode === 'leave-dirty') {
+      writeFileSync(`${tree}/uncommitted.txt`, 'wip\n');
+      return 'left wip';
+    }
+    return 'ok';
+  } });
+
+  await handleLine('post-task-refresh', first);
+  const { name } = first.discussion;
+
+  // 1. Clean task with passing Tested: line -> without clicking Worker tab or calling refreshWorker,
+  // the last workerinfo event sent to the page shows canMerge: true (not greyed out for running/queued).
+  queueWork(first, 'implement feature');
+  await first.workQueue;
+  const lastInfo1 = first.events.filter((e) => e.type === 'workerinfo').at(-1)?.info;
+  assert.ok(lastInfo1, 'workerinfo event sent after task');
+  assert.equal(lastInfo1.mergeable[name]?.canMerge, true);
+  assert.equal(lastInfo1.mergeable[name]?.disabledReason, null);
+  assert.equal(first.screen.workerInfo.mergeable[name]?.canMerge, true);
+
+  // 2. Task that leaves uncommitted edits -> refreshed workerInfo after hold reflects dirty state and disables Close and Merge for uncommitted edits (not running/queued).
+  mode = 'leave-dirty';
+  queueWork(first, 'leave edits');
+  await first.workQueue;
+  const lastInfo2 = first.events.filter((e) => e.type === 'workerinfo').at(-1)?.info;
+  assert.ok(workerLane(first, name).blockedBy, 'lane is held for uncommitted edits');
+  assert.equal(lastInfo2.mergeable[name]?.canMerge, false);
+  assert.match(lastInfo2.mergeable[name]?.disabledReason, /uncommitted edits/);
+  assert.ok(lastInfo2.pending.some((p) => p.lane === name && p.dirty === true));
+  assert.ok(lastInfo2.discardable.includes(name));
 });

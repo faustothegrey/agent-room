@@ -192,7 +192,6 @@ the closing statement is one turn of the given agent, with the worker reports
 a closing statement that is empty, a pass or without the pending instructions reference is refused; a failed turn is reported
 Close asks one agent with the worker's settings for the statement, never the discussion agents
 without a stand-in, Close's writer is a one-off agent with the worker's provider and model, in the room's folder
-the worker's worktree links the room's node_modules and ignores the link
 a ```csv block shows as a table: column letters, row numbers, formulas worked out, every cell named
 table formulas: AVERAGE, MIN, MAX, precedence; errors show in the cell; cell text is escaped
 pointing: a cell click from the shown document becomes a chip, and the next message carries it as text
@@ -227,3 +226,4 @@ branchDiagram: strips leading [label] from subjects and tags third-branch merges
 the Close action switches between Close and Close with pending work in Actions and Discussions
 POST /__discard previews and confirms Close and Discard only from the room page
 POST /__merge and POST /__catchup enforce same-origin and wire preview, confirm and catch-up
+showMergeDialog omits ignored files and mentions untracked files only when present
