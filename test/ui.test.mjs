@@ -4265,7 +4265,8 @@ test('branchDiagram: behind main, diverged, main merged into branch twice, and h
     const lane = ctx.screen.workerInfo.lanes[0];
     const graph = await checkGraph(lane.diagram);
     assert.match(graph, new RegExp(`commit id: "${base} `));
-    assert.match(graph, new RegExp(`commit id: "${w1} \\[${name}\\] worker diverged"`));
+    assert.match(graph, new RegExp(`commit id: "${w1} worker diverged"`));
+    assert.doesNotMatch(graph, new RegExp(`\\[${name}\\]`));
     assert.match(graph, new RegExp(`commit id: "${m1} main diverged"`));
   }
 
@@ -4382,4 +4383,53 @@ test('branchDiagram: falls back to a plain-text note when gitGraph cannot draw t
     const ast = await parse('gitGraph', res.graph);
     assert.ok(ast.statements.length > 0);
   }
+});
+
+test('branchDiagram: strips leading [label] from subjects and tags third-branch merges with tag: "merge"', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { parse } = await import('@mermaid-js/parser');
+  const { branchDiagram, workerPlace, ensureWorktree } = await import('../src/ui.mjs');
+
+  const dir = await tmp('diag-labels-and-third-');
+  const g = await gitRoom(dir);
+  const place = await workerPlace(dir, '2026-11-19-readable-labels');
+  await ensureWorktree(place);
+
+  // Long leading [label] is stripped BEFORE truncating to 48 chars so the actual subject stays readable.
+  const longLabel = '2026-11-19-a-very-long-discussion-folder-name-that-would-fill-the-label';
+  writeFileSync(`${place.path}/w.txt`, '1\n'); g('-C', place.path, 'add', 'w.txt');
+  g('-C', place.path, 'commit', '-q', '-m', `[${longLabel}] Add branch diagram labels`);
+  const w1 = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+  // Main merges a third branch (not the worker branch): stays in the diagram as one commit tagged "merge".
+  g('checkout', '-q', '-b', 'worker/other');
+  writeFileSync(`${dir}/other.txt`, 'other\n'); g('add', 'other.txt');
+  g('commit', '-q', '-m', '[2026-11-19-other] Other branch work');
+  g('checkout', '-q', 'main');
+  g('merge', '--no-ff', 'worker/other', '-m', '[2026-11-19-other] Merge other branch');
+  const mMerge = g('rev-parse', '--short=7', 'HEAD');
+
+  const res = await branchDiagram(place);
+  assert.ok(res.graph && !res.note, `expected graph, got: ${JSON.stringify(res)}`);
+  const ast = await parse('gitGraph', res.graph);
+  assert.ok(ast.statements.length > 0);
+  assert.match(res.graph, new RegExp(`commit id: "${w1} Add branch diagram labels"`));
+  assert.ok(!res.graph.includes(longLabel));
+  assert.match(res.graph, new RegExp(`commit id: "${mMerge} Merge other branch" tag: "merge"`));
+  assert.doesNotMatch(res.graph, /type: HIGHLIGHT/);
+
+  // Worker branch merging a third branch also stays as one commit tagged "merge" (no text-note fallback).
+  g('checkout', '-q', '-b', 'side-helper', 'HEAD~1');
+  writeFileSync(`${dir}/helper.txt`, 'h\n'); g('add', 'helper.txt');
+  g('commit', '-q', '-m', 'helper commit');
+  g('checkout', '-q', 'main');
+  g('-C', place.path, 'merge', '--no-ff', 'side-helper', '-m', `[${longLabel}] Bring in helper`);
+  const wMerge = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+  const res2 = await branchDiagram(place);
+  assert.ok(res2.graph && !res2.note, `expected graph, got: ${JSON.stringify(res2)}`);
+  const ast2 = await parse('gitGraph', res2.graph);
+  assert.ok(ast2.statements.length > 0);
+  assert.match(res2.graph, new RegExp(`commit id: "${wMerge} Bring in helper" tag: "merge"`));
+  assert.doesNotMatch(res2.graph, /type: HIGHLIGHT/);
 });

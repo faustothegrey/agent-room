@@ -223,3 +223,4 @@ Stop now with a real program: the worker's process group is killed through its m
 the stop buttons hide while peeking at another discussion or viewing a peer's, and come back at once on returning, before any room update
 the Worker tab draws a Mermaid gitGraph when a lane is expanded and shows a plain-text note when gitGraph cannot draw it
 branchDiagram: falls back to a plain-text note when gitGraph cannot draw the history faithfully, and supports non-main room branches
+branchDiagram: strips leading [label] from subjects and tags third-branch merges with tag: "merge"

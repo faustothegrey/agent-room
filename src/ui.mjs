@@ -3143,12 +3143,13 @@ async function workerInfo(ctx, seen = new Map(), own = null) {
 
 // ── Branch diagram for the Worker tab ──
 // Builds a Mermaid gitGraph of `place.branch` against the room's current branch, from their
-// fork/merge-base to both tips, using first-parent chains and real merge commits between the two
-// branches. At most `limit` commits per side; cut-off history is marked with a "+N more commits"
-// node and never drawn as a direct parent link. When gitGraph cannot represent the history
-// faithfully (no common ancestor, criss-cross / non-monotonic merges, octopus or external merges on
-// the worker branch, merges crossing the cut-off window), returns `{ note }` instead of a wrong
-// picture.
+// fork/merge-base to both tips, using each side's first-parent history and real merge commits
+// between the two branches. Other merges (such as main merging a third branch) stay as one commit
+// tagged "merge". At most `limit` commits per side; cut-off history is marked with a "+N more
+// commits" node (`type: HIGHLIGHT`) and never drawn as a direct parent link. When gitGraph cannot
+// represent the history faithfully (no common ancestor, criss-cross / non-monotonic merges,
+// octopus merges involving both branches, merges crossing the cut-off window), returns `{ note }`
+// instead of a wrong picture.
 export const BRANCH_DIAGRAM_LIMIT = 15;
 const gitLogFirstParent = async (top, range) => {
   const out = await git(top, 'log', '--first-parent', '--format=%H%x1f%P%x1f%s', range);
@@ -3164,7 +3165,12 @@ const gitCommitInfo = async (top, sha) => {
   return { id, parents: p ? p.split(' ').filter(Boolean) : [], subject: rest.join('\x1f') };
 };
 function formatDiagramLabel(commit) {
-  const raw = String(commit.subject ?? '').replace(/"/g, "'").replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const raw = String(commit.subject ?? '')
+    .replace(/^\s*\[[^\]]+\]\s+/, '')
+    .replace(/"/g, "'")
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   const subj = raw.length > 48 ? `${raw.slice(0, 47)}…` : raw;
   return subj ? `${commit.id.slice(0, 7)} ${subj}` : commit.id.slice(0, 7);
 }
@@ -3214,16 +3220,18 @@ export async function branchDiagram(place, { limit = BRANCH_DIAGRAM_LIMIT } = {}
     }
   }
 
-  // Classify merges between the two branches.
+  // Classify merges between the two branches; merges from outside the two branches stay as one
+  // commit tagged "merge".
   const rSet = new Set([base, ...rCommits.map((c) => c.id)]);
   const bSet = new Set([base, ...bCommits.map((c) => c.id)]);
   for (const c of bCommits) {
     const extra = c.parents.slice(1);
-    if (extra.length > 1) return note(`Branch diagram unavailable: ${place.branch} has an octopus merge (${c.id.slice(0, 7)}) that gitGraph cannot draw faithfully.`);
-    if (extra.length === 1) {
-      if (!rSet.has(extra[0])) return note(`Branch diagram unavailable: ${place.branch} merges ${extra[0].slice(0, 7)}, which is not on ${roomBranch}'s first-parent line.`);
-      c.mergeFrom = extra[0];
+    const rParents = extra.filter((p) => rSet.has(p));
+    if (rParents.length > 1 || (rParents.length === 1 && extra.length > 1)) {
+      return note(`Branch diagram unavailable: ${place.branch} has an octopus merge (${c.id.slice(0, 7)}) involving ${roomBranch}.`);
     }
+    if (rParents.length === 1) c.mergeFrom = rParents[0];
+    else if (extra.length > 0) c.externalMerge = true;
   }
   for (const c of rCommits) {
     const extra = c.parents.slice(1);
@@ -3232,6 +3240,7 @@ export async function branchDiagram(place, { limit = BRANCH_DIAGRAM_LIMIT } = {}
       return note(`Branch diagram unavailable: ${roomBranch} has an octopus merge (${c.id.slice(0, 7)}) involving ${place.branch}.`);
     }
     if (bParents.length === 1) c.mergeFrom = bParents[0];
+    else if (extra.length > 0) c.externalMerge = true;
   }
 
   // Limit each side to `limit` commits, marking any cut-off prefix with a "+N more commits" node.
@@ -3261,7 +3270,7 @@ export async function branchDiagram(place, { limit = BRANCH_DIAGRAM_LIMIT } = {}
     lines.push('---', 'config:', '  gitGraph:', `    mainBranchName: "${roomBranch}"`, '---');
   }
   lines.push('gitGraph TB:');
-  lines.push(`  commit id: "${formatDiagramLabel(baseCommit)}"`);
+  lines.push(`  commit id: "${formatDiagramLabel(baseCommit)}"${baseCommit.parents.length > 1 ? ' tag: "merge"' : ''}`);
   lines.push(`  branch "${place.branch}"`);
 
   let curr = place.branch;
@@ -3292,7 +3301,7 @@ export async function branchDiagram(place, { limit = BRANCH_DIAGRAM_LIMIT } = {}
         lines.push(`  commit id: "${c.label}" type: HIGHLIGHT`);
       } else {
         checkout(place.branch);
-        lines.push(`  commit id: "${formatDiagramLabel(c)}"`);
+        lines.push(`  commit id: "${formatDiagramLabel(c)}"${c.externalMerge ? ' tag: "merge"' : ''}`);
       }
       bTip = c.id; bTipBranch = place.branch;
     } else {
@@ -3308,7 +3317,7 @@ export async function branchDiagram(place, { limit = BRANCH_DIAGRAM_LIMIT } = {}
         lines.push(`  commit id: "${c.label}" type: HIGHLIGHT`);
       } else {
         checkout(roomBranch);
-        lines.push(`  commit id: "${formatDiagramLabel(c)}"`);
+        lines.push(`  commit id: "${formatDiagramLabel(c)}"${c.externalMerge ? ' tag: "merge"' : ''}`);
       }
       rTip = c.id; rTipBranch = roomBranch;
     }
