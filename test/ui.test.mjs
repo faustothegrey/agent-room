@@ -4936,3 +4936,50 @@ test('plain Close implicitly cleans up an already-merged clean branch (removing 
     assert.match(stmt, /Worker worktree and branch not removed \(Close and Merge for other-disc was in progress\): nothing removed\./);
   }
 });
+
+test('after a worker task ends, refreshed workerInfo clears the finished task so Close and Merge is enabled without clicking Worker tab, and reflects holds for uncommitted edits', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  let mode = 'clean-pass';
+  const { first, git } = await multiRoom({ worker: (ctx) => {
+    const tree = ctx.workerDir.path;
+    if (mode === 'clean-pass') {
+      writeFileSync(`${tree}/feat.txt`, 'ok\n');
+      inTree(tree, 'add', 'feat.txt');
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] add feat`);
+      return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+    }
+    if (mode === 'leave-dirty') {
+      writeFileSync(`${tree}/uncommitted.txt`, 'wip\n');
+      return 'left wip';
+    }
+    return 'ok';
+  } });
+
+  await handleLine('post-task-refresh', first);
+  const { name } = first.discussion;
+
+  // 1. Clean task with passing Tested: line -> without clicking Worker tab or calling refreshWorker,
+  // the last workerinfo event sent to the page shows canMerge: true (not greyed out for running/queued).
+  queueWork(first, 'implement feature');
+  await first.workQueue;
+  const lastInfo1 = first.events.filter((e) => e.type === 'workerinfo').at(-1)?.info;
+  assert.ok(lastInfo1, 'workerinfo event sent after task');
+  assert.equal(lastInfo1.mergeable[name]?.canMerge, true);
+  assert.equal(lastInfo1.mergeable[name]?.disabledReason, null);
+  assert.equal(first.screen.workerInfo.mergeable[name]?.canMerge, true);
+
+  // 2. Task that leaves uncommitted edits -> refreshed workerInfo after hold reflects dirty state and disables Close and Merge for uncommitted edits (not running/queued).
+  mode = 'leave-dirty';
+  queueWork(first, 'leave edits');
+  await first.workQueue;
+  const lastInfo2 = first.events.filter((e) => e.type === 'workerinfo').at(-1)?.info;
+  assert.ok(workerLane(first, name).blockedBy, 'lane is held for uncommitted edits');
+  assert.equal(lastInfo2.mergeable[name]?.canMerge, false);
+  assert.match(lastInfo2.mergeable[name]?.disabledReason, /uncommitted edits/);
+  assert.ok(lastInfo2.pending.some((p) => p.lane === name && p.dirty === true));
+  assert.ok(lastInfo2.discardable.includes(name));
+});

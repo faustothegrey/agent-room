@@ -2593,6 +2593,7 @@ async function pumpLane(shop, lane) {
         if (dirty === true) { if (!lane.blockedBy) hold(t.origin, { origin: t.origin, owner: t.owner, label: t.label, task: t.text, before: t.before, place }); }
         else if (dirty === false && lane.blockedBy) release(t.origin, lane);
       } catch (err) { note(t.origin, `✗ ${err.message}`, true); }
+      await refreshWorker(t.origin).catch(() => {}); // lane.running is null and hold/release settled: Close actions & Worker tab see final state
       t.done();
       // A place is free: the lanes waiting for one can start.
       for (const other of lanesOf(shop)) if (other !== lane && other.tasks.length && !other.running) pumpLane(shop, other).catch(() => {});

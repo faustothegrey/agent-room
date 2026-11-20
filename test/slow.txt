@@ -90,3 +90,4 @@ Close and Merge: greyed-out reasons, Catch up when main moved, change between cl
 Close and Merge active-work notice and shared room lock with Close and Discard
 plain Close implicitly cleans up an already-merged clean branch (removing .worker-notes/ and node_modules/), hides Close and Discard when nothing would be lost, keeps unmerged/untracked work, and reports when the shared lock is held
 the worker's worktree links the room's node_modules and ignores the link
+after a worker task ends, refreshed workerInfo clears the finished task so Close and Merge is enabled without clicking Worker tab, and reflects holds for uncommitted edits
