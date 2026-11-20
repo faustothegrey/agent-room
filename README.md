@@ -69,6 +69,30 @@ login (for Claude, "Claude reports login ends …", from `loginExpiresAt` in `cl
 Codex "logged in, no expiry given", from `codex login status`) and how many of this room's
 programs are running now. Login is checked once per server, at startup and every 10 minutes.
 
+Click a provider name or its ⚠ to open **Providers** and expand its health section, which covers every room on
+this server. The folded health section shows ⚠ when this room’s header reports a provider problem. It lists running and leftover programs, each room's quota meter status and its measured
+and checked times, and login results with the next scheduled check. **Check now** checks all three
+CLI paths and versions, logins, leftovers and quota meters together; CLI checks run only on request.
+For CLI, login and leftover checks, the latest error and its time remain visible separately from the
+last successful result. Agy login is not monitored. The 10-minute login schedule covers only providers used in an open room; other providers are checked
+only with Check now. Leftover checks continue at their usual interval; opening the tab does not run
+them. The health section also shows each provider's model list source, availability, count and latest
+error. Claude's list is agent-room's fixed list, Codex's is `models_cache.json`, and Agy's comes from
+`agy models`. Check now reloads all three lists, bypassing Agy's five-minute refresh limit. It compares
+each open discussion member and worker, and the saved defaults, with those lists: CLI default, in
+list, not in list, list not read yet or list unavailable. Claude's list is agent-room's own, so inclusion proves little
+about availability. These checks do not change configured models. Per-room operation tables show
+the live provider and model for discussion turns, summaries, worker tasks, closing statements,
+discussion titles, login checks and the quota meter. Closing statements use a new worker-provider
+session. The session tables list the provider session IDs known to agent-room and each member's and
+worker's last turn, with its outcome and latest error. A session is memory between turns, not a
+running program. Turn outcomes and latest errors are kept only in memory, not in a history or log. For each provider,
+**Test prompt (uses quota)** sends a tiny prompt with the chosen configured model or CLI default in a
+new session and temporary empty folder. It runs only on click, separately from Check now, and its
+latest result per provider and model is kept in memory. The result proves only that the model answered
+at that moment. Claude runs without tools or session persistence; Codex uses a read-only sandbox,
+no web search and an ephemeral session; Agy uses its sandbox and does not bypass permissions.
+
 A **leftover** is a program agent-room started that is still alive after a crash or a Restart.
 Each program is written, when it starts, to `~/.local/state/agent-room/programs/<pid>.json` (PID,
 start time, provider, agent name, room folder, and the PID and start time of the server that
@@ -443,7 +467,8 @@ The **Providers** tab (beside Discussion and Worker) holds the defaults for new 
 members and the worker together, and is shown first when a new discussion opens (**Go to the
 discussion** returns to the chat). Before the discussion starts, its changes apply to it too; after,
 they change only the defaults (for new discussions in this room and every other), never the running
-agents or worker. The two tabs' own panels below work as before.
+agents or worker. Below the settings, the Provider health section is folded until opened; the whole
+tab scrolls as one column. The two tabs' own panels below work as before.
 
 Defaults save automatically to `~/.config/agent-room/defaults.json`, shared across project
 folders and subsequent launches, including the Dock launcher. Dropdown selections save on change;

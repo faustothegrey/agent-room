@@ -8,7 +8,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
-import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -108,32 +108,61 @@ function currentSettings(ctx) {
 // Refresh in the background at most once every five minutes, including after a failed lookup.
 // Keep the previous list while refreshing; an unavailable catalog still allows a custom ID.
 export function agyModelCatalog(exec = execFile, now = Date.now) {
-  let models = [], lastAttempt = -Infinity, pending = false;
-  return () => {
-    if (!pending && now() - lastAttempt >= 5 * 60_000) {
-      lastAttempt = now();
-      pending = true;
-      exec('agy', ['models'], { timeout: 5000 }, (err, stdout = '') => {
-        if (!err) models = String(stdout).split('\n').flatMap((line) => {
+  let models = [], lastAttempt = -Infinity, pending = null, loaded = false, lastError = null, checked = null;
+  const start = () => {
+    lastAttempt = now();
+    let finish;
+    pending = new Promise((resolve) => { finish = resolve; });
+    const done = (err, stdout = '') => {
+      checked = new Date(now()).toISOString();
+      if (err) { loaded = false; lastError = { message: err.message ?? String(err), at: checked }; }
+      else {
+        models = String(stdout).split('\n').flatMap((line) => {
           const [id, label] = line.trim().split('\t');
           return label && /^[A-Za-z0-9._[\]()-]+$/.test(id) ? [{ id, label: label.trim() }] : [];
         });
-        pending = false;
-      });
-    }
+        loaded = true;
+      }
+      pending = null;
+      finish();
+    };
+    const result = pending;
+    try { exec('agy', ['models'], { timeout: 5000 }, done); } catch (err) { done(err); }
+    return result;
+  };
+  const catalog = () => {
+    if (!pending && now() - lastAttempt >= 5 * 60_000) start();
     return models;
   };
+  catalog.status = () => ({ models, loaded, checked, error: lastError });
+  catalog.refresh = async () => { if (pending) await pending; await start(); };
+  return catalog;
 }
 const agyModels = agyModelCatalog();
 let agyModelsWarmed = false;
+export function codexModelCatalog(read = readFileSync, now = Date.now) {
+  let models = [], loaded = false, checked = null, error = null;
+  const refresh = () => {
+    checked = new Date(now()).toISOString();
+    try {
+      const cache = JSON.parse(read(join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'models_cache.json'), 'utf8'));
+      models = cache.models.filter((m) => m.visibility === 'list' && typeof m.slug === 'string').map((m) => ({ id: m.slug, label: m.display_name || m.slug }));
+      loaded = true;
+    } catch (err) { loaded = false; error = { message: err.message ?? String(err), at: checked }; }
+    return loaded ? models : [];
+  };
+  refresh.status = () => ({ models, loaded, checked, error });
+  return refresh;
+}
+const codexModels = codexModelCatalog();
+const claudeModels = ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
 export function modelChoices() {
-  // Codex maintains this catalog itself; unavailable catalogs still allow a custom model ID.
-  let codex = [];
-  try {
-    const cache = JSON.parse(readFileSync(join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'models_cache.json'), 'utf8'));
-    codex = cache.models.filter((m) => m.visibility === 'list' && typeof m.slug === 'string').map((m) => ({ id: m.slug, label: m.display_name || m.slug }));
-  } catch {}
-  return { claude: ['opus', 'sonnet', 'haiku'].map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) })), codex, agy: agyModels() };
+  return { claude: claudeModels, codex: codexModels(), agy: agyModels() };
+}
+export function modelAlignment(model, catalog) {
+  if (!model) return 'CLI default';
+  if (!catalog.loaded) return catalog.checked ? 'list unavailable' : 'list not read yet';
+  return catalog.models.some((m) => m.id === model) ? 'in list' : 'not in list';
 }
 // A model's name for the tab titles: its label in the catalog (or its ID), "<Provider> default" for the CLI default.
 function modelLabel(provider, model) {
@@ -216,6 +245,24 @@ export async function saveSettings(ctx, value, file = defaultsFile()) {
   return { applied, workerApplied: true, settings: saved };
 }
 
+// Turn records live only in memory, keyed by the actual provider session, never in checkpoints.
+export function monitorAgentTurns(agent, session, records) {
+  const turn = agent.turn.bind(agent), reset = agent.reset?.bind(agent);
+  agent.turn = async (...args) => {
+    try {
+      const result = await turn(...args);
+      records.set(session, { ...records.get(session), ended: new Date().toISOString(), outcome: 'ok' });
+      return result;
+    } catch (err) {
+      const ended = new Date().toISOString();
+      records.set(session, { ended, outcome: 'error', error: { message: err?.message ?? String(err), at: ended } });
+      throw err;
+    }
+  };
+  if (reset) agent.reset = (...args) => { records.delete(session); return reset(...args); };
+  return agent;
+}
+
 // Imports fresh copies of the modules and the two rulebooks and builds a room on ctx.state, and the worker. Returns
 // the parts to put into ctx; if anything fails it throws, leaving ctx as it was (at most an
 // unused empty session added).
@@ -233,7 +280,7 @@ export async function load(ctx, v) {
   const instr = await import(`./instructions.mjs${v}`);
   const instructions = readFileSync(instr.rulebookPath('brainstorming'), 'utf8');
   const workerInstructions = readFileSync(instr.rulebookPath('worker'), 'utf8');
-  const { createAgent, claudeTitle, run, findLeftovers } = await import(`./agents.mjs${v}`);
+  const { createAgent, claudeTitle, run, findLeftovers, parseCodexEvents, parseAgyOutput } = await import(`./agents.mjs${v}`);
   const { createRoom, closingStatement } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
   const usage = await import(`./usage.mjs${v}`);
@@ -250,14 +297,17 @@ export async function load(ctx, v) {
   const runner = (command, args, options) => {
     if (programs.stopping) return Promise.reject(new Error('not started: the room is quitting'));
     const turn = run(command, args, { ...options, procs: programs.running, record: { agent: options?.agent ?? command, room: ctx.cwd } });
+    for (const proc of programs.running) if (!proc.monitorInfo) proc.monitorInfo = { agent: options?.agent ?? command, room: ctx.cwd, started: new Date().toISOString() };
     ctx.showMonitor?.();
     turn.then(() => ctx.showMonitor?.(), () => ctx.showMonitor?.());
     return turn;
   };
+  const turnRecords = ctx.turnRecords ??= new WeakMap();
   const agents = ctx.agentSpecs.split(',').map((spec) => {
     const { provider, name, model } = parseSpec(spec);
     if (!ctx.sessions.has(name)) ctx.sessions.set(name, {});
-    return createAgent(provider, { name, model, cwd: ctx.cwd, instructions, runner, session: ctx.sessions.get(name) });
+    const session = ctx.sessions.get(name);
+    return monitorAgentTurns(createAgent(provider, { name, model, cwd: ctx.cwd, instructions, runner, session }), session, turnRecords);
   });
   // The worker's session is kept under its own key, so it never mixes with a room agent's.
   const { provider: wProvider, name: wName, model: wModel } = parseSpec(ctx.workerSpec, true);
@@ -275,8 +325,8 @@ export async function load(ctx, v) {
     const programs = { running: new Set(), stopped: false };
     const own = (command, args, options) => (programs.stopped ? Promise.reject(new Error('not started: the User stopped this instruction'))
       : runner(command, args, { ...options, started: (p) => programs.running.add(p) }));
-    return Object.assign(createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
-      timeoutMs: WORKER_TIMEOUT_MS, runner: own, session }), { programs });
+    return Object.assign(monitorAgentTurns(createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
+      timeoutMs: WORKER_TIMEOUT_MS, runner: own, session }), session, turnRecords), { programs });
   };
   const worker = makeWorker(ctx.sessions.get(`worker:${wName}`));
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
@@ -286,6 +336,7 @@ export async function load(ctx, v) {
   roomShop.launchDefaults ??= { agents: ctx.agentSpecs, worker: ctx.workerSpec };
   return { room: createRoom(agents, ctx.state, instr), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: roomShop,
+    testPrompt: (room, provider, model) => runPromptTest(room, provider, model, runner, { parseCodexEvents, parseAgyOutput }),
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
     makeWorker,
     // Close's closing statement, written by a one-off agent with the worker's provider and model, in
@@ -359,6 +410,9 @@ function wire(ctx) {
       launchDefaults: { agents: launch.agents.split(',').map((s) => parseSpec(s)), worker: parseSpec(launch.worker, true) },
       models: modelChoices(), started: settingsStarted(ctx) };
   };
+  ctx.screen.providerHealth = () => healthView(ctx);
+  ctx.screen.testPrompt = (body) => ctx.testPrompt(ctx, body?.provider, body?.model);
+  ctx.screen.checkProviderHealth = () => checkProviderHealth(ctx);
   ctx.screen.saveSettings = (value) => (value?.scope === 'defaults' ? saveDefaultSettings(ctx, value) : saveSettings(ctx, value));
   ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
   ctx.screen.stopWorker = (mode) => stopWorker(ctx, mode);
@@ -2292,33 +2346,132 @@ const providersOf = (ctx) => [...new Set([...ctx.room.agents, ctx.worker].map((a
 function watchMonitor(ctx) {
   const hub = hubOf(ctx);
   hub.monitor ??= { login: {}, leftovers: [] };
-  hub.checkLogins = (all) => checkLogins(hub, all).catch(() => {});
-  hub.checkLeftovers = () => checkLeftovers(hub).catch(() => {});
+  hub.monitor.errors ??= { login: {}, leftovers: null, cli: {} };
+  hub.monitor.cli ??= {};
+  hub.checkLogins = (all, requested) => checkLogins(hub, all, requested);
+  hub.checkLeftovers = () => checkLeftovers(hub);
   ctx.showMonitor = () => showMonitor(ctx);
   if (!hub.monitorTimers) {
-    hub.monitorTimers = [setInterval(() => hub.checkLogins(true), LOGIN_EVERY_MS).unref(),
-      setInterval(() => hub.checkLeftovers(), LEFTOVERS_EVERY_MS).unref()];
+    hub.monitor.nextLogin = new Date(Date.now() + LOGIN_EVERY_MS).toISOString();
+    hub.monitor.nextLeftovers = new Date(Date.now() + LEFTOVERS_EVERY_MS).toISOString();
+    hub.monitorTimers = [setInterval(() => { hub.monitor.nextLogin = new Date(Date.now() + LOGIN_EVERY_MS).toISOString(); hub.checkLogins(true); }, LOGIN_EVERY_MS).unref(),
+      setInterval(() => { hub.monitor.nextLeftovers = new Date(Date.now() + LEFTOVERS_EVERY_MS).toISOString(); hub.checkLeftovers(); }, LEFTOVERS_EVERY_MS).unref()];
     hub.checkLeftovers();
   }
-  hub.checkLogins(false); // this room's providers not checked yet
+  hub.checkLogins(false);
 }
-// Every provider in use on the server (all), or only those not checked yet. null: being checked.
-async function checkLogins(hub, all) {
+const errorAt = (err) => ({ message: err?.message ?? String(err), at: new Date().toISOString() });
+// Preserve the last success separately from the latest failure, including unreadable login output.
+export async function checkLogins(hub, all, requested) {
   const rooms = loadedRooms(hub);
-  const providers = [...new Set(rooms.flatMap(providersOf))].filter((p) => all || !(p in hub.monitor.login));
-  if (!providers.length) return;
-  for (const p of providers) if (!(p in hub.monitor.login)) hub.monitor.login[p] = null;
+  if (!rooms.length) return;
+  const providers = (requested ?? [...new Set(rooms.flatMap(providersOf))]).filter((p) => all || !(p in hub.monitor.login));
   await Promise.all(providers.map(async (p) => {
-    hub.monitor.login[p] = { ...await rooms[0].usage.checkLogin(p), checked: new Date().toISOString() };
+    try {
+      const result = await rooms[0].usage.checkLogin(p), checked = new Date().toISOString();
+      if (result.state === 'unknown') hub.monitor.errors.login[p] = { message: result.error, at: checked };
+      else hub.monitor.login[p] = { ...result, checked };
+      hub.monitor.loginCurrent ??= {};
+      hub.monitor.loginCurrent[p] = { ...result, checked };
+    } catch (err) {
+      hub.monitor.errors.login[p] = errorAt(err);
+      (hub.monitor.loginCurrent ??= {})[p] = { state: 'unknown', error: hub.monitor.errors.login[p].message, checked: hub.monitor.errors.login[p].at };
+    }
   }));
   for (const r of loadedRooms(hub)) showMonitor(r);
 }
-async function checkLeftovers(hub) {
+export async function checkLeftovers(hub) {
   const rooms = loadedRooms(hub);
   if (!rooms.length) return;
-  const tracked = new Set(rooms.flatMap((r) => [...(r.programs?.running ?? [])].map((p) => p.pid)));
-  hub.monitor.leftovers = await rooms[0].findLeftovers(tracked);
+  try {
+    const tracked = new Set(rooms.flatMap((r) => [...(r.programs?.running ?? [])].map((p) => p.pid)));
+    hub.monitor.leftovers = await rooms[0].findLeftovers(tracked);
+    hub.monitor.leftoversChecked = new Date().toISOString();
+  } catch (err) { hub.monitor.errors.leftovers = errorAt(err); }
   for (const r of loadedRooms(hub)) showMonitor(r);
+}
+const commandOutput = (command, args) => new Promise((resolve, reject) => execFile(command, args, { timeout: 20_000 }, (err, out) => err ? reject(err) : resolve(String(out).trim())));
+export async function checkCli(hub, provider, run = commandOutput) {
+  let path;
+  try {
+    path = await run('which', [provider]);
+    const version = await run(path, ['--version']);
+    hub.monitor.cli[provider] = { path, version, checked: new Date().toISOString() };
+  } catch (err) { hub.monitor.errors.cli[provider] = { ...errorAt(err), path: path ?? null }; }
+}
+// A diagnostic is a fresh provider invocation, separate from every agent's session and rulebook.
+export async function runPromptTest(ctx, provider, model, runner, parsers) {
+  const hub = hubOf(ctx), rooms = loadedRooms(hub);
+  if (!['claude', 'codex', 'agy'].includes(provider) || typeof model !== 'string') throw new Error('Choose a provider and model.');
+  const configured = rooms.flatMap((r) => { const s = currentSettings(r); return [...s.agents, s.worker]; });
+  if (model && !configured.some((a) => a.provider === provider && a.model === model)) throw new Error('Choose a model configured on this server.');
+  hub.promptRunning ??= new Set();
+  if (hub.promptRunning.has(provider)) throw new Error('A prompt test for this provider is already running.');
+  hub.promptRunning.add(provider);
+  const started = Date.now(), at = new Date(started).toISOString();
+  let dir, reply = '', error = null;
+  try {
+    dir = mkdtempSync(join(tmpdir(), 'agent-room-prompt-test-'));
+    let args;
+    if (provider === 'claude') {
+      args = ['-p', '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config'];
+      if (model) args.push('--model', model);
+      args.push('--tools', '');
+    } else if (provider === 'codex') {
+      args = ['exec', '--json', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', '-c', 'web_search="disabled"'];
+      if (model) args.push('-m', model);
+      args.push('-');
+    } else {
+      args = ['--output-format', 'json', '--sandbox'];
+      if (model) args.push('--model', model);
+    }
+    const output = await runner(provider, args, { input: 'Reply with exactly OK.', cwd: dir, timeoutMs: 30_000, agent: 'prompt test' });
+    if (provider === 'claude') {
+      const result = JSON.parse(output);
+      if (result.is_error) throw new Error(`claude: ${result.result || 'test failed'}`);
+      reply = String(result.result ?? '').trim();
+    } else if (provider === 'codex') reply = parsers.parseCodexEvents(output).text;
+    else reply = parsers.parseAgyOutput(output).text;
+    if (!reply) throw new Error(`${provider}: no reply`);
+  } catch (err) { error = err?.message ?? String(err); }
+  finally {
+    try { if (dir) rmSync(dir, { recursive: true, force: true }); }
+    catch (err) { error = [error, `Could not remove temporary folder: ${err.message}`].filter(Boolean).join('; '); }
+    hub.promptRunning.delete(provider);
+  }
+  const result = { provider, model, at, durationMs: Date.now() - started, outcome: error ? 'failed' : 'ok', reply: reply.slice(0, 200), error };
+  hub.promptResults ??= new Map();
+  if (!hub.promptResults.has(provider)) hub.promptResults.set(provider, new Map());
+  hub.promptResults.get(provider).set(model, result);
+  return result;
+}
+function healthView(ctx) {
+  const hub = hubOf(ctx), m = hub.monitor;
+  const rooms = loadedRooms(hub);
+  const catalogs = { claude: { models: claudeModels, loaded: true, error: null }, codex: codexModels.status(), agy: agyModels.status() };
+  const configured = (settings) => [...settings.agents.map((a) => ({ ...a, role: 'member' })), { ...settings.worker, role: 'worker' }]
+    .map((a) => ({ ...a, alignment: modelAlignment(a.model, catalogs[a.provider]) }));
+  const defaults = readDefaults();
+  const sessions = rooms.map((r) => {
+    const view = sessionView(r);
+    const entry = (agent, role, key) => ({ ...agent, role, lastTurn: r.turnRecords?.get(r.sessions.get(key)) ?? null });
+    return { room: r.cwd, discussion: folderOf(r), agents: [
+      ...view.agents.map((a) => entry(a, 'member', a.name)), entry(view.worker, 'worker', `worker:${view.worker.name}`) ] };
+  });
+  return { promptResults: [...(hub.promptResults?.values() ?? [])].flatMap((results) => [...results.values()]),
+    promptRunning: [...(hub.promptRunning ?? [])], sessions, scheduledProviders: [...new Set(rooms.flatMap(providersOf))], catalogs,
+    configured: rooms.map((r) => ({ room: r.cwd, discussion: folderOf(r), agents: configured(currentSettings(r)).map((a) => ({ ...a, enabled: a.role === 'worker' || !(r.state.disabledAgents ?? []).includes(a.name) })) })),
+    defaults: defaults ? configured(defaults) : null, login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
+    leftovers: m.leftovers, leftoversChecked: m.leftoversChecked, nextLogin: m.nextLogin, nextLeftovers: m.nextLeftovers,
+    running: loadedRooms(hub).flatMap((r) => [...(r.programs?.running ?? [])].map((p) => ({ pid: p.pid, provider: p.provider, ...p.monitorInfo }))),
+    quota: loadedRooms(hub).map((r) => ({ room: r.cwd, reachable: r.screen.quota === undefined ? null : r.screen.quota !== null, ...r.screen.quotaAt })) };
+}
+async function checkProviderHealth(ctx) {
+  const hub = hubOf(ctx);
+  codexModels();
+  await Promise.all([agyModels.refresh(), checkLogins(hub, true, ['claude', 'codex', 'agy']), checkLeftovers(hub),
+    ...['claude', 'codex', 'agy'].map((p) => checkCli(hub, p)), ...loadedRooms(hub).map((r) => refreshQuota(r).catch(() => null))]);
+  return healthView(ctx);
 }
 // What this room's panel shows, per provider: its login, how many of this room's programs are in its
 // procs, and the leftovers of this room, or of a room not open on this server. A provider with a
@@ -2330,7 +2483,7 @@ export function monitorView(ctx) {
   const running = [...(ctx.programs?.running ?? [])];
   const view = {};
   for (const p of new Set([...providersOf(ctx), ...leftovers.map((l) => l.provider)])) {
-    view[p] = { login: hub.monitor?.login[p] ?? null, running: running.filter((r) => r.provider === p).length,
+    view[p] = { login: hub.monitor?.loginCurrent?.[p] ?? hub.monitor?.login[p] ?? null, running: running.filter((r) => r.provider === p).length,
       leftovers: leftovers.filter((l) => l.provider === p), inRoom: providersOf(ctx).includes(p) };
   }
   return view;

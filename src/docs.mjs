@@ -617,6 +617,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 .quota .gauge { grid-column: 2; }
 /* A provider's name and each gauge: hover or focus shows details; a ⚠ right of the name on a problem. */
 .quota b, .gauge { position: relative; cursor: default; }
+.quota b[role=button] { cursor: pointer; }
 .quota b .alert { margin-left: .25rem; font-weight: 700; color: light-dark(#b45309, #d6a84c); }
 .quota b .alert.red { color: #ef4444; }
 .quota b .hover-detail, .gauge .hover-detail { left: auto; right: 0; text-transform: none; font-weight: 400; white-space: normal; }
@@ -789,7 +790,13 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #header, #bar { background: #88808; }
 .agent-settings { border-bottom: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--tint); padding: .5rem .8rem; max-height: 45%; overflow-y: auto; flex-shrink: 0; }
 .agent-settings summary { cursor: pointer; font-weight: 600; font-size: .85rem; }
-.providers-panel { padding: .6rem .9rem; overflow-y: auto; }
+#providers { display: block; overflow-y: auto; }
+#providers[hidden] { display: none; }
+.providers-panel { padding: .6rem .9rem; }
+#health-details > summary { cursor: pointer; font-weight: 600; }
+#health-warning { color: light-dark(#b45309, #d6a84c); }
+#provider-health table { border-collapse: collapse; margin: .5rem 0; }
+#provider-health th, #provider-health td { border: 1px solid var(--line); padding: .3rem .5rem; text-align: left; vertical-align: top; }
 /* The Instructions tab: prompt sets, each piece expandable, its content in a monospace block. */
 #instructions { overflow-y: auto; padding: .8rem 1rem; }
 .ins-set { margin-bottom: 1.3rem; }
@@ -866,6 +873,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <p class="settings-status" id="providers-status" role="status"></p>
       <button type="button" id="providers-done">Go to the discussion</button>
     </form>
+    <details class="providers-panel" id="health-details"><summary>Provider health · all rooms on this server <span id="health-warning" hidden>⚠</span></summary><button type="button" id="health-check">Check now</button><div id="provider-health" role="status"></div></details>
   </div>
   <div class="view" id="instructions" hidden><div id="instructions-pane"></div></div>
   <div class="view" id="work" hidden>
@@ -2584,6 +2592,7 @@ for (const scope of ['talk', 'work']) {
 let providerRows = null;
 async function renderProviders() {
   const status = $('providers-status'), agentsBox = $('providers-agent-rows'), workerBox = $('providers-worker-row'), note = $('providers-member-note');
+  if ($('health-details').open) loadHealth();
   status.textContent = ''; providerRows = null;
   agentsBox.replaceChildren(); workerBox.replaceChildren();
   try {
@@ -2608,6 +2617,99 @@ async function renderProviders() {
       : 'Defaults for new discussions, in this room and every other. This discussion hasn’t started, so they apply to it too.';
   } catch (err) { status.textContent = 'Could not load settings: ' + err.message; }
 }
+async function loadHealth(check = false) {
+  const box = $('provider-health'), button = $('health-check');
+  button.disabled = true;
+  try {
+    const res = check ? await post('__provider-health', {}) : await fetch('__provider-health');
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    box.replaceChildren();
+    const line = (text) => { const p = document.createElement('p'); p.textContent = text; box.append(p); };
+    const when = (t) => t ? longDate(t) : 'not yet';
+    const error = (e) => e ? ' · latest error ' + when(e.at) + ': ' + e.message : '';
+    for (const provider of ['claude', 'codex', 'agy']) {
+      const cli = data.cli[provider], login = data.login[provider];
+      line(provider.toUpperCase() + ' · CLI: ' + (cli ? cli.path + ' · ' + cli.version + ' · last success ' + when(cli.checked) : (data.errors.cli[provider]?.path ? 'found at ' + data.errors.cli[provider].path + ', version unavailable' : 'not checked successfully')) + error(data.errors.cli[provider]));
+      line('Login: ' + (provider === 'agy' ? 'not monitored' : login ? login.state + (login.expiresAt ? ' · ends ' + when(login.expiresAt) : '') + ' · last success ' + when(login.checked) : 'not checked successfully') + error(data.errors.login[provider]) + (provider === 'agy' ? '' : data.scheduledProviders.includes(provider) ? ' · next scheduled check ' + when(data.nextLogin) : ' · not on the 10-minute schedule (Check now only)'));
+    }
+    const sources = { claude: "agent-room's fixed list in modelChoices", codex: 'models_cache.json', agy: 'agy models' };
+    for (const provider of ['claude', 'codex', 'agy']) {
+      const c = data.catalogs[provider];
+      line(provider.toUpperCase() + ' model list · ' + sources[provider] + ' · ' + (c.loaded ? 'loaded' : c.checked ? 'unavailable' : 'not read yet') + ' · ' + c.models.length + ' models' + (c.checked ? ' · last attempt ' + when(c.checked) : '') + error(c.error));
+    }
+    line("Claude's list is agent-room's own; being in that list proves little about availability.");
+    const showConfigured = (label, agents) => {
+      line(label);
+      for (const a of agents) line(a.role + ' ' + a.name + ' · ' + a.provider + ' · ' + (a.model || 'CLI default') + ' · ' + a.alignment);
+    };
+    for (const group of data.configured) showConfigured('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started'), group.agents);
+    if (data.defaults) showConfigured('Saved defaults', data.defaults);
+    else line('Saved defaults: none available');
+    line('Prompt tests use quota and prove only that the model answered at that moment.');
+    for (const provider of ['claude', 'codex', 'agy']) {
+      const row = document.createElement('p'), label = document.createElement('label'), select = document.createElement('select');
+      label.textContent = provider.toUpperCase() + ' model: ';
+      const choices = [...new Set(data.configured.flatMap((group) => group.agents.filter((a) => a.provider === provider && a.model).map((a) => a.model)))];
+      for (const model of ['', ...choices]) { const option = document.createElement('option'); option.value = model; option.textContent = model || 'CLI default'; select.append(option); }
+      label.append(select); row.append(label, ' ');
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Test prompt (uses quota)';
+      button.disabled = data.promptRunning.includes(provider);
+      const result = document.createElement('span');
+      button.onclick = async () => {
+        button.disabled = true; result.textContent = ' Running…';
+        try {
+          const res = await post('__prompt-test', { provider, model: select.value });
+          if (!res.ok) throw new Error(await res.text());
+          await loadHealth();
+        } catch (err) { result.textContent = ' Could not run test: ' + err.message; button.disabled = false; }
+      };
+      row.append(button, result); box.append(row);
+      for (const r of data.promptResults.filter((item) => item.provider === provider)) {
+        line(provider.toUpperCase() + ' · ' + (r.model || 'CLI default') + ' · ' + when(r.at) + ' · ' + (r.durationMs / 1000).toFixed(1) + ' s · ' + r.outcome + ' · reply: ' + (r.reply || '(none)') + (r.error ? ' · error: ' + r.error : ''));
+      }
+    }
+    const table = (headings, rows) => {
+      const t = document.createElement('table'), thead = t.createTHead(), tr = thead.insertRow();
+      for (const h of headings) { const th = document.createElement('th'); th.scope = 'col'; th.textContent = h; tr.append(th); }
+      const body = t.createTBody();
+      for (const row of rows) { const r = body.insertRow(); for (const cell of row) r.insertCell().textContent = cell; }
+      box.append(t);
+    };
+    line('Operations · provider and model used now');
+    for (const group of data.configured) {
+      line('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started'));
+      const members = group.agents.filter((a) => a.role === 'member'), worker = group.agents.find((a) => a.role === 'worker');
+      const model = (a) => a.model || 'CLI default';
+      const rows = members.map((a) => ['Discussion turn · ' + a.name + (a.enabled ? '' : ' (disabled)'), a.provider, model(a)]);
+      rows.push(...members.filter((a) => a.enabled).map((a) => ['Summary · ' + a.name, a.provider, model(a)]));
+      rows.push(['Worker tasks · ' + worker.name, worker.provider, model(worker)],
+        ['Closing statement · new session', worker.provider, model(worker)],
+        ['Discussion title', 'Claude', 'CLI default'],
+        ['Login check · claude auth status', 'Claude', 'not applicable'],
+        ['Login check · codex login status', 'Codex', 'not applicable'],
+        ['Login check', 'Agy', 'not monitored'], ['Quota meter', 'quota meter', 'not applicable']);
+      table(['Operation', 'Provider', 'Model'], rows);
+    }
+    line('Sessions are memory between turns, not running programs. This list covers only sessions known to agent-room.');
+    for (const group of data.sessions) {
+      line('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started'));
+      table(['Agent', 'Provider', 'Session ID', 'Last turn', 'Latest error'], group.agents.map((a) => [
+        a.role + ' ' + a.name, a.provider, a.id || 'none yet', a.lastTurn ? when(a.lastTurn.ended) + ' · ' + a.lastTurn.outcome : 'none yet',
+        a.lastTurn?.error ? when(a.lastTurn.error.at) + ' · ' + a.lastTurn.error.message : 'none' ]));
+    }
+    line('Leftovers: last success ' + when(data.leftoversChecked) + error(data.errors.leftovers) + ' · next scheduled check ' + when(data.nextLeftovers));
+    const age = (started) => started ? Math.max(0, Math.floor((Date.now() - new Date(started)) / 60000)) + ' min' : 'unknown';
+    for (const [label, programs] of [['Running', data.running], ['Leftover', data.leftovers]]) {
+      if (!programs.length) line(label + ': none in last available results');
+      for (const p of programs) line(label + ': PID ' + p.pid + ' · ' + p.provider + ' · ' + p.agent + ' · room ' + p.room + ' · age ' + age(p.started) + (p.unverified ? ' · unverified' : ''));
+    }
+    for (const q of data.quota) line('Quota meter · room ' + q.room + ': ' + (q.reachable === null ? 'not checked' : q.reachable ? 'reachable' : 'not reachable') + ' · measured ' + (q.measured || 'unknown') + ' · checked ' + when(q.checked));
+  } catch (err) { box.textContent = 'Could not load provider health: ' + err.message; }
+  finally { button.disabled = false; }
+}
+$('health-details').ontoggle = () => { if ($('health-details').open) loadHealth(); };
+$('health-check').onclick = () => loadHealth(true);
 function saveProviders() {
   const status = $('providers-status');
   if (!providerRows) return;
@@ -2867,13 +2969,15 @@ function providerHealth(provider) {
 function providerName(provider, display = provider, health = true) {
   const b = document.createElement('b'); b.textContent = display;
   const h = health ? providerHealth(provider) : null;
-  if (!h) return b;
-  b.tabIndex = 0;
-  if (h.level) { const a = document.createElement('span'); a.className = 'alert' + (h.level === 'red' ? ' red' : ''); a.textContent = '⚠'; b.append(a); }
-  b.append(h.box);
+  if (!health) return b;
+  const openHealth = () => { showTab('providers'); $('health-details').open = true; $('health-details').scrollIntoView({ block: 'start' }); };
+  b.tabIndex = 0; b.setAttribute('role', 'button'); b.onclick = openHealth;
+  b.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openHealth(); } };
+  if (h?.level) { const a = document.createElement('span'); a.className = 'alert' + (h.level === 'red' ? ' red' : ''); a.textContent = '⚠'; b.append(a); }
+  if (h) b.append(h.box);
   return b;
 }
-function showMonitor(view) { monitor = view ?? {}; showQuota(...lastQuota); }
+function showMonitor(view) { monitor = view ?? {}; $('health-warning').hidden = !Object.keys(monitor).some((p) => providerHealth(p)?.level); showQuota(...lastQuota); }
 function showQuota(gauges, at) {
   lastQuota = [gauges, at];
   const box = $('gauges');
@@ -3021,7 +3125,7 @@ events.onmessage = (e) => {
     setWorking(ev.working);
     if (!ev.workInput) { $('wcomposer').hidden = true; }
     showWorkerInfo(ev.workerInfo);
-    monitor = ev.monitor ?? {};
+    showMonitor(ev.monitor);
     showQuota(ev.quota, ev.quotaAt);
     if (ev.room) { retryId = ev.room.retryId ?? null; updateRetry(); showFailedAgents(ev.room.failedAgents); setRoom(ev.room); renderWorkerStop(); showWorkerInfo(workerInfoShown); }
     $('newroom').hidden = !ev.newRoom;
@@ -3310,6 +3414,21 @@ function handleScreen(req, res, url, dir, screen) {
     if (!screen.listRooms) { send(409, 'text/plain', 'Room discovery is unavailable.'); return true; }
     screen.listRooms().then((rooms) => send(200, 'application/json', JSON.stringify(rooms)),
       (err) => send(500, 'text/plain; charset=utf-8', err.message));
+    return true;
+  }
+  if (url.pathname === '/__provider-health') {
+    if (!screen.providerHealth || !screen.checkProviderHealth) { send(409, 'text/plain', 'Provider health is unavailable.'); return true; }
+    if (req.method !== 'GET' && (req.method !== 'POST' || !fromOwnPage(req))) { send(403, 'text/plain', 'Refused.'); return true; }
+    Promise.resolve().then(() => req.method === 'GET' ? screen.providerHealth() : screen.checkProviderHealth()).then(
+      (data) => send(200, 'application/json', JSON.stringify(data)), (err) => send(500, 'text/plain; charset=utf-8', err.message));
+    return true;
+  }
+  if (url.pathname === '/__prompt-test') {
+    if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain', 'Refused: only the room page can run a prompt test.'); return true; }
+    if (!screen.testPrompt) { send(409, 'text/plain', 'Prompt tests are unavailable in this room.'); return true; }
+    readJson(req).then((body) => screen.testPrompt(body)).then(
+      (result) => send(200, 'application/json', JSON.stringify(result)),
+      (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
   // The Instructions tab: the prompt catalog, with each rulebook's current text.

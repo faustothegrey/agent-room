@@ -4012,3 +4012,205 @@ test('a worker agent\'s programs: once its task is stopped, none starts', async 
   await assert.rejects(ctx.worker.turn('hi'), /not started: the User stopped this instruction/);
   assert.equal(ctx.programs.running.size, 0);
 });
+
+test('provider health retains the latest errors separately from successful checks', async () => {
+  const { checkCli, checkLogins, checkLeftovers } = await import('../src/ui.mjs');
+  const monitor = { login: {}, cli: {}, leftovers: [], errors: { login: {}, cli: {}, leftovers: null } };
+  const room = { room: { agents: [{ provider: 'claude' }] }, worker: { provider: 'codex' },
+    usage: { checkLogin: async () => ({ state: 'ok' }) }, findLeftovers: async () => [{ pid: 1 }], programs: { running: new Set() } };
+  const hub = { monitor, rooms: new Map([['room', room]]) };
+  await checkLogins(hub, true, ['claude']);
+  await checkLeftovers(hub);
+  await checkCli(hub, 'claude', async (command) => command === 'which' ? '/bin/claude' : '1.0');
+  const login = monitor.login.claude, leftovers = monitor.leftovers, cli = monitor.cli.claude;
+  room.usage.checkLogin = async () => ({ state: 'unknown', error: 'unreadable' });
+  room.findLeftovers = async () => { throw new Error('scan failed'); };
+  await checkLogins(hub, true, ['claude']);
+  await checkLeftovers(hub);
+  await checkCli(hub, 'claude', async () => { throw new Error('missing'); });
+  assert.equal(monitor.login.claude, login);
+  assert.equal(monitor.leftovers, leftovers);
+  assert.equal(monitor.cli.claude, cli);
+  for (const e of [monitor.errors.login.claude, monitor.errors.leftovers, monitor.errors.cli.claude]) assert.ok(e.at);
+  assert.equal(monitor.errors.login.claude.message, 'unreadable');
+  assert.equal(monitor.loginCurrent.claude.state, 'unknown');
+  assert.equal(monitor.errors.leftovers.message, 'scan failed');
+  assert.equal(monitor.errors.cli.claude.message, 'missing');
+  room.usage.checkLogin = async () => { throw new Error('login failed'); };
+  await checkLogins(hub, true, ['claude']);
+  assert.equal(monitor.errors.login.claude.message, 'login failed');
+  room.usage.checkLogin = async () => ({ state: 'out' });
+  await checkLogins(hub, true, ['claude']);
+  assert.equal(monitor.login.claude.state, 'out');
+  assert.equal(monitor.errors.login.claude.message, 'login failed');
+});
+
+test('model catalogs retain their latest error and Check now bypasses the Agy throttle', async () => {
+  const { agyModelCatalog, codexModelCatalog } = await import('../src/ui.mjs');
+  let time = 0, finish, calls = 0;
+  const agy = agyModelCatalog((cmd, args, opts, done) => { calls++; finish = done; }, () => time);
+  agy(); finish(new Error('agy missing'));
+  assert.equal(agy.status().loaded, false);
+  assert.deepEqual(agy.status().error, { message: 'agy missing', at: new Date(0).toISOString() });
+  time = 1000;
+  const forced = agy.refresh();
+  assert.equal(calls, 2);
+  finish(null, 'gemini-one\tGemini One\n');
+  await forced;
+  assert.equal(agy.status().loaded, true);
+  assert.equal(agy.status().models.length, 1);
+  assert.equal(agy.status().error.message, 'agy missing');
+  const forcedFailure = agy.refresh();
+  finish(new Error('agy failed again'));
+  await forcedFailure;
+  assert.equal(agy.status().loaded, false);
+  assert.equal(agy.status().models.length, 1);
+  assert.equal(agy.status().error.message, 'agy failed again');
+
+  let cache = '{"models":[{"visibility":"list","slug":"one"}]}';
+  const codex = codexModelCatalog(() => { if (cache instanceof Error) throw cache; return cache; }, () => time);
+  assert.equal(codex().length, 1);
+  cache = new Error('cache missing'); time = 2000;
+  assert.deepEqual(codex(), []);
+  assert.equal(codex.status().loaded, false);
+  assert.equal(codex.status().models.length, 1);
+  assert.deepEqual(codex.status().error, { message: 'cache missing', at: new Date(time).toISOString() });
+  cache = '{"models":[]}';
+  codex();
+  assert.equal(codex.status().loaded, true);
+  assert.equal(codex.status().error.message, 'cache missing');
+});
+
+test('model alignment distinguishes defaults, membership and unavailable lists', async () => {
+  const { modelAlignment } = await import('../src/ui.mjs');
+  const loaded = { loaded: true, models: [{ id: 'one' }] }, unavailable = { loaded: false, checked: '2026-01-01T00:00:00.000Z', models: [{ id: 'one' }] };
+  assert.equal(modelAlignment('', unavailable), 'CLI default');
+  assert.equal(modelAlignment('one', loaded), 'in list');
+  assert.equal(modelAlignment('two', loaded), 'not in list');
+  assert.equal(modelAlignment('one', unavailable), 'list unavailable');
+});
+
+test('scheduled login checks use only providers in open rooms, while explicit checks include all', async () => {
+  const { checkLogins } = await import('../src/ui.mjs');
+  const called = [];
+  const room = { room: { agents: [{ provider: 'claude' }] }, worker: { provider: 'claude' },
+    usage: { checkLogin: async (provider) => { called.push(provider); return { state: 'ok' }; } } };
+  const hub = { rooms: new Map([['room', room]]), monitor: { login: {}, errors: { login: {} } } };
+  await checkLogins(hub, true);
+  assert.deepEqual(called, ['claude']);
+  called.length = 0;
+  await checkLogins(hub, true, ['claude', 'codex', 'agy']);
+  assert.deepEqual(called, ['claude', 'codex', 'agy']);
+});
+
+
+test('unread model catalogs differ from failed reads when checking alignment', async () => {
+  const { agyModelCatalog, codexModelCatalog, modelAlignment } = await import('../src/ui.mjs');
+  const agy = agyModelCatalog(() => {}, () => 0), codex = codexModelCatalog(() => { throw new Error('missing'); }, () => 0);
+  for (const catalog of [agy.status(), codex.status()]) {
+    assert.equal(catalog.checked, null);
+    assert.equal(modelAlignment('example', catalog), 'list not read yet');
+    assert.equal(modelAlignment('', catalog), 'CLI default');
+  }
+  codex();
+  assert.equal(modelAlignment('example', codex.status()), 'list unavailable');
+});
+
+test('last-turn records stay in memory by session and retain the latest error after success', async () => {
+  const { monitorAgentTurns } = await import('../src/ui.mjs');
+  const records = new WeakMap(), session = {}, other = {};
+  let failure = null, resets = 0;
+  const agent = monitorAgentTurns({ turn: async (value) => { if (failure) throw failure; return value; }, reset: () => { resets++; } }, session, records);
+  assert.equal(records.get(session), undefined);
+  assert.equal(await agent.turn('reply'), 'reply');
+  assert.equal(records.get(session).outcome, 'ok');
+  assert.ok(records.get(session).ended);
+  failure = new Error('first failure');
+  await assert.rejects(agent.turn('again'), /first failure/);
+  assert.equal(records.get(session).outcome, 'error');
+  assert.equal(records.get(session).error.message, 'first failure');
+  assert.equal(records.get(session).error.at, records.get(session).ended);
+  failure = new Error('latest failure');
+  await assert.rejects(agent.turn('again'), /latest failure/);
+  failure = null;
+  await agent.turn('recovered');
+  assert.equal(records.get(session).outcome, 'ok');
+  assert.equal(records.get(session).error.message, 'latest failure');
+  assert.equal(records.get(other), undefined);
+  assert.deepEqual(session, {});
+  agent.reset();
+  assert.equal(resets, 1);
+  assert.equal(records.get(session), undefined);
+});
+
+test('prompt diagnostics use isolated calls, retain results and leave agent sessions alone', async () => {
+  const { runPromptTest } = await import('../src/ui.mjs');
+  const { parseCodexEvents, parseAgyOutput } = await import('../src/agents.mjs');
+  const { existsSync, readdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const agentSession = { threadId: 'existing-thread' }, workerSession = { conversationId: 'existing-worker' };
+  const ctx = { cwd: '/tmp', agentSpecs: 'codex:A:configured,claude:B:opus', workerSpec: 'agy:W:gemini',
+    room: { agents: [{ provider: 'codex' }, { provider: 'claude' }] }, worker: { provider: 'agy' }, usage: {},
+    sessions: new Map([['A', agentSession], ['worker:W', workerSession]]) };
+  ctx.hub = { rooms: new Map([['room', ctx]]) };
+  const parsers = { parseCodexEvents, parseAgyOutput }, calls = [], dirs = [];
+  const runner = async (provider, args, options) => {
+    calls.push({ provider, args, options }); dirs.push(options.cwd);
+    assert.ok(options.cwd.startsWith(tmpdir()));
+    assert.deepEqual(readdirSync(options.cwd), []);
+    assert.equal(options.timeoutMs, 30_000);
+    assert.equal(options.input, 'Reply with exactly OK.');
+    if (provider === 'codex') return '{"type":"thread.started","thread_id":"new-test-thread"}\n{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n';
+    if (provider === 'agy') return JSON.stringify({ status: 'SUCCESS', conversation_id: 'new-test-session', response: 'OK' });
+    return JSON.stringify({ result: 'X'.repeat(250), is_error: false });
+  };
+  const codex = await runPromptTest(ctx, 'codex', 'configured', runner, parsers);
+  assert.equal(codex.outcome, 'ok'); assert.equal(codex.reply, 'OK'); assert.ok(codex.at); assert.ok(codex.durationMs >= 0);
+  assert.ok(calls[0].args.includes('read-only')); assert.ok(calls[0].args.includes('web_search="disabled"'));
+  assert.ok(calls[0].args.includes('--ephemeral')); assert.ok(!calls[0].args.includes('resume'));
+  const claude = await runPromptTest(ctx, 'claude', 'opus', runner, parsers);
+  assert.equal(claude.reply.length, 200); assert.ok(calls[1].args.includes('--no-session-persistence'));
+  assert.deepEqual(calls[1].args.slice(-2), ['--tools', '']); assert.ok(calls[1].args.includes('opus'));
+  await runPromptTest(ctx, 'agy', 'gemini', runner, parsers);
+  assert.ok(calls[2].args.includes('--sandbox')); assert.ok(!calls[2].args.includes('--dangerously-skip-permissions'));
+  assert.ok(!calls[2].args.includes('--conversation'));
+  const failure = await runPromptTest(ctx, 'codex', 'configured', async () => { throw new Error('CLI failed'); }, parsers);
+  assert.equal(failure.outcome, 'failed'); assert.equal(failure.error, 'CLI failed'); assert.equal(failure.reply, '');
+  assert.equal(ctx.hub.promptResults.get('codex').get('configured'), failure);
+  assert.equal(ctx.hub.promptResults.get('claude').get('opus'), claude);
+  assert.deepEqual(agentSession, { threadId: 'existing-thread' });
+  assert.deepEqual(workerSession, { conversationId: 'existing-worker' });
+  assert.ok(dirs.every((dir) => !existsSync(dir)));
+  await assert.rejects(runPromptTest(ctx, 'codex', 'not-configured', runner, parsers), /configured/);
+});
+
+test('Stop now with a real program: the worker\'s process group is killed through its monitored turn, and its last-turn record is an error', async () => {
+  const { writeFileSync, chmodSync, mkdirSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { queueWork, stopWorker } = await import('../src/ui.mjs');
+  const cwd = await tmp('stop-real-');
+  await gitRoom(cwd);
+  // A stand-in `claude` that runs a child in its group and never answers.
+  const bin = join(cwd, '..', `bin-${Date.now()}`);
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, 'claude'), '#!/bin/sh\nsleep 30 &\nwait\n');
+  chmodSync(join(bin, 'claude'), 0o755);
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  try {
+    const ctx = await savedRoom(cwd, 'stop-real');
+    await handleLine('plan it', ctx);
+    const worker = ctx.worker;
+    queueWork(ctx, 'count slowly');
+    await eventually(() => worker.programs.running.size > 0);
+    const [proc] = worker.programs.running;
+    assert.equal(proc.groupAlive(), true);
+    stopWorker(ctx, 'now');
+    await ctx.workQueue;
+    await eventually(() => !proc.groupAlive());
+    const record = ctx.turnRecords.get(ctx.sessions.get('worker:W'));
+    assert.equal(record.outcome, 'error');
+    assert.equal(record.error.message, 'claude was stopped (SIGKILL)');
+    assert.match(ctx.screen.worker.filter((m) => m.speaker === 'W').at(-1).html, /^<p>Stopped by the User: /);
+  } finally { process.env.PATH = path; }
+});
