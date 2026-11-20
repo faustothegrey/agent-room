@@ -4214,3 +4214,172 @@ test('Stop now with a real program: the worker\'s process group is killed throug
     assert.match(ctx.screen.worker.filter((m) => m.speaker === 'W').at(-1).html, /^<p>Stopped by the User: /);
   } finally { process.env.PATH = path; }
 });
+
+test('branchDiagram: behind main, diverged, main merged into branch twice, and history longer than the limit (real git repos)', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { parse } = await import('@mermaid-js/parser');
+  const { branchDiagram, workerPlace, ensureWorktree, refreshWorker } = await import('../src/ui.mjs');
+
+  const checkGraph = async (d) => {
+    assert.ok(d && d.graph && !d.note, `expected graph, got: ${JSON.stringify(d)}`);
+    const ast = await parse('gitGraph', d.graph);
+    assert.ok(ast.statements.length > 0);
+    return d.graph;
+  };
+
+  // 1. Branch behind main
+  {
+    const dir = await tmp('diag-behind-');
+    const g = await gitRoom(dir);
+    const base = g('rev-parse', '--short=7', 'HEAD');
+    const place = await workerPlace(dir, '2026-11-19-behind');
+    await ensureWorktree(place);
+    writeFileSync(`${dir}/a.txt`, '1\n'); g('add', 'a.txt'); g('commit', '-q', '-m', 'main step one');
+    const m1 = g('rev-parse', '--short=7', 'HEAD');
+    writeFileSync(`${dir}/a.txt`, '2\n'); g('commit', '-q', '-am', 'main step two');
+    const m2 = g('rev-parse', '--short=7', 'HEAD');
+
+    const graph = await checkGraph(await branchDiagram(place));
+    assert.match(graph, new RegExp(`commit id: "${base} `));
+    assert.match(graph, new RegExp(`branch "${place.branch}"`));
+    assert.match(graph, new RegExp(`checkout "main"\\n  commit id: "${m1} main step one"\\n  commit id: "${m2} main step two"`));
+    assert.doesNotMatch(graph, /merge /);
+  }
+
+  // 2. Diverged branches (also checked via refreshWorker on a room)
+  {
+    const { ctx } = await workerRoom();
+    ctx.noScreen = true;
+    const g = await gitRoom(ctx.cwd);
+    const base = g('rev-parse', '--short=7', 'HEAD');
+    await handleLine('hello', ctx);
+    const name = ctx.discussion.name;
+    const place = await workerPlace(ctx.cwd, name);
+    await ensureWorktree(place);
+    writeFileSync(`${ctx.cwd}/m.txt`, 'm\n'); g('add', 'm.txt'); g('commit', '-q', '-m', 'main diverged');
+    const m1 = g('rev-parse', '--short=7', 'HEAD');
+    writeFileSync(`${place.path}/w.txt`, 'w\n'); g('-C', place.path, 'add', 'w.txt'); g('-C', place.path, 'commit', '-q', '-m', `[${name}] worker diverged`);
+    const w1 = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+    await refreshWorker(ctx);
+    const lane = ctx.screen.workerInfo.lanes[0];
+    const graph = await checkGraph(lane.diagram);
+    assert.match(graph, new RegExp(`commit id: "${base} `));
+    assert.match(graph, new RegExp(`commit id: "${w1} \\[${name}\\] worker diverged"`));
+    assert.match(graph, new RegExp(`commit id: "${m1} main diverged"`));
+  }
+
+  // 3. Main merged into the branch twice (and main moves on after the second merge)
+  {
+    const dir = await tmp('diag-merges-');
+    const g = await gitRoom(dir);
+    const base = g('rev-parse', '--short=7', 'HEAD');
+    const place = await workerPlace(dir, '2026-11-19-merges');
+    await ensureWorktree(place);
+    writeFileSync(`${place.path}/w.txt`, '1\n'); g('-C', place.path, 'add', 'w.txt'); g('-C', place.path, 'commit', '-q', '-m', 'worker 1');
+    const w1 = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+    writeFileSync(`${dir}/m.txt`, '1\n'); g('add', 'm.txt'); g('commit', '-q', '-m', 'main 1');
+    const m1 = g('rev-parse', '--short=7', 'HEAD');
+    g('-C', place.path, 'merge', 'main', '-m', 'catch up 1');
+    const wm1 = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+    writeFileSync(`${place.path}/w.txt`, '2\n'); g('-C', place.path, 'commit', '-q', '-am', 'worker 2');
+    const w2 = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+    writeFileSync(`${dir}/m.txt`, '2\n'); g('commit', '-q', '-am', 'main 2');
+    const m2 = g('rev-parse', '--short=7', 'HEAD');
+    g('-C', place.path, 'merge', 'main', '-m', 'catch up 2');
+    const wm2 = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+    writeFileSync(`${dir}/m.txt`, '3\n'); g('commit', '-q', '-am', 'main 3');
+    const m3 = g('rev-parse', '--short=7', 'HEAD');
+
+    const graph = await checkGraph(await branchDiagram(place));
+    const lines = graph.split('\n');
+    const idx = (pat) => lines.findIndex((l) => pat.test(l));
+    assert.ok(idx(new RegExp(`commit id: "${base} `)) >= 0);
+    assert.ok(idx(new RegExp(`commit id: "${w1} worker 1"`)) < idx(new RegExp(`merge "main" id: "${wm1} catch up 1"`)));
+    assert.ok(idx(new RegExp(`commit id: "${m1} main 1"`)) < idx(new RegExp(`merge "main" id: "${wm1} catch up 1"`)));
+    assert.ok(idx(new RegExp(`merge "main" id: "${wm1} catch up 1"`)) < idx(new RegExp(`commit id: "${m2} main 2"`)));
+    assert.ok(idx(new RegExp(`commit id: "${w2} worker 2"`)) < idx(new RegExp(`merge "main" id: "${wm2} catch up 2"`)));
+    assert.ok(idx(new RegExp(`commit id: "${m2} main 2"`)) < idx(new RegExp(`merge "main" id: "${wm2} catch up 2"`)));
+    assert.ok(idx(new RegExp(`merge "main" id: "${wm2} catch up 2"`)) < idx(new RegExp(`commit id: "${m3} main 3"`)));
+  }
+
+  // 4. History longer than the limit: cut-off marked with "+N more commits", never a direct parent link
+  {
+    const dir = await tmp('diag-limit-');
+    const g = await gitRoom(dir);
+    const place = await workerPlace(dir, '2026-11-19-long');
+    await ensureWorktree(place);
+    const mainHashes = [];
+    for (let i = 1; i <= 19; i++) {
+      g('commit', '-q', '--allow-empty', '-m', `main commit ${i}`);
+      mainHashes.push(g('rev-parse', '--short=7', 'HEAD'));
+    }
+    const workerHashes = [];
+    for (let i = 1; i <= 17; i++) {
+      g('-C', place.path, 'commit', '-q', '--allow-empty', '-m', `worker commit ${i}`);
+      workerHashes.push(g('-C', place.path, 'rev-parse', '--short=7', 'HEAD'));
+    }
+
+    const res = await branchDiagram(place); // default limit 15
+    const graph = await checkGraph(res);
+    assert.equal(res.truncated, true);
+    assert.match(graph, /commit id: "\+4 more commits" type: HIGHLIGHT/);
+    assert.match(graph, /commit id: "\+2 more commits" type: HIGHLIGHT/);
+    // Cut-off commits are omitted; the newest 15 commits per side are present right after the cut node.
+    assert.ok(!graph.includes(mainHashes[0]));
+    assert.ok(!graph.includes(mainHashes[3]));
+    assert.ok(graph.includes(mainHashes[4]));
+    assert.ok(graph.includes(mainHashes[18]));
+    assert.ok(!graph.includes(workerHashes[0]));
+    assert.ok(!graph.includes(workerHashes[1]));
+    assert.ok(graph.includes(workerHashes[2]));
+    assert.ok(graph.includes(workerHashes[16]));
+    const lines = graph.split('\n');
+    assert.ok(lines.findIndex((l) => l.includes('+4 more commits')) < lines.findIndex((l) => l.includes(mainHashes[4])));
+    assert.ok(lines.findIndex((l) => l.includes('+2 more commits')) < lines.findIndex((l) => l.includes(workerHashes[2])));
+  }
+});
+
+test('branchDiagram: falls back to a plain-text note when gitGraph cannot draw the history faithfully, and supports non-main room branches', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { parse } = await import('@mermaid-js/parser');
+  const { branchDiagram, workerPlace, ensureWorktree } = await import('../src/ui.mjs');
+
+  // 1. Criss-cross merge (two merge-bases): returns a plain-text note, no graph.
+  {
+    const dir = await tmp('diag-crisscross-');
+    const g = await gitRoom(dir);
+    const place = await workerPlace(dir, '2026-11-19-cross');
+    await ensureWorktree(place);
+    writeFileSync(`${dir}/a.txt`, 'a\n'); g('add', 'a.txt'); g('commit', '-q', '-m', 'main a');
+    const m1 = g('rev-parse', 'HEAD');
+    writeFileSync(`${place.path}/b.txt`, 'b\n'); g('-C', place.path, 'add', 'b.txt'); g('-C', place.path, 'commit', '-q', '-m', 'worker b');
+    const w1 = g('-C', place.path, 'rev-parse', 'HEAD');
+    g('merge', w1, '-m', 'main merges w1');
+    g('-C', place.path, 'merge', m1, '-m', 'worker merges m1');
+
+    const res = await branchDiagram(place);
+    assert.ok(res.note && !res.graph);
+    assert.match(res.note, /multiple merge-bases|criss-cross/i);
+  }
+
+  // 2. Non-main room branch (e.g. feature/dev): emits YAML frontmatter with mainBranchName and parses cleanly.
+  {
+    const dir = await tmp('diag-nonmain-');
+    const g = await gitRoom(dir);
+    g('checkout', '-q', '-b', 'feature/dev');
+    const place = await workerPlace(dir, '2026-11-19-dev');
+    await ensureWorktree(place);
+    g('-C', place.path, 'commit', '-q', '--allow-empty', '-m', 'work on dev');
+
+    const res = await branchDiagram(place);
+    assert.ok(res.graph && !res.note);
+    assert.match(res.graph, /mainBranchName: "feature\/dev"/);
+    const ast = await parse('gitGraph', res.graph);
+    assert.ok(ast.statements.length > 0);
+  }
+});

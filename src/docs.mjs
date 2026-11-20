@@ -586,6 +586,9 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #winfo summary { cursor: pointer; }
 #winfo .lane-lines { margin: .2rem 0 .2rem 1rem; display: flex; flex-direction: column; gap: .2rem; overflow-wrap: anywhere; }
 #winfo .preview-files { margin: .2rem 0 0 1rem; max-height: 12rem; overflow-y: auto; }
+#winfo .branch-diagram { margin-top: .3rem; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 6px; overflow: auto; max-height: 22rem; background: Canvas; }
+#winfo .branch-diagram svg { max-width: 100%; height: auto; display: block; }
+#winfo .branch-diagram-note { margin-top: .25rem; font-style: italic; }
 #winfo button { align-self: flex-start; font-size: .75rem; margin-top: .2rem; }
 #server { max-width: 100%; font-size: .75rem; color: light-dark(#3d5fc4, #5a7bd8); display: inline-flex; align-items: center; gap: .4rem; }
 #server[data-state="down"] { color: #ef4444; font-weight: 600; }
@@ -1151,6 +1154,46 @@ function showWorkerInfo(info) {
   }
   if (ended || restarting) wbox.disabled = true;
 }
+// Mermaid for the Worker tab's branch diagrams: loaded once, only when a diagram is drawn.
+let mermaidReady = null, diagramSeq = 0;
+const diagramCache = new Map();
+function loadMermaid() {
+  if (window.mermaid) return Promise.resolve(window.mermaid);
+  return mermaidReady ??= new Promise((done, fail) => {
+    const s = document.createElement('script');
+    s.src = '__lib/mermaid.js';
+    s.onload = () => {
+      if (!window.mermaid) { mermaidReady = null; return fail(new Error('Mermaid failed to load')); }
+      window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default' });
+      done(window.mermaid);
+    };
+    s.onerror = () => { mermaidReady = null; fail(new Error('Could not load Mermaid')); };
+    document.head.append(s);
+  });
+}
+function drawBranchDiagram(box, source) {
+  if (box.dataset.drawn === source) return;
+  box.dataset.drawn = source;
+  const theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default';
+  const key = theme + '\\n' + source;
+  if (diagramCache.has(key)) { box.innerHTML = diagramCache.get(key); return; }
+  box.textContent = 'Drawing branch diagram…';
+  loadMermaid().then((m) => {
+    const id = 'wgit-' + (++diagramSeq);
+    return m.render(id, source).then(({ svg }) => {
+      if (diagramCache.size > 40) diagramCache.clear();
+      diagramCache.set(key, svg);
+      if (box.dataset.drawn === source) box.innerHTML = svg;
+    }, (err) => {
+      const stray = document.getElementById('d' + id); if (stray) stray.remove();
+      throw err;
+    });
+  }).catch((err) => {
+    if (box.dataset.drawn !== source) return;
+    box.className = 'branch-diagram-note';
+    box.textContent = 'Branch diagram could not be drawn: ' + ((err && err.message) || err);
+  });
+}
 // Each lane (the discussion's own branch first, then every other one with something to review) is
 // shown collapsed under a one-line summary; what the User opens stays open across refreshes.
 function setWorkerInfo(info) {
@@ -1170,6 +1213,16 @@ function setWorkerInfo(info) {
     const summary = document.createElement('summary'); summary.textContent = lane.summary;
     const body = document.createElement('div'); body.className = 'lane-lines';
     for (const line of lane.lines) body.append(lineEl(line));
+    if (lane.diagram?.note) {
+      const note = document.createElement('div'); note.className = 'branch-diagram-note'; note.textContent = lane.diagram.note;
+      body.append(note);
+    } else if (lane.diagram?.graph) {
+      const box = document.createElement('div'); box.className = 'branch-diagram';
+      body.append(box);
+      const draw = () => drawBranchDiagram(box, lane.diagram.graph);
+      d.addEventListener('toggle', () => { if (d.open) draw(); });
+      if (d.open) draw();
+    }
     d.append(summary, body);
     el.append(d);
   }

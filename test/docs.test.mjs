@@ -405,6 +405,52 @@ test('showing the Worker tab asks the room to recheck its branches, only from th
   assert.match(showTab, /if \(name === 'work'\) \{[^}]*post\('__workerinfo', \{\}\)/);
 });
 
+test('the Worker tab draws a Mermaid gitGraph when a lane is expanded and shows a plain-text note when gitGraph cannot draw it', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('// Mermaid for the Worker tab'), source.indexOf('function setWorking('));
+  const node = (tag = 'div') => {
+    const listeners = {};
+    return {
+      tag, className: '', textContent: '', innerHTML: '', open: false, disabled: false, placeholder: '',
+      children: [], dataset: {},
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      querySelectorAll() { return []; },
+      addEventListener(ev, fn) { (listeners[ev] ??= []).push(fn); },
+      trigger(ev) { for (const fn of listeners[ev] ?? []) fn(); },
+    };
+  };
+  const rendered = [];
+  const winfo = node('div'), wbox = node('textarea');
+  const win = { mermaid: { render: async (id, src) => { rendered.push({ id, src }); return { svg: '<svg>ok</svg>' }; } } };
+  const harness = new Function('$', 'document', 'window', 'matchMedia', 'wbox',
+    code + '\nreturn { setWorkerInfo };'
+  )((id) => (id === 'winfo' ? winfo : node(id)), { createElement: node, getElementById: () => null, head: node('head') }, win, () => ({ matches: false }), wbox);
+
+  harness.setWorkerInfo({
+    lines: [],
+    lanes: [
+      { summary: 'worker/a · 1 commit to review', lines: ['line a'], diagram: { graph: 'gitGraph TB:\n  commit id: "abc1234 base"\n  branch "worker/a"' } },
+      { summary: 'worker/b · 1 commit to review', lines: ['line b'], diagram: { note: 'Branch diagram unavailable: criss-cross merge.' } },
+    ],
+  });
+  assert.equal(winfo.children.length, 2);
+  // Collapsed lane has the diagram container ready, and draws on toggle open.
+  assert.equal(rendered.length, 0);
+  const laneA = winfo.children[0];
+  laneA.open = true;
+  laneA.trigger('toggle');
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(rendered.length, 1);
+  assert.match(rendered[0].src, /^gitGraph TB:/);
+  const boxA = laneA.children[1].children.find((c) => c.className === 'branch-diagram');
+  assert.equal(boxA.innerHTML, '<svg>ok</svg>');
+  // Unfaithful history lane renders the plain-text note.
+  const laneB = winfo.children[1];
+  const noteB = laneB.children[1].children.find((c) => c.className === 'branch-diagram-note');
+  assert.equal(noteB.textContent, 'Branch diagram unavailable: criss-cross merge.');
+});
+
 test('the Worker tab\'s stop buttons: /__stopworker reaches the room only from its page, with a known mode; each button asks to click again', async () => {
   const calls = [];
   const s = await serve(fixture(), { clients: new Set(), transcript: [], stopWorker: (mode) => { if (mode !== 'after' && mode !== 'now') throw new Error('Unknown stop'); calls.push(mode); } });

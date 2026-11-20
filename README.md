@@ -707,7 +707,11 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   and its first instruction in the new worktree tells it its working directory has changed.
 - **The Worker tab** shows the worktree of the discussion shown, then every other branch with
   commits not in main or uncommitted edits: the folder, branch and base commit, uncommitted edits,
-  commits on each side. For a branch with commits not in main it also says:
+  commits on each side, and a Mermaid `gitGraph` of that branch's local history against the room's
+  current branch (from their merge-base to both tips, showing short hash and subject, merges between
+  the two branches including repeated merges of main into the branch, at most 15 commits per side
+  with cut-off history marked by a `+N more commits` node, or a plain-text note when `gitGraph`
+  cannot draw the history faithfully). For a branch with commits not in main it also says:
   - whether it contains main's current commit, naming it, or how many of main's commits it lacks;
   - the commits its worker last reported testing together, from its reply's last
     `Tested: <branch commit> with main <main commit>: tests passed|failed` line (recorded only

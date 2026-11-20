@@ -80,3 +80,4 @@ Quit room during a round: after the grace period the agent mid-turn is stopped, 
 replication startup publishes a closed snapshot interrupted before its line update
 closing a discussion does not stop an earlier discussion's detached worker
 Stop now: only this task's programs are killed, queued instructions are cancelled with their full text, the report says what it left, no Retry, and the next instruction is told once
+branchDiagram: behind main, diverged, main merged into branch twice, and history longer than the limit (real git repos)
