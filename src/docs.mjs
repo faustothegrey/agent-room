@@ -1686,6 +1686,11 @@ function showMergeDialog(name, initialPreview, initialChanged) {
     const note = document.createElement('p'); note.className = 'discard-note';
     note.textContent = 'After merging, the worktree and branch will be removed and the discussion closed. Any untracked and ignored files in the worktree will be deleted for good.';
     dialog.append(note);
+    if (preview.activeNotice) {
+      const act = document.createElement('p'); act.className = 'discard-note';
+      act.textContent = preview.activeNotice;
+      dialog.append(act);
+    }
     const section = (title, items) => {
       const sh = document.createElement('h4'); sh.textContent = title + ' (' + items.length + ')'; dialog.append(sh);
       if (!items.length) { const p = document.createElement('p'); p.className = 'discard-note'; p.textContent = 'None.'; dialog.append(p); return; }

@@ -4751,3 +4751,90 @@ test('Close and Merge: greyed-out reasons, Catch up when main moved, change betw
   const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
   assert.ok(stmt.includes(`Worker work merged into \`main\` as \`${merged.mergeCommit}\`.`));
 });
+
+test('Close and Merge active-work notice and shared room lock with Close and Discard', async () => {
+  const { writeFileSync, existsSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, closeMergePreview, closeAndMerge, discardPreview, closeAndDiscard } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  let releaseOther;
+  const otherGate = new Promise((r) => { releaseOther = r; });
+  const { first, git, contexts } = await multiRoom({ worker: async (ctx, p) => {
+    const tree = ctx.workerDir.path;
+    if (p.endsWith('commit a')) {
+      writeFileSync(`${tree}/a.txt`, 'a\n');
+      inTree(tree, 'add', 'a.txt');
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] a`);
+      return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+    }
+    if (p.endsWith('commit b')) {
+      writeFileSync(`${tree}/b.txt`, 'b\n');
+      inTree(tree, 'add', 'b.txt');
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] b`);
+      return 'ok';
+    }
+    if (p.endsWith('run b')) { await otherGate; return 'ok'; }
+    return 'ok';
+  } });
+
+  await handleLine('disc-a', first);
+  const nameA = first.discussion.name;
+  queueWork(first, 'commit a');
+  await first.workQueue;
+
+  // 1. With nothing else active and no other branches with unmerged commits: notice is omitted.
+  const quiet = await closeMergePreview(first, nameA);
+  assert.equal(quiet.ok, true);
+  assert.equal(quiet.preview.activeNotice, undefined);
+
+  // 2. With another discussion in a round, another worker task running + queued, and another branch with unmerged commits:
+  // notice lists all of them, does not block merge, and does NOT invalidate the snapshot from before!
+  await handleLine('/new', first);
+  const second = contexts()[1];
+  await handleLine('disc-b', second);
+  const nameB = second.discussion.name;
+  queueWork(second, 'commit b');
+  await second.workQueue;
+
+  second.screen.thinking = 'A'; // simulate disc-b in the middle of a round
+  queueWork(second, 'run b');
+  queueWork(second, 'queued b');
+  await until(() => workerLane(second, nameB).running);
+
+  const busy = await closeMergePreview(first, nameA);
+  assert.equal(busy.ok, true);
+  assert.match(busy.preview.activeNotice, /Active now: 1 discussion in a round, 1 worker task running \(worker\/[^)]+\), 1 queued \(worker\/[^)]+\)\./);
+  assert.match(busy.preview.activeNotice, new RegExp(`Other branches may need Catch up with main afterwards: worker/${nameB}\\.`));
+  // Active-work notice is not part of the snapshot!
+  assert.equal(busy.preview.snapshot, quiet.preview.snapshot);
+
+  // 3. Shared lock: while Close and Merge holds the lock, Close and Discard is refused at once and changes nothing.
+  let discardAttempt;
+  const mergeRes = await closeAndMerge(first, nameA, quiet.preview.snapshot, {
+    _beforeMerge: async () => {
+      discardAttempt = await closeAndDiscard(second, nameB, 'any-snap').then(() => null, (err) => err);
+    },
+  });
+  assert.equal(mergeRes.ok, true);
+  assert.ok(discardAttempt instanceof Error);
+  assert.match(discardAttempt.message, new RegExp(`Cannot Close and Discard ${nameB}: Close and Merge for ${nameA} is already in progress`));
+  assert.ok(existsSync(second.workerDir.path), 'second worktree untouched while lock held');
+
+  // Release disc-b's running/queued tasks so we can test failed Discard releasing the lock.
+  second.screen.thinking = null;
+  releaseOther();
+  await second.workQueue;
+
+  // 4. Shared lock is released after a failed Close and Discard (e.g. refusal error inside lock).
+  const treeB = second.workerDir.path;
+  const wtGitDirB = inTree(treeB, 'rev-parse', '--absolute-git-dir');
+  writeFileSync(`${wtGitDirB}/MERGE_HEAD`, git('rev-parse', 'HEAD') + '\n');
+  await assert.rejects(() => closeAndDiscard(second, nameB, 'snap'), /mid-merge/);
+  assert.equal(first.shop.merging, null, 'lock must be released after failed Discard');
+  const { unlinkSync } = await import('node:fs');
+  unlinkSync(`${wtGitDirB}/MERGE_HEAD`);
+  // Subsequent discardPreview succeeds immediately now that the lock is free.
+  const afterFail = await discardPreview(second, nameB);
+  assert.equal(afterFail.ok, true);
+});

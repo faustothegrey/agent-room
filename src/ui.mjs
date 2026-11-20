@@ -1943,12 +1943,13 @@ function failActionReport(ctx, action, name, step, err, done, notDone, extra = '
   throw new Error(summary);
 }
 
-async function inspectDiscard(ctx, name) {
+async function inspectDiscard(ctx, name, { selfLock = null } = {}) {
   const d = discussionRef(join(ctx.cwd, 'discussions'), name);
   if (!d) throw new Error(`No discussion "${name}".`);
   const shop = shopOf(ctx), closing = shop.closing ??= new Map();
   if (closing.has(d.name)) throw new Error(`${d.name} is already closing.`);
   if (closedDiscussions(ctx).includes(d.name)) throw new Error(`${d.name} is already closed.`);
+  if (shop.merging && shop.merging !== selfLock) throw new Error(`Cannot Close and Discard ${d.name}: ${shop.merging} is already in progress in this room.`);
   const tasks = [...runningTasks(shop), ...queuedTasks(shop)].filter((t) => t.owner === d.name);
   if (tasks.length) {
     const names = tasks.map((t) => `"${firstLine(t.text)}"`).join(', ');
@@ -2011,64 +2012,72 @@ export async function discardPreview(ctx, name) {
 }
 
 export async function closeAndDiscard(ctx, name, snapshot) {
-  const info = await inspectDiscard(ctx, name);
-  if (!snapshot || info.preview.snapshot !== snapshot) {
-    return { changed: true, preview: info.preview };
-  }
-  const { d, place, branchHead, worktreeExists, branchExists, preview } = info;
-  const done = [];
-  const failReport = (step, err, notDone) => failActionReport(ctx, 'Close and Discard', d.name, step, err, done, notDone);
-
-  let savedRef = null;
-  if (branchExists && preview.commits.length > 0) {
-    try {
-      savedRef = await saveDiscardRef(place.top, d.name, branchHead);
-      done.push(`saved ${plural(preview.commits.length, 'commit')} at ${savedRef}`);
-    } catch (err) {
-      failReport('save recovery ref', err, [
-        ...(worktreeExists ? [`worktree ${place.path} not removed`] : []),
-        `branch ${place.branch} not deleted`,
-        'lane hold and worker session not cleared',
-        'discussion not closed',
-      ]);
-    }
-  }
-  if (worktreeExists) {
-    try {
-      await git(place.top, 'worktree', 'remove', '--force', place.path);
-      done.push(`removed worktree ${place.path}`);
-    } catch (err) {
-      failReport('remove worktree', err, [
-        ...(branchExists ? [`branch ${place.branch} not deleted`] : []),
-        'lane hold and worker session not cleared',
-        'discussion not closed',
-      ]);
-    }
-  }
-  if (branchExists) {
-    try {
-      await git(place.top, 'branch', '-D', place.branch);
-      done.push(`deleted branch ${place.branch}`);
-    } catch (err) {
-      failReport('delete branch', err, [
-        'lane hold and worker session not cleared',
-        'discussion not closed',
-      ]);
-    }
-  }
-  clearLaneAndWorkerSession(ctx, d.name);
-  done.push('cleared lane hold and worker session');
-  await refreshWorker(ctx).catch(() => {});
-
-  const discardLine = savedRef
-    ? `Worker work discarded: ${plural(preview.commits.length, 'commit')} kept at \`${savedRef}\`.`
-    : 'Worker work discarded: nothing committed.';
+  const shop = shopOf(ctx);
+  if (shop.merging) throw new Error(`Cannot Close and Discard ${name}: ${shop.merging} is already in progress in this room.`);
+  const lock = `Close and Discard for ${name}`;
+  shop.merging = lock;
   try {
-    await closeNamedDiscussion(ctx, d.name, { extraLine: discardLine, rethrow: true });
-  } catch (err) {
-    failReport('close discussion', err, ['discussion not closed']);
+    const info = await inspectDiscard(ctx, name, { selfLock: lock });
+    if (!snapshot || info.preview.snapshot !== snapshot) {
+      return { changed: true, preview: info.preview };
+    }
+    const { d, place, branchHead, worktreeExists, branchExists, preview } = info;
+    const done = [];
+    const failReport = (step, err, notDone) => failActionReport(ctx, 'Close and Discard', d.name, step, err, done, notDone);
+
+    let savedRef = null;
+    if (branchExists && preview.commits.length > 0) {
+      try {
+        savedRef = await saveDiscardRef(place.top, d.name, branchHead);
+        done.push(`saved ${plural(preview.commits.length, 'commit')} at ${savedRef}`);
+      } catch (err) {
+        failReport('save recovery ref', err, [
+          ...(worktreeExists ? [`worktree ${place.path} not removed`] : []),
+          `branch ${place.branch} not deleted`,
+          'lane hold and worker session not cleared',
+          'discussion not closed',
+        ]);
+      }
+    }
+    if (worktreeExists) {
+      try {
+        await git(place.top, 'worktree', 'remove', '--force', place.path);
+        done.push(`removed worktree ${place.path}`);
+      } catch (err) {
+        failReport('remove worktree', err, [
+          ...(branchExists ? [`branch ${place.branch} not deleted`] : []),
+          'lane hold and worker session not cleared',
+          'discussion not closed',
+        ]);
+      }
+    }
+    if (branchExists) {
+      try {
+        await git(place.top, 'branch', '-D', place.branch);
+        done.push(`deleted branch ${place.branch}`);
+      } catch (err) {
+        failReport('delete branch', err, [
+          'lane hold and worker session not cleared',
+          'discussion not closed',
+        ]);
+      }
+    }
+    clearLaneAndWorkerSession(ctx, d.name);
+    done.push('cleared lane hold and worker session');
+    await refreshWorker(ctx).catch(() => {});
+
+    const discardLine = savedRef
+      ? `Worker work discarded: ${plural(preview.commits.length, 'commit')} kept at \`${savedRef}\`.`
+      : 'Worker work discarded: nothing committed.';
+    try {
+      await closeNamedDiscussion(ctx, d.name, { extraLine: discardLine, rethrow: true });
+    } catch (err) {
+      failReport('close discussion', err, ['discussion not closed']);
+    }
+    return { ok: true, savedRef };
+  } finally {
+    if (shop.merging === lock) shop.merging = null;
   }
-  return { ok: true, savedRef };
 }
 
 // ── Close and Merge ───────────────────────────────────────────────────
@@ -2139,13 +2148,44 @@ export async function mergeReadiness(ctx, place) {
   return { show: true, canMerge: true, catchUp: false, disabledReason: null, targetBranch, roomHead, branchHead, worktreeExists, ahead, behind };
 }
 
-async function inspectCloseMerge(ctx, name, { selfLock = false } = {}) {
+async function activeWorkNotice(ctx, name, place, targetBranch) {
+  const shop = shopOf(ctx);
+  const otherRounds = siblings(ctx).filter((c) => !c.stopped && c.discussion?.name !== name && !!c.screen?.thinking).length;
+  const otherRunning = runningTasks(shop).filter((t) => t.owner !== name);
+  const otherQueued = queuedTasks(shop).filter((t) => t.owner !== name);
+  const taskBranch = (t) => (t.lane ? `worker/${t.lane}` : WORKER_BRANCH);
+
+  const branchRefs = await git(place.top, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/worker/').catch(() => '');
+  const otherBranches = [];
+  for (const b of branchRefs.split('\n').filter(Boolean)) {
+    if (b === place.branch) continue;
+    const ahead = Number(await git(place.top, 'rev-list', '--count', `${targetBranch}..refs/heads/${b}`).catch(() => '0'));
+    if (ahead > 0) otherBranches.push(b);
+  }
+
+  const activeParts = [];
+  if (otherRounds) activeParts.push(`${plural(otherRounds, 'discussion')} in a round`);
+  if (otherRunning.length) {
+    const branches = [...new Set(otherRunning.map(taskBranch))].join(', ');
+    activeParts.push(`${plural(otherRunning.length, 'worker task')} running (${branches})`);
+  }
+  if (otherQueued.length) {
+    const branches = [...new Set(otherQueued.map(taskBranch))].join(', ');
+    activeParts.push(`${otherQueued.length} queued (${branches})`);
+  }
+  const sentences = [];
+  if (activeParts.length) sentences.push(`Active now: ${activeParts.join(', ')}.`);
+  if (otherBranches.length) sentences.push(`Other branches may need Catch up with ${targetBranch} afterwards: ${otherBranches.join(', ')}.`);
+  return sentences.length ? sentences.join(' ') : null;
+}
+
+async function inspectCloseMerge(ctx, name, { selfLock = null } = {}) {
   const d = discussionRef(join(ctx.cwd, 'discussions'), name);
   if (!d) throw new Error(`No discussion "${name}".`);
   const shop = shopOf(ctx), closing = shop.closing ??= new Map();
   if (closing.has(d.name)) throw new Error(`${d.name} is already closing.`);
   if (closedDiscussions(ctx).includes(d.name)) throw new Error(`${d.name} is already closed.`);
-  if (shop.merging && !(selfLock && shop.merging === d.name)) throw new Error(`Cannot Close and Merge ${d.name}: another merge (${shop.merging}) is already in progress in this room.`);
+  if (shop.merging && shop.merging !== selfLock) throw new Error(`Cannot Close and Merge ${d.name}: ${shop.merging} is already in progress in this room.`);
   const place = await lanePlace(ctx, d.name);
   if (place.disabled) throw new Error(place.disabled);
   const state = await mergeReadiness(ctx, place);
@@ -2158,12 +2198,16 @@ async function inspectCloseMerge(ctx, name, { selfLock = false } = {}) {
   }
   if (!state.canMerge) throw new Error(`Cannot Close and Merge ${d.name}: ${state.disabledReason}`);
 
-  const logOut = await git(place.top, 'log', '--format=%h%x1f%s', `${state.roomHead}..${state.branchHead}`);
+  const [logOut, worktreeSnap, activeNotice] = await Promise.all([
+    git(place.top, 'log', '--format=%h%x1f%s', `${state.roomHead}..${state.branchHead}`),
+    collectWorktreeSnapshot(place, state.branchHead, state.worktreeExists),
+    activeWorkNotice(ctx, d.name, place, state.targetBranch),
+  ]);
   const commits = logOut ? logOut.split('\n').filter(Boolean).map((l) => {
     const [hash, ...rest] = l.split('\x1f');
     return { hash, subject: rest.join('\x1f') };
   }) : [];
-  const worktreeSnap = await collectWorktreeSnapshot(place, state.branchHead, state.worktreeExists);
+  // activeNotice is informational only and intentionally excluded from the snapshot.
   const mergeSnap = createHash('sha256')
     .update(`target:${state.targetBranch}\nroomHead:${state.roomHead}\nwt:${worktreeSnap.snapshot}\n`)
     .digest('hex');
@@ -2174,6 +2218,7 @@ async function inspectCloseMerge(ctx, name, { selfLock = false } = {}) {
       name: d.name, branch: place.branch, targetBranch: state.targetBranch,
       title: `Merge ${place.branch} into ${state.targetBranch}`,
       path: place.path, commits, untracked: worktreeSnap.untracked, ignored: worktreeSnap.ignored,
+      ...(activeNotice && { activeNotice }),
       snapshot: mergeSnap,
     },
   };
@@ -2206,10 +2251,11 @@ export async function catchUpWithBranch(ctx, name) {
 
 export async function closeAndMerge(ctx, name, snapshot, { _beforeMerge = null } = {}) {
   const shop = shopOf(ctx);
-  if (shop.merging) throw new Error(`Cannot Close and Merge ${name}: another merge (${shop.merging}) is already in progress in this room.`);
-  shop.merging = name;
+  if (shop.merging) throw new Error(`Cannot Close and Merge ${name}: ${shop.merging} is already in progress in this room.`);
+  const lock = `Close and Merge for ${name}`;
+  shop.merging = lock;
   try {
-    const info = await inspectCloseMerge(ctx, name, { selfLock: true });
+    const info = await inspectCloseMerge(ctx, name, { selfLock: lock });
     if (info.catchUp) return { catchUp: true, targetBranch: info.state.targetBranch, behind: info.state.behind, message: info.message };
     if (!snapshot || info.preview.snapshot !== snapshot) {
       return { changed: true, preview: info.preview };
@@ -2285,7 +2331,7 @@ export async function closeAndMerge(ctx, name, snapshot, { _beforeMerge = null }
     }
     return { ok: true, mergeCommit, targetBranch };
   } finally {
-    shop.merging = null;
+    if (shop.merging === lock) shop.merging = null;
   }
 }
 
