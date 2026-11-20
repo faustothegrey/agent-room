@@ -51,7 +51,7 @@ the server's version. An amber ⚠ to the right of **Server** means a replicatio
 (hover for how many); click it to open **Peers…**. **Current discussion** (green): on the left, the selected
 discussion's or brainstorm's title (**New brainstorm** before a brainstorm's first message), or **No discussion started**, with its state under it (who is thinking, or your
 turn); **Actions ▾** holds **Summarize**, **New discussion**, **New brainstorm**, **Turn into a discussion** (when a
-brainstorm is shown) and (on the screen) **Close discussion** (**Close brainstorm**); on the right, every open discussion whose worker is working is listed, one per line,
+brainstorm is shown) and (on the screen) **Close** (**Close with pending work** when the worker branch has unmerged commits or uncommitted edits; **Close brainstorm** for a brainstorm); on the right, every open discussion whose worker is working is listed, one per line,
 as `<title> · Worker is working` (the shown discussion included). **Monitoring** (amber): the monitor panel, with the subscription usage gauges
 and a warning per provider (below).
 
@@ -304,16 +304,16 @@ it is, during a round too: its agents carry on, nothing is restarted. An open di
 yet) has **Go to** instead, which only shows it. **New discussion** and **New brainstorm** open the new
 one beside the one in use, which stays open (in place, when the one in use hasn't started). Resume
 and Start fresh open any other discussion or brainstorm beside the open ones; several brainstorms
-can be open at once. **Close discussion** (in **Actions ▾**, or `/close`) also works on a paused
-discussion's row. It refuses new worker instructions and waits for its queued and running tasks;
-while waiting the row says **closing, waiting for worker** and offers **Cancel close**. A one-off
+can be open at once. **Close** (in **Actions ▾** and each row's menu in **Discussions**, or `/close`) is labelled **Close with pending work** when the discussion's worker branch has commits not in main or uncommitted edits, and also works on a paused
+discussion's row. It keeps the worker branch and worktree exactly as they are (branch, commits, uncommitted, untracked and ignored files) for rework later. It refuses new worker instructions and waits for its queued and running tasks;
+while waiting the row says **closing, waiting for worker** and offers **Cancel close**. Tasks queued behind an unresolved-edits hold can never start, so Close refuses at once and names them instead of waiting. A one-off
 agent with the provider and model set in that discussion's **Worker · provider & model** panel
 (not the discussion agents, nor the worker's own session) then reads the discussion's notes and
-transcripts and writes a closing statement pointing to `pending-instructions.md` (the system messages name its provider and model, when it starts and when the discussion is closed); agent-room writes the one
+transcripts and writes a closing statement pointing to `pending-instructions.md` (the system messages name its provider and model, when it starts and when the discussion is closed); when the branch has pending work, agent-room appends `Worker work pending on <node or host>: \`worker/<name>\`, N commits not in main, uncommitted edits: yes/no, worktree \`<path>\`.` to `closing-statement.md`. agent-room writes the one
 current `closing-statement.md`, ends the sessions and marks the discussion closed. Unresolved worker
-edits still prevent Close. If Close fails or is cancelled, the discussion stays open or paused and
+edits do not prevent Close: the worktree's queue hold stays as it is, and resuming the discussion later finds the edits still there. If Close fails or is cancelled, the discussion stays open or paused and
 can be retried. **Quit room** ends the room, and Restart brings back every open discussion and
-brainstorm from its checkpoint (not empty ones). Only closed discussions replicate. Each discussion keeps its own worker settings and
+brainstorm from its checkpoint (not empty ones). Only closed discussions replicate; replication sends the closing statement (including any pending-work line) but never the worker branch or worktree. Each discussion keeps its own worker settings and
 session. In the terminal one discussion is open at
 a time, as described next: its one input can't switch between discussions.
 
@@ -585,7 +585,7 @@ node src/cli.mjs --help
 | `/resume <folder-name>` | Show an open discussion, continue a paused checkpoint, or reopen a closed discussion with fresh sessions from its closing statement. `archive/…` or `deferred/…` is made active first; `brainstorms/<folder-name>` resumes a brainstorm. |
 | `/fresh <folder-name>` | Start fresh: new sessions there, from its closing statement or pending handoff, notes and its checkpoint's latest summary; the saved sessions and chat are discarded. `brainstorms/<folder-name>`: from its latest summary or its transcripts. |
 | `/new` | On the screen, open a new discussion beside this one (which stays open). In the terminal, end this session; your next message starts a new discussion. Its worker tasks finish in its own worker session; the new discussion's worker starts fresh. |
-| `/close` | Close the discussion shown; `/close <folder-name>` also closes a paused one. Waits for its worker and writes a closing statement (not while it holds unresolved worker edits). |
+| `/close` | Close the discussion shown; `/close <folder-name>` also closes a paused one. Waits for its worker, writes a closing statement (appending a pending-work line if the branch has unmerged commits or uncommitted edits), and keeps the worker branch and worktree intact (refuses immediately if tasks are queued behind an unresolved-edits hold). |
 | `/brainstorm` | Start a brainstorm (on the screen beside this one; in the terminal, ending this session). Its first message names it in `brainstorms/`. |
 | `/convert brainstorms/<folder-name>` | Turn into a discussion: the folder moves to `discussions/`, the agents keep their sessions and are told. |
 | `/delete brainstorms/<folder-name>` | Delete a closed brainstorm's folder and checkpoint, for good. |
@@ -788,7 +788,7 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   next. If a task leaves uncommitted edits, that worktree's queue holds (other discussions' go on)
   and its origin is told; only that origin's own
   instructions go through (to finish and commit them, or to abandon them), with the first task's
-  details. That discussion can't be closed, archived or deferred meanwhile. Uncommitted edits of
+  details. That discussion can't be archived or deferred meanwhile (Close is allowed as **Close with pending work**, leaving the edits and queue hold intact for rework later). Uncommitted edits of
   unknown origin hold that worktree's queue until it is clean (commit or remove them yourself); they
   are never given to a new task. Before starting work, agent-room saves the origin, full task text
   and starting commit in the worktree's private Git directory (never committed). Recovery keeps

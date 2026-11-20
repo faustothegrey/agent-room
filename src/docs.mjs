@@ -837,7 +837,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b id="room-name">agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">New brainstorm</button><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
+<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">New brainstorm</button><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
 <div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 <div id="busy" aria-hidden="true"></div>
 </header>
@@ -1145,7 +1145,7 @@ let workerInfoShown = null, workPlaceholder = null;
 function showWorkerInfo(info) {
   const pendingChanged = JSON.stringify(info?.pending ?? null) !== JSON.stringify(workerPending);
   workerInfoShown = info;
-  if (pendingChanged) { workerPending = info?.pending ?? null; renderDiscussions(); } // its rows say which have worker work to merge or commit
+  if (pendingChanged) { workerPending = info?.pending ?? null; updateCloseButton(); renderDiscussions(); } // its rows and Close label follow pending worker work
   workPlaceholder ??= wbox.placeholder;
   if (room?.brainstorm) setWorkerInfo({ lines: [BRAINSTORM_NO_WORK], disabled: true });
   else {
@@ -1580,6 +1580,17 @@ function setPeeking(p) {
   peeking = p;
   renderWorkerStop();
 }
+function closeActionLabel(lane) {
+  return lane && (workerPending ?? []).some((p) => p.lane === lane) ? 'Close with pending work' : 'Close';
+}
+function updateCloseButton() {
+  const b = $('closedisc');
+  if (!b) return;
+  const activeLane = !room?.brainstorm && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
+  const label = room?.brainstorm ? 'Close brainstorm' : closeActionLabel(activeLane);
+  if (b.dataset.armed) b.dataset.label = label;
+  else b.textContent = label;
+}
 function updateReplicaView() {
   updateDiscWorkers();
   renderWorkerStop();
@@ -1607,9 +1618,9 @@ function updateReplicaView() {
   // Turn into a discussion: a brainstorm once its first message has named it.
   $('convert').hidden = !(room?.brainstorm && room.active);
   // With several discussions open (the screen), New discussion and Resume keep this one open;
-  // Close discussion closes it. Their tooltips say so.
+  // Close closes it (labelled "Close with pending work" when its branch has pending work).
   $('closedisc').hidden = !room?.multi || !(room.active || room.brainstorm || room.open?.length > 1);
-  $('closedisc').textContent = room?.brainstorm ? 'Close brainstorm' : 'Close discussion';
+  updateCloseButton();
   if (room?.multi) {
     $('newdisc').title = 'Open a new discussion beside this one, which stays open (Discussions or Brainstorms: Resume shows it again).';
     $('newbrainstorm').title = 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.';
@@ -1731,12 +1742,12 @@ function freshButton(b, ref) {
 // New discussion: once this session has started, it ends it (the chat clears), so it takes two
 // clicks, like Quit. ask: when the first click only asks (by default, as said above).
 function confirmed(b, run, warning, ask = () => room?.started || warning) {
-  const label = b.textContent;
   b.onclick = (e) => {
     e.stopPropagation();
     if (ask() && !b.dataset.armed) {
-      b.dataset.armed = '1'; b.textContent = warning || 'Click again: this session ends and the chat clears';
-      return setTimeout(() => { delete b.dataset.armed; b.textContent = label; }, 4000);
+      b.dataset.armed = '1'; b.dataset.label = b.textContent;
+      b.textContent = warning || 'Click again: this session ends and the chat clears';
+      return setTimeout(() => { delete b.dataset.armed; b.textContent = b.dataset.label; }, 4000);
     }
     run();
   };
@@ -2023,7 +2034,7 @@ function renderDiscussions() {
       menu.open = openRowMenu === path;
       menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
       if (!room?.closedDiscussions?.includes(d)) {
-        const close = el('button', '', 'Close');
+        const close = el('button', '', closeActionLabel(d));
         close.onclick = () => { closeMenus(); send('/close ' + d); };
         items.append(close);
       }

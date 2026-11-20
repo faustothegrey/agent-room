@@ -2460,9 +2460,9 @@ test('switching discussion while one waits for its worker task: the message type
   assert.deepEqual([first, second].map((c) => c.screen.working ?? null), [null, null]);
 });
 
-test('leftover edits hold their own lane for their origin, which can recover them; other lanes go on; they block Close, Archive and Defer; unknown leftovers hold their lane', async () => {
+test('leftover edits hold their own lane for their origin, which can recover them; other lanes go on; they block Archive and Defer; unknown leftovers hold their lane', async () => {
   const { writeFileSync, existsSync } = await import('node:fs');
-  const { queueWork, start } = await import('../src/ui.mjs');
+  const { queueWork, start, workerHold } = await import('../src/ui.mjs');
   const { execFileSync } = await import('node:child_process');
   const inTree = (ctx, ...a) => execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]);
   const { first, git, contexts } = await multiRoom({ worker: (ctx, p) => {
@@ -2482,8 +2482,7 @@ test('leftover edits hold their own lane for their origin, which can recover the
   await second.workQueue;
   assert.deepEqual([second.prompts.length, workerLane(second).blockedBy, workerLane(first).blockedBy.origin], [1, null, first]);
 
-  await handleLine('/close', first);
-  assert.match(first.notes.at(-1), /can't be closed yet: its worker edits from "make wip" are unresolved/);
+  assert.match(workerHold(first), /its worker edits from "make wip" are unresolved/);
   await markClosed(first.cwd, first.discussion.name);
   await handleLine(`/move ${first.discussion.name} archive`, second);
   assert.match(second.notes.at(-1), /can't move: its worker edits from "make wip" are unresolved/);
@@ -4433,4 +4432,66 @@ test('branchDiagram: strips leading [label] from subjects and tags third-branch 
   assert.ok(ast2.statements.length > 0);
   assert.match(res2.graph, new RegExp(`commit id: "${wMerge} Bring in helper" tag: "merge"`));
   assert.doesNotMatch(res2.graph, /type: HIGHLIGHT/);
+});
+
+test('Close with pending work: allowed with unresolved edits (hold and files kept), appends pending-work line to closing-statement.md, and refuses tasks queued behind an unresolved-edits hold', async () => {
+  const { writeFileSync, readFileSync, existsSync } = await import('node:fs');
+  const { hostname } = await import('node:os');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, workerHold } = await import('../src/ui.mjs');
+  const inTree = (ctx, ...a) => execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]);
+
+  const { first, contexts } = await multiRoom({ worker: (ctx, p) => {
+    if (p.endsWith('make pending')) {
+      writeFileSync(`${ctx.workerDir.path}/committed.txt`, 'c\n');
+      inTree(ctx, 'add', 'committed.txt');
+      inTree(ctx, 'commit', '-q', '-m', `[${ctx.discussion.name}] committed step`);
+      writeFileSync(`${ctx.workerDir.path}/wip.txt`, 'uncommitted\n');
+    }
+    return 'ok';
+  } });
+  await handleLine('pending-topic', first);
+  const { name, dir } = first.discussion;
+  queueWork(first, 'make pending');
+  await first.workQueue;
+  const worktreePath = first.workerDir.path;
+  assert.ok(workerLane(first).blockedBy);
+  assert.match(workerHold(first), /unresolved/);
+
+  // Close succeeds despite unresolved edits, keeps the worktree/edits/hold, and writes the pending-work line.
+  first.node = 'MacBook';
+  await handleLine('/close', first);
+  assert.match(first.notes.at(-1), new RegExp(`^Closed ${name}\\.`));
+  assert.ok(existsSync(`${worktreePath}/wip.txt`));
+  assert.ok(workerLane(first, name).blockedBy, 'queue hold stays intact after Close');
+  const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
+  assert.ok(stmt.includes(`Worker work pending on MacBook: \`worker/${name}\`, 1 commit not in main, uncommitted edits: yes, worktree \`${worktreePath}\`.`));
+
+  // Resume later finds the edits and hold still there.
+  await handleLine(`/resume ${name}`, first);
+  const resumed = contexts().find((c) => c.discussion?.name === name);
+  assert.ok(resumed);
+  resumed.docs = { ...resumed.docs, broadcast: (s, ev) => { if (ev.type === 'note') resumed.notes.push(ev.text); } };
+  assert.ok(existsSync(`${worktreePath}/wip.txt`));
+  assert.ok(workerLane(resumed, name).blockedBy);
+
+  // A task queued behind an unknown-origin unresolved-edits hold cannot start: Close refuses immediately.
+  const { unlinkSync } = await import('node:fs');
+  const gitDir = inTree(first, 'rev-parse', '--absolute-git-dir').toString().trim();
+  if (existsSync(`${gitDir}/agent-room-owner.json`)) unlinkSync(`${gitDir}/agent-room-owner.json`);
+  workerLane(resumed, name).blockedBy = { origin: null, owner: null, label: null, task: null, place: workerLane(resumed, name).blockedBy.place };
+  resumed.worker.turn = async () => 'ok';
+  queueWork(resumed, 'stuck task');
+  await handleLine(`/close ${name}`, resumed);
+  assert.match(resumed.notes.at(-1), /1 worker task is queued behind unresolved edits: remove them from the queue first/);
+  assert.match(resumed.notes.at(-1), /"stuck task"/);
+  workerLane(resumed, name).tasks.length = 0;
+
+  // Without a replication node name, the pending-work line falls back to hostname(); without pending work, no line is written.
+  const { first: clean } = await multiRoom();
+  await handleLine('clean-topic', clean);
+  const { dir: cleanDir } = clean.discussion;
+  await handleLine('/close', clean);
+  assert.doesNotMatch(readFileSync(`${cleanDir}/closing-statement.md`, 'utf8'), /Worker work pending on/);
+  assert.ok(hostname().length > 0);
 });

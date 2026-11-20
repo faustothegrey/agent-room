@@ -224,3 +224,4 @@ the stop buttons hide while peeking at another discussion or viewing a peer's, a
 the Worker tab draws a Mermaid gitGraph when a lane is expanded and shows a plain-text note when gitGraph cannot draw it
 branchDiagram: falls back to a plain-text note when gitGraph cannot draw the history faithfully, and supports non-main room branches
 branchDiagram: strips leading [label] from subjects and tags third-branch merges with tag: "merge"
+the Close action switches between Close and Close with pending work in Actions and Discussions

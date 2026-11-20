@@ -9,7 +9,7 @@ import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
 import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir, networkInterfaces, tmpdir } from 'node:os';
+import { homedir, hostname, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as defaultInstructions from './instructions.mjs';
@@ -1666,6 +1666,19 @@ async function closingContext(ctx, d) {
   return shadow;
 }
 
+async function pendingWorkLine(ctx, name) {
+  const place = await lanePlace(ctx, name);
+  if (place.disabled) return null;
+  const s = await worktreeStatus(place);
+  if (!s.exists) return null;
+  const main = await mainRef(place.top);
+  const ahead = Number(await git(place.top, 'rev-list', '--count', `${main}..${place.branch}`));
+  const dirty = !!s.treeDirty;
+  if (!ahead && !dirty) return null;
+  const where = ctx.node || hostname();
+  return `Worker work pending on ${where}: \`${place.branch}\`, ${plural(ahead, 'commit')} not in main, uncommitted edits: ${dirty ? 'yes' : 'no'}, worktree \`${place.path}\`.`;
+}
+
 async function closeNamedDiscussion(ctx, name) {
   const d = discussionRef(join(ctx.cwd, 'discussions'), name);
   if (!d) return note(ctx, `✗ No discussion "${name}".`, true);
@@ -1673,23 +1686,36 @@ async function closeNamedDiscussion(ctx, name) {
   if (closing.has(d.name)) return note(ctx, `✗ ${d.name} is already closing.`, true);
   if (closedDiscussions(ctx).includes(d.name)) return note(ctx, `✗ ${d.name} is already closed.`, true);
   const opened = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, d.name));
+  const blockedQueued = () => lanesOf(shop).flatMap((l) =>
+    l.blockedBy ? l.tasks.filter((t) => t.owner === d.name && l.blockedBy.owner !== t.owner) : []);
+  const checkBlocked = () => {
+    const blocked = blockedQueued();
+    if (!blocked.length) return;
+    const names = blocked.map((t) => `"${firstLine(t.text)}"`).join(', ');
+    throw new Error(`${blocked.length} worker ${blocked.length === 1 ? 'task is' : 'tasks are'} queued behind unresolved edits: remove them from the queue first (${names}).`);
+  };
   const c = { waiting: true, cancelled: false, wake: null };
   closing.set(d.name, c);
   showHeader(ctx);
   try {
+    checkBlocked();
     const tasks = [...runningTasks(shop), ...queuedTasks(shop)].filter((t) => t.owner === d.name && t.finished);
     let finished = !tasks.length;
     Promise.all(tasks.map((t) => t.finished)).then(() => { finished = true; c.wake?.(); });
     const pending = () => [...runningTasks(shop), ...queuedTasks(shop)].some((t) => t.owner === d.name);
-    while ((!finished || pending()) && !c.cancelled) await new Promise((resolve) => { c.wake = resolve; setTimeout(resolve, 100); });
+    while ((!finished || pending()) && !c.cancelled) {
+      if (!runningTasks(shop).some((t) => t.owner === d.name)) checkBlocked();
+      await new Promise((resolve) => { c.wake = resolve; setTimeout(resolve, 100); });
+    }
     c.wake = null;
     if (c.cancelled) return note(ctx, `Close cancelled for ${d.name}.`);
     if (ctx.stopped || opened?.stopped) throw new Error('The room stopped while Close was waiting.');
     c.waiting = false;
     showHeader(ctx);
     const target = opened ?? await closingContext(ctx, d);
-    const hold = workerHold(target);
-    if (hold) throw new Error(`This can't be closed yet: ${hold}.`);
+    if (runningTasks(shop).some((t) => (t.owner ?? ownerOf(t.origin)) === ownerOf(target))) {
+      throw new Error('This can\'t be closed yet: a worker task from it is running.');
+    }
     if (target.checkpointError) throw new Error(`The latest checkpoint could not be saved: ${target.checkpointError}`);
     const reports = shop.log.filter((m) => m.owner === d.name && m.speaker).map((m) => `${m.speaker}: ${m.html ?? m.text ?? ''}`).join('\n\n');
     // Written by the worker's provider and model as set for this discussion, not by its discussion
@@ -1699,6 +1725,8 @@ async function closeNamedDiscussion(ctx, name) {
     const writer = `${spec.provider[0].toUpperCase() + spec.provider.slice(1)} (${modelLabel(spec.provider, spec.model)})`;
     note(ctx, `Closing ${d.name}: ${writer} is writing the closing statement…`);
     const statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports }, target.closingAgent?.());
+    const pendingLine = await pendingWorkLine(target, d.name).catch(() => null);
+    const body = pendingLine ? `${statement.trimEnd()}\n\n${pendingLine}\n` : `${statement}\n`;
     const file = join(target.discussion.dir, 'closing-statement.md');
     const temp = `${file}.${process.pid}.tmp`;
     const previous = existsSync(file) ? readFileSync(file) : null;
@@ -1706,7 +1734,7 @@ async function closeNamedDiscussion(ctx, name) {
     const sessions = [...(target.sessions?.values() ?? [])].map((s) => [s, { ...s }]);
     let snapshot, markedClosed = false;
     try {
-      writeFileSync(temp, statement + '\n');
+      writeFileSync(temp, body);
       // CLI calls run one process per turn; the worker and closing turns have returned. Drop their
       // provider IDs without stopping another discussion's detached worker in this context.
       for (const [session] of sessions) for (const key of Object.keys(session)) delete session[key];

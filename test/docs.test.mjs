@@ -451,6 +451,49 @@ test('the Worker tab draws a Mermaid gitGraph when a lane is expanded and shows 
   assert.equal(noteB.textContent, 'Branch diagram unavailable: criss-cross merge.');
 });
 
+test('the Close action switches between Close and Close with pending work in Actions and Discussions', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const winfoCode = source.slice(source.indexOf('const BRAINSTORM_NO_WORK ='), source.indexOf('function setWorking('));
+  const closeCode = source.slice(source.indexOf('function closeActionLabel('), source.indexOf('function updateReplicaView('));
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', placeholder: '', disabled: false, children: [], dataset: {},
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; },
+    addEventListener() {},
+  });
+  const closedisc = node('button'), winfo = node('div'), wbox = node('textarea');
+  let renders = 0;
+  const harness = new Function('$', 'document', 'window', 'matchMedia', 'wbox', 'renderDiscussions',
+    'let room = { active: "discussions/2026-11-19-a", brainstorm: false }, workerPending = null, ended = false, restarting = false;\n' +
+    closeCode + '\n' + winfoCode + '\nreturn { showWorkerInfo, closeActionLabel, updateCloseButton, setRoom: (r) => { room = r; updateCloseButton(); } };'
+  )((id) => (id === 'closedisc' ? closedisc : id === 'winfo' ? winfo : node(id)),
+    { createElement: node, getElementById: () => null, head: node('head') }, {}, () => ({ matches: false }), wbox, () => { renders++; });
+
+  // No pending work: Close in Actions and for every discussion row.
+  harness.showWorkerInfo({ lines: [], pending: [] });
+  assert.equal(closedisc.textContent, 'Close');
+  assert.equal(harness.closeActionLabel('2026-11-19-a'), 'Close');
+  assert.equal(harness.closeActionLabel('2026-11-19-b'), 'Close');
+
+  // Pending work on discussion a: switches to Close with pending work for a, stays Close for b.
+  const before = renders;
+  harness.showWorkerInfo({ lines: [], pending: [{ lane: '2026-11-19-a', branch: 'worker/2026-11-19-a', ahead: 2, dirty: false }] });
+  assert.equal(closedisc.textContent, 'Close with pending work');
+  assert.equal(harness.closeActionLabel('2026-11-19-a'), 'Close with pending work');
+  assert.equal(harness.closeActionLabel('2026-11-19-b'), 'Close');
+  assert.equal(renders, before + 1);
+
+  // Pending work cleared: returns to Close.
+  harness.showWorkerInfo({ lines: [], pending: [] });
+  assert.equal(closedisc.textContent, 'Close');
+  assert.equal(harness.closeActionLabel('2026-11-19-a'), 'Close');
+
+  // Brainstorm stays Close brainstorm.
+  harness.setRoom({ active: 'brainstorms/2026-11-19-idea', brainstorm: true });
+  assert.equal(closedisc.textContent, 'Close brainstorm');
+});
+
 test('the Worker tab\'s stop buttons: /__stopworker reaches the room only from its page, with a known mode; each button asks to click again', async () => {
   const calls = [];
   const s = await serve(fixture(), { clients: new Set(), transcript: [], stopWorker: (mode) => { if (mode !== 'after' && mode !== 'now') throw new Error('Unknown stop'); calls.push(mode); } });

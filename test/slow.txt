@@ -81,3 +81,5 @@ replication startup publishes a closed snapshot interrupted before its line upda
 closing a discussion does not stop an earlier discussion's detached worker
 Stop now: only this task's programs are killed, queued instructions are cancelled with their full text, the report says what it left, no Retry, and the next instruction is told once
 branchDiagram: behind main, diverged, main merged into branch twice, and history longer than the limit (real git repos)
+leftover edits hold their own lane for their origin, which can recover them; other lanes go on; they block Archive and Defer; unknown leftovers hold their lane
+Close with pending work: allowed with unresolved edits (hold and files kept), appends pending-work line to closing-statement.md, and refuses tasks queued behind an unresolved-edits hold
