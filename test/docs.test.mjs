@@ -931,7 +931,7 @@ test('the attach row (and pointing chips) is shown for a brainstorm, and the att
   const $ = (id) => els[id] || (els[id] = node(id));
   const harness = new Function('$', 'document', 'box',
     'let room = null, viewing = null, peeking = null, localInput = true, attaching = false, pending = [], viewExpired = false, viewNotice = null, localThinking = null, localWorking = null, replica = { node: "local", own: {}, received: [] };\n' +
-    'const updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, renderAutoDev = () => {}, talkStatus = () => "", receivedTime = () => "";\n' +
+    'const updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, renderAutoDev = () => {}, updateCloseButton = () => {}, talkStatus = () => "", receivedTime = () => "";\n' +
     viewCode + '\n' + attachCode + '\n' +
     'return { update: (r, v = null, p = null) => { room = r; viewing = v; peeking = p; updateReplicaView(); } };'
   )($, { createElement: node, createTextNode: () => ({}) }, node('textarea'));
