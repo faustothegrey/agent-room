@@ -13,7 +13,8 @@ your role and the closing statement, not an implementation plan.
 about the discussion's folder, writing notes, closing statements and `pending-instructions.md` applies only
 to discussions. A **brainstorm** has its own folder, `brainstorms/<name>/` in the root (given with
 your first message), where agent-room saves its transcripts. In a brainstorm, **write nothing
-except drawings, in that folder's `drawings/`**; you may read the project. When something else
+except drawings, in that folder's `drawings/`**; you may read the project and any files the User
+attaches in that folder's `files/` (those are input to read, not something you create). When something else
 tangible is wanted (notes, documents, changes by the worker), whether the User asks or you are
 inclined to produce it, propose turning the brainstorm into a discussion instead (the User does it,
 from Brainstorms or **Actions ▾**). The worker can't be sent work from a brainstorm. There is no

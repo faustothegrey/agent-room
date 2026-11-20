@@ -221,3 +221,5 @@ Stop after this task: the running instruction finishes and is reported as usual;
 a worker agent's programs: once its task is stopped, none starts
 Stop now with a real program: the worker's process group is killed through its monitored turn, and its last-turn record is an error
 the stop buttons hide while peeking at another discussion or viewing a peer's, and come back at once on returning, before any room update
+a brainstorm message with attachments saves into brainstorms/<name>/files/ and appends their paths
+the attach row (and pointing chips) is shown for a brainstorm, and the attach button stays disabled before its first message

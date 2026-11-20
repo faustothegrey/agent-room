@@ -858,7 +858,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <div id="remote-view" hidden></div>
       <div id="autodev" role="status" hidden></div>
       <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"></textarea>
-      <div id="attach-row"><button type="button" id="attach" title="Attach files to your next message: saved into the discussion's files/ folder when you send it (25 MB at most each)">📎 Attach</button><input type="file" id="attach-input" multiple hidden><span id="attachments"></span><span id="pointed"></span></div>
+      <div id="attach-row"><button type="button" id="attach" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)">📎 Attach</button><input type="file" id="attach-input" multiple hidden><span id="attachments"></span><span id="pointed"></span></div>
     </div>
   </div>
   <div class="view" id="providers" hidden>
@@ -1539,10 +1539,11 @@ function updateReplicaView() {
   const panel = $('remote-view'); panel.hidden = !readOnly; panel.replaceChildren();
   $('composer').hidden = !readOnly && !localInput;
   box.hidden = readOnly;
-  // Attach: in discussions only (disabled until the first message creates the folder), not in brainstorms.
-  $('attach-row').hidden = readOnly || !room || !!room.brainstorm;
+  // Attach and pointing chips: shown in discussions and brainstorms (Attach is disabled until the first message creates the folder).
+  $('attach-row').hidden = readOnly || !room;
   if ($('attach-row').hidden && !attaching) pending = [];
-  $('attach').title = room?.active ? "Attach files to your next message: saved into the discussion's files/ folder when you send it (25 MB at most each)" : 'Send a first message to start the discussion; then you can attach files';
+  const kind = room?.brainstorm ? 'brainstorm' : 'discussion';
+  $('attach').title = room?.active ? 'Attach files to your next message: saved into this ' + kind + "'s files/ folder when you send it (25 MB at most each)" : 'Send a first message to start the ' + kind + '; then you can attach files';
   renderAttachments();
   $('talk-settings').hidden = readOnly;
   $('summary').hidden = readOnly;
@@ -2820,7 +2821,7 @@ $('newroom').onclick = async () => {
 };
 // Attachments: files chosen with Attach wait beside the composer (each removable) and go with the
 // next message, which is sent only once the server has saved them all (see sayWithFiles); on failure
-// the text and the files stay here. Only in a started discussion, never in a brainstorm.
+// the text and the files stay here. Needs a started discussion or brainstorm.
 const ATTACH_LIMIT = 25 * 1024 * 1024, ATTACH_TOTAL = 250 * 1024 * 1024;
 const sizeText = (n) => n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1024 / 1024).toFixed(1) + ' MB';
 function renderAttachments() {
@@ -3549,12 +3550,12 @@ function handleScreen(req, res, url, dir, screen) {
     });
     return true;
   }
-  // A message with attachments: every file is saved into the discussion's files/ first, and their
+  // A message with attachments: every file is saved into the discussion's or brainstorm's files/ first, and their
   // paths are appended to the text; if any save fails, or the message isn't taken, nothing stays saved.
   function sayWithFiles(text, files, confirmed) {
     const fail = (status, message) => send(status, 'text/plain; charset=utf-8', message + ' Nothing was sent.');
     const active = screen.room?.active;
-    if (!active || screen.room.brainstorm) return fail(409, 'Attachments need a started discussion (not a brainstorm).');
+    if (!active) return fail(409, 'Attachments need a started discussion or brainstorm.');
     if (text.startsWith('/')) return fail(400, 'Attachments go with a message, not a command.');
     const folder = join(dir, active, 'files');
     let saved;

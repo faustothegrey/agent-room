@@ -731,6 +731,69 @@ test('the page keeps the text and the attachments when sending them fails, and c
   assert.deepEqual(page.pending(), []);
 });
 
+test('a brainstorm message with attachments saves into brainstorms/<name>/files/ and appends their paths', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'attach-brainstorm-test-'));
+  mkdirSync(join(root, 'brainstorms', '2026-11-20-idea'), { recursive: true });
+  const said = [];
+  const screen = { clients: new Set(), transcript: [], room: { active: 'brainstorms/2026-11-20-idea', brainstorm: true },
+    say: (line) => { said.push(line); } };
+  const files = join(root, 'brainstorms', '2026-11-20-idea', 'files');
+  const s = await serve(root, screen);
+  try {
+    assert.equal((await postFrom(s, '/__say', { text: 'look', files: [{ name: 'sketch.png', data: b64('img1') }, { name: 'sketch.png', data: b64('img2') }] })).status, 204);
+    assert.deepEqual(said, ['look\n\nAttached: files/sketch.png, files/sketch-2.png']);
+    assert.equal(readFileSync(join(files, 'sketch.png'), 'utf8'), 'img1');
+    assert.equal(readFileSync(join(files, 'sketch-2.png'), 'utf8'), 'img2');
+    // Without a started folder, attachments are still refused.
+    screen.room = { active: null, brainstorm: true };
+    const refused = await postFrom(s, '/__say', { text: 'early', files: [{ name: 'a.txt', data: b64('A') }] });
+    assert.equal(refused.status, 409);
+    assert.match(await refused.text(), /started discussion or brainstorm.*Nothing was sent/);
+  } finally {
+    s.close();
+  }
+});
+
+test('the attach row (and pointing chips) is shown for a brainstorm, and the attach button stays disabled before its first message', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const viewCode = source.slice(source.indexOf('function updateReplicaView()'), source.indexOf('async function remoteFiles()'));
+  const attachCode = source.slice(source.indexOf('const ATTACH_LIMIT = 25'), source.indexOf('$(\'attach\').onclick'));
+  const node = (tag = 'div') => ({
+    tag, hidden: false, disabled: false, title: '', textContent: '', dataset: {}, style: {}, children: [],
+    append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+  });
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const harness = new Function('$', 'document', 'box',
+    'let room = null, viewing = null, peeking = null, localInput = true, attaching = false, pending = [], viewExpired = false, viewNotice = null, localThinking = null, localWorking = null, replica = { node: "local", own: {}, received: [] };\n' +
+    'const updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, renderAutoDev = () => {}, talkStatus = () => "", receivedTime = () => "";\n' +
+    viewCode + '\n' + attachCode + '\n' +
+    'return { update: (r, v = null, p = null) => { room = r; viewing = v; peeking = p; updateReplicaView(); } };'
+  )($, { createElement: node, createTextNode: () => ({}) }, node('textarea'));
+
+  // No room: hidden.
+  harness.update(null);
+  assert.equal($('attach-row').hidden, true);
+
+  // Unstarted brainstorm: row (and pointing chips) shown, attach button disabled.
+  harness.update({ active: null, brainstorm: true, discussion: 'New brainstorm', started: true });
+  assert.equal($('attach-row').hidden, false);
+  assert.equal($('attach').disabled, true);
+  assert.match($('attach').title, /brainstorm/);
+
+  // Started brainstorm: row shown, attach button enabled.
+  harness.update({ active: 'brainstorms/2026-11-20-idea', brainstorm: true, discussion: 'Idea', started: true });
+  assert.equal($('attach-row').hidden, false);
+  assert.equal($('attach').disabled, false);
+  assert.match($('attach').title, /brainstorm's files\//);
+
+  // Read-only (viewing or peeking): hidden.
+  harness.update({ active: 'brainstorms/2026-11-20-idea', brainstorm: true, discussion: 'Idea', started: true }, { title: 'Remote', node: 'peer', round: 1, receivedAt: 0, discussion: 'd', commit: 'c' });
+  assert.equal($('attach-row').hidden, true);
+  harness.update({ active: 'brainstorms/2026-11-20-idea', brainstorm: true, discussion: 'Idea', started: true }, null, { title: 'Other', doc: null });
+  assert.equal($('attach-row').hidden, true);
+});
+
 // Exercise the same member state and row code embedded in the screen, without a browser.
 function memberFunctions() {
   const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
