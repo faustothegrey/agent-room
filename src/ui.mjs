@@ -1671,6 +1671,73 @@ async function closingContext(ctx, d) {
   return shadow;
 }
 
+async function checkLaneCleanMerged(place) {
+  const worktreeExists = existsSync(place.path) && (await worktrees(place.top)).some((w) => w.path === real(place.path));
+  const branchHead = await git(place.top, 'rev-parse', '--verify', '-q', `refs/heads/${place.branch}^{commit}`).catch(() => null);
+  const branchExists = !!branchHead;
+  if (!worktreeExists && !branchExists) return { exists: false, worktreeExists: false, branchExists: false, ahead: 0, dirty: false, op: null, hasLoss: false };
+  const ahead = branchExists ? Number(await git(place.top, 'rev-list', '--count', `HEAD..${branchHead}`)) : 0;
+  let op = null, dirty = false;
+  if (worktreeExists) {
+    const privateDir = await git(place.path, 'rev-parse', '--absolute-git-dir');
+    op = worktreeOperation(privateDir);
+    // `git status --porcelain` (without --ignored) checks tracked edits and untracked files only;
+    // gitignored files such as .worker-notes/ and node_modules/ are treated as transient.
+    dirty = (await git(place.path, 'status', '--porcelain')) !== '';
+  }
+  return { exists: true, worktreeExists, branchExists, ahead, dirty, op, hasLoss: ahead > 0 || dirty || !!op };
+}
+
+async function cleanupMergedOnClose(ctx, name) {
+  const place = await lanePlace(ctx, name);
+  if (place.disabled) return null;
+  const pre = await checkLaneCleanMerged(place);
+  if (!pre.exists || pre.hasLoss) return null;
+  const shop = shopOf(ctx);
+  if (shop.merging) {
+    const msg = `Worker worktree and branch not removed (${shop.merging} was in progress): nothing removed.`;
+    note(ctx, msg, true);
+    return msg;
+  }
+  const lock = `Close cleanup for ${name}`;
+  shop.merging = lock;
+  const done = [];
+  const partial = (err, notDone) => {
+    const msg = `Worker worktree/branch cleanup failed (${err.message}). Removed: ${done.length ? done.join('; ') : 'nothing'}. Not removed: ${notDone.join('; ')}.`;
+    note(ctx, `✗ ${msg}`, true);
+    return msg;
+  };
+  try {
+    const cur = await checkLaneCleanMerged(place);
+    if (!cur.exists || cur.hasLoss) return null;
+    if (cur.worktreeExists) {
+      try {
+        await git(place.top, 'worktree', 'remove', '--force', place.path);
+        done.push(`worktree ${place.path}`);
+      } catch (err) {
+        return partial(err, [
+          `worktree ${place.path}`,
+          ...(cur.branchExists ? [`branch ${place.branch}`] : []),
+          'lane hold and worker session',
+        ]);
+      }
+    }
+    if (cur.branchExists) {
+      try {
+        await git(place.top, 'branch', '-d', place.branch);
+        done.push(`branch ${place.branch}`);
+      } catch (err) {
+        return partial(err, [`branch ${place.branch}`, 'lane hold and worker session']);
+      }
+    }
+    clearLaneAndWorkerSession(ctx, name);
+    await refreshWorker(ctx).catch(() => {});
+    return 'Worker worktree and branch removed (already merged).';
+  } finally {
+    if (shop.merging === lock) shop.merging = null;
+  }
+}
+
 async function pendingWorkLine(ctx, name) {
   const place = await lanePlace(ctx, name);
   if (place.disabled) return null;
@@ -1730,7 +1797,12 @@ async function closeNamedDiscussion(ctx, name, { extraLine = null, rethrow = fal
     const writer = `${spec.provider[0].toUpperCase() + spec.provider.slice(1)} (${modelLabel(spec.provider, spec.model)})`;
     note(ctx, `Closing ${d.name}: ${writer} is writing the closing statement…`);
     const statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports }, target.closingAgent?.());
-    const appendedLine = extraLine ?? await pendingWorkLine(target, d.name).catch(() => null);
+    const cleanupLine = extraLine ? null : await cleanupMergedOnClose(target, d.name).catch((err) => {
+      const msg = `Worker worktree/branch cleanup failed (${err.message}): nothing removed.`;
+      note(ctx, `✗ ${msg}`, true);
+      return msg;
+    });
+    const appendedLine = extraLine ?? cleanupLine ?? await pendingWorkLine(target, d.name).catch(() => null);
     const body = appendedLine ? `${statement.trimEnd()}\n\n${appendedLine}\n` : `${statement}\n`;
     const file = join(target.discussion.dir, 'closing-statement.md');
     const temp = `${file}.${process.pid}.tmp`;
@@ -3721,7 +3793,15 @@ async function workerInfo(ctx, seen = new Map(), own = null) {
         const branchRefs = await git(own.top, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/worker/').catch(() => '');
         const fromBranches = branchRefs.split('\n').filter(Boolean).map((r) => r.slice('worker/'.length)).filter((n) => n && n !== 'main');
         const fromWorktrees = existing.map((l) => l.lane).filter(Boolean);
-        return [...new Set([...fromWorktrees, ...fromBranches])].sort();
+        const candidates = [...new Set([...fromWorktrees, ...fromBranches])].sort();
+        const out = [];
+        for (const n of candidates) {
+          const p = await workerPlace(own.root, n);
+          if (p.disabled) continue;
+          const st = await checkLaneCleanMerged(p).catch(() => null);
+          if (st?.exists && (st.ahead > 0 || st.dirty)) out.push(n);
+        }
+        return out;
       })());
     }
     const mergeable = {};
