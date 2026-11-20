@@ -139,7 +139,8 @@ worker's, as their panels list them ("<provider> default" for CLI default).
   [The worker's worktrees](#the-workers-worktrees)). A discussion's instructions run one at a time,
   in the order sent, alongside the discussion and alongside other discussions' (at most two
   worker tasks at once in a folder), with a 30-minute timeout per instruction.
-  While the shown discussion's worker runs an instruction, the tab offers two stop buttons; each
+  While the shown discussion's worker runs an instruction, the tab offers two stop buttons (hidden
+  while the page peeks at another discussion or views a peer's, back at once on returning); each
   asks you to click it again to confirm, as Close discussion does. They act only on this
   discussion's worker: other discussions' workers and the room's agents keep running. Both cancel
   this discussion's queued instructions at once (none can start in between), listing each in the

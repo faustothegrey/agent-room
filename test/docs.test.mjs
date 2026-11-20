@@ -422,6 +422,48 @@ test('the Worker tab\'s stop buttons: /__stopworker reaches the room only from i
   assert.match(source, /confirmed\(\$\('wstop-now'\), \(\) => stopWorker\('now'\), 'Click again: [^']+', \(\) => true\)/);
 });
 
+test('the stop buttons hide while peeking at another discussion or viewing a peer\'s, and come back at once on returning, before any room update', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', hidden: false, disabled: false, children: [], dataset: {}, style: {},
+    classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
+    get firstChild() { return this.children[0] || null; }, set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; }, querySelector() { return null; }, addEventListener() {}, setAttribute() {}, getAttribute() { return null; },
+  });
+  const els = {};
+  const answers = [];
+  const fetch = async (path) => (path === '__view' ? { ok: true, json: async () => answers.shift() } : { ok: false });
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'localStorage', 'fetch', 'send',
+    'let tab = "work", replica = { node: "here", addresses: [], own: {}, received: [], peers: [{ name: "mac", reachable: true }], project: null }, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'let attaching = false, pending = [], localMessages = [], localWorking = null, viewExpired = false, viewNotice = null, posting = 0;\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (act) => act(), updateBusy = () => {}, busyFailed = () => {};\n' +
+    'const talk = { clear() {}, add() {} }, viewClient = "c", setThinking = () => {}, status = () => {};\n' +
+    code + '\n' +
+    'return { setRoom, setPeeking, viewRemote };'
+  )((id) => els[id] || (els[id] = node(id)), { createElement: node, title: '', querySelectorAll: () => [] }, { href: '' }, null, null, () => {}, (cb) => cb(), () => {},
+    { getItem: () => null, setItem() {} }, fetch, () => {});
+  const shown = () => !els.wstop.hidden;
+
+  // The shown discussion's worker runs an instruction: the buttons show.
+  harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-16-x', discussion: 'X', started: true, workerStop: { after: false, now: false } });
+  assert.equal(shown(), true);
+  // Peeking at a closed discussion (the reset event), and back: no room update in between.
+  harness.setPeeking({ title: 'Closed one', doc: null });
+  assert.equal(shown(), false);
+  harness.setPeeking(null);
+  assert.equal(shown(), true);
+  // Viewing a peer's discussion, and back.
+  answers.push({ viewing: { title: "Peer topic", discussion: "peer-topic", node: "mac", round: 3, messages: [] } });
+  await harness.viewRemote({ discussion: 'peer-topic', node: 'mac' });
+  assert.equal(shown(), false);
+  answers.push({ viewing: null });
+  await harness.viewRemote(null);
+  assert.equal(shown(), true);
+});
+
 test('without a worker input (terminal mode), /__work is refused', async () => {
   const s = await serve(fixture(), { clients: new Set(), transcript: [] });
   assert.equal((await postFrom(s, '/__work', { text: 'hi' })).status, 409);

@@ -1239,21 +1239,16 @@ function message(m, live = false) {
   mention(el, m, live);
   if (m.outcome) renderAutoDev();
 }
-// Auto dev (see ui.mjs): Start beside the latest agreed summary's instruction, or why it can't be
-// sent; while a run is going or paused, its line above the message box, with Restart when paused.
-// The stop buttons (see stopWorker in ui.mjs): while this discussion's worker runs an instruction.
-// Each takes a second click to confirm, as Close discussion does.
-function renderWorkerStop() {
-  const w = room?.workerStop;
-  $('wstop').hidden = !w || w.now || viewing || !localInput;
-  $('wstop-after').disabled = !!w?.after;
-}
+// The stop buttons (see stopWorker in ui.mjs and renderWorkerStop): each takes a second click to
+// confirm, as Close discussion does.
 async function stopWorker(mode) {
   try { const res = await post('__stopworker', { mode }); if (!res.ok) throw new Error(await res.text()); }
   catch (err) { status(err.message, true, 'Worker'); }
 }
 confirmed($('wstop-after'), () => stopWorker('after'), 'Click again: stop after this task; queued instructions are cancelled', () => true);
 confirmed($('wstop-now'), () => stopWorker('now'), 'Click again: stop now; partial edits may be left', () => true);
+// Auto dev (see ui.mjs): Start beside the latest agreed summary's instruction, or why it can't be
+// sent; while a run is going or paused, its line above the message box, with Restart when paused.
 function renderAutoDev() {
   document.querySelectorAll('.autodev-offer').forEach((e) => e.remove());
   const a = room?.autoDev, el = $('autodev');
@@ -1520,8 +1515,21 @@ function updateDiscWorkers() {
     return s;
   }));
 }
+// The Worker tab's stop buttons: while this discussion's worker runs an instruction, and not while
+// the page peeks at another discussion or views a peer's (they come back at once on returning).
+function renderWorkerStop() {
+  const w = room?.workerStop;
+  $('wstop').hidden = !w || w.now || !!viewing || !!peeking || !localInput;
+  $('wstop-after').disabled = !!w?.after;
+}
+// Entering or leaving a peek (the reset event): the stop buttons follow at once.
+function setPeeking(p) {
+  peeking = p;
+  renderWorkerStop();
+}
 function updateReplicaView() {
   updateDiscWorkers();
+  renderWorkerStop();
   updateReplicaHeader();
   renderAutoDev();
   const readOnly = !!(viewing || peeking);
@@ -3108,7 +3116,7 @@ events.onmessage = (e) => {
   }
   if (ev.type === 'reset') {
     localMessages = []; localInput = ev.input;
-    peeking = ev.peek ?? null;
+    setPeeking(ev.peek ?? null);
     talk.clear();
     if (peeking) {
       for (const m of ev.messages) if (!m.pass && !m.hidden) talk.add(bubble(m));
