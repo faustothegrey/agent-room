@@ -123,9 +123,9 @@ worker's, as their panels list them ("<provider> default" for CLI default).
   stopping when everyone passes consecutively, a turn fails, or the lap cap is reached (10 laps in a
   discussion, 20 in a brainstorm; one lap is each selected agent speaking once).
   Passes are hidden in the chat and retained in the transcript. Replies appear when complete.
-  **📎 Attach** (under the message box, in discussions only, not brainstorms; a new discussion
+  **📎 Attach** (under the message box, in discussions and brainstorms; a new one
   allows it after its first message) adds files of any type to your next message; each waits
-  there, removable with ✕. Sending saves them into the discussion's `files/` folder (created if
+  there, removable with ✕. Sending saves them into the discussion's or brainstorm's `files/` folder (created if
   missing; a taken name becomes `name-2.ext`, `name-3.ext`, …, never overwritten) and appends
   their paths to the message, e.g. `Attached: files/sketch.png`, for the agents and the
   transcript. Each file can be at most 25 MB, and 250 MB together per message. If any file can't
@@ -339,14 +339,14 @@ totals.
 **New brainstorm** (in the header's **Actions ▾** menu, or `/brainstorm`) starts a conversation with
 the same agents, turns and `PASS` rules. Its first message gets a title from Claude and a folder,
 as a discussion's does, but under `brainstorms/` at the root: `brainstorms/<date>-<title>/`, holding
-`transcripts/` and, if the agents draw, `drawings/`. A name is never one already taken in
+`transcripts/`, `drawings/` if the agents draw, and `files/` if you attach files. A name is never one already taken in
 `discussions/` (`archive/` and `deferred/` included), nor a discussion's one taken in `brainstorms/`.
 It saves checkpoints like a discussion (below), under the key `brainstorms/<name>` and with no worker
 part, so Resume (`/resume brainstorms/<name>`), Close and Restart work as for discussions. The agents
 are told it is a brainstorm: they write nothing except drawings in its `drawings/`, may read the
 project, and propose turning it into a discussion when something else tangible is wanted. A
 brainstorm sends no work: while one is shown, the Worker tab says "Turn this brainstorm into a
-discussion to send work." and refuses instructions; there is no Attach, auto dev or automatic
+discussion to send work." and refuses instructions; there is no auto dev or automatic
 summary (manual **Summarize** works), and the lap cap is 20. Brainstorms are not replicated to
 peers. Typing in a room with no discussion still starts a discussion.
 
