@@ -13,8 +13,8 @@
   <rect x="20" y="64" width="320" height="26" rx="6" fill="#1168bd"/>
   <text x="180" y="82" fill="#fff" text-anchor="middle" font-weight="bold">1. Unstarted context (/new or launch)</text>
   <text x="32" y="106" font-size="11">• No folder, transcript or checkpoint on disk yet</text>
-  <text x="32" y="122" font-size="11">• Screen <tspan font-family="monospace">/new</tspan>: opens beside open discussions &amp; brainstorms</text>
-  <text x="42" y="136" font-size="10.5" fill="#444">(an unstarted brainstorm in place becomes the new discussion)</text>
+  <text x="32" y="122" font-size="11">• Screen <tspan font-family="monospace">/new</tspan>: opens beside open discussions</text>
+  <text x="42" y="136" font-size="10.5" fill="#444">&amp; brainstorms (unstarted brainstorm becomes it)</text>
   <text x="32" y="152" font-size="11">• Settings changes apply directly before 1st message</text>
   <text x="32" y="168" font-size="11">• Worker tasks before 1st message use <tspan font-family="monospace">worker/main</tspan></text>
   <text x="32" y="184" font-size="10.5" fill="#555">• Valid 1st message → <tspan font-family="monospace">openDiscussion()</tspan>:</text>
@@ -36,28 +36,29 @@
   <text x="752" y="184" font-size="11">• No worker, auto dev or automatic summary</text>
   <text x="752" y="200" font-size="10.5" fill="#b07a1f">• Agents write only drawings (may read root &amp; <tspan font-family="monospace">files/</tspan>)</text>
 
-  <!-- Center Box: Active Open Discussion (x=390..710, y=64..268) -->
-  <rect x="390" y="64" width="320" height="204" rx="6" fill="#e6f4ea" stroke="#2e7d32" stroke-width="2"/>
+  <!-- Center Box: Active Open Discussion (x=390..710, y=64..274) -->
+  <rect x="390" y="64" width="320" height="210" rx="6" fill="#e6f4ea" stroke="#2e7d32" stroke-width="2"/>
   <rect x="390" y="64" width="320" height="26" rx="6" fill="#2e7d32"/>
   <text x="550" y="82" fill="#fff" text-anchor="middle" font-weight="bold">3. Open discussion (in use / open beside)</text>
   <text x="402" y="104" font-size="11">• Folder: <tspan font-family="monospace">discussions/&lt;date-title&gt;/</tspan></text>
-  <text x="402" y="119" font-size="11">• Session log: <tspan font-family="monospace">transcripts/session-*.md</tspan></text>
-  <text x="402" y="134" font-size="11">• Own agent sessions + worker session (<tspan font-family="monospace">workerSeat</tspan>)</text>
-  <text x="402" y="149" font-size="11">• Worktree: <tspan font-family="monospace">&lt;repo&gt;.workers/&lt;name&gt;/</tspan> (<tspan font-family="monospace">worker/&lt;name&gt;</tspan>)</text>
-  <text x="402" y="164" font-size="11">• Saves checkpoint after each round, <tspan font-family="monospace">/summary</tspan>,</text>
-  <text x="412" y="177" font-size="10.5" fill="#444">worker task, and on Quit &amp; Restart</text>
-  <text x="402" y="192" font-size="11">• <tspan font-family="monospace">/close</tspan> (or Close with pending work): waits for</text>
-  <text x="412" y="205" font-size="10.5" fill="#444">worker tasks, writes <tspan font-family="monospace">closing-statement.md</tspan> (pointing</text>
-  <text x="412" y="218" font-size="10.5" fill="#444">to <tspan font-family="monospace">pending-instructions.md</tspan>), drops sessions, marks closed</text>
-  <text x="402" y="233" font-size="11">• Close and Merge (<tspan font-family="monospace">--no-ff</tspan>) or Close and Discard</text>
-  <text x="412" y="246" font-size="10.5" fill="#444">(<tspan font-family="monospace">refs/discarded/</tspan>): cleans up worktree &amp; branch, closes</text>
-  <text x="412" y="260" font-size="10" fill="#555">(two-click preview; shared room-wide lock)</text>
+  <text x="402" y="118" font-size="11">• Session log: <tspan font-family="monospace">transcripts/session-*.md</tspan></text>
+  <text x="402" y="132" font-size="11">• Own agent sessions + worker session (<tspan font-family="monospace">workerSeat</tspan>)</text>
+  <text x="402" y="146" font-size="11">• Worktree: <tspan font-family="monospace">&lt;repo&gt;.workers/&lt;name&gt;/</tspan></text>
+  <text x="412" y="159" font-size="10.5" fill="#444">(branch <tspan font-family="monospace">worker/&lt;name&gt;</tspan>, own queue)</text>
+  <text x="402" y="173" font-size="11">• Saves checkpoint after each round, <tspan font-family="monospace">/summary</tspan>,</text>
+  <text x="412" y="186" font-size="10.5" fill="#444">worker task, and on Quit &amp; Restart</text>
+  <text x="402" y="200" font-size="11">• <tspan font-family="monospace">/close</tspan> (or Close with pending work): waits for</text>
+  <text x="412" y="213" font-size="10.5" fill="#444">worker, writes <tspan font-family="monospace">closing-statement.md</tspan> (pointing to</text>
+  <text x="412" y="226" font-size="10.5" fill="#444"><tspan font-family="monospace">pending-instructions.md</tspan>), drops sessions, closes</text>
+  <text x="402" y="240" font-size="11">• Close and Merge (<tspan font-family="monospace">--no-ff</tspan>) or Close and Discard</text>
+  <text x="412" y="253" font-size="10.5" fill="#444">(<tspan font-family="monospace">refs/discarded/</tspan>): removes worktree &amp; branch,</text>
+  <text x="412" y="266" font-size="10" fill="#555">closes (two-click preview; room-wide lock)</text>
 
   <!-- Arrow down from Active Discussion to Checkpoint / Closed states -->
-  <line x1="470" y1="268" x2="470" y2="306" stroke="#444" stroke-width="1.5" marker-end="url(#a)"/>
-  <text x="462" y="291" font-size="10" text-anchor="end" fill="#444">saveCheckpoint() / Close / Restart</text>
-  <line x1="620" y1="308" x2="620" y2="270" stroke="#2e7d32" stroke-width="1.5" marker-end="url(#a)"/>
-  <text x="628" y="291" font-size="10" fill="#2e7d32" font-weight="bold">Resume / 1st msg</text>
+  <line x1="470" y1="274" x2="470" y2="306" stroke="#444" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="462" y="294" font-size="10" text-anchor="end" fill="#444">saveCheckpoint() / Close / Restart</text>
+  <line x1="620" y1="308" x2="620" y2="276" stroke="#2e7d32" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="628" y="294" font-size="10" fill="#2e7d32" font-weight="bold">Resume / 1st msg</text>
 
   <!-- Row 2 Left: Resume with Full Checkpoint (x=20..525, y=308..518) -->
   <rect x="20" y="308" width="505" height="210" rx="6" fill="#f3f7fb" stroke="#1168bd" stroke-width="1.5"/>
