@@ -85,3 +85,5 @@ leftover edits hold their own lane for their origin, which can recover them; oth
 Close with pending work: allowed with unresolved edits (hold and files kept), appends pending-work line to closing-statement.md, and refuses tasks queued behind an unresolved-edits hold
 Stop now with a real program: the worker's process group is killed through its monitored turn, and its last-turn record is an error
 Close and Discard: refuses with a queued task or mid-operation, previews commits/edits/untracked/ignored summary, detects changes between clicks, saves unique discard ref, removes worktree and branch, clears hold/session, and closes
+Stop now while the worktree is prepared: the worker never starts, and the result is unknown
+Close and Merge: greyed-out reasons, Catch up when main moved, change between clicks, conflicting merge aborted cleanly, and successful merge with cleanup and close

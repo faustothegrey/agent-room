@@ -462,39 +462,70 @@ test('the Close action switches between Close and Close with pending work in Act
     querySelectorAll() { return []; },
     addEventListener() {},
   });
-  const closedisc = node('button'), closediscard = node('button'), winfo = node('div'), wbox = node('textarea');
+  const closedisc = node('button'), closemerge = node('button'), closediscard = node('button'), winfo = node('div'), wbox = node('textarea');
   let renders = 0;
   const harness = new Function('$', 'document', 'window', 'matchMedia', 'wbox', 'renderDiscussions',
-    'let room = { active: "discussions/2026-11-19-a", brainstorm: false }, workerPending = null, workerDiscardable = new Set(), ended = false, restarting = false;\n' +
+    'let room = { active: "discussions/2026-11-19-a", brainstorm: false }, workerPending = null, workerDiscardable = new Set(), workerMergeable = {}, ended = false, restarting = false;\n' +
     closeCode + '\n' + winfoCode + '\nreturn { showWorkerInfo, closeActionLabel, updateCloseButton, setRoom: (r) => { room = r; updateCloseButton(); } };'
-  )((id) => (id === 'closedisc' ? closedisc : id === 'closediscard' ? closediscard : id === 'winfo' ? winfo : node(id)),
+  )((id) => (id === 'closedisc' ? closedisc : id === 'closemerge' ? closemerge : id === 'closediscard' ? closediscard : id === 'winfo' ? winfo : node(id)),
     { createElement: node, getElementById: () => null, head: node('head') }, {}, () => ({ matches: false }), wbox, () => { renders++; });
 
-  // No pending work: Close in Actions and for every discussion row; Close and Discard hidden until a worktree/branch exists.
-  harness.showWorkerInfo({ lines: [], pending: [], discardable: [] });
+  // No pending work: Close in Actions and for every discussion row; Merge and Discard hidden until relevant.
+  harness.showWorkerInfo({ lines: [], pending: [], discardable: [], mergeable: {} });
   assert.equal(closedisc.textContent, 'Close');
+  assert.equal(closemerge.hidden, true);
   assert.equal(closediscard.hidden, true);
   assert.equal(harness.closeActionLabel('2026-11-19-a'), 'Close');
   assert.equal(harness.closeActionLabel('2026-11-19-b'), 'Close');
 
-  // Pending work and discardable lane on discussion a: switches to Close with pending work and shows Close and Discard.
+  // Pending work with greyed-out Close and Merge (tooltip gives reason) and visible Close and Discard.
   const before = renders;
-  harness.showWorkerInfo({ lines: [], pending: [{ lane: '2026-11-19-a', branch: 'worker/2026-11-19-a', ahead: 2, dirty: false }], discardable: ['2026-11-19-a'] });
+  harness.showWorkerInfo({
+    lines: [],
+    pending: [{ lane: '2026-11-19-a', branch: 'worker/2026-11-19-a', ahead: 2, dirty: true }],
+    discardable: ['2026-11-19-a'],
+    mergeable: { '2026-11-19-a': { canMerge: false, catchUp: false, disabledReason: 'The worker\'s worktree has uncommitted edits.', targetBranch: 'main', behind: 0 } },
+  });
   assert.equal(closedisc.textContent, 'Close with pending work');
+  assert.equal(closemerge.hidden, false);
+  assert.equal(closemerge.disabled, true);
+  assert.equal(closemerge.title, 'The worker\'s worktree has uncommitted edits.');
   assert.equal(closediscard.hidden, false);
   assert.equal(harness.closeActionLabel('2026-11-19-a'), 'Close with pending work');
   assert.equal(harness.closeActionLabel('2026-11-19-b'), 'Close');
   assert.equal(renders, before + 1);
 
-  // Pending work cleared: returns to Close; no discardable lane hides Close and Discard.
-  harness.showWorkerInfo({ lines: [], pending: [], discardable: [] });
+  // Target branch moved: switches to enabled Catch up with main.
+  harness.showWorkerInfo({
+    lines: [],
+    pending: [{ lane: '2026-11-19-a', branch: 'worker/2026-11-19-a', ahead: 2, dirty: false }],
+    discardable: ['2026-11-19-a'],
+    mergeable: { '2026-11-19-a': { canMerge: false, catchUp: true, disabledReason: null, targetBranch: 'main', behind: 1 } },
+  });
+  assert.equal(closemerge.disabled, false);
+  assert.equal(closemerge.textContent, 'Catch up with main');
+
+  // Ready to merge: enabled Close and Merge.
+  harness.showWorkerInfo({
+    lines: [],
+    pending: [{ lane: '2026-11-19-a', branch: 'worker/2026-11-19-a', ahead: 2, dirty: false }],
+    discardable: ['2026-11-19-a'],
+    mergeable: { '2026-11-19-a': { canMerge: true, catchUp: false, disabledReason: null, targetBranch: 'main', behind: 0 } },
+  });
+  assert.equal(closemerge.disabled, false);
+  assert.equal(closemerge.textContent, 'Close and Merge');
+
+  // Pending work cleared: returns to Close; hides Merge and Discard.
+  harness.showWorkerInfo({ lines: [], pending: [], discardable: [], mergeable: {} });
   assert.equal(closedisc.textContent, 'Close');
+  assert.equal(closemerge.hidden, true);
   assert.equal(closediscard.hidden, true);
   assert.equal(harness.closeActionLabel('2026-11-19-a'), 'Close');
 
-  // Brainstorm stays Close brainstorm and hides Close and Discard.
+  // Brainstorm stays Close brainstorm and hides Merge and Discard.
   harness.setRoom({ active: 'brainstorms/2026-11-19-idea', brainstorm: true });
   assert.equal(closedisc.textContent, 'Close brainstorm');
+  assert.equal(closemerge.hidden, true);
   assert.equal(closediscard.hidden, true);
 });
 
@@ -517,6 +548,25 @@ test('POST /__discard previews and confirms Close and Discard only from the room
     assert.equal(r3.status, 200);
     assert.equal((await r3.json()).ok, true);
     assert.deepEqual(calls, [['preview', '2026-11-19-a'], ['confirm', '2026-11-19-a', 'stale'], ['confirm', '2026-11-19-a', 'snap1']]);
+  } finally { s.close(); }
+});
+
+test('POST /__merge and POST /__catchup enforce same-origin and wire preview, confirm and catch-up', async () => {
+  const calls = [];
+  const s = await serve(fixture(), {
+    clients: new Set(), transcript: [],
+    mergePreviewClose: async (name) => { calls.push(['preview', name]); return { ok: true, preview: { name, snapshot: 'ms1' } }; },
+    closeAndMerge: async (name, snap) => { calls.push(['merge', name, snap]); return snap === 'ms1' ? { ok: true } : { changed: true, preview: { name, snapshot: 'ms2' } }; },
+    catchUpMerge: async (name) => { calls.push(['catchup', name]); return { ok: true, targetBranch: 'main' }; },
+  });
+  try {
+    assert.equal((await postFrom(s, '/__merge', { name: '2026-11-19-a' }, { origin: 'https://evil.example' })).status, 403);
+    assert.equal((await postFrom(s, '/__catchup', { name: '2026-11-19-a' }, { origin: 'https://evil.example' })).status, 403);
+    assert.equal((await (await postFrom(s, '/__merge', { name: '2026-11-19-a' })).json()).preview.snapshot, 'ms1');
+    assert.equal((await (await postFrom(s, '/__merge', { name: '2026-11-19-a', snapshot: 'stale' })).json()).changed, true);
+    assert.equal((await (await postFrom(s, '/__merge', { name: '2026-11-19-a', snapshot: 'ms1' })).json()).ok, true);
+    assert.equal((await (await postFrom(s, '/__catchup', { name: '2026-11-19-a' })).json()).targetBranch, 'main');
+    assert.deepEqual(calls, [['preview', '2026-11-19-a'], ['merge', '2026-11-19-a', 'stale'], ['merge', '2026-11-19-a', 'ms1'], ['catchup', '2026-11-19-a']]);
   } finally { s.close(); }
 });
 

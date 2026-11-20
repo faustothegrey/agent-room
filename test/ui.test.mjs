@@ -4583,3 +4583,171 @@ test('Close and Discard: refuses with a queued task or mid-operation, previews c
   const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
   assert.ok(stmt.includes(`Worker work discarded: 1 commit kept at \`${done.savedRef}\`.`));
 });
+
+test('Close and Merge: greyed-out reasons, Catch up when main moved, change between clicks, conflicting merge aborted cleanly, and successful merge with cleanup and close', async () => {
+  const { writeFileSync, mkdirSync, readFileSync, existsSync, unlinkSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, workerPlace, mergeReadiness, closeMergePreview, catchUpWithBranch, closeAndMerge } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  let releaseSlow;
+  const slowGate = new Promise((r) => { releaseSlow = r; });
+  let replyMode = 'commit-untested';
+  const { first, git } = await multiRoom({ worker: async (ctx, p) => {
+    const tree = ctx.workerDir.path;
+    if (replyMode === 'slow') { await slowGate; return 'done'; }
+    if (replyMode === 'commit-untested') {
+      writeFileSync(`${tree}/shared.txt`, 'worker-v1\n');
+      inTree(tree, 'add', 'shared.txt');
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] add shared`);
+      return 'committed without tested line';
+    }
+    if (replyMode === 'test-fail') {
+      return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests failed`;
+    }
+    if (replyMode === 'test-pass') {
+      return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+    }
+    if (replyMode === 'catchup') {
+      inTree(tree, 'merge', 'main', '--no-edit');
+      return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+    }
+    return 'ok';
+  } });
+  writeFileSync(`${first.cwd}/.gitignore`, 'cache/\n');
+  writeFileSync(`${first.cwd}/base.txt`, 'base\n');
+  git('add', '.gitignore', 'base.txt'); git('commit', '-q', '-m', 'init files');
+
+  await handleLine('merge-topic', first);
+  const { name, dir } = first.discussion;
+  queueWork(first, 'make change');
+  await first.workQueue;
+  const tree = first.workerDir.path;
+  const place = await workerPlace(first.cwd, name);
+  const wtGitDir = inTree(tree, 'rev-parse', '--absolute-git-dir');
+  const roomGitDir = git('rev-parse', '--absolute-git-dir');
+
+  // 1. Greyed-out reasons:
+  // (a) No Tested: report yet
+  let st = await mergeReadiness(first, place);
+  assert.equal(st.show, true); assert.equal(st.canMerge, false);
+  assert.match(st.disabledReason, /No passing Tested: report/);
+
+  // (b) Failed Tested: report
+  replyMode = 'test-fail';
+  queueWork(first, 'run failing test');
+  await first.workQueue;
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false);
+  assert.match(st.disabledReason, /last test report failed/);
+
+  // (c) Record passing Tested: report -> now canMerge is true!
+  replyMode = 'test-pass';
+  queueWork(first, 'run passing test');
+  await first.workQueue;
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, true); assert.equal(st.disabledReason, null);
+
+  // (d) Uncommitted edit in worktree
+  writeFileSync(`${tree}/wip.txt`, 'dirty\n');
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false); assert.match(st.disabledReason, /uncommitted edits/);
+  unlinkSync(`${tree}/wip.txt`);
+
+  // (e) Worktree mid-rebase
+  mkdirSync(`${wtGitDir}/rebase-merge`, { recursive: true });
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false); assert.match(st.disabledReason, /mid-rebase/);
+  const { rmSync } = await import('node:fs');
+  rmSync(`${wtGitDir}/rebase-merge`, { recursive: true, force: true });
+
+  // (f) Room tracked edits outside discussions/ (while edits inside discussions/ are fine)
+  writeFileSync(`${first.cwd}/base.txt`, 'edited in room\n');
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false); assert.match(st.disabledReason, /tracked edits outside discussions/);
+  git('checkout', '--', 'base.txt');
+
+  // (g) Room mid-operation
+  writeFileSync(`${roomGitDir}/MERGE_HEAD`, git('rev-parse', 'HEAD') + '\n');
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false); assert.match(st.disabledReason, /room's checkout is mid-merge/);
+  unlinkSync(`${roomGitDir}/MERGE_HEAD`);
+
+  // (h) Room detached HEAD
+  const mainSha = git('rev-parse', 'main');
+  git('checkout', '-q', '--detach', mainSha);
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false); assert.match(st.disabledReason, /detached HEAD/);
+  git('checkout', '-q', 'main');
+
+  // (i) Worker task running or queued
+  replyMode = 'slow';
+  queueWork(first, 'running task');
+  await until(() => workerLane(first, name).running);
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false); assert.match(st.disabledReason, /running or queued.*"running task"/);
+  releaseSlow();
+  await first.workQueue;
+
+  // 2. Main moves on: Catch up with main is offered instead, queues catch-up task, and does NOT merge automatically.
+  writeFileSync(`${first.cwd}/other.txt`, 'from main\n');
+  git('add', 'other.txt'); git('commit', '-q', '-m', 'main moved');
+  const mainAfterMove = git('rev-parse', 'main');
+  const previewMoved = await closeMergePreview(first, name);
+  assert.equal(previewMoved.catchUp, true);
+  assert.equal(previewMoved.targetBranch, 'main');
+  replyMode = 'catchup';
+  const cu = await catchUpWithBranch(first, name);
+  assert.equal(cu.ok, true);
+  await first.workQueue;
+  // Nothing merged into main automatically: main is still at mainAfterMove!
+  assert.equal(git('rev-parse', 'main'), mainAfterMove);
+  assert.equal(existsSync(tree), true);
+
+  // 3. Two-click preview + change between clicks (ignored file added in worktree).
+  mkdirSync(`${tree}/cache`, { recursive: true });
+  writeFileSync(`${tree}/cache/c1.bin`, 'abc');
+  const p1 = await closeMergePreview(first, name);
+  assert.equal(p1.ok, true);
+  assert.equal(p1.preview.title, `Merge worker/${name} into main`);
+  assert.ok(p1.preview.ignored.some((i) => i.label === 'cache/ 1 file'));
+  writeFileSync(`${tree}/cache/c2.bin`, 'def');
+  const changed = await closeAndMerge(first, name, p1.preview.snapshot);
+  assert.equal(changed.changed, true);
+  assert.equal(git('rev-parse', 'main'), mainAfterMove, 'must not merge when snapshot changed');
+
+  // 4. Conflicting merge aborted cleanly: room left clean, branch/worktree/discussion left open.
+  const p2 = await closeMergePreview(first, name);
+  await assert.rejects(
+    () => closeAndMerge(first, name, p2.preview.snapshot, {
+      _beforeMerge: async () => {
+        // Create a conflicting commit on main right after the preflight check to exercise real merge conflict + abort.
+        writeFileSync(`${first.cwd}/shared.txt`, 'main-conflict\n');
+        git('add', 'shared.txt'); git('commit', '-q', '-m', 'conflicting main commit');
+      },
+    }),
+    /Aborted the merge; the room's checkout is back as it was/,
+  );
+  assert.equal(existsSync(`${roomGitDir}/MERGE_HEAD`), false, 'MERGE_HEAD must be aborted');
+  assert.equal(git('status', '--porcelain', '--', '.', ':(exclude)discussions'), '');
+  assert.equal(existsSync(tree), true, 'worktree kept open on conflict');
+  assert.ok(!first.screen.room.closedDiscussions.includes(name), 'discussion left open on conflict');
+
+  // Reset main back to mainAfterMove (undo the injected conflict commit) so we can test a clean merge!
+  git('reset', '--hard', '-q', mainAfterMove);
+
+  // 5. Successful Close and Merge: merges with --no-ff, removes worktree and branch (-d), clears hold/session, and closes with closing-statement line.
+  const p3 = await closeMergePreview(first, name);
+  assert.equal(p3.ok, true);
+  const merged = await closeAndMerge(first, name, p3.preview.snapshot);
+  assert.equal(merged.ok, true);
+  assert.equal(merged.targetBranch, 'main');
+  assert.match(merged.mergeCommit, /^[0-9a-f]{7}$/);
+  assert.equal(git('rev-parse', '--short=7', 'main'), merged.mergeCommit);
+  assert.equal(git('show', '-s', '--format=%s', 'main'), `[${name}] Merge worker/${name}`);
+  assert.equal(existsSync(tree), false, 'worktree removed after merge');
+  assert.throws(() => git('rev-parse', '--verify', `refs/heads/worker/${name}`), 'branch deleted after merge');
+  assert.ok(first.screen.room.closedDiscussions.includes(name));
+  const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
+  assert.ok(stmt.includes(`Worker work merged into \`main\` as \`${merged.mergeCommit}\`.`));
+});
