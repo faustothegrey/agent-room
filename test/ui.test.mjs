@@ -5110,3 +5110,28 @@ test('a detached worker from another discussion reports usage unavailable instea
   assert.match(got[1], /^\[your reported usage this session: usage unavailable · codex quota 20% 5h \/ 3% week, meter at 09:42\]\n\nqueued from old discussion$/);
   assert.doesNotMatch(got[1].split('\n')[0], /none yet|77\.0k/);
 });
+
+test('closing one of two open discussions removes it from the other page\'s open list once its quit finishes', async () => {
+  const { stopRoom, ended } = await import('../src/ui.mjs');
+  const { hub, first, contexts } = await multiRoom();
+  await handleLine('topic-a', first);
+  await handleLine('/new', first);
+  const [, second] = contexts();
+  await handleLine('topic-b', second);
+  const closedName = second.discussion.name;
+  second.closingAgent = () => ({ name: 'W', turn: async () => 'Closing statement: pending-instructions.md' });
+
+  await handleLine('/close', second);
+  assert.ok(second.queued.includes('/quit'));
+
+  // Run the /quit tail as cli.mjs does: stopRoom, ended, then delete from hub.rooms.
+  await stopRoom(second);
+  await ended(second, false);
+  hub.rooms.delete(second.key);
+
+  assert.deepEqual(first.screen.room.open.map((o) => o.active), [`discussions/${first.discussion.name}`]);
+  assert.ok(first.screen.room.closedDiscussions.includes(closedName));
+  const lastRoomEvent = first.events.filter((e) => e.type === 'room').at(-1)?.room;
+  assert.deepEqual(lastRoomEvent.open.map((o) => o.active), [`discussions/${first.discussion.name}`]);
+  assert.ok(lastRoomEvent.closedDiscussions.includes(closedName));
+});

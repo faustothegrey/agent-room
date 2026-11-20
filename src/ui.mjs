@@ -478,7 +478,7 @@ export function sessionView(ctx) {
 // Every page of the folder's open discussions: they list each other.
 function showHeader(ctx) {
   for (const c of siblings(ctx)) {
-    if (!c.room || !c.worker) continue; // still loading
+    if (c.stopped || !c.room || !c.worker) continue; // still loading or already stopped
     c.screen.room = header(c);
     toScreen(c, { type: 'room', room: c.screen.room });
   }
@@ -1538,7 +1538,7 @@ const originLabel = (ctx) => (ctx.state.brainstorm ? 'brainstorm' : ctx.discussi
 const pageOf = (ctx) => `${roomPath(ctx)}__room`;
 // started: its first message was sent (Explorer shows Resume for it then, Go to before).
 function openList(ctx) {
-  return siblings(ctx).filter((c) => c.state && c.id).map((c) => ({ url: pageOf(c), current: c === ctx,
+  return siblings(ctx).filter((c) => c.state && c.id && !c.stopped).map((c) => ({ url: pageOf(c), current: c === ctx,
     title: c.discussion?.title ?? (c.state.brainstorm ? 'New brainstorm (not started)' : 'New discussion (not started)'),
     active: folderOf(c), brainstorm: !!c.state.brainstorm, started: !!c.logPath, working: !!c.screen.working }));
 }
@@ -3230,6 +3230,7 @@ export async function reloaded(ctx) {
 export function ended(ctx, restarting = false) {
   if (ctx.replicaOwner && ctx.replica) ctx.replicate.stopPeers(ctx.replica); // its other discussions close with it (Quit room)
   clearInterval(ctx.quotaTimer);
+  if (!restarting) showHeader(ctx);
   return ctx.docs.endAll(ctx.screen, { type: restarting ? 'restarting' : 'ended' });
 }
 
