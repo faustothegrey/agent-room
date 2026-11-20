@@ -216,10 +216,14 @@ last-turn records stay in memory by session and retain the latest error after su
 prompt diagnostics use isolated calls, retain results and leave agent sessions alone
 run gives `started` the process as soon as it is spawned (the worker's Stop now stops only its own)
 the Worker tab's stop buttons: /__stopworker reaches the room only from its page, with a known mode; each button asks to click again
-Stop now while the worktree is prepared: the worker never starts, and the result is unknown
 Stop after this task: the running instruction finishes and is reported as usual; queued ones are cancelled; auto dev pauses; other discussions' workers go on
 a worker agent's programs: once its task is stopped, none starts
-Stop now with a real program: the worker's process group is killed through its monitored turn, and its last-turn record is an error
 the stop buttons hide while peeking at another discussion or viewing a peer's, and come back at once on returning, before any room update
 a brainstorm message with attachments saves into brainstorms/<name>/files/ and appends their paths
 the attach row (and pointing chips) is shown for a brainstorm, and the attach button stays disabled before its first message
+the Worker tab draws a Mermaid gitGraph when a lane is expanded and shows a plain-text note when gitGraph cannot draw it
+branchDiagram: falls back to a plain-text note when gitGraph cannot draw the history faithfully, and supports non-main room branches
+branchDiagram: strips leading [label] from subjects and tags third-branch merges with tag: "merge"
+the Close action switches between Close and Close with pending work in Actions and Discussions
+POST /__discard previews and confirms Close and Discard only from the room page
+POST /__merge and POST /__catchup enforce same-origin and wire preview, confirm and catch-up

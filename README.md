@@ -51,7 +51,7 @@ the server's version. An amber ⚠ to the right of **Server** means a replicatio
 (hover for how many); click it to open **Peers…**. **Current discussion** (green): on the left, the selected
 discussion's or brainstorm's title (**New brainstorm** before a brainstorm's first message), or **No discussion started**, with its state under it (who is thinking, or your
 turn); **Actions ▾** holds **Summarize**, **New discussion**, **New brainstorm**, **Turn into a discussion** (when a
-brainstorm is shown) and (on the screen) **Close discussion** (**Close brainstorm**); on the right, every open discussion whose worker is working is listed, one per line,
+brainstorm is shown), **Close** (**Close with pending work** when the worker branch has unmerged commits or uncommitted edits; **Close brainstorm** for a brainstorm), **Close and Merge** (or **Catch up with `<branch>`**, when the discussion's branch has commits not in the room's current branch), and **Close and Discard** (when the discussion has a worker worktree or branch); on the right, every open discussion whose worker is working is listed, one per line,
 as `<title> · Worker is working` (the shown discussion included). **Monitoring** (amber): the monitor panel, with the subscription usage gauges
 and a warning per provider (below).
 
@@ -304,16 +304,16 @@ it is, during a round too: its agents carry on, nothing is restarted. An open di
 yet) has **Go to** instead, which only shows it. **New discussion** and **New brainstorm** open the new
 one beside the one in use, which stays open (in place, when the one in use hasn't started). Resume
 and Start fresh open any other discussion or brainstorm beside the open ones; several brainstorms
-can be open at once. **Close discussion** (in **Actions ▾**, or `/close`) also works on a paused
-discussion's row. It refuses new worker instructions and waits for its queued and running tasks;
-while waiting the row says **closing, waiting for worker** and offers **Cancel close**. A one-off
+can be open at once. **Close** (in **Actions ▾** and each row's menu in **Discussions**, or `/close`) is labelled **Close with pending work** when the discussion's worker branch has commits not in main or uncommitted edits, and also works on a paused
+discussion's row. It keeps the worker branch and worktree exactly as they are (branch, commits, uncommitted, untracked and ignored files) for rework later. It refuses new worker instructions and waits for its queued and running tasks;
+while waiting the row says **closing, waiting for worker** and offers **Cancel close**. Tasks queued behind an unresolved-edits hold can never start, so Close refuses at once and names them instead of waiting. A one-off
 agent with the provider and model set in that discussion's **Worker · provider & model** panel
 (not the discussion agents, nor the worker's own session) then reads the discussion's notes and
-transcripts and writes a closing statement pointing to `pending-instructions.md` (the system messages name its provider and model, when it starts and when the discussion is closed); agent-room writes the one
+transcripts and writes a closing statement pointing to `pending-instructions.md` (the system messages name its provider and model, when it starts and when the discussion is closed); when the branch has pending work, agent-room appends `Worker work pending on <node or host>: \`worker/<name>\`, N commits not in main, uncommitted edits: yes/no, worktree \`<path>\`.` to `closing-statement.md`. agent-room writes the one
 current `closing-statement.md`, ends the sessions and marks the discussion closed. Unresolved worker
-edits still prevent Close. If Close fails or is cancelled, the discussion stays open or paused and
+edits do not prevent Close: the worktree's queue hold stays as it is, and resuming the discussion later finds the edits still there. **Close and Merge** (beside Close in **Actions ▾** and each row's menu in **Discussions**, shown when the discussion's branch has commits not in the room's current branch) merges `worker/<name>` into the room's current branch, cleans up its worktree and branch, and closes after two clicks: it is greyed out with the reason in its tooltip while the worktree has uncommitted edits or is mid-merge/rebase/revert, a worker task is running or queued, the room is on a detached HEAD, mid-operation or has tracked edits outside `discussions/`, the merge preview is not clean, or the worker has not recorded a passing `Tested:` line for the current tips. When the room's branch has moved ahead of `worker/<name>`, it offers **Catch up with `<branch>`** instead, sending the worker a catch-up task and stopping so you can review the report before clicking **Close and Merge** again. The first click names the target (`Merge worker/<name> into <branch>`), lists the commits to merge and the untracked/ignored files cleanup will delete, shows an informational notice of any other discussions in a round, running/queued worker tasks, or other branches with unmerged commits (omitted when nothing else is active and no other branches have unmerged commits; never blocks the merge or invalidates the second click), and snapshots the state; the second click re-checks everything, runs `git merge --no-ff` under a room-wide lock shared with **Close and Discard** so only one merge or discard runs at a time across the room (a second request refuses immediately, naming the operation in progress; on conflict, the merge is aborted and everything stays open), removes the worktree (`git worktree remove --force`), deletes the branch (`git branch -d`), clears the lane's hold and saved worker session, and closes with `Worker work merged into \`<branch>\` as \`<merge commit>\`.` in `closing-statement.md`. **Close and Discard** (beside Close in **Actions ▾** and each row's menu in **Discussions**, shown only when the discussion has a worker worktree or branch) closes the discussion and deletes its worker worktree and branch after two clicks (sharing the same room-wide lock with **Close and Merge**): it refuses while a worker task for the discussion is running or queued, or while its worktree is mid-merge, mid-rebase or mid-revert; the first click lists commits not in main, tracked edits, untracked files, and ignored files summarised by top-level folder and snapshots them; the second click re-checks the snapshot (asking again if anything changed), saves any unmerged commits to a unique `refs/discarded/<name>/<YYYYMMDD-HHMMSS>` ref (commits only, not uncommitted or ignored files), removes the worktree (`git worktree remove --force`), deletes `worker/<name>` (`git branch -D`), clears the lane's hold and saved worker session, and closes the discussion with a `Worker work discarded: …` line in `closing-statement.md`. If any step fails partway, it stops, leaves the discussion open, and reports what was and wasn't done. If Close fails or is cancelled, the discussion stays open or paused and
 can be retried. **Quit room** ends the room, and Restart brings back every open discussion and
-brainstorm from its checkpoint (not empty ones). Only closed discussions replicate. Each discussion keeps its own worker settings and
+brainstorm from its checkpoint (not empty ones). Only closed discussions replicate; replication sends the closing statement (including any pending-work line) but never the worker branch or worktree. Each discussion keeps its own worker settings and
 session. In the terminal one discussion is open at
 a time, as described next: its one input can't switch between discussions.
 
@@ -585,7 +585,7 @@ node src/cli.mjs --help
 | `/resume <folder-name>` | Show an open discussion, continue a paused checkpoint, or reopen a closed discussion with fresh sessions from its closing statement. `archive/…` or `deferred/…` is made active first; `brainstorms/<folder-name>` resumes a brainstorm. |
 | `/fresh <folder-name>` | Start fresh: new sessions there, from its closing statement or pending handoff, notes and its checkpoint's latest summary; the saved sessions and chat are discarded. `brainstorms/<folder-name>`: from its latest summary or its transcripts. |
 | `/new` | On the screen, open a new discussion beside this one (which stays open). In the terminal, end this session; your next message starts a new discussion. Its worker tasks finish in its own worker session; the new discussion's worker starts fresh. |
-| `/close` | Close the discussion shown; `/close <folder-name>` also closes a paused one. Waits for its worker and writes a closing statement (not while it holds unresolved worker edits). |
+| `/close` | Close the discussion shown; `/close <folder-name>` also closes a paused one. Waits for its worker, writes a closing statement (appending a pending-work line if the branch has unmerged commits or uncommitted edits), and keeps the worker branch and worktree intact (refuses immediately if tasks are queued behind an unresolved-edits hold). |
 | `/brainstorm` | Start a brainstorm (on the screen beside this one; in the terminal, ending this session). Its first message names it in `brainstorms/`. |
 | `/convert brainstorms/<folder-name>` | Turn into a discussion: the folder moves to `discussions/`, the agents keep their sessions and are told. |
 | `/delete brainstorms/<folder-name>` | Delete a closed brainstorm's folder and checkpoint, for good. |
@@ -707,7 +707,12 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   and its first instruction in the new worktree tells it its working directory has changed.
 - **The Worker tab** shows the worktree of the discussion shown, then every other branch with
   commits not in main or uncommitted edits: the folder, branch and base commit, uncommitted edits,
-  commits on each side. For a branch with commits not in main it also says:
+  commits on each side, and a Mermaid `gitGraph` of that branch's local history against the room's
+  current branch (from their merge-base to both tips, showing each branch's first-parent history
+  plus the merges between the two branches — including repeated merges of main into the branch —
+  with other merges tagged `merge`, commit labels showing short hash and subject without a leading
+  `[<label>] `, at most 15 commits per side with cut-off history marked by a `+N more commits`
+  node, or a plain-text note when `gitGraph` cannot draw the history faithfully). For a branch with commits not in main it also says:
   - whether it contains main's current commit, naming it, or how many of main's commits it lacks;
   - the commits its worker last reported testing together, from its reply's last
     `Tested: <branch commit> with main <main commit>: tests passed|failed` line (recorded only
@@ -724,8 +729,9 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   These checks are made again after each task and whenever the Worker tab is shown.
 - Before each instruction, the discussion's branch catches up with the room's `HEAD`, by
   fast-forward only, when it is strictly behind it and its worktree is clean. Otherwise it is left
-  as it is, and the tab says why. agent-room's own code never resets, merges, rebases or deletes a
-  worktree or its branch, and never touches the room's own index, branch or files. The worker
+  as it is, and the tab says why. agent-room's own code never resets or rebases a
+  worktree or its branch, and only merges into the room's branch or deletes a worktree and branch
+  on **Close and Merge** or **Close and Discard**, after you confirm its preview. The worker
   itself may do such Git actions in its worktree when you explicitly ask (a rollback's reverts,
   merging main into its branch to catch up or for rollback, or abandoning an attempt after listing
   the edits and getting your approval).
@@ -735,8 +741,13 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   not forced: the worker reports it and that discussion's queue holds for its recovery. An
   unfinished merge or revert holds that queue even if `git status` otherwise shows no edits. The existing
   strictly-behind fast-forward remains; agent-room does not perform a normal merge or revert itself.
-- **Merging a branch into main** (you do it, in the room):
-  - First check that the discussion has no worker task running or queued, that the room's `git
+- **Merging a branch into main** (via **Close and Merge** in **Actions ▾** or the **Discussions**
+  row menu, or by hand in the room):
+  - **Close and Merge** automates the checks below, runs `git merge --no-ff`, removes the worktree
+    and branch, and closes the discussion after two clicks (or offers **Catch up with `<branch>`**
+    when the room's branch has moved). When merging agent-room's own source into a running room,
+    run **Reload** (or dev mode reloads it) afterwards.
+  - To merge by hand instead: first check that the discussion has no worker task running or queued, that the room's `git
     status` shows no tracked edits outside `discussions/`, and that the Worker tab says the branch
     contains current main with a test report that is "Still current". If main has moved since,
     ask that discussion's worker to catch up with main first: then `git merge worker/<name>`
@@ -783,7 +794,7 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   next. If a task leaves uncommitted edits, that worktree's queue holds (other discussions' go on)
   and its origin is told; only that origin's own
   instructions go through (to finish and commit them, or to abandon them), with the first task's
-  details. That discussion can't be closed, archived or deferred meanwhile. Uncommitted edits of
+  details. That discussion can't be archived or deferred meanwhile (Close is allowed as **Close with pending work**, leaving the edits and queue hold intact for rework later). Uncommitted edits of
   unknown origin hold that worktree's queue until it is clean (commit or remove them yourself); they
   are never given to a new task. Before starting work, agent-room saves the origin, full task text
   and starting commit in the worktree's private Git directory (never committed). Recovery keeps

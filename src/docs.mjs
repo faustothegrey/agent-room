@@ -575,6 +575,16 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #peers-buttons { display: flex; justify-content: flex-end; margin-top: 1rem; }
 #ask-text { margin: 0 0 1rem; overflow-wrap: anywhere; }
 #ask-buttons { display: flex; justify-content: flex-end; gap: .5rem; }
+.discard-dialog { width: min(38rem, 92vw); max-height: 85vh; border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.2rem; overflow: auto; }
+.discard-dialog::backdrop { background: #0006; }
+.discard-dialog h3 { margin: 0 0 .5rem; font-size: .95rem; }
+.discard-dialog h4 { margin: .65rem 0 .25rem; font-size: .78rem; color: var(--dim); text-transform: uppercase; letter-spacing: .03em; }
+.discard-dialog ul { margin: 0; padding-left: 1.2rem; max-height: 10rem; overflow-y: auto; font-size: .8rem; font-family: ui-monospace, monospace; }
+.discard-dialog .discard-warn { color: #d97706; font-size: .82rem; margin: .4rem 0; }
+.discard-dialog .discard-err { color: #ef4444; font-size: .82rem; margin: .5rem 0 0; overflow-wrap: anywhere; }
+.discard-dialog .discard-note { color: var(--dim); font-size: .78rem; margin: .4rem 0; }
+.discard-dialog .discard-buttons { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .9rem; }
+.discard-dialog .danger { color: #ef4444; border-color: #ef4444; }
 #rooms { max-width: min(28rem, 80vw); font: inherit; font-size: .75rem; }
 #disc { font-size: .75rem; color: var(--dim); line-height: 1.35; }
 #disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
@@ -586,6 +596,9 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #winfo summary { cursor: pointer; }
 #winfo .lane-lines { margin: .2rem 0 .2rem 1rem; display: flex; flex-direction: column; gap: .2rem; overflow-wrap: anywhere; }
 #winfo .preview-files { margin: .2rem 0 0 1rem; max-height: 12rem; overflow-y: auto; }
+#winfo .branch-diagram { margin-top: .3rem; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 6px; overflow: auto; max-height: 22rem; background: Canvas; }
+#winfo .branch-diagram svg { max-width: 100%; height: auto; display: block; }
+#winfo .branch-diagram-note { margin-top: .25rem; font-style: italic; }
 #winfo button { align-self: flex-start; font-size: .75rem; margin-top: .2rem; }
 #server { max-width: 100%; font-size: .75rem; color: light-dark(#3d5fc4, #5a7bd8); display: inline-flex; align-items: center; gap: .4rem; }
 #server[data-state="down"] { color: #ef4444; font-weight: 600; }
@@ -834,7 +847,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b id="room-name">agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">New brainstorm</button><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close discussion</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
+<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">New brainstorm</button><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
 <div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 <div id="busy" aria-hidden="true"></div>
 </header>
@@ -1141,8 +1154,18 @@ const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a discussion to send work.
 let workerInfoShown = null, workPlaceholder = null;
 function showWorkerInfo(info) {
   const pendingChanged = JSON.stringify(info?.pending ?? null) !== JSON.stringify(workerPending);
+  const nextDiscardable = info?.discardable ?? [];
+  const discardableChanged = JSON.stringify(nextDiscardable) !== JSON.stringify([...workerDiscardable]);
+  const nextMergeable = info?.mergeable ?? {};
+  const mergeableChanged = JSON.stringify(nextMergeable) !== JSON.stringify(workerMergeable);
   workerInfoShown = info;
-  if (pendingChanged) { workerPending = info?.pending ?? null; renderDiscussions(); } // its rows say which have worker work to merge or commit
+  if (pendingChanged || discardableChanged || mergeableChanged) {
+    workerPending = info?.pending ?? null;
+    workerDiscardable = new Set(nextDiscardable);
+    workerMergeable = nextMergeable;
+    updateCloseButton();
+    renderDiscussions();
+  } // its rows and Close/Merge/Discard actions follow pending work and existing worker lanes
   workPlaceholder ??= wbox.placeholder;
   if (room?.brainstorm) setWorkerInfo({ lines: [BRAINSTORM_NO_WORK], disabled: true });
   else {
@@ -1150,6 +1173,46 @@ function showWorkerInfo(info) {
     if (!info?.disabled) { wbox.disabled = false; wbox.placeholder = workPlaceholder; }
   }
   if (ended || restarting) wbox.disabled = true;
+}
+// Mermaid for the Worker tab's branch diagrams: loaded once, only when a diagram is drawn.
+let mermaidReady = null, diagramSeq = 0;
+const diagramCache = new Map();
+function loadMermaid() {
+  if (window.mermaid) return Promise.resolve(window.mermaid);
+  return mermaidReady ??= new Promise((done, fail) => {
+    const s = document.createElement('script');
+    s.src = '__lib/mermaid.js';
+    s.onload = () => {
+      if (!window.mermaid) { mermaidReady = null; return fail(new Error('Mermaid failed to load')); }
+      window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default' });
+      done(window.mermaid);
+    };
+    s.onerror = () => { mermaidReady = null; fail(new Error('Could not load Mermaid')); };
+    document.head.append(s);
+  });
+}
+function drawBranchDiagram(box, source) {
+  if (box.dataset.drawn === source) return;
+  box.dataset.drawn = source;
+  const theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default';
+  const key = theme + '\\n' + source;
+  if (diagramCache.has(key)) { box.innerHTML = diagramCache.get(key); return; }
+  box.textContent = 'Drawing branch diagram…';
+  loadMermaid().then((m) => {
+    const id = 'wgit-' + (++diagramSeq);
+    return m.render(id, source).then(({ svg }) => {
+      if (diagramCache.size > 40) diagramCache.clear();
+      diagramCache.set(key, svg);
+      if (box.dataset.drawn === source) box.innerHTML = svg;
+    }, (err) => {
+      const stray = document.getElementById('d' + id); if (stray) stray.remove();
+      throw err;
+    });
+  }).catch((err) => {
+    if (box.dataset.drawn !== source) return;
+    box.className = 'branch-diagram-note';
+    box.textContent = 'Branch diagram could not be drawn: ' + ((err && err.message) || err);
+  });
 }
 // Each lane (the discussion's own branch first, then every other one with something to review) is
 // shown collapsed under a one-line summary; what the User opens stays open across refreshes.
@@ -1170,6 +1233,16 @@ function setWorkerInfo(info) {
     const summary = document.createElement('summary'); summary.textContent = lane.summary;
     const body = document.createElement('div'); body.className = 'lane-lines';
     for (const line of lane.lines) body.append(lineEl(line));
+    if (lane.diagram?.note) {
+      const note = document.createElement('div'); note.className = 'branch-diagram-note'; note.textContent = lane.diagram.note;
+      body.append(note);
+    } else if (lane.diagram?.graph) {
+      const box = document.createElement('div'); box.className = 'branch-diagram';
+      body.append(box);
+      const draw = () => drawBranchDiagram(box, lane.diagram.graph);
+      d.addEventListener('toggle', () => { if (d.open) draw(); });
+      if (d.open) draw();
+    }
     d.append(summary, body);
     el.append(d);
   }
@@ -1527,6 +1600,193 @@ function setPeeking(p) {
   peeking = p;
   renderWorkerStop();
 }
+function closeActionLabel(lane) {
+  return lane && (workerPending ?? []).some((p) => p.lane === lane) ? 'Close with pending work' : 'Close';
+}
+function configureMergeButton(btn, lane) {
+  const m = lane && workerMergeable ? workerMergeable[lane] : null;
+  if (!m) { btn.hidden = true; return false; }
+  btn.hidden = false;
+  if (m.catchUp) {
+    btn.textContent = 'Catch up with ' + m.targetBranch;
+    btn.disabled = false;
+    btn.title = 'Ask the worker to merge ' + m.targetBranch + ' into worker/' + lane + ' and run tests; nothing merges into ' + m.targetBranch + ' automatically.';
+  } else if (m.canMerge) {
+    btn.textContent = 'Close and Merge';
+    btn.disabled = false;
+    btn.title = 'Merge worker/' + lane + ' into ' + m.targetBranch + ', remove the worktree and branch, and close.';
+  } else {
+    btn.textContent = 'Close and Merge';
+    btn.disabled = true;
+    btn.title = m.disabledReason || 'Cannot Close and Merge yet.';
+  }
+  return true;
+}
+function updateCloseButton() {
+  const b = $('closedisc');
+  if (!b) return;
+  const activeLane = !room?.brainstorm && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
+  const label = room?.brainstorm ? 'Close brainstorm' : closeActionLabel(activeLane);
+  if (b.dataset.armed) b.dataset.label = label;
+  else b.textContent = label;
+  const m = $('closemerge');
+  if (m) {
+    if (b.hidden || !activeLane || !!room?.brainstorm || !!room?.closedDiscussions?.includes(activeLane)) m.hidden = true;
+    else configureMergeButton(m, activeLane);
+  }
+  const d = $('closediscard');
+  if (d) d.hidden = b.hidden || !activeLane || !!room?.brainstorm || !workerDiscardable?.has(activeLane) || !!room?.closedDiscussions?.includes(activeLane);
+}
+async function startCatchUp(name) {
+  try {
+    const res = await post('__catchup', { name });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    status('Queued catch-up with ' + data.targetBranch + ' for ' + name + '. Review the report, then click Close and Merge again.', false);
+  } catch (err) { status(err.message, true); }
+}
+async function startMerge(name) {
+  const m = workerMergeable?.[name];
+  if (m?.catchUp) return startCatchUp(name);
+  try {
+    const res = await post('__merge', { name });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    if (data.catchUp) return showCatchUpDialog(name, data);
+    showMergeDialog(name, data.preview, false);
+  } catch (err) { status(err.message, true); }
+}
+function showCatchUpDialog(name, data) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'discard-dialog';
+  const h = document.createElement('h3'); h.textContent = 'Catch up with ' + data.targetBranch + '?'; dialog.append(h);
+  const p = document.createElement('p'); p.className = 'discard-note'; p.textContent = data.message; dialog.append(p);
+  const buttons = document.createElement('div'); buttons.className = 'discard-buttons';
+  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.onclick = () => dialog.close();
+  const go = document.createElement('button'); go.type = 'button'; go.textContent = 'Catch up with ' + data.targetBranch;
+  go.onclick = async () => { dialog.close(); await startCatchUp(name); };
+  buttons.append(cancel, go); dialog.append(buttons);
+  dialog.onclose = () => dialog.remove();
+  document.body.append(dialog);
+  dialog.showModal();
+}
+function showMergeDialog(name, initialPreview, initialChanged) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'discard-dialog';
+  let current = initialPreview;
+  const render = (preview, changed, errMsg = '') => {
+    current = preview;
+    dialog.replaceChildren();
+    const h = document.createElement('h3'); h.textContent = preview.title; dialog.append(h);
+    if (changed) {
+      const w = document.createElement('p'); w.className = 'discard-warn';
+      w.textContent = 'The room branch or worktree changed since your first click. Review the updated preview below and confirm again.';
+      dialog.append(w);
+    }
+    const note = document.createElement('p'); note.className = 'discard-note';
+    note.textContent = 'After merging, the worktree and branch will be removed and the discussion closed. Any untracked and ignored files in the worktree will be deleted for good.';
+    dialog.append(note);
+    if (preview.activeNotice) {
+      const act = document.createElement('p'); act.className = 'discard-note';
+      act.textContent = preview.activeNotice;
+      dialog.append(act);
+    }
+    const section = (title, items) => {
+      const sh = document.createElement('h4'); sh.textContent = title + ' (' + items.length + ')'; dialog.append(sh);
+      if (!items.length) { const p = document.createElement('p'); p.className = 'discard-note'; p.textContent = 'None.'; dialog.append(p); return; }
+      const ul = document.createElement('ul');
+      for (const text of items) { const li = document.createElement('li'); li.textContent = text; ul.append(li); }
+      dialog.append(ul);
+    };
+    section('Commits to merge', preview.commits.map((c) => c.hash + ' ' + c.subject));
+    section('Untracked files deleted on cleanup', preview.untracked);
+    section('Ignored files deleted on cleanup (by top-level folder)', preview.ignored.map((i) => i.label));
+    const errEl = document.createElement('p'); errEl.className = 'discard-err'; errEl.textContent = errMsg;
+    if (errMsg) dialog.append(errEl);
+    const buttons = document.createElement('div'); buttons.className = 'discard-buttons';
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.onclick = () => dialog.close();
+    const confirm = document.createElement('button'); confirm.type = 'button'; confirm.textContent = 'Confirm ' + preview.title;
+    confirm.onclick = async () => {
+      confirm.disabled = true; cancel.disabled = true;
+      try {
+        const res = await post('__merge', { name, snapshot: current.snapshot });
+        if (!res.ok) throw new Error(await res.text());
+        const out = await res.json();
+        if (out.catchUp) { dialog.close(); showCatchUpDialog(name, out); return; }
+        if (out.changed) { render(out.preview, true); return; }
+        dialog.close();
+      } catch (err) {
+        render(current, false, err.message);
+      }
+    };
+    buttons.append(cancel, confirm); dialog.append(buttons);
+  };
+  render(initialPreview, initialChanged);
+  dialog.onclose = () => dialog.remove();
+  document.body.append(dialog);
+  dialog.showModal();
+}
+async function startDiscard(name) {
+  try {
+    const res = await post('__discard', { name });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    showDiscardDialog(name, data.preview, false);
+  } catch (err) { status(err.message, true); }
+}
+function showDiscardDialog(name, initialPreview, initialChanged) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'discard-dialog';
+  let current = initialPreview;
+  const render = (preview, changed, errMsg = '') => {
+    current = preview;
+    dialog.replaceChildren();
+    const h = document.createElement('h3'); h.textContent = 'Close and Discard ' + name + '?'; dialog.append(h);
+    if (changed) {
+      const w = document.createElement('p'); w.className = 'discard-warn';
+      w.textContent = 'The worktree or branch changed since your first click. Review the updated list below and confirm again.';
+      dialog.append(w);
+    }
+    const note = document.createElement('p'); note.className = 'discard-note';
+    note.textContent = preview.commits.length
+      ? 'Commits will be saved to a recovery ref under refs/discarded/' + name + '/… (commits only; uncommitted, untracked and ignored files are deleted for good).'
+      : 'Nothing committed to save; the worktree and branch will be removed and all uncommitted, untracked and ignored files deleted for good.';
+    dialog.append(note);
+    const section = (title, items) => {
+      const sh = document.createElement('h4'); sh.textContent = title + ' (' + items.length + ')'; dialog.append(sh);
+      if (!items.length) { const p = document.createElement('p'); p.className = 'discard-note'; p.textContent = 'None.'; dialog.append(p); return; }
+      const ul = document.createElement('ul');
+      for (const text of items) { const li = document.createElement('li'); li.textContent = text; ul.append(li); }
+      dialog.append(ul);
+    };
+    section('Commits not in main', preview.commits.map((c) => c.hash + ' ' + c.subject));
+    section('Tracked edits', preview.tracked.map((t) => t.status + ' ' + t.path));
+    section('Untracked files', preview.untracked);
+    section('Ignored files (by top-level folder)', preview.ignored.map((i) => i.label));
+    const errEl = document.createElement('p'); errEl.className = 'discard-err'; errEl.textContent = errMsg;
+    if (errMsg) dialog.append(errEl);
+    const buttons = document.createElement('div'); buttons.className = 'discard-buttons';
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.onclick = () => dialog.close();
+    const confirm = document.createElement('button'); confirm.type = 'button'; confirm.className = 'danger'; confirm.textContent = 'Confirm Close and Discard';
+    confirm.onclick = async () => {
+      confirm.disabled = true; cancel.disabled = true;
+      try {
+        const res = await post('__discard', { name, snapshot: current.snapshot });
+        if (!res.ok) throw new Error(await res.text());
+        const out = await res.json();
+        if (out.changed) { render(out.preview, true); return; }
+        dialog.close();
+      } catch (err) {
+        render(current, false, err.message);
+      }
+    };
+    buttons.append(cancel, confirm); dialog.append(buttons);
+  };
+  render(initialPreview, initialChanged);
+  dialog.onclose = () => dialog.remove();
+  document.body.append(dialog);
+  dialog.showModal();
+}
 function updateReplicaView() {
   updateDiscWorkers();
   renderWorkerStop();
@@ -1555,9 +1815,9 @@ function updateReplicaView() {
   // Turn into a discussion: a brainstorm once its first message has named it.
   $('convert').hidden = !(room?.brainstorm && room.active);
   // With several discussions open (the screen), New discussion and Resume keep this one open;
-  // Close discussion closes it. Their tooltips say so.
+  // Close closes it (labelled "Close with pending work" when its branch has pending work).
   $('closedisc').hidden = !room?.multi || !(room.active || room.brainstorm || room.open?.length > 1);
-  $('closedisc').textContent = room?.brainstorm ? 'Close brainstorm' : 'Close discussion';
+  updateCloseButton();
   if (room?.multi) {
     $('newdisc').title = 'Open a new discussion beside this one, which stays open (Discussions or Brainstorms: Resume shows it again).';
     $('newbrainstorm').title = 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.';
@@ -1679,12 +1939,12 @@ function freshButton(b, ref) {
 // New discussion: once this session has started, it ends it (the chat clears), so it takes two
 // clicks, like Quit. ask: when the first click only asks (by default, as said above).
 function confirmed(b, run, warning, ask = () => room?.started || warning) {
-  const label = b.textContent;
   b.onclick = (e) => {
     e.stopPropagation();
     if (ask() && !b.dataset.armed) {
-      b.dataset.armed = '1'; b.textContent = warning || 'Click again: this session ends and the chat clears';
-      return setTimeout(() => { delete b.dataset.armed; b.textContent = label; }, 4000);
+      b.dataset.armed = '1'; b.dataset.label = b.textContent;
+      b.textContent = warning || 'Click again: this session ends and the chat clears';
+      return setTimeout(() => { delete b.dataset.armed; b.textContent = b.dataset.label; }, 4000);
     }
     run();
   };
@@ -1851,7 +2111,7 @@ function discussionsIn(prefix) {
 // Worker work not yet in main, from the Worker tab's checks (showWorkerInfo): each lane's
 // { lane: its discussion or null for worker/main, branch, ahead: commits not in main, dirty }.
 // null: not known (no checks yet, or no worker here), so rows say nothing about it.
-let workerPending = null;
+let workerPending = null, workerDiscardable = new Set(), workerMergeable = {};
 function renderDiscussions() {
   const container = $('discussions-pane');
   if (!container) return;
@@ -1971,9 +2231,20 @@ function renderDiscussions() {
       menu.open = openRowMenu === path;
       menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
       if (!room?.closedDiscussions?.includes(d)) {
-        const close = el('button', '', 'Close');
+        const close = el('button', '', closeActionLabel(d));
         close.onclick = () => { closeMenus(); send('/close ' + d); };
         items.append(close);
+        if (workerMergeable?.[d]) {
+          const merge = el('button', '', 'Close and Merge');
+          configureMergeButton(merge, d);
+          merge.onclick = () => { closeMenus(); startMerge(d); };
+          items.append(merge);
+        }
+        if (workerDiscardable.has(d)) {
+          const discard = el('button', 'danger', 'Close and Discard');
+          discard.onclick = () => { closeMenus(); startDiscard(d); };
+          items.append(discard);
+        }
       }
       for (const [label, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
         const b = el('button', '', label);
@@ -3051,6 +3322,16 @@ confirmed($('newdisc'), () => send('/new'), null, () => !room?.multi && room?.st
 confirmed($('newbrainstorm'), () => send('/brainstorm'), null, () => !room?.multi && room?.started);
 confirmed($('convert'), () => { closeMenus(); send('/convert ' + room.active); }, 'Click again: it moves to discussions/', () => true);
 confirmed($('closedisc'), () => send('/close'), 'Click again: this discussion closes (its agents stop)', () => !!room?.started);
+$('closemerge').onclick = () => {
+  closeMenus();
+  const activeLane = !room?.brainstorm && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
+  if (activeLane) startMerge(activeLane);
+};
+$('closediscard').onclick = () => {
+  closeMenus();
+  const activeLane = !room?.brainstorm && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
+  if (activeLane) startDiscard(activeLane);
+};
 $('summary').onclick = () => send('/summary');
 $('reload').onclick = () => send('/reload');
 // Two clicks to quit or shut down, so a stray click doesn't end anything.
@@ -3492,7 +3773,7 @@ function handleScreen(req, res, url, dir, screen) {
       (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
-  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom', '/__retry', '/__agent-enabled', '/__cancelclose', '/__stopworker'].includes(url.pathname)) {
+  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom', '/__retry', '/__agent-enabled', '/__cancelclose', '/__stopworker', '/__discard', '/__merge', '/__catchup'].includes(url.pathname)) {
     if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain; charset=utf-8', 'Refused: only the room page can send input.'); return true; }
     readJson(req, url.pathname === '/__say' ? ATTACH_TOTAL * 1.4 : undefined).then((body) => {
       if (url.pathname === '/__newroom') {
@@ -3516,6 +3797,35 @@ function handleScreen(req, res, url, dir, screen) {
         if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before cancelling Close.');
         if (!screen.cancelClose?.(body?.name)) return send(409, 'text/plain; charset=utf-8', 'Close is no longer waiting for the worker.');
         return send(204, 'text/plain', '');
+      }
+      if (url.pathname === '/__discard') {
+        if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before discarding worker work.');
+        if (!screen.discardPreview || !screen.closeAndDiscard) return send(409, 'text/plain; charset=utf-8', 'Close and Discard is unavailable.');
+        const name = typeof body?.name === 'string' ? body.name.trim() : '';
+        if (!name) return send(400, 'text/plain; charset=utf-8', 'Discussion name is required.');
+        const act = body?.snapshot ? screen.closeAndDiscard(name, String(body.snapshot)) : screen.discardPreview(name);
+        return Promise.resolve(act).then(
+          (result) => send(200, 'application/json', JSON.stringify(result)),
+          (err) => send(409, 'text/plain; charset=utf-8', err.message));
+      }
+      if (url.pathname === '/__merge') {
+        if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before merging worker work.');
+        if (!screen.mergePreviewClose || !screen.closeAndMerge) return send(409, 'text/plain; charset=utf-8', 'Close and Merge is unavailable.');
+        const name = typeof body?.name === 'string' ? body.name.trim() : '';
+        if (!name) return send(400, 'text/plain; charset=utf-8', 'Discussion name is required.');
+        const act = body?.snapshot ? screen.closeAndMerge(name, String(body.snapshot)) : screen.mergePreviewClose(name);
+        return Promise.resolve(act).then(
+          (result) => send(200, 'application/json', JSON.stringify(result)),
+          (err) => send(409, 'text/plain; charset=utf-8', err.message));
+      }
+      if (url.pathname === '/__catchup') {
+        if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before catching up.');
+        if (!screen.catchUpMerge) return send(409, 'text/plain; charset=utf-8', 'Catch up is unavailable.');
+        const name = typeof body?.name === 'string' ? body.name.trim() : '';
+        if (!name) return send(400, 'text/plain; charset=utf-8', 'Discussion name is required.');
+        return Promise.resolve(screen.catchUpMerge(name)).then(
+          (result) => send(200, 'application/json', JSON.stringify(result)),
+          (err) => send(409, 'text/plain; charset=utf-8', err.message));
       }
       if (url.pathname === '/__agent-enabled') {
         if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before changing discussion agents.');

@@ -2460,9 +2460,9 @@ test('switching discussion while one waits for its worker task: the message type
   assert.deepEqual([first, second].map((c) => c.screen.working ?? null), [null, null]);
 });
 
-test('leftover edits hold their own lane for their origin, which can recover them; other lanes go on; they block Close, Archive and Defer; unknown leftovers hold their lane', async () => {
+test('leftover edits hold their own lane for their origin, which can recover them; other lanes go on; they block Archive and Defer; unknown leftovers hold their lane', async () => {
   const { writeFileSync, existsSync } = await import('node:fs');
-  const { queueWork, start } = await import('../src/ui.mjs');
+  const { queueWork, start, workerHold } = await import('../src/ui.mjs');
   const { execFileSync } = await import('node:child_process');
   const inTree = (ctx, ...a) => execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]);
   const { first, git, contexts } = await multiRoom({ worker: (ctx, p) => {
@@ -2482,8 +2482,7 @@ test('leftover edits hold their own lane for their origin, which can recover the
   await second.workQueue;
   assert.deepEqual([second.prompts.length, workerLane(second).blockedBy, workerLane(first).blockedBy.origin], [1, null, first]);
 
-  await handleLine('/close', first);
-  assert.match(first.notes.at(-1), /can't be closed yet: its worker edits from "make wip" are unresolved/);
+  assert.match(workerHold(first), /its worker edits from "make wip" are unresolved/);
   await markClosed(first.cwd, first.discussion.name);
   await handleLine(`/move ${first.discussion.name} archive`, second);
   assert.match(second.notes.at(-1), /can't move: its worker edits from "make wip" are unresolved/);
@@ -4213,4 +4212,629 @@ test('Stop now with a real program: the worker\'s process group is killed throug
     assert.equal(record.error.message, 'claude was stopped (SIGKILL)');
     assert.match(ctx.screen.worker.filter((m) => m.speaker === 'W').at(-1).html, /^<p>Stopped by the User: /);
   } finally { process.env.PATH = path; }
+});
+
+test('branchDiagram: behind main, diverged, main merged into branch twice, and history longer than the limit (real git repos)', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { parse } = await import('@mermaid-js/parser');
+  const { branchDiagram, workerPlace, ensureWorktree, refreshWorker } = await import('../src/ui.mjs');
+
+  const checkGraph = async (d) => {
+    assert.ok(d && d.graph && !d.note, `expected graph, got: ${JSON.stringify(d)}`);
+    assert.match(d.graph, /^---\nconfig:\n  gitGraph:\n    rotateCommitLabel: false\n/);
+    const ast = await parse('gitGraph', d.graph);
+    assert.ok(ast.statements.length > 0);
+    return d.graph;
+  };
+
+  // 1. Branch behind main
+  {
+    const dir = await tmp('diag-behind-');
+    const g = await gitRoom(dir);
+    const base = g('rev-parse', '--short=7', 'HEAD');
+    const place = await workerPlace(dir, '2026-11-19-behind');
+    await ensureWorktree(place);
+    writeFileSync(`${dir}/a.txt`, '1\n'); g('add', 'a.txt'); g('commit', '-q', '-m', 'main step one');
+    const m1 = g('rev-parse', '--short=7', 'HEAD');
+    writeFileSync(`${dir}/a.txt`, '2\n'); g('commit', '-q', '-am', 'main step two');
+    const m2 = g('rev-parse', '--short=7', 'HEAD');
+
+    const graph = await checkGraph(await branchDiagram(place));
+    assert.match(graph, new RegExp(`commit id: "${base} `));
+    assert.match(graph, new RegExp(`branch "${place.branch}"`));
+    assert.match(graph, new RegExp(`checkout "main"\\n  commit id: "${m1} main step one"\\n  commit id: "${m2} main step two"`));
+    assert.doesNotMatch(graph, /merge /);
+  }
+
+  // 2. Diverged branches (also checked via refreshWorker on a room)
+  {
+    const { ctx } = await workerRoom();
+    ctx.noScreen = true;
+    const g = await gitRoom(ctx.cwd);
+    const base = g('rev-parse', '--short=7', 'HEAD');
+    await handleLine('hello', ctx);
+    const name = ctx.discussion.name;
+    const place = await workerPlace(ctx.cwd, name);
+    await ensureWorktree(place);
+    writeFileSync(`${ctx.cwd}/m.txt`, 'm\n'); g('add', 'm.txt'); g('commit', '-q', '-m', 'main diverged');
+    const m1 = g('rev-parse', '--short=7', 'HEAD');
+    writeFileSync(`${place.path}/w.txt`, 'w\n'); g('-C', place.path, 'add', 'w.txt'); g('-C', place.path, 'commit', '-q', '-m', `[${name}] worker diverged`);
+    const w1 = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+    await refreshWorker(ctx);
+    const lane = ctx.screen.workerInfo.lanes[0];
+    const graph = await checkGraph(lane.diagram);
+    assert.match(graph, new RegExp(`commit id: "${base} `));
+    assert.match(graph, new RegExp(`commit id: "${w1} worker diverged"`));
+    assert.doesNotMatch(graph, new RegExp(`\\[${name}\\]`));
+    assert.match(graph, new RegExp(`commit id: "${m1} main diverged"`));
+  }
+
+  // 3. Main merged into the branch twice (and main moves on after the second merge)
+  {
+    const dir = await tmp('diag-merges-');
+    const g = await gitRoom(dir);
+    const base = g('rev-parse', '--short=7', 'HEAD');
+    const place = await workerPlace(dir, '2026-11-19-merges');
+    await ensureWorktree(place);
+    writeFileSync(`${place.path}/w.txt`, '1\n'); g('-C', place.path, 'add', 'w.txt'); g('-C', place.path, 'commit', '-q', '-m', 'worker 1');
+    const w1 = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+    writeFileSync(`${dir}/m.txt`, '1\n'); g('add', 'm.txt'); g('commit', '-q', '-m', 'main 1');
+    const m1 = g('rev-parse', '--short=7', 'HEAD');
+    g('-C', place.path, 'merge', 'main', '-m', 'catch up 1');
+    const wm1 = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+    writeFileSync(`${place.path}/w.txt`, '2\n'); g('-C', place.path, 'commit', '-q', '-am', 'worker 2');
+    const w2 = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+    writeFileSync(`${dir}/m.txt`, '2\n'); g('commit', '-q', '-am', 'main 2');
+    const m2 = g('rev-parse', '--short=7', 'HEAD');
+    g('-C', place.path, 'merge', 'main', '-m', 'catch up 2');
+    const wm2 = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+    writeFileSync(`${dir}/m.txt`, '3\n'); g('commit', '-q', '-am', 'main 3');
+    const m3 = g('rev-parse', '--short=7', 'HEAD');
+
+    const graph = await checkGraph(await branchDiagram(place));
+    const lines = graph.split('\n');
+    const idx = (pat) => lines.findIndex((l) => pat.test(l));
+    assert.ok(idx(new RegExp(`commit id: "${base} `)) >= 0);
+    assert.ok(idx(new RegExp(`commit id: "${w1} worker 1"`)) < idx(new RegExp(`merge "main" id: "${wm1} catch up 1"`)));
+    assert.ok(idx(new RegExp(`commit id: "${m1} main 1"`)) < idx(new RegExp(`merge "main" id: "${wm1} catch up 1"`)));
+    assert.ok(idx(new RegExp(`merge "main" id: "${wm1} catch up 1"`)) < idx(new RegExp(`commit id: "${m2} main 2"`)));
+    assert.ok(idx(new RegExp(`commit id: "${w2} worker 2"`)) < idx(new RegExp(`merge "main" id: "${wm2} catch up 2"`)));
+    assert.ok(idx(new RegExp(`commit id: "${m2} main 2"`)) < idx(new RegExp(`merge "main" id: "${wm2} catch up 2"`)));
+    assert.ok(idx(new RegExp(`merge "main" id: "${wm2} catch up 2"`)) < idx(new RegExp(`commit id: "${m3} main 3"`)));
+  }
+
+  // 4. History longer than the limit: cut-off marked with "+N more commits", never a direct parent link
+  {
+    const dir = await tmp('diag-limit-');
+    const g = await gitRoom(dir);
+    const place = await workerPlace(dir, '2026-11-19-long');
+    await ensureWorktree(place);
+    const mainHashes = [];
+    for (let i = 1; i <= 19; i++) {
+      g('commit', '-q', '--allow-empty', '-m', `main commit ${i}`);
+      mainHashes.push(g('rev-parse', '--short=7', 'HEAD'));
+    }
+    const workerHashes = [];
+    for (let i = 1; i <= 17; i++) {
+      g('-C', place.path, 'commit', '-q', '--allow-empty', '-m', `worker commit ${i}`);
+      workerHashes.push(g('-C', place.path, 'rev-parse', '--short=7', 'HEAD'));
+    }
+
+    const res = await branchDiagram(place); // default limit 15
+    const graph = await checkGraph(res);
+    assert.equal(res.truncated, true);
+    assert.match(graph, /commit id: "\+4 more commits" type: HIGHLIGHT/);
+    assert.match(graph, /commit id: "\+2 more commits" type: HIGHLIGHT/);
+    // Cut-off commits are omitted; the newest 15 commits per side are present right after the cut node.
+    assert.ok(!graph.includes(mainHashes[0]));
+    assert.ok(!graph.includes(mainHashes[3]));
+    assert.ok(graph.includes(mainHashes[4]));
+    assert.ok(graph.includes(mainHashes[18]));
+    assert.ok(!graph.includes(workerHashes[0]));
+    assert.ok(!graph.includes(workerHashes[1]));
+    assert.ok(graph.includes(workerHashes[2]));
+    assert.ok(graph.includes(workerHashes[16]));
+    const lines = graph.split('\n');
+    assert.ok(lines.findIndex((l) => l.includes('+4 more commits')) < lines.findIndex((l) => l.includes(mainHashes[4])));
+    assert.ok(lines.findIndex((l) => l.includes('+2 more commits')) < lines.findIndex((l) => l.includes(workerHashes[2])));
+  }
+});
+
+test('branchDiagram: falls back to a plain-text note when gitGraph cannot draw the history faithfully, and supports non-main room branches', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { parse } = await import('@mermaid-js/parser');
+  const { branchDiagram, workerPlace, ensureWorktree } = await import('../src/ui.mjs');
+
+  // 1. Criss-cross merge (two merge-bases): returns a plain-text note, no graph.
+  {
+    const dir = await tmp('diag-crisscross-');
+    const g = await gitRoom(dir);
+    const place = await workerPlace(dir, '2026-11-19-cross');
+    await ensureWorktree(place);
+    writeFileSync(`${dir}/a.txt`, 'a\n'); g('add', 'a.txt'); g('commit', '-q', '-m', 'main a');
+    const m1 = g('rev-parse', 'HEAD');
+    writeFileSync(`${place.path}/b.txt`, 'b\n'); g('-C', place.path, 'add', 'b.txt'); g('-C', place.path, 'commit', '-q', '-m', 'worker b');
+    const w1 = g('-C', place.path, 'rev-parse', 'HEAD');
+    g('merge', w1, '-m', 'main merges w1');
+    g('-C', place.path, 'merge', m1, '-m', 'worker merges m1');
+
+    const res = await branchDiagram(place);
+    assert.ok(res.note && !res.graph);
+    assert.match(res.note, /multiple merge-bases|criss-cross/i);
+  }
+
+  // 2. Non-main room branch (e.g. feature/dev): emits YAML frontmatter with mainBranchName and parses cleanly.
+  {
+    const dir = await tmp('diag-nonmain-');
+    const g = await gitRoom(dir);
+    g('checkout', '-q', '-b', 'feature/dev');
+    const place = await workerPlace(dir, '2026-11-19-dev');
+    await ensureWorktree(place);
+    g('-C', place.path, 'commit', '-q', '--allow-empty', '-m', 'work on dev');
+
+    const res = await branchDiagram(place);
+    assert.ok(res.graph && !res.note);
+    assert.match(res.graph, /^---\nconfig:\n  gitGraph:\n    rotateCommitLabel: false\n    mainBranchName: "feature\/dev"\n---\ngitGraph TB:\n/);
+    const ast = await parse('gitGraph', res.graph);
+    assert.ok(ast.statements.length > 0);
+  }
+});
+
+test('branchDiagram: strips leading [label] from subjects and tags third-branch merges with tag: "merge"', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { parse } = await import('@mermaid-js/parser');
+  const { branchDiagram, workerPlace, ensureWorktree } = await import('../src/ui.mjs');
+
+  const dir = await tmp('diag-labels-and-third-');
+  const g = await gitRoom(dir);
+  const place = await workerPlace(dir, '2026-11-19-readable-labels');
+  await ensureWorktree(place);
+
+  // Long leading [label] is stripped BEFORE truncating to 48 chars so the actual subject stays readable.
+  const longLabel = '2026-11-19-a-very-long-discussion-folder-name-that-would-fill-the-label';
+  writeFileSync(`${place.path}/w.txt`, '1\n'); g('-C', place.path, 'add', 'w.txt');
+  g('-C', place.path, 'commit', '-q', '-m', `[${longLabel}] Add branch diagram labels`);
+  const w1 = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+  // Main merges a third branch (not the worker branch): stays in the diagram as one commit tagged "merge".
+  g('checkout', '-q', '-b', 'worker/other');
+  writeFileSync(`${dir}/other.txt`, 'other\n'); g('add', 'other.txt');
+  g('commit', '-q', '-m', '[2026-11-19-other] Other branch work');
+  g('checkout', '-q', 'main');
+  g('merge', '--no-ff', 'worker/other', '-m', '[2026-11-19-other] Merge other branch');
+  const mMerge = g('rev-parse', '--short=7', 'HEAD');
+
+  const res = await branchDiagram(place);
+  assert.ok(res.graph && !res.note, `expected graph, got: ${JSON.stringify(res)}`);
+  const ast = await parse('gitGraph', res.graph);
+  assert.ok(ast.statements.length > 0);
+  assert.match(res.graph, new RegExp(`commit id: "${w1} Add branch diagram labels"`));
+  assert.ok(!res.graph.includes(longLabel));
+  assert.match(res.graph, new RegExp(`commit id: "${mMerge} Merge other branch" tag: "merge"`));
+  assert.doesNotMatch(res.graph, /type: HIGHLIGHT/);
+
+  // Worker branch merging a third branch also stays as one commit tagged "merge" (no text-note fallback).
+  g('checkout', '-q', '-b', 'side-helper', 'HEAD~1');
+  writeFileSync(`${dir}/helper.txt`, 'h\n'); g('add', 'helper.txt');
+  g('commit', '-q', '-m', 'helper commit');
+  g('checkout', '-q', 'main');
+  g('-C', place.path, 'merge', '--no-ff', 'side-helper', '-m', `[${longLabel}] Bring in helper`);
+  const wMerge = g('-C', place.path, 'rev-parse', '--short=7', 'HEAD');
+
+  const res2 = await branchDiagram(place);
+  assert.ok(res2.graph && !res2.note, `expected graph, got: ${JSON.stringify(res2)}`);
+  const ast2 = await parse('gitGraph', res2.graph);
+  assert.ok(ast2.statements.length > 0);
+  assert.match(res2.graph, new RegExp(`commit id: "${wMerge} Bring in helper" tag: "merge"`));
+  assert.doesNotMatch(res2.graph, /type: HIGHLIGHT/);
+});
+
+test('Close with pending work: allowed with unresolved edits (hold and files kept), appends pending-work line to closing-statement.md, and refuses tasks queued behind an unresolved-edits hold', async () => {
+  const { writeFileSync, readFileSync, existsSync } = await import('node:fs');
+  const { hostname } = await import('node:os');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, workerHold } = await import('../src/ui.mjs');
+  const inTree = (ctx, ...a) => execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]);
+
+  const { first, contexts } = await multiRoom({ worker: (ctx, p) => {
+    if (p.endsWith('make pending')) {
+      writeFileSync(`${ctx.workerDir.path}/committed.txt`, 'c\n');
+      inTree(ctx, 'add', 'committed.txt');
+      inTree(ctx, 'commit', '-q', '-m', `[${ctx.discussion.name}] committed step`);
+      writeFileSync(`${ctx.workerDir.path}/wip.txt`, 'uncommitted\n');
+    }
+    return 'ok';
+  } });
+  await handleLine('pending-topic', first);
+  const { name, dir } = first.discussion;
+  queueWork(first, 'make pending');
+  await first.workQueue;
+  const worktreePath = first.workerDir.path;
+  assert.ok(workerLane(first).blockedBy);
+  assert.match(workerHold(first), /unresolved/);
+
+  // Close succeeds despite unresolved edits, keeps the worktree/edits/hold, and writes the pending-work line.
+  first.node = 'MacBook';
+  await handleLine('/close', first);
+  assert.match(first.notes.at(-1), new RegExp(`^Closed ${name}\\.`));
+  assert.ok(existsSync(`${worktreePath}/wip.txt`));
+  assert.ok(workerLane(first, name).blockedBy, 'queue hold stays intact after Close');
+  const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
+  assert.ok(stmt.includes(`Worker work pending on MacBook: \`worker/${name}\`, 1 commit not in main, uncommitted edits: yes, worktree \`${worktreePath}\`.`));
+
+  // Resume later finds the edits and hold still there.
+  await handleLine(`/resume ${name}`, first);
+  const resumed = contexts().find((c) => c.discussion?.name === name);
+  assert.ok(resumed);
+  resumed.docs = { ...resumed.docs, broadcast: (s, ev) => { if (ev.type === 'note') resumed.notes.push(ev.text); } };
+  assert.ok(existsSync(`${worktreePath}/wip.txt`));
+  assert.ok(workerLane(resumed, name).blockedBy);
+
+  // A task queued behind an unknown-origin unresolved-edits hold cannot start: Close refuses immediately.
+  const { unlinkSync } = await import('node:fs');
+  const gitDir = inTree(first, 'rev-parse', '--absolute-git-dir').toString().trim();
+  if (existsSync(`${gitDir}/agent-room-owner.json`)) unlinkSync(`${gitDir}/agent-room-owner.json`);
+  workerLane(resumed, name).blockedBy = { origin: null, owner: null, label: null, task: null, place: workerLane(resumed, name).blockedBy.place };
+  resumed.worker.turn = async () => 'ok';
+  queueWork(resumed, 'stuck task');
+  await handleLine(`/close ${name}`, resumed);
+  assert.match(resumed.notes.at(-1), /1 worker task is queued behind unresolved edits: remove them from the queue first/);
+  assert.match(resumed.notes.at(-1), /"stuck task"/);
+  workerLane(resumed, name).tasks.length = 0;
+
+  // Without a replication node name, the pending-work line falls back to hostname(); without pending work, no line is written.
+  const { first: clean } = await multiRoom();
+  await handleLine('clean-topic', clean);
+  const { dir: cleanDir } = clean.discussion;
+  await handleLine('/close', clean);
+  assert.doesNotMatch(readFileSync(`${cleanDir}/closing-statement.md`, 'utf8'), /Worker work pending on/);
+  assert.ok(hostname().length > 0);
+});
+
+test('Close and Discard: refuses with a queued task or mid-operation, previews commits/edits/untracked/ignored summary, detects changes between clicks, saves unique discard ref, removes worktree and branch, clears hold/session, and closes', async () => {
+  const { writeFileSync, mkdirSync, readFileSync, existsSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, discardPreview, closeAndDiscard } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  let releaseRunning;
+  const runningGate = new Promise((r) => { releaseRunning = r; });
+  const { first, git } = await multiRoom({ worker: async (ctx, p) => {
+    if (p.endsWith('slow task')) {
+      writeFileSync(`${ctx.workerDir.path}/a.txt`, 'v1\n');
+      inTree(ctx.workerDir.path, 'add', 'a.txt');
+      inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.discussion.name}] add a.txt`);
+      await runningGate;
+    }
+    return 'ok';
+  } });
+  writeFileSync(`${first.cwd}/.gitignore`, 'dist/\n*.log\n');
+  git('add', '.gitignore'); git('commit', '-q', '-m', 'add gitignore');
+
+  await handleLine('discard-topic', first);
+  const { name, dir } = first.discussion;
+
+  // 1. Refusal while a task is running or queued (names them).
+  queueWork(first, 'slow task');
+  queueWork(first, 'queued followup');
+  await until(() => workerLane(first, name).running);
+  await assert.rejects(
+    () => discardPreview(first, name),
+    (err) => /running or queued/.test(err.message) && err.message.includes('"slow task"') && err.message.includes('"queued followup"'),
+  );
+  releaseRunning();
+  await first.workQueue;
+
+  const tree = first.workerDir.path;
+  // Create tracked edit, untracked file, and ignored files in a folder (summarised, not listed one-by-one).
+  writeFileSync(`${tree}/a.txt`, 'edited\n');
+  writeFileSync(`${tree}/untracked.txt`, 'u1\n');
+  mkdirSync(`${tree}/dist/sub`, { recursive: true });
+  writeFileSync(`${tree}/dist/one.js`, '1');
+  writeFileSync(`${tree}/dist/sub/two.js`, '2');
+  writeFileSync(`${tree}/debug.log`, 'log');
+
+  // 2. Preview listing (commits, tracked edits, untracked files, ignored-files summary by top-level folder).
+  const firstClick = await discardPreview(first, name);
+  const p1 = firstClick.preview;
+  assert.equal(p1.commits.length, 1);
+  assert.match(p1.commits[0].subject, /add a\.txt/);
+  assert.deepEqual(p1.tracked.map((t) => t.path), ['a.txt']);
+  assert.deepEqual(p1.untracked, ['untracked.txt']);
+  assert.ok(p1.ignored.some((i) => i.label === 'dist/ 2 files'), `expected dist/ 2 files, got ${JSON.stringify(p1.ignored)}`);
+  assert.ok(p1.ignored.some((i) => i.label === 'debug.log'), `expected debug.log, got ${JSON.stringify(p1.ignored)}`);
+  assert.ok(!p1.ignored.some((i) => i.label.includes('one.js') || i.label.includes('two.js')));
+
+  // 3. A change between the two clicks (even inside an already-listed untracked file) returns { changed: true, preview } and deletes nothing.
+  writeFileSync(`${tree}/untracked.txt`, 'u2-modified\n');
+  const changedRes = await closeAndDiscard(first, name, p1.snapshot);
+  assert.equal(changedRes.changed, true);
+  assert.notEqual(changedRes.preview.snapshot, p1.snapshot);
+  assert.ok(existsSync(tree), 'worktree must not be removed when snapshot changed');
+
+  // Also detects a change in an ignored file's size/mtime.
+  writeFileSync(`${tree}/dist/one.js`, '111111');
+  const changedIgnored = await closeAndDiscard(first, name, changedRes.preview.snapshot);
+  assert.equal(changedIgnored.changed, true);
+
+  // 4. Mid-rebase / mid-merge refusal.
+  const gitDir = inTree(tree, 'rev-parse', '--absolute-git-dir');
+  writeFileSync(`${gitDir}/MERGE_HEAD`, git('rev-parse', 'HEAD') + '\n');
+  await assert.rejects(() => discardPreview(first, name), /mid-merge/);
+  const { unlinkSync } = await import('node:fs');
+  unlinkSync(`${gitDir}/MERGE_HEAD`);
+
+  // 5. Confirm with fresh snapshot: saves refs/discarded/<name>/<ts>, removes worktree and branch, clears hold/session, and closes with closing-statement line.
+  const tipBefore = git('rev-parse', `worker/${name}`);
+  const finalPreview = await discardPreview(first, name);
+  const done = await closeAndDiscard(first, name, finalPreview.preview.snapshot);
+  assert.equal(done.ok, true);
+  assert.match(done.savedRef, new RegExp(`^refs/discarded/${name}/\\d{8}-\\d{6}`));
+  assert.equal(git('rev-parse', done.savedRef), tipBefore);
+  assert.equal(existsSync(tree), false, 'worktree removed');
+  assert.throws(() => git('rev-parse', '--verify', `refs/heads/worker/${name}`), 'branch deleted');
+  assert.equal(workerLane(first, name).blockedBy, null);
+  assert.ok(first.screen.room.closedDiscussions.includes(name));
+  const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
+  assert.ok(stmt.includes(`Worker work discarded: 1 commit kept at \`${done.savedRef}\`.`));
+});
+
+test('Close and Merge: greyed-out reasons, Catch up when main moved, change between clicks, conflicting merge aborted cleanly, and successful merge with cleanup and close', async () => {
+  const { writeFileSync, mkdirSync, readFileSync, existsSync, unlinkSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, workerPlace, mergeReadiness, closeMergePreview, catchUpWithBranch, closeAndMerge } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  let releaseSlow;
+  const slowGate = new Promise((r) => { releaseSlow = r; });
+  let replyMode = 'commit-untested';
+  const { first, git } = await multiRoom({ worker: async (ctx, p) => {
+    const tree = ctx.workerDir.path;
+    if (replyMode === 'slow') { await slowGate; return 'done'; }
+    if (replyMode === 'commit-untested') {
+      writeFileSync(`${tree}/shared.txt`, 'worker-v1\n');
+      inTree(tree, 'add', 'shared.txt');
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] add shared`);
+      return 'committed without tested line';
+    }
+    if (replyMode === 'test-fail') {
+      return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests failed`;
+    }
+    if (replyMode === 'test-pass') {
+      return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+    }
+    if (replyMode === 'catchup') {
+      inTree(tree, 'merge', 'main', '--no-edit');
+      return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+    }
+    return 'ok';
+  } });
+  writeFileSync(`${first.cwd}/.gitignore`, 'cache/\n');
+  writeFileSync(`${first.cwd}/base.txt`, 'base\n');
+  git('add', '.gitignore', 'base.txt'); git('commit', '-q', '-m', 'init files');
+
+  await handleLine('merge-topic', first);
+  const { name, dir } = first.discussion;
+  queueWork(first, 'make change');
+  await first.workQueue;
+  const tree = first.workerDir.path;
+  const place = await workerPlace(first.cwd, name);
+  const wtGitDir = inTree(tree, 'rev-parse', '--absolute-git-dir');
+  const roomGitDir = git('rev-parse', '--absolute-git-dir');
+
+  // 1. Greyed-out reasons:
+  // (a) No Tested: report yet
+  let st = await mergeReadiness(first, place);
+  assert.equal(st.show, true); assert.equal(st.canMerge, false);
+  assert.match(st.disabledReason, /No passing Tested: report/);
+
+  // (b) Failed Tested: report
+  replyMode = 'test-fail';
+  queueWork(first, 'run failing test');
+  await first.workQueue;
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false);
+  assert.match(st.disabledReason, /last test report failed/);
+
+  // (c) Record passing Tested: report -> now canMerge is true!
+  replyMode = 'test-pass';
+  queueWork(first, 'run passing test');
+  await first.workQueue;
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, true); assert.equal(st.disabledReason, null);
+
+  // (d) Uncommitted edit in worktree
+  writeFileSync(`${tree}/wip.txt`, 'dirty\n');
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false); assert.match(st.disabledReason, /uncommitted edits/);
+  unlinkSync(`${tree}/wip.txt`);
+
+  // (e) Worktree mid-rebase
+  mkdirSync(`${wtGitDir}/rebase-merge`, { recursive: true });
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false); assert.match(st.disabledReason, /mid-rebase/);
+  const { rmSync } = await import('node:fs');
+  rmSync(`${wtGitDir}/rebase-merge`, { recursive: true, force: true });
+
+  // (f) Room tracked edits outside discussions/ (while edits inside discussions/ are fine)
+  writeFileSync(`${first.cwd}/base.txt`, 'edited in room\n');
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false); assert.match(st.disabledReason, /tracked edits outside discussions/);
+  git('checkout', '--', 'base.txt');
+
+  // (g) Room mid-operation
+  writeFileSync(`${roomGitDir}/MERGE_HEAD`, git('rev-parse', 'HEAD') + '\n');
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false); assert.match(st.disabledReason, /room's checkout is mid-merge/);
+  unlinkSync(`${roomGitDir}/MERGE_HEAD`);
+
+  // (h) Room detached HEAD
+  const mainSha = git('rev-parse', 'main');
+  git('checkout', '-q', '--detach', mainSha);
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false); assert.match(st.disabledReason, /detached HEAD/);
+  git('checkout', '-q', 'main');
+
+  // (i) Worker task running or queued
+  replyMode = 'slow';
+  queueWork(first, 'running task');
+  await until(() => workerLane(first, name).running);
+  st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, false); assert.match(st.disabledReason, /running or queued.*"running task"/);
+  releaseSlow();
+  await first.workQueue;
+
+  // 2. Main moves on: Catch up with main is offered instead, queues catch-up task, and does NOT merge automatically.
+  writeFileSync(`${first.cwd}/other.txt`, 'from main\n');
+  git('add', 'other.txt'); git('commit', '-q', '-m', 'main moved');
+  const mainAfterMove = git('rev-parse', 'main');
+  const previewMoved = await closeMergePreview(first, name);
+  assert.equal(previewMoved.catchUp, true);
+  assert.equal(previewMoved.targetBranch, 'main');
+  replyMode = 'catchup';
+  const cu = await catchUpWithBranch(first, name);
+  assert.equal(cu.ok, true);
+  await first.workQueue;
+  // Nothing merged into main automatically: main is still at mainAfterMove!
+  assert.equal(git('rev-parse', 'main'), mainAfterMove);
+  assert.equal(existsSync(tree), true);
+
+  // 3. Two-click preview + change between clicks (ignored file added in worktree).
+  mkdirSync(`${tree}/cache`, { recursive: true });
+  writeFileSync(`${tree}/cache/c1.bin`, 'abc');
+  const p1 = await closeMergePreview(first, name);
+  assert.equal(p1.ok, true);
+  assert.equal(p1.preview.title, `Merge worker/${name} into main`);
+  assert.ok(p1.preview.ignored.some((i) => i.label === 'cache/ 1 file'));
+  writeFileSync(`${tree}/cache/c2.bin`, 'def');
+  const changed = await closeAndMerge(first, name, p1.preview.snapshot);
+  assert.equal(changed.changed, true);
+  assert.equal(git('rev-parse', 'main'), mainAfterMove, 'must not merge when snapshot changed');
+
+  // 4. Conflicting merge aborted cleanly: room left clean, branch/worktree/discussion left open.
+  const p2 = await closeMergePreview(first, name);
+  await assert.rejects(
+    () => closeAndMerge(first, name, p2.preview.snapshot, {
+      _beforeMerge: async () => {
+        // Create a conflicting commit on main right after the preflight check to exercise real merge conflict + abort.
+        writeFileSync(`${first.cwd}/shared.txt`, 'main-conflict\n');
+        git('add', 'shared.txt'); git('commit', '-q', '-m', 'conflicting main commit');
+      },
+    }),
+    /Aborted the merge; the room's checkout is back as it was/,
+  );
+  assert.equal(existsSync(`${roomGitDir}/MERGE_HEAD`), false, 'MERGE_HEAD must be aborted');
+  assert.equal(git('status', '--porcelain', '--', '.', ':(exclude)discussions'), '');
+  assert.equal(existsSync(tree), true, 'worktree kept open on conflict');
+  assert.ok(!first.screen.room.closedDiscussions.includes(name), 'discussion left open on conflict');
+
+  // Reset main back to mainAfterMove (undo the injected conflict commit) so we can test a clean merge!
+  git('reset', '--hard', '-q', mainAfterMove);
+
+  // 5. Successful Close and Merge: merges with --no-ff, removes worktree and branch (-d), clears hold/session, and closes with closing-statement line.
+  const p3 = await closeMergePreview(first, name);
+  assert.equal(p3.ok, true);
+  const merged = await closeAndMerge(first, name, p3.preview.snapshot);
+  assert.equal(merged.ok, true);
+  assert.equal(merged.targetBranch, 'main');
+  assert.match(merged.mergeCommit, /^[0-9a-f]{7}$/);
+  assert.equal(git('rev-parse', '--short=7', 'main'), merged.mergeCommit);
+  assert.equal(git('show', '-s', '--format=%s', 'main'), `[${name}] Merge worker/${name}`);
+  assert.equal(existsSync(tree), false, 'worktree removed after merge');
+  assert.throws(() => git('rev-parse', '--verify', `refs/heads/worker/${name}`), 'branch deleted after merge');
+  assert.ok(first.screen.room.closedDiscussions.includes(name));
+  const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
+  assert.ok(stmt.includes(`Worker work merged into \`main\` as \`${merged.mergeCommit}\`.`));
+});
+
+test('Close and Merge active-work notice and shared room lock with Close and Discard', async () => {
+  const { writeFileSync, existsSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, closeMergePreview, closeAndMerge, discardPreview, closeAndDiscard } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  let releaseOther;
+  const otherGate = new Promise((r) => { releaseOther = r; });
+  const { first, git, contexts } = await multiRoom({ worker: async (ctx, p) => {
+    const tree = ctx.workerDir.path;
+    if (p.endsWith('commit a')) {
+      writeFileSync(`${tree}/a.txt`, 'a\n');
+      inTree(tree, 'add', 'a.txt');
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] a`);
+      return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+    }
+    if (p.endsWith('commit b')) {
+      writeFileSync(`${tree}/b.txt`, 'b\n');
+      inTree(tree, 'add', 'b.txt');
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] b`);
+      return 'ok';
+    }
+    if (p.endsWith('run b')) { await otherGate; return 'ok'; }
+    return 'ok';
+  } });
+
+  await handleLine('disc-a', first);
+  const nameA = first.discussion.name;
+  queueWork(first, 'commit a');
+  await first.workQueue;
+
+  // 1. With nothing else active and no other branches with unmerged commits: notice is omitted.
+  const quiet = await closeMergePreview(first, nameA);
+  assert.equal(quiet.ok, true);
+  assert.equal(quiet.preview.activeNotice, undefined);
+
+  // 2. With another discussion in a round, another worker task running + queued, and another branch with unmerged commits:
+  // notice lists all of them, does not block merge, and does NOT invalidate the snapshot from before!
+  await handleLine('/new', first);
+  const second = contexts()[1];
+  await handleLine('disc-b', second);
+  const nameB = second.discussion.name;
+  queueWork(second, 'commit b');
+  await second.workQueue;
+
+  second.screen.thinking = 'A'; // simulate disc-b in the middle of a round
+  queueWork(second, 'run b');
+  queueWork(second, 'queued b');
+  await until(() => workerLane(second, nameB).running);
+
+  const busy = await closeMergePreview(first, nameA);
+  assert.equal(busy.ok, true);
+  assert.match(busy.preview.activeNotice, /Active now: 1 discussion in a round, 1 worker task running \(worker\/[^)]+\), 1 queued \(worker\/[^)]+\)\./);
+  assert.match(busy.preview.activeNotice, new RegExp(`Other branches may need Catch up with main afterwards: worker/${nameB}\\.`));
+  // Active-work notice is not part of the snapshot!
+  assert.equal(busy.preview.snapshot, quiet.preview.snapshot);
+
+  // 3. Shared lock: while Close and Merge holds the lock, Close and Discard is refused at once and changes nothing.
+  let discardAttempt;
+  const mergeRes = await closeAndMerge(first, nameA, quiet.preview.snapshot, {
+    _beforeMerge: async () => {
+      discardAttempt = await closeAndDiscard(second, nameB, 'any-snap').then(() => null, (err) => err);
+    },
+  });
+  assert.equal(mergeRes.ok, true);
+  assert.ok(discardAttempt instanceof Error);
+  assert.match(discardAttempt.message, new RegExp(`Cannot Close and Discard ${nameB}: Close and Merge for ${nameA} is already in progress`));
+  assert.ok(existsSync(second.workerDir.path), 'second worktree untouched while lock held');
+
+  // Release disc-b's running/queued tasks so we can test failed Discard releasing the lock.
+  second.screen.thinking = null;
+  releaseOther();
+  await second.workQueue;
+
+  // 4. Shared lock is released after a failed Close and Discard (e.g. refusal error inside lock).
+  const treeB = second.workerDir.path;
+  const wtGitDirB = inTree(treeB, 'rev-parse', '--absolute-git-dir');
+  writeFileSync(`${wtGitDirB}/MERGE_HEAD`, git('rev-parse', 'HEAD') + '\n');
+  await assert.rejects(() => closeAndDiscard(second, nameB, 'snap'), /mid-merge/);
+  assert.equal(first.shop.merging, null, 'lock must be released after failed Discard');
+  const { unlinkSync } = await import('node:fs');
+  unlinkSync(`${wtGitDirB}/MERGE_HEAD`);
+  // Subsequent discardPreview succeeds immediately now that the lock is free.
+  const afterFail = await discardPreview(second, nameB);
+  assert.equal(afterFail.ok, true);
 });

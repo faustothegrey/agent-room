@@ -8,8 +8,8 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
-import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir, networkInterfaces, tmpdir } from 'node:os';
+import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { homedir, hostname, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as defaultInstructions from './instructions.mjs';
@@ -417,6 +417,11 @@ function wire(ctx) {
   ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
   ctx.screen.stopWorker = (mode) => stopWorker(ctx, mode);
   ctx.screen.cancelClose = (name) => cancelClose(ctx, name);
+  ctx.screen.discardPreview = (name) => discardPreview(ctx, name);
+  ctx.screen.closeAndDiscard = (name, snapshot) => closeAndDiscard(ctx, name, snapshot);
+  ctx.screen.mergePreviewClose = (name) => closeMergePreview(ctx, name);
+  ctx.screen.closeAndMerge = (name, snapshot) => closeAndMerge(ctx, name, snapshot);
+  ctx.screen.catchUpMerge = (name) => catchUpWithBranch(ctx, name);
   ctx.screen.setAgentEnabled = (name, enabled, member) => setAgentEnabled(ctx, name, enabled, { member });
 }
 
@@ -1666,30 +1671,56 @@ async function closingContext(ctx, d) {
   return shadow;
 }
 
-async function closeNamedDiscussion(ctx, name) {
+async function pendingWorkLine(ctx, name) {
+  const place = await lanePlace(ctx, name);
+  if (place.disabled) return null;
+  const s = await worktreeStatus(place);
+  if (!s.exists) return null;
+  const main = await mainRef(place.top);
+  const ahead = Number(await git(place.top, 'rev-list', '--count', `${main}..${place.branch}`));
+  const dirty = !!s.treeDirty;
+  if (!ahead && !dirty) return null;
+  const where = ctx.node || hostname();
+  return `Worker work pending on ${where}: \`${place.branch}\`, ${plural(ahead, 'commit')} not in main, uncommitted edits: ${dirty ? 'yes' : 'no'}, worktree \`${place.path}\`.`;
+}
+
+async function closeNamedDiscussion(ctx, name, { extraLine = null, rethrow = false } = {}) {
   const d = discussionRef(join(ctx.cwd, 'discussions'), name);
-  if (!d) return note(ctx, `✗ No discussion "${name}".`, true);
+  if (!d) { const msg = `No discussion "${name}".`; note(ctx, `✗ ${msg}`, true); if (rethrow) throw new Error(msg); return false; }
   const shop = shopOf(ctx), closing = shop.closing ??= new Map();
-  if (closing.has(d.name)) return note(ctx, `✗ ${d.name} is already closing.`, true);
-  if (closedDiscussions(ctx).includes(d.name)) return note(ctx, `✗ ${d.name} is already closed.`, true);
+  if (closing.has(d.name)) { const msg = `${d.name} is already closing.`; note(ctx, `✗ ${msg}`, true); if (rethrow) throw new Error(msg); return false; }
+  if (closedDiscussions(ctx).includes(d.name)) { const msg = `${d.name} is already closed.`; note(ctx, `✗ ${msg}`, true); if (rethrow) throw new Error(msg); return false; }
   const opened = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, d.name));
+  const blockedQueued = () => lanesOf(shop).flatMap((l) =>
+    l.blockedBy ? l.tasks.filter((t) => t.owner === d.name && l.blockedBy.owner !== t.owner) : []);
+  const checkBlocked = () => {
+    const blocked = blockedQueued();
+    if (!blocked.length) return;
+    const names = blocked.map((t) => `"${firstLine(t.text)}"`).join(', ');
+    throw new Error(`${blocked.length} worker ${blocked.length === 1 ? 'task is' : 'tasks are'} queued behind unresolved edits: remove them from the queue first (${names}).`);
+  };
   const c = { waiting: true, cancelled: false, wake: null };
   closing.set(d.name, c);
   showHeader(ctx);
   try {
+    checkBlocked();
     const tasks = [...runningTasks(shop), ...queuedTasks(shop)].filter((t) => t.owner === d.name && t.finished);
     let finished = !tasks.length;
     Promise.all(tasks.map((t) => t.finished)).then(() => { finished = true; c.wake?.(); });
     const pending = () => [...runningTasks(shop), ...queuedTasks(shop)].some((t) => t.owner === d.name);
-    while ((!finished || pending()) && !c.cancelled) await new Promise((resolve) => { c.wake = resolve; setTimeout(resolve, 100); });
+    while ((!finished || pending()) && !c.cancelled) {
+      if (!runningTasks(shop).some((t) => t.owner === d.name)) checkBlocked();
+      await new Promise((resolve) => { c.wake = resolve; setTimeout(resolve, 100); });
+    }
     c.wake = null;
-    if (c.cancelled) return note(ctx, `Close cancelled for ${d.name}.`);
+    if (c.cancelled) { note(ctx, `Close cancelled for ${d.name}.`); return false; }
     if (ctx.stopped || opened?.stopped) throw new Error('The room stopped while Close was waiting.');
     c.waiting = false;
     showHeader(ctx);
     const target = opened ?? await closingContext(ctx, d);
-    const hold = workerHold(target);
-    if (hold) throw new Error(`This can't be closed yet: ${hold}.`);
+    if (runningTasks(shop).some((t) => (t.owner ?? ownerOf(t.origin)) === ownerOf(target))) {
+      throw new Error('This can\'t be closed yet: a worker task from it is running.');
+    }
     if (target.checkpointError) throw new Error(`The latest checkpoint could not be saved: ${target.checkpointError}`);
     const reports = shop.log.filter((m) => m.owner === d.name && m.speaker).map((m) => `${m.speaker}: ${m.html ?? m.text ?? ''}`).join('\n\n');
     // Written by the worker's provider and model as set for this discussion, not by its discussion
@@ -1699,6 +1730,8 @@ async function closeNamedDiscussion(ctx, name) {
     const writer = `${spec.provider[0].toUpperCase() + spec.provider.slice(1)} (${modelLabel(spec.provider, spec.model)})`;
     note(ctx, `Closing ${d.name}: ${writer} is writing the closing statement…`);
     const statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports }, target.closingAgent?.());
+    const appendedLine = extraLine ?? await pendingWorkLine(target, d.name).catch(() => null);
+    const body = appendedLine ? `${statement.trimEnd()}\n\n${appendedLine}\n` : `${statement}\n`;
     const file = join(target.discussion.dir, 'closing-statement.md');
     const temp = `${file}.${process.pid}.tmp`;
     const previous = existsSync(file) ? readFileSync(file) : null;
@@ -1706,7 +1739,7 @@ async function closeNamedDiscussion(ctx, name) {
     const sessions = [...(target.sessions?.values() ?? [])].map((s) => [s, { ...s }]);
     let snapshot, markedClosed = false;
     try {
-      writeFileSync(temp, statement + '\n');
+      writeFileSync(temp, body);
       // CLI calls run one process per turn; the worker and closing turns have returned. Drop their
       // provider IDs without stopping another discussion's detached worker in this context.
       for (const [session] of sessions) for (const key of Object.keys(session)) delete session[key];
@@ -1751,11 +1784,554 @@ async function closeNamedDiscussion(ctx, name) {
     }
     note(ctx, `Closed ${d.name}. Closing statement written by ${writer}.`);
     if (snapshot) saveClosed(ctx, target, snapshot);
+    return true;
   } catch (err) {
     note(ctx, `✗ Could not close ${d.name}: ${err.message}`, true);
+    if (rethrow) throw err;
+    return false;
   } finally {
     closing.delete(d.name);
     showHeader(ctx);
+  }
+}
+
+// ── Close and Discard ─────────────────────────────────────────────────
+// Two-click confirmation: first click previews everything that would be lost (commits not in main,
+// tracked edits, untracked files, ignored files summarised by top-level folder) and snapshots it;
+// second click re-checks the snapshot before saving refs/discarded/<name>/<timestamp>, removing
+// the worktree and branch, clearing the lane's hold and saved worker session, and closing.
+function worktreeOperation(privateDir) {
+  if (existsSync(join(privateDir, 'MERGE_HEAD'))) return 'merge';
+  if (existsSync(join(privateDir, 'rebase-merge')) || existsSync(join(privateDir, 'rebase-apply'))) return 'rebase';
+  if (existsSync(join(privateDir, 'REVERT_HEAD')) || existsSync(join(privateDir, 'sequencer'))) return 'revert';
+  return null;
+}
+const gitRaw = (dir, ...args) => new Promise((done, fail) => execFile('git', ['-C', dir, ...args], { maxBuffer: 1 << 24 },
+  (err, out, errOut) => (err ? fail(new Error(`git ${args[0]}: ${(errOut || err.message).trim()}`)) : done(out))));
+function fileContentHash(fullPath) {
+  try {
+    const st = lstatSync(fullPath);
+    if (st.isSymbolicLink()) return `symlink:${readlinkSync(fullPath)}`;
+    if (st.isDirectory()) return 'dir';
+    return createHash('sha256').update(readFileSync(fullPath)).digest('hex');
+  } catch { return 'missing'; }
+}
+// Walks an ignored folder without following symlinks, collecting count + metadata hash (size, mtime).
+function walkIgnoredMeta(rootDir, relDir, hash) {
+  let count = 0;
+  const walk = (abs, rel) => {
+    let entries;
+    try { entries = readdirSync(abs, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)); }
+    catch { return; }
+    for (const e of entries) {
+      const childAbs = join(abs, e.name), childRel = rel ? `${rel}/${e.name}` : e.name;
+      let st;
+      try { st = lstatSync(childAbs); } catch { continue; }
+      if (st.isSymbolicLink()) {
+        count++;
+        hash.update(`L\0${childRel}\0${st.size}\0${st.mtimeMs}\n`);
+      } else if (st.isDirectory()) {
+        walk(childAbs, childRel);
+      } else {
+        count++;
+        hash.update(`F\0${childRel}\0${st.size}\0${st.mtimeMs}\n`);
+      }
+    }
+  };
+  walk(join(rootDir, relDir), relDir);
+  return count;
+}
+function parseStatusZ(raw) {
+  const parts = raw.split('\0');
+  const tracked = [], untracked = [];
+  for (let i = 0; i < parts.length; i++) {
+    const entry = parts[i];
+    if (!entry) continue;
+    const xy = entry.slice(0, 2), path = entry.slice(3);
+    if (xy === '??') untracked.push(path);
+    else if (xy !== '!!') {
+      const renamed = xy[0] === 'R' || xy[0] === 'C' || xy[1] === 'R' || xy[1] === 'C';
+      const orig = renamed ? parts[++i] : null;
+      tracked.push({ status: xy.trim() || xy, path, ...(orig && { orig }) });
+    }
+  }
+  return { tracked, untracked };
+}
+// Shared snapshot collector for Close and Discard (Step 3) and Close and Merge (Step 4):
+// snapshots the branch tip, tracked diff/status, content hashes for tracked/untracked files,
+// and metadata (count, size, mtime) for ignored files summarised by top-level folder.
+async function collectWorktreeSnapshot(place, branchHead, worktreeExists) {
+  let tracked = [], untracked = [], ignored = [];
+  const snap = createHash('sha256');
+  snap.update(`branch:${branchHead ?? 'none'}\nworktree:${worktreeExists}\n`);
+
+  if (worktreeExists) {
+    const [statusZ, diffCached, ignoredZ] = await Promise.all([
+      gitRaw(place.path, 'status', '--porcelain', '-z', '-uall'),
+      gitRaw(place.path, 'diff', '--cached'),
+      gitRaw(place.path, 'status', '--porcelain', '-z', '--ignored=matching'),
+    ]);
+    snap.update(`status:${statusZ}\ncached:${createHash('sha256').update(diffCached).digest('hex')}\n`);
+    const parsed = parseStatusZ(statusZ);
+    tracked = parsed.tracked;
+    untracked = parsed.untracked.sort();
+    for (const t of tracked) snap.update(`T\0${t.status}\0${t.path}\0${fileContentHash(join(place.path, t.path))}\n`);
+    for (const u of untracked) snap.update(`U\0${u}\0${fileContentHash(join(place.path, u))}\n`);
+
+    const groups = new Map();
+    const getGroup = (key, isDir) => {
+      if (!groups.has(key)) groups.set(key, { key, isDir, count: 0, hash: createHash('sha256') });
+      return groups.get(key);
+    };
+    const ignoredEntries = ignoredZ.split('\0').filter((e) => e.startsWith('!! ')).map((e) => e.slice(3)).sort();
+    for (const entry of ignoredEntries) {
+      const clean = entry.replace(/\/$/, '');
+      const full = join(place.path, clean);
+      let st;
+      try { st = lstatSync(full); } catch { continue; }
+      const topFolder = clean.includes('/') ? `${clean.split('/')[0]}/` : null;
+      if (st.isSymbolicLink()) {
+        const g = getGroup(topFolder ?? clean, !!topFolder);
+        g.count++;
+        g.hash.update(`L\0${clean}\0${st.size}\0${st.mtimeMs}\n`);
+      } else if (st.isDirectory()) {
+        const key = topFolder ?? `${clean}/`;
+        const g = getGroup(key, true);
+        g.count += walkIgnoredMeta(place.path, clean, g.hash);
+      } else {
+        const g = getGroup(topFolder ?? clean, !!topFolder);
+        g.count++;
+        g.hash.update(`F\0${clean}\0${st.size}\0${st.mtimeMs}\n`);
+      }
+    }
+    ignored = [...groups.values()].sort((a, b) => a.key.localeCompare(b.key)).map((g) => {
+      const metaDigest = g.hash.digest('hex');
+      snap.update(`I\0${g.key}\0${g.count}\0${metaDigest}\n`);
+      const label = g.isDir ? `${g.key} ${g.count.toLocaleString('en-US')} ${g.count === 1 ? 'file' : 'files'}` : g.key;
+      return { key: g.key, count: g.count, label };
+    });
+  }
+  return { tracked, untracked, ignored, snapshot: snap.digest('hex') };
+}
+
+function clearLaneAndWorkerSession(ctx, name) {
+  const shop = shopOf(ctx);
+  const lane = laneState(shop, name);
+  lane.blockedBy = null;
+  lane.holdContext = null;
+  lane.inspectionError = null;
+  if (lane.recheck) { clearTimeout(lane.recheck); lane.recheck = null; }
+  const opened = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, name));
+  if (opened) {
+    const wName = parseSpec(opened.workerSpec ?? 'claude', true).name;
+    const ws = opened.sessions?.get(`worker:${wName}`);
+    if (ws) for (const k of Object.keys(ws)) delete ws[k];
+    opened.workerBriefed = false;
+    opened.workerTree = null;
+    opened.workerLabel = null;
+    if (opened.workerDir) opened.workerDir.path = null;
+  }
+  const cp = readCheckpoint(ctx, name);
+  if (cp && !cp.invalid && Array.isArray(cp.sessions)) {
+    writeCheckpoint(ctx, name, { ...cp, sessions: cp.sessions.filter(([k]) => !String(k).startsWith('worker:')) });
+  }
+}
+
+function failActionReport(ctx, action, name, step, err, done, notDone, extra = '') {
+  const summary = `${action} for ${name} stopped at "${step}": ${err.message}. Done: ${done.length ? done.join('; ') : 'nothing'}. Not done: ${notDone.join('; ')}.${extra ? ` ${extra}` : ''} The discussion was left open.`;
+  note(ctx, `✗ ${summary}`, true);
+  throw new Error(summary);
+}
+
+async function inspectDiscard(ctx, name, { selfLock = null } = {}) {
+  const d = discussionRef(join(ctx.cwd, 'discussions'), name);
+  if (!d) throw new Error(`No discussion "${name}".`);
+  const shop = shopOf(ctx), closing = shop.closing ??= new Map();
+  if (closing.has(d.name)) throw new Error(`${d.name} is already closing.`);
+  if (closedDiscussions(ctx).includes(d.name)) throw new Error(`${d.name} is already closed.`);
+  if (shop.merging && shop.merging !== selfLock) throw new Error(`Cannot Close and Discard ${d.name}: ${shop.merging} is already in progress in this room.`);
+  const tasks = [...runningTasks(shop), ...queuedTasks(shop)].filter((t) => t.owner === d.name);
+  if (tasks.length) {
+    const names = tasks.map((t) => `"${firstLine(t.text)}"`).join(', ');
+    throw new Error(`Cannot Close and Discard ${d.name}: ${plural(tasks.length, 'worker task')} running or queued (${names}).`);
+  }
+  const place = await lanePlace(ctx, d.name);
+  if (place.disabled) throw new Error(place.disabled);
+  const worktreeExists = existsSync(place.path) && (await worktrees(place.top)).some((w) => w.path === real(place.path));
+  const branchHead = await git(place.top, 'rev-parse', '--verify', '-q', `refs/heads/${place.branch}^{commit}`).catch(() => null);
+  const branchExists = !!branchHead;
+  if (!worktreeExists && !branchExists) throw new Error(`${d.name} has no worker worktree or branch to discard.`);
+  if (worktreeExists) {
+    const privateDir = await git(place.path, 'rev-parse', '--absolute-git-dir');
+    const op = worktreeOperation(privateDir);
+    if (op) throw new Error(`Cannot Close and Discard ${d.name}: its worktree is mid-${op}. Resolve or abort it first.`);
+  }
+
+  let commits = [];
+  if (branchExists) {
+    const main = await mainRef(place.top);
+    const logOut = await git(place.top, 'log', '--format=%h%x1f%s', `${main}..refs/heads/${place.branch}`);
+    commits = logOut ? logOut.split('\n').filter(Boolean).map((l) => {
+      const [hash, ...rest] = l.split('\x1f');
+      return { hash, subject: rest.join('\x1f') };
+    }) : [];
+  }
+
+  const { tracked, untracked, ignored, snapshot } = await collectWorktreeSnapshot(place, branchHead, worktreeExists);
+  return {
+    d, place, branchHead, worktreeExists, branchExists,
+    preview: {
+      name: d.name, branch: place.branch, path: place.path, worktreeExists, branchExists,
+      commits, tracked, untracked, ignored, snapshot,
+    },
+  };
+}
+
+function discardTimestamp(now = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+async function saveDiscardRef(top, name, tip) {
+  const baseTs = discardTimestamp();
+  const zero = '0'.repeat(40);
+  for (let n = 1; n <= 100; n++) {
+    const ref = `refs/discarded/${name}/${n === 1 ? baseTs : `${baseTs}-${n}`}`;
+    try {
+      await git(top, 'update-ref', ref, tip, zero);
+      return ref;
+    } catch {
+      if (!(await gitOk(top, 'rev-parse', '--verify', '-q', ref))) throw new Error(`Could not save recovery ref ${ref}.`);
+    }
+  }
+  throw new Error(`Could not allocate a unique refs/discarded/${name}/${baseTs} ref.`);
+}
+
+export async function discardPreview(ctx, name) {
+  const { preview } = await inspectDiscard(ctx, name);
+  return { ok: true, preview };
+}
+
+export async function closeAndDiscard(ctx, name, snapshot) {
+  const shop = shopOf(ctx);
+  if (shop.merging) throw new Error(`Cannot Close and Discard ${name}: ${shop.merging} is already in progress in this room.`);
+  const lock = `Close and Discard for ${name}`;
+  shop.merging = lock;
+  try {
+    const info = await inspectDiscard(ctx, name, { selfLock: lock });
+    if (!snapshot || info.preview.snapshot !== snapshot) {
+      return { changed: true, preview: info.preview };
+    }
+    const { d, place, branchHead, worktreeExists, branchExists, preview } = info;
+    const done = [];
+    const failReport = (step, err, notDone) => failActionReport(ctx, 'Close and Discard', d.name, step, err, done, notDone);
+
+    let savedRef = null;
+    if (branchExists && preview.commits.length > 0) {
+      try {
+        savedRef = await saveDiscardRef(place.top, d.name, branchHead);
+        done.push(`saved ${plural(preview.commits.length, 'commit')} at ${savedRef}`);
+      } catch (err) {
+        failReport('save recovery ref', err, [
+          ...(worktreeExists ? [`worktree ${place.path} not removed`] : []),
+          `branch ${place.branch} not deleted`,
+          'lane hold and worker session not cleared',
+          'discussion not closed',
+        ]);
+      }
+    }
+    if (worktreeExists) {
+      try {
+        await git(place.top, 'worktree', 'remove', '--force', place.path);
+        done.push(`removed worktree ${place.path}`);
+      } catch (err) {
+        failReport('remove worktree', err, [
+          ...(branchExists ? [`branch ${place.branch} not deleted`] : []),
+          'lane hold and worker session not cleared',
+          'discussion not closed',
+        ]);
+      }
+    }
+    if (branchExists) {
+      try {
+        await git(place.top, 'branch', '-D', place.branch);
+        done.push(`deleted branch ${place.branch}`);
+      } catch (err) {
+        failReport('delete branch', err, [
+          'lane hold and worker session not cleared',
+          'discussion not closed',
+        ]);
+      }
+    }
+    clearLaneAndWorkerSession(ctx, d.name);
+    done.push('cleared lane hold and worker session');
+    await refreshWorker(ctx).catch(() => {});
+
+    const discardLine = savedRef
+      ? `Worker work discarded: ${plural(preview.commits.length, 'commit')} kept at \`${savedRef}\`.`
+      : 'Worker work discarded: nothing committed.';
+    try {
+      await closeNamedDiscussion(ctx, d.name, { extraLine: discardLine, rethrow: true });
+    } catch (err) {
+      failReport('close discussion', err, ['discussion not closed']);
+    }
+    return { ok: true, savedRef };
+  } finally {
+    if (shop.merging === lock) shop.merging = null;
+  }
+}
+
+// ── Close and Merge ───────────────────────────────────────────────────
+// Reuses Step 3's snapshot and step-by-step failure report. Checks all merge prerequisites
+// (greyed-out reasons), offers Catch up with <branch> when the target branch has moved,
+// runs one merge at a time with best-effort abort on conflict, then removes the worktree,
+// deletes the branch with `git branch -d`, clears hold/session, and closes.
+export async function mergeReadiness(ctx, place) {
+  const name = place.lane;
+  const shop = shopOf(ctx);
+  const [roomBranch, roomHead, roomGitDir] = await Promise.all([
+    git(place.top, 'rev-parse', '--abbrev-ref', 'HEAD'),
+    git(place.top, 'rev-parse', 'HEAD'),
+    git(place.top, 'rev-parse', '--absolute-git-dir'),
+  ]);
+  const branchHead = await git(place.top, 'rev-parse', '--verify', '-q', `refs/heads/${place.branch}^{commit}`).catch(() => null);
+  if (!branchHead) return { show: false };
+  const ahead = Number(await git(place.top, 'rev-list', '--count', `${roomHead}..${branchHead}`));
+  if (!ahead) return { show: false };
+
+  const targetBranch = roomBranch === 'HEAD' ? null : roomBranch;
+  const tasks = [...runningTasks(shop), ...queuedTasks(shop)].filter((t) => t.owner === name);
+  const worktreeExists = existsSync(place.path) && (await worktrees(place.top)).some((w) => w.path === real(place.path));
+  let worktreeOp = null, worktreeDirty = false;
+  if (worktreeExists) {
+    const privateDir = await git(place.path, 'rev-parse', '--absolute-git-dir');
+    worktreeOp = worktreeOperation(privateDir);
+    worktreeDirty = (await git(place.path, 'status', '--porcelain')) !== '';
+  }
+  const roomOp = worktreeOperation(roomGitDir);
+  const roomTrackedDirty = (await git(place.root, 'status', '--porcelain', '--untracked-files=no', '--', '.', ':(exclude)discussions', ':(exclude).agent-room')) !== '';
+  const behind = Number(await git(place.top, 'rev-list', '--count', `${branchHead}..${roomHead}`));
+
+  // Order of checks: active tasks / worktree state / room state first.
+  const block = (disabledReason) => ({ show: true, canMerge: false, catchUp: false, disabledReason, targetBranch, roomHead, branchHead, worktreeExists, ahead, behind });
+  if (tasks.length) {
+    const names = tasks.map((t) => `"${firstLine(t.text)}"`).join(', ');
+    return block(`${plural(tasks.length, 'worker task')} running or queued (${names}).`);
+  }
+  if (worktreeOp) return block(`The worker's worktree is mid-${worktreeOp}.`);
+  if (worktreeDirty) return block('The worker\'s worktree has uncommitted edits.');
+  if (!targetBranch) return block('The room\'s checkout is on a detached HEAD.');
+  if (roomOp) return block(`The room's checkout is mid-${roomOp}.`);
+  if (roomTrackedDirty) return block('The room\'s checkout has tracked edits outside discussions/.');
+
+  // Target branch has moved: offer Catch up with <branch> instead of merging.
+  if (behind > 0) {
+    return { show: true, canMerge: false, catchUp: true, disabledReason: null, targetBranch, roomHead, branchHead, worktreeExists, ahead, behind };
+  }
+
+  // Merge preview check (Git 2.38+).
+  if (await hasMergeTree()) {
+    const r = await gitStatus(place.top, 'merge-tree', '--write-tree', '--name-only', '--no-messages', targetBranch, place.branch);
+    if (r.code === 1) {
+      const files = [...new Set(r.out.split('\n').slice(1).filter(Boolean))];
+      return block(`Merge preview is not clean (would conflict in ${files.join(', ') || 'files Git did not name'}).`);
+    }
+    if (r.code !== 0) return block(`Merge preview could not be computed (${r.err || `git exited with ${r.code}`}).`);
+  }
+
+  // Recorded Tested: result for the branch's current tip with the room's current tip.
+  const t = worktreeExists ? await readTested(place) : null;
+  if (!t) return block(`No passing Tested: report from the worker for ${place.branch} with ${targetBranch} yet.`);
+  if (t.result !== 'passed') return block('The worker\'s last test report failed.');
+  if (t.branch !== branchHead || t.main !== roomHead) {
+    return block(`The worker's test report is out of date (${place.branch} or ${targetBranch} moved since it was tested).`);
+  }
+  return { show: true, canMerge: true, catchUp: false, disabledReason: null, targetBranch, roomHead, branchHead, worktreeExists, ahead, behind };
+}
+
+async function activeWorkNotice(ctx, name, place, targetBranch) {
+  const shop = shopOf(ctx);
+  const otherRounds = siblings(ctx).filter((c) => !c.stopped && c.discussion?.name !== name && !!c.screen?.thinking).length;
+  const otherRunning = runningTasks(shop).filter((t) => t.owner !== name);
+  const otherQueued = queuedTasks(shop).filter((t) => t.owner !== name);
+  const taskBranch = (t) => (t.lane ? `worker/${t.lane}` : WORKER_BRANCH);
+
+  const branchRefs = await git(place.top, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/worker/').catch(() => '');
+  const otherBranches = [];
+  for (const b of branchRefs.split('\n').filter(Boolean)) {
+    if (b === place.branch) continue;
+    const ahead = Number(await git(place.top, 'rev-list', '--count', `${targetBranch}..refs/heads/${b}`).catch(() => '0'));
+    if (ahead > 0) otherBranches.push(b);
+  }
+
+  const activeParts = [];
+  if (otherRounds) activeParts.push(`${plural(otherRounds, 'discussion')} in a round`);
+  if (otherRunning.length) {
+    const branches = [...new Set(otherRunning.map(taskBranch))].join(', ');
+    activeParts.push(`${plural(otherRunning.length, 'worker task')} running (${branches})`);
+  }
+  if (otherQueued.length) {
+    const branches = [...new Set(otherQueued.map(taskBranch))].join(', ');
+    activeParts.push(`${otherQueued.length} queued (${branches})`);
+  }
+  const sentences = [];
+  if (activeParts.length) sentences.push(`Active now: ${activeParts.join(', ')}.`);
+  if (otherBranches.length) sentences.push(`Other branches may need Catch up with ${targetBranch} afterwards: ${otherBranches.join(', ')}.`);
+  return sentences.length ? sentences.join(' ') : null;
+}
+
+async function inspectCloseMerge(ctx, name, { selfLock = null } = {}) {
+  const d = discussionRef(join(ctx.cwd, 'discussions'), name);
+  if (!d) throw new Error(`No discussion "${name}".`);
+  const shop = shopOf(ctx), closing = shop.closing ??= new Map();
+  if (closing.has(d.name)) throw new Error(`${d.name} is already closing.`);
+  if (closedDiscussions(ctx).includes(d.name)) throw new Error(`${d.name} is already closed.`);
+  if (shop.merging && shop.merging !== selfLock) throw new Error(`Cannot Close and Merge ${d.name}: ${shop.merging} is already in progress in this room.`);
+  const place = await lanePlace(ctx, d.name);
+  if (place.disabled) throw new Error(place.disabled);
+  const state = await mergeReadiness(ctx, place);
+  if (!state.show) throw new Error(`${d.name} has no commits not in the room's current branch to merge.`);
+  if (state.catchUp) {
+    return {
+      d, place, state, catchUp: true,
+      message: `${state.targetBranch} has moved (${place.branch} lacks ${plural(state.behind, 'commit')} of ${state.targetBranch}). Catch up with ${state.targetBranch} first; nothing was merged.`,
+    };
+  }
+  if (!state.canMerge) throw new Error(`Cannot Close and Merge ${d.name}: ${state.disabledReason}`);
+
+  const [logOut, worktreeSnap, activeNotice] = await Promise.all([
+    git(place.top, 'log', '--format=%h%x1f%s', `${state.roomHead}..${state.branchHead}`),
+    collectWorktreeSnapshot(place, state.branchHead, state.worktreeExists),
+    activeWorkNotice(ctx, d.name, place, state.targetBranch),
+  ]);
+  const commits = logOut ? logOut.split('\n').filter(Boolean).map((l) => {
+    const [hash, ...rest] = l.split('\x1f');
+    return { hash, subject: rest.join('\x1f') };
+  }) : [];
+  // activeNotice is informational only and intentionally excluded from the snapshot.
+  const mergeSnap = createHash('sha256')
+    .update(`target:${state.targetBranch}\nroomHead:${state.roomHead}\nwt:${worktreeSnap.snapshot}\n`)
+    .digest('hex');
+
+  return {
+    d, place, state, catchUp: false,
+    preview: {
+      name: d.name, branch: place.branch, targetBranch: state.targetBranch,
+      title: `Merge ${place.branch} into ${state.targetBranch}`,
+      path: place.path, commits, untracked: worktreeSnap.untracked, ignored: worktreeSnap.ignored,
+      ...(activeNotice && { activeNotice }),
+      snapshot: mergeSnap,
+    },
+  };
+}
+
+export async function closeMergePreview(ctx, name) {
+  const info = await inspectCloseMerge(ctx, name);
+  if (info.catchUp) return { catchUp: true, targetBranch: info.state.targetBranch, behind: info.state.behind, message: info.message };
+  return { ok: true, preview: info.preview };
+}
+
+export async function catchUpWithBranch(ctx, name) {
+  const d = discussionRef(join(ctx.cwd, 'discussions'), name);
+  if (!d) throw new Error(`No discussion "${name}".`);
+  const opened = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, d.name));
+  if (!opened) throw new Error(`Resume ${d.name} first so its worker can catch up.`);
+  const place = await lanePlace(opened, d.name);
+  if (place.disabled) throw new Error(place.disabled);
+  const state = await mergeReadiness(opened, place);
+  if (!state.show) throw new Error(`${d.name} has no unmerged commits.`);
+  if (!state.catchUp) {
+    if (state.disabledReason) throw new Error(`Cannot catch up ${d.name}: ${state.disabledReason}`);
+    throw new Error(`${place.branch} already contains ${state.targetBranch}.`);
+  }
+  const target = state.targetBranch;
+  const text = `Catch up with ${target}: merge ${target} into ${place.branch} with a normal merge (git merge ${target}). Label any merge commit "[${d.name}] catch up with ${target}". If it clashes, do not force it: leave the state intact and report the conflict. After a successful merge, run the project's tests (npm test, if it has them), report their real output, and end your reply with the line "Tested: <full commit ID of ${place.branch}> with ${target} <full commit ID of ${target}>: tests passed" (or "tests failed"). Never merge into ${target} or push.`;
+  queueWork(opened, text);
+  return { ok: true, targetBranch: target };
+}
+
+export async function closeAndMerge(ctx, name, snapshot, { _beforeMerge = null } = {}) {
+  const shop = shopOf(ctx);
+  if (shop.merging) throw new Error(`Cannot Close and Merge ${name}: ${shop.merging} is already in progress in this room.`);
+  const lock = `Close and Merge for ${name}`;
+  shop.merging = lock;
+  try {
+    const info = await inspectCloseMerge(ctx, name, { selfLock: lock });
+    if (info.catchUp) return { catchUp: true, targetBranch: info.state.targetBranch, behind: info.state.behind, message: info.message };
+    if (!snapshot || info.preview.snapshot !== snapshot) {
+      return { changed: true, preview: info.preview };
+    }
+    const { d, place, state } = info;
+    const targetBranch = state.targetBranch;
+    const roomGitDir = await git(place.top, 'rev-parse', '--absolute-git-dir');
+    const done = [];
+    const failAfterMerge = (step, err, notDone) =>
+      failActionReport(ctx, 'Close and Merge', d.name, step, err, done, notDone, `The merge in ${targetBranch} stays.`);
+
+    if (_beforeMerge) await _beforeMerge(place);
+
+    // 1. Run normal merge (--no-ff) in the room checkout.
+    try {
+      await git(place.top, 'merge', '--no-ff', '-m', `[${d.name}] Merge ${place.branch}`, place.branch);
+    } catch (err) {
+      const hasMergeHead = existsSync(join(roomGitDir, 'MERGE_HEAD'));
+      let report;
+      if (hasMergeHead) {
+        try {
+          await git(place.top, 'merge', '--abort');
+          report = `Merge of ${place.branch} into ${targetBranch} failed (${err.message}). Aborted the merge; the room's checkout is back as it was. The branch, worktree and discussion were left open.`;
+        } catch (abortErr) {
+          report = `Merge of ${place.branch} into ${targetBranch} failed (${err.message}), and git merge --abort also failed (${abortErr.message}). The room's checkout may still be mid-merge: inspect git status and git diff in ${place.top}, then run git merge --abort or git reset --merge as appropriate. The branch, worktree and discussion were left open.`;
+        }
+      } else {
+        report = `Merge of ${place.branch} into ${targetBranch} failed (${err.message}). No merge was left in progress; the branch, worktree and discussion were left open.`;
+      }
+      note(ctx, `✗ ${report}`, true);
+      throw new Error(report);
+    }
+
+    const mergeCommit = await git(place.top, 'rev-parse', '--short=7', 'HEAD');
+    done.push(`merged ${place.branch} into ${targetBranch} as ${mergeCommit}`);
+
+    // 2. Remove worktree.
+    if (state.worktreeExists) {
+      try {
+        await git(place.top, 'worktree', 'remove', '--force', place.path);
+        done.push(`removed worktree ${place.path}`);
+      } catch (err) {
+        failAfterMerge('remove worktree', err, [
+          `branch ${place.branch} not deleted`,
+          'lane hold and worker session not cleared',
+          'discussion not closed',
+        ]);
+      }
+    }
+
+    // 3. Delete branch with `git branch -d` (not -D).
+    try {
+      await git(place.top, 'branch', '-d', place.branch);
+      done.push(`deleted branch ${place.branch}`);
+    } catch (err) {
+      failAfterMerge('delete branch', err, [
+        'lane hold and worker session not cleared',
+        'discussion not closed',
+      ]);
+    }
+
+    // 4. Clear lane hold and saved worker session.
+    clearLaneAndWorkerSession(ctx, d.name);
+    done.push('cleared lane hold and worker session');
+    await refreshWorker(ctx).catch(() => {});
+
+    // 5. Close discussion with closing-statement line.
+    const mergeLine = `Worker work merged into \`${targetBranch}\` as \`${mergeCommit}\`.`;
+    try {
+      await closeNamedDiscussion(ctx, d.name, { extraLine: mergeLine, rethrow: true });
+    } catch (err) {
+      failAfterMerge('close discussion', err, ['discussion not closed']);
+    }
+    return { ok: true, mergeCommit, targetBranch };
+  } finally {
+    if (shop.merging === lock) shop.merging = null;
   }
 }
 
@@ -3032,8 +3608,7 @@ export async function worktreeStatus(place) {
     git(place.top, 'merge-base', 'HEAD', place.branch).then((sha) => sha.slice(0, 7), () => 'no common commit'),
     git(place.path, 'status', '--porcelain').then((out) => out !== '')]);
   const privateDir = await git(place.path, 'rev-parse', '--absolute-git-dir');
-  const operation = existsSync(join(privateDir, 'MERGE_HEAD')) ? 'merge' :
-    existsSync(join(privateDir, 'REVERT_HEAD')) || existsSync(join(privateDir, 'sequencer')) ? 'revert/sequencer' : null;
+  const operation = worktreeOperation(privateDir);
   return { exists, head, roomDirty, ahead, behind, base, treeDirty: dirty || !!operation, operation };
 }
 
@@ -3111,14 +3686,22 @@ const laneOf = (ctx) => (ctx.discussion && !ctx.state?.brainstorm ? ctx.discussi
 async function workerInfo(ctx, seen = new Map(), own = null) {
   own ??= await lanePlace(ctx, laneOf(ctx));
   if (own.disabled) return { lines: [own.disabled], disabled: true };
-  // A lane's lines, a one-line summary for the page, and whether it has something to review:
-  // { lines, summary, review }, with `pending` when it has: its discussion (lane; null for
-  // worker/main), branch, commits not in main and uncommitted edits, for the Discussions tab.
+  // A lane's lines, a one-line summary for the page, its branch diagram against the room's current
+  // branch, and whether it has something to review: { lines, summary, review, diagram }, with
+  // `pending` when it has: its discussion (lane; null for worker/main), branch, commits not in main
+  // and uncommitted edits, for the Discussions tab.
   const of = (place) => {
     if (!seen.has(place.path)) seen.set(place.path, (async () => {
       const s = await worktreeStatus(place);
-      const checks = s.exists ? await laneChecks(place) : { lines: [], brief: [] };
+      const [checks, diagram, merge] = s.exists
+        ? await Promise.all([
+          laneChecks(place),
+          branchDiagram(place).catch((err) => ({ note: `Branch diagram unavailable: ${err.message}` })),
+          place.lane ? mergeReadiness(ctx, place).catch((err) => ({ show: true, canMerge: false, catchUp: false, disabledReason: err.message })) : null,
+        ])
+        : [{ lines: [], brief: [] }, null, null];
       return { lines: [...worktreeLines(place, s), ...checks.lines], summary: laneSummary(place, s, checks.brief), review: !!(s.ahead || s.treeDirty),
+        diagram, merge,
         pending: { lane: place.lane ?? null, branch: place.branch, ahead: s.ahead || 0, dirty: !!s.treeDirty } };
     })());
     return seen.get(place.path);
@@ -3127,14 +3710,219 @@ async function workerInfo(ctx, seen = new Map(), own = null) {
     const mine = await of(own);
     const lines = [...mine.lines], lanes = [{ ...mine, own: true }];
     if (!seen.has('lanes')) seen.set('lanes', existingLanes(ctx));
-    for (const other of await seen.get('lanes')) {
+    const existing = await seen.get('lanes');
+    for (const other of existing) {
       if (other.path === own.path) continue;
       const o = await of(other);
       if (o.review) { lines.push(...o.lines); lanes.push(o); }
     }
-    return { lines, lanes: lanes.map(({ lines, summary, own }) => ({ lines, summary, own: !!own })),
-      pending: lanes.filter((l) => l.review).map((l) => l.pending) };
+    if (!seen.has('discardable')) {
+      seen.set('discardable', (async () => {
+        const branchRefs = await git(own.top, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/worker/').catch(() => '');
+        const fromBranches = branchRefs.split('\n').filter(Boolean).map((r) => r.slice('worker/'.length)).filter((n) => n && n !== 'main');
+        const fromWorktrees = existing.map((l) => l.lane).filter(Boolean);
+        return [...new Set([...fromWorktrees, ...fromBranches])].sort();
+      })());
+    }
+    const mergeable = {};
+    for (const l of lanes) {
+      if (l.pending?.lane && l.merge?.show) {
+        mergeable[l.pending.lane] = {
+          canMerge: !!l.merge.canMerge,
+          catchUp: !!l.merge.catchUp,
+          disabledReason: l.merge.disabledReason ?? null,
+          targetBranch: l.merge.targetBranch ?? null,
+          behind: l.merge.behind ?? 0,
+        };
+      }
+    }
+    return { lines, lanes: lanes.map(({ lines, summary, own, diagram }) => ({ lines, summary, own: !!own, ...(diagram && { diagram }) })),
+      pending: lanes.filter((l) => l.review).map((l) => l.pending),
+      discardable: await seen.get('discardable'),
+      mergeable };
   } catch (err) { return { lines: [`✗ ${err.message}`], error: true }; }
+}
+
+// ── Branch diagram for the Worker tab ──
+// Builds a Mermaid gitGraph of `place.branch` against the room's current branch, from their
+// fork/merge-base to both tips, using each side's first-parent history and real merge commits
+// between the two branches. Other merges (such as main merging a third branch) stay as one commit
+// tagged "merge". At most `limit` commits per side; cut-off history is marked with a "+N more
+// commits" node (`type: HIGHLIGHT`) and never drawn as a direct parent link. When gitGraph cannot
+// represent the history faithfully (no common ancestor, criss-cross / non-monotonic merges,
+// octopus merges involving both branches, merges crossing the cut-off window), returns `{ note }`
+// instead of a wrong picture.
+export const BRANCH_DIAGRAM_LIMIT = 15;
+const gitLogFirstParent = async (top, range) => {
+  const out = await git(top, 'log', '--first-parent', '--format=%H%x1f%P%x1f%s', range);
+  if (!out) return [];
+  return out.split('\n').filter(Boolean).map((line) => {
+    const [id, p = '', ...rest] = line.split('\x1f');
+    return { id, parents: p ? p.split(' ').filter(Boolean) : [], subject: rest.join('\x1f') };
+  });
+};
+const gitCommitInfo = async (top, sha) => {
+  const out = await git(top, 'log', '-1', '--format=%H%x1f%P%x1f%s', sha);
+  const [id, p = '', ...rest] = out.split('\x1f');
+  return { id, parents: p ? p.split(' ').filter(Boolean) : [], subject: rest.join('\x1f') };
+};
+function formatDiagramLabel(commit) {
+  const raw = String(commit.subject ?? '')
+    .replace(/^\s*\[[^\]]+\]\s+/, '')
+    .replace(/"/g, "'")
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const subj = raw.length > 48 ? `${raw.slice(0, 47)}…` : raw;
+  return subj ? `${commit.id.slice(0, 7)} ${subj}` : commit.id.slice(0, 7);
+}
+export async function branchDiagram(place, { limit = BRANCH_DIAGRAM_LIMIT } = {}) {
+  const branchHead = await git(place.top, 'rev-parse', '--verify', '-q', `refs/heads/${place.branch}^{commit}`).catch(() => null);
+  if (!branchHead) return null;
+  const [roomHead, roomBranch] = await Promise.all([
+    git(place.top, 'rev-parse', 'HEAD'),
+    git(place.top, 'rev-parse', '--abbrev-ref', 'HEAD'),
+  ]);
+  const note = (msg) => ({ note: msg, roomBranch, branch: place.branch });
+  if (roomBranch === place.branch) return note(`${place.branch} is the room's current branch.`);
+  if (/["\r\n]/.test(roomBranch) || /["\r\n]/.test(place.branch)) return note('Branch diagram unavailable: branch name contains unsupported characters.');
+
+  const basesOut = await git(place.top, 'merge-base', '--all', roomHead, branchHead).catch(() => '');
+  const bases = basesOut.split('\n').filter(Boolean);
+  if (!bases.length) return note(`Branch diagram unavailable: ${place.branch} and ${roomBranch} have no common ancestor.`);
+  if (bases.length > 1) return note(`Branch diagram unavailable: ${place.branch} and ${roomBranch} have multiple merge-bases (criss-cross merge) that gitGraph cannot draw faithfully.`);
+
+  // Walk both first-parent chains back to their shared fork point so repeated merges between the
+  // two branches stay anchored to the commit where they split.
+  let base, rCommits, bCommits;
+  if (roomHead === branchHead) {
+    base = roomHead; rCommits = []; bCommits = [];
+  } else {
+    const [bRaw, rRaw] = await Promise.all([
+      gitLogFirstParent(place.top, `${roomHead}..${branchHead}`),
+      gitLogFirstParent(place.top, `${branchHead}..${roomHead}`),
+    ]);
+    const bBase = bRaw.length ? bRaw.at(-1).parents[0] : branchHead;
+    const rBase = rRaw.length ? rRaw.at(-1).parents[0] : roomHead;
+    if (!bBase || !rBase) return note(`Branch diagram unavailable: could not find a common first-parent base between ${place.branch} and ${roomBranch}.`);
+    if (bBase === rBase) {
+      base = bBase; rCommits = rRaw.reverse(); bCommits = bRaw.reverse();
+    } else if (await gitOk(place.top, 'merge-base', '--is-ancestor', bBase, rBase)) {
+      const rFull = await gitLogFirstParent(place.top, `${bBase}..${roomHead}`);
+      const ok = rFull.length ? rFull.at(-1).parents[0] === bBase : roomHead === bBase;
+      if (!ok) return note(`Branch diagram unavailable: history between ${place.branch} and ${roomBranch} does not follow a single first-parent fork.`);
+      base = bBase; rCommits = rFull.reverse(); bCommits = bRaw.reverse();
+    } else if (await gitOk(place.top, 'merge-base', '--is-ancestor', rBase, bBase)) {
+      const bFull = await gitLogFirstParent(place.top, `${rBase}..${branchHead}`);
+      const ok = bFull.length ? bFull.at(-1).parents[0] === rBase : branchHead === rBase;
+      if (!ok) return note(`Branch diagram unavailable: history between ${place.branch} and ${roomBranch} does not follow a single first-parent fork.`);
+      base = rBase; rCommits = rRaw.reverse(); bCommits = bFull.reverse();
+    } else {
+      return note(`Branch diagram unavailable: ${place.branch} and ${roomBranch} do not share a single first-parent fork point.`);
+    }
+  }
+
+  // Classify merges between the two branches; merges from outside the two branches stay as one
+  // commit tagged "merge".
+  const rSet = new Set([base, ...rCommits.map((c) => c.id)]);
+  const bSet = new Set([base, ...bCommits.map((c) => c.id)]);
+  for (const c of bCommits) {
+    const extra = c.parents.slice(1);
+    const rParents = extra.filter((p) => rSet.has(p));
+    if (rParents.length > 1 || (rParents.length === 1 && extra.length > 1)) {
+      return note(`Branch diagram unavailable: ${place.branch} has an octopus merge (${c.id.slice(0, 7)}) involving ${roomBranch}.`);
+    }
+    if (rParents.length === 1) c.mergeFrom = rParents[0];
+    else if (extra.length > 0) c.externalMerge = true;
+  }
+  for (const c of rCommits) {
+    const extra = c.parents.slice(1);
+    const bParents = extra.filter((p) => bSet.has(p) && p !== base);
+    if (bParents.length > 1 || (bParents.length === 1 && extra.length > 1)) {
+      return note(`Branch diagram unavailable: ${roomBranch} has an octopus merge (${c.id.slice(0, 7)}) involving ${place.branch}.`);
+    }
+    if (bParents.length === 1) c.mergeFrom = bParents[0];
+    else if (extra.length > 0) c.externalMerge = true;
+  }
+
+  // Limit each side to `limit` commits, marking any cut-off prefix with a "+N more commits" node.
+  // Never drop or fake a merge that crosses the cut-off boundary.
+  const rCut = Math.max(0, rCommits.length - limit);
+  const bCut = Math.max(0, bCommits.length - limit);
+  const rCutSet = new Set(rCommits.slice(0, rCut).map((c) => c.id));
+  const bCutSet = new Set(bCommits.slice(0, bCut).map((c) => c.id));
+  const rKept = rCommits.slice(rCut);
+  const bKept = bCommits.slice(bCut);
+  if (bKept.some((c) => c.mergeFrom && rCutSet.has(c.mergeFrom)) || rKept.some((c) => c.mergeFrom && bCutSet.has(c.mergeFrom))) {
+    return note(`Branch diagram unavailable: a shown merge crosses history older than the ${limit}-commit display limit.`);
+  }
+  if (bCommits.slice(0, bCut).some((c) => c.mergeFrom && !rCutSet.has(c.mergeFrom)) || rCommits.slice(0, rCut).some((c) => c.mergeFrom && !bCutSet.has(c.mergeFrom))) {
+    return note(`Branch diagram unavailable: cut-off history merges a commit within the ${limit}-commit display window.`);
+  }
+
+  const sameCut = rCut > 0 && bCut > 0 && rCut === bCut;
+  const rSeq = rCut > 0 ? [{ cut: true, id: '__cut_r', label: `+${rCut} more ${plural(rCut, 'commit').slice(String(rCut).length + 1)}${sameCut ? ` (${roomBranch})` : ''}` }, ...rKept] : [...rKept];
+  const bSeq = bCut > 0 ? [{ cut: true, id: '__cut_b', label: `+${bCut} more ${plural(bCut, 'commit').slice(String(bCut).length + 1)}${sameCut ? ` (${place.branch})` : ''}` }, ...bKept] : [...bKept];
+
+  // Replay both sides into Mermaid gitGraph commands, checking that every merge targets the
+  // other branch's current tip and never violates Mermaid's own gitGraph rules.
+  const baseCommit = await gitCommitInfo(place.top, base);
+  const lines = ['---', 'config:', '  gitGraph:', '    rotateCommitLabel: false'];
+  if (roomBranch !== 'main') lines.push(`    mainBranchName: "${roomBranch}"`);
+  lines.push('---', 'gitGraph TB:');
+  lines.push(`  commit id: "${formatDiagramLabel(baseCommit)}"${baseCommit.parents.length > 1 ? ' tag: "merge"' : ''}`);
+  lines.push(`  branch "${place.branch}"`);
+
+  let curr = place.branch;
+  let rTip = base, rTipBranch = roomBranch;
+  let bTip = base, bTipBranch = roomBranch;
+  let ri = 0, bi = 0;
+
+  const checkout = (name) => { if (curr !== name) { lines.push(`  checkout "${name}"`); curr = name; } };
+  while (ri < rSeq.length || bi < bSeq.length) {
+    const rPinned = bSeq.slice(bi).some((c) => c.mergeFrom === rTip);
+    const bPinned = rSeq.slice(ri).some((c) => c.mergeFrom === bTip);
+    const canR = ri < rSeq.length && !rPinned && (!rSeq[ri].mergeFrom || bTip === rSeq[ri].mergeFrom);
+    const canB = bi < bSeq.length && !bPinned && (!bSeq[bi].mergeFrom || rTip === bSeq[bi].mergeFrom);
+    if (!canR && !canB) {
+      return note(`Branch diagram unavailable: merge order between ${place.branch} and ${roomBranch} cannot be drawn faithfully as a gitGraph.`);
+    }
+    const pickB = canB && (!canR || curr === place.branch);
+    if (pickB) {
+      const c = bSeq[bi++];
+      if (c.mergeFrom) {
+        if (bTipBranch === roomBranch) {
+          return note(`Branch diagram unavailable: ${place.branch} merges ${roomBranch} (${c.id.slice(0, 7)}) before any commit of its own, which gitGraph cannot draw.`);
+        }
+        checkout(place.branch);
+        lines.push(`  merge "${roomBranch}" id: "${formatDiagramLabel(c)}"`);
+      } else if (c.cut) {
+        checkout(place.branch);
+        lines.push(`  commit id: "${c.label}" type: HIGHLIGHT`);
+      } else {
+        checkout(place.branch);
+        lines.push(`  commit id: "${formatDiagramLabel(c)}"${c.externalMerge ? ' tag: "merge"' : ''}`);
+      }
+      bTip = c.id; bTipBranch = place.branch;
+    } else {
+      const c = rSeq[ri++];
+      if (c.mergeFrom) {
+        if (rTipBranch === place.branch) {
+          return note(`Branch diagram unavailable: ${roomBranch} merges ${place.branch} (${c.id.slice(0, 7)}) before any commit of its own, which gitGraph cannot draw.`);
+        }
+        checkout(roomBranch);
+        lines.push(`  merge "${place.branch}" id: "${formatDiagramLabel(c)}"`);
+      } else if (c.cut) {
+        checkout(roomBranch);
+        lines.push(`  commit id: "${c.label}" type: HIGHLIGHT`);
+      } else {
+        checkout(roomBranch);
+        lines.push(`  commit id: "${formatDiagramLabel(c)}"${c.externalMerge ? ' tag: "merge"' : ''}`);
+      }
+      rTip = c.id; rTipBranch = roomBranch;
+    }
+  }
+  return { graph: lines.join('\n'), truncated: rCut > 0 || bCut > 0, roomBranch, branch: place.branch };
 }
 
 // ── Guardrails for merging a lane into main ──
@@ -3174,7 +3962,7 @@ async function readTested(place) {
 // The worker's last "Tested: <branch commit> with main <main commit>: tests passed|failed" line, if
 // Git agrees: the branch commit is on its branch, it contains the main commit, which is main's.
 async function recordTested(ctx, place, text, owner, label) {
-  const m = [...String(text).matchAll(/^Tested: ([0-9a-f]{7,64}) with main ([0-9a-f]{7,64}): tests (passed|failed)\.?$/gm)].at(-1);
+  const m = [...String(text).matchAll(/^Tested: ([0-9a-f]{7,64}) with (?:main|\S+) ([0-9a-f]{7,64}): tests (passed|failed)\.?$/gm)].at(-1);
   if (!m) return;
   try {
     const main = await mainRef(place.top);
@@ -3182,7 +3970,9 @@ async function recordTested(ctx, place, text, owner, label) {
     const [branch, mainId] = [await id(m[1]), await id(m[2])];
     if (!await gitOk(place.path, 'merge-base', '--is-ancestor', branch, 'HEAD')) throw new Error(`${m[1].slice(0, 7)} is not on ${place.branch}`);
     if (!await gitOk(place.path, 'merge-base', '--is-ancestor', mainId, branch)) throw new Error(`${m[1].slice(0, 7)} doesn't contain ${m[2].slice(0, 7)}`);
-    if (!await gitOk(place.path, 'merge-base', '--is-ancestor', mainId, main)) throw new Error(`${m[2].slice(0, 7)} is not a commit of ${main}`);
+    const onMain = await gitOk(place.path, 'merge-base', '--is-ancestor', mainId, main);
+    const onRoomHead = onMain || await gitOk(place.top, 'merge-base', '--is-ancestor', mainId, 'HEAD');
+    if (!onRoomHead) throw new Error(`${m[2].slice(0, 7)} is not a commit of ${main}`);
     const file = await testedFile(place);
     writeFileSync(`${file}.tmp`, JSON.stringify({ version: 1, branch, main: mainId, result: m[3], at: new Date().toISOString() }) + '\n', { mode: 0o600 });
     renameSync(`${file}.tmp`, file);
