@@ -334,7 +334,13 @@ export async function load(ctx, v) {
   const screen = ctx.screen ?? { clients: new Set(), transcript: ctx.state.transcript, doc: null, thinking: null, worker: shop?.log ?? [], working: shop && runningTasks(shop).some((t) => t.origin === ctx) ? wName : null };
   const roomShop = shop ?? newShop(screen.worker);
   roomShop.launchDefaults ??= { agents: ctx.agentSpecs, worker: ctx.workerSpec };
-  return { room: createRoom(agents, ctx.state, instr), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
+  const usageLine = (agent) => usage.agentUsageLine({
+    total: ctx.totals?.[agent.name],
+    provider: agent.provider,
+    gauges: ctx.screen?.quota,
+    measured: ctx.screen?.quotaAt?.measured,
+  });
+  return { room: createRoom(agents, ctx.state, instr, usageLine), worker, docs, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: roomShop,
     testPrompt: (room, provider, model) => runPromptTest(room, provider, model, runner, { parseCodexEvents, parseAgyOutput }),
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
@@ -4221,7 +4227,13 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       const interrupted = instr.workerInterrupted(told);
       if (told.length) work.interrupted = work.interrupted.filter((r) => !told.includes(r));
       const retryBrief = t?.retry ? `Your earlier attempt at this instruction failed: ${t.retry.error}\nInspect the current worktree and Git state first, including uncommitted edits and any merge or revert in progress. Commits made since the failure:\n${t.retry.after ? (await git(place.path, 'log', '--format=%H %s', `${t.retry.after}..HEAD`).catch(() => '(could not read commits)') || '(none)') : '(the failure commit could not be determined)'}\n\n` : '';
-      const prompt = interrupted + brief + tree + commit + retryBrief + leftover + merge + (history ? instr.workerHistory(history, text) : text);
+      const usageLine = ctx.usage.agentUsageLine({
+        total: worker === ctx.worker ? ctx.totals?.[worker.name] : null,
+        provider: worker.provider,
+        gauges: ctx.screen?.quota,
+        measured: ctx.screen?.quotaAt?.measured,
+      });
+      const prompt = `${usageLine}\n\n` + interrupted + brief + tree + commit + retryBrief + leftover + merge + (history ? instr.workerHistory(history, text) : text);
       // Stopped while its worktree was prepared: its worker never starts.
       if (t?.stopNow) throw new Error('stopped by the User before the worker started');
       if (t) t.turnStarted = true;

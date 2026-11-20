@@ -215,7 +215,6 @@ last-turn records stay in memory by session and retain the latest error after su
 prompt diagnostics use isolated calls, retain results and leave agent sessions alone
 run gives `started` the process as soon as it is spawned (the worker's Stop now stops only its own)
 the Worker tab's stop buttons: /__stopworker reaches the room only from its page, with a known mode; each button asks to click again
-Stop after this task: the running instruction finishes and is reported as usual; queued ones are cancelled; auto dev pauses; other discussions' workers go on
 a worker agent's programs: once its task is stopped, none starts
 the stop buttons hide while peeking at another discussion or viewing a peer's, and come back at once on returning, before any room update
 a brainstorm message with attachments saves into brainstorms/<name>/files/ and appends their paths
@@ -227,3 +226,6 @@ the Close action switches between Close and Close with pending work in Actions a
 POST /__discard previews and confirms Close and Discard only from the room page
 POST /__merge and POST /__catchup enforce same-origin and wire preview, confirm and catch-up
 showMergeDialog omits ignored files and mentions untracked files only when present
+usageLine callback is read per prompt (including summary turns) and placed at the top
+agentUsageLine formats only the agent's own totals and provider quota, with none yet / quota unavailable for missing data
+discussion and brainstorm prompts (including summary turns) start with each agent's own usage line from live totals and cached quota

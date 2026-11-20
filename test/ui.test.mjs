@@ -226,9 +226,9 @@ test('the worker is told the active discussion\'s folder with its first instruct
   queueWork(ctx, 'fix the bug'); // as the Worker tab sends it
   queueWork(ctx, 'and the test');
   await ctx.workQueue;
-  assert.match(got[0], new RegExp(`^The active discussion's folder is ${ctx.discussion.dir}: create, read and write this discussion's documents`));
+  assert.match(got[0], new RegExp(`^\\[your reported usage this session: [^\\]]+\\]\\n\\nThe active discussion's folder is ${ctx.discussion.dir}: create, read and write this discussion's documents`));
   assert.match(got[0], /fix the bug$/);
-  assert.equal(got[1], 'and the test');
+  assert.match(got[1], /^\[your reported usage this session: [^\]]+\]\n\nand the test$/);
 });
 
 test('agent settings persist, apply before startup, and switch only the active worker after startup', async () => {
@@ -645,14 +645,14 @@ test('/new in the terminal doesn\'t wait: a running task finishes in the old dis
 
   queueWork(ctx, 'before the folder exists'); // the new, fresh session: told where it works, no discussion yet
   await ctx.workQueue;
-  assert.match(got[2], /^Your working directory is /);
+  assert.match(got[2], /^\[your reported usage this session: [^\]]+\]\n\nYour working directory is /);
   assert.ok(!got[2].includes('create, read and write'));
   assert.ok(!got[2].includes(firstDir));
 
   await handleLine('second', ctx);
   queueWork(ctx, 'after');
   await ctx.workQueue;
-  assert.match(got[3], new RegExp(`^The active discussion's folder is ${ctx.discussion.dir}: `));
+  assert.match(got[3], new RegExp(`^\\[your reported usage this session: [^\\]]+\\]\\n\\nThe active discussion's folder is ${ctx.discussion.dir}: `));
   assert.ok(!readFileSync(ctx.logPath, 'utf8').includes('long done'));
 });
 
@@ -756,10 +756,10 @@ test('the first instruction creates the worktree beside the repository, on worke
   assert.equal(git('-C', path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'worker/main');
   assert.equal(git('rev-parse', 'worker/main'), head);
   assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main'); // the room's branch is unchanged
-  assert.match(got[0], new RegExp(`^Your working directory is ${path}, your own Git worktree of the project, on the branch worker/main\\. Make your changes there, never in the room's root`));
+  assert.match(got[0], new RegExp(`^\\[your reported usage this session: [^\\]]+\\]\\n\\nYour working directory is ${path}, your own Git worktree of the project, on the branch worker/main\\. Make your changes there, never in the room's root`));
   assert.match(got[0], /do it$/);
   await work(ctx, 'again');
-  assert.equal(got[1], 'again'); // told once
+  assert.match(got[1], /^\[your reported usage this session: [^\]]+\]\n\nagain$/); // told once
   assert.match(ctx.screen.workerInfo.lines[0], new RegExp(`^Worktree ${path} · branch worker/main · based on ${head.slice(0, 7)}$`));
 });
 
@@ -884,7 +884,7 @@ test('each discussion works in its own lane, <repo>.workers/<name>/ on worker/<n
   assert.ok(got[1].includes(`commit it on worker/${name} with a message starting "[${name}]"`));
   assert.equal(resets, 0); // the same session continues
   await work(ctx, 'again');
-  assert.equal(got[2], 'again'); // told once
+  assert.match(got[2], /^\[your reported usage this session: [^\]]+\]\n\nagain$/); // told once
   assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main'); // the room's branch is unchanged
   await handleLine('/brainstorm', ctx);
   await work(ctx, 'brainstorm task');
@@ -1213,7 +1213,7 @@ test('a worker task keeps the discussion it started in, even if New discussion c
   await handleLine('/new', ctx); // the room's discussion changes before the task's first turn
   assert.equal(ctx.discussion, null);
   await until(() => finish);
-  assert.match(got[0], new RegExp(`^The active discussion's folder is ${first.dir}: `)); // its own, not "no discussion"
+  assert.match(got[0], new RegExp(`^\\[your reported usage this session: [^\\]]+\\]\\n\\nThe active discussion's folder is ${first.dir}: `)); // its own, not "no discussion"
   await markClosed(ctx.cwd, first.name);
   await handleLine(`/move ${first.name} archive`, ctx); // still locked by the task
   assert.match(ctx.notes.at(-1), /A worker task is still writing to/);
@@ -3091,7 +3091,7 @@ test('a worker task cut off with a clean worktree: Resume reports it and the tas
   // The next instruction from this discussion carries the notice, once.
   queueWork(after, 'next task');
   await after.workQueue;
-  assert.match(prompts[0], /^Your previous instruction "first task" was interrupted by a Restart, Quit or a crash: check the worktree before continuing\./);
+  assert.match(prompts[0], /^\[your reported usage this session: [^\]]+\]\n\nYour previous instruction "first task" was interrupted by a Restart, Quit or a crash: check the worktree before continuing\./);
   queueWork(after, 'another task');
   await after.workQueue;
   assert.doesNotMatch(prompts[1], /was interrupted/);
@@ -3946,7 +3946,7 @@ test('Stop now: only this task\'s programs are killed, queued instructions are c
   await ctx.workQueue;
   queueWork(ctx, 'and then');
   await ctx.workQueue;
-  assert.match(prompts[0], /^Your previous instruction "long task" was stopped by the User \(Stop now\): check the worktree before continuing\./);
+  assert.match(prompts[0], /^\[your reported usage this session: [^\]]+\]\n\nYour previous instruction "long task" was stopped by the User \(Stop now\): check the worktree before continuing\./);
   assert.doesNotMatch(prompts[1], /was stopped by the User/);
 });
 
@@ -4982,4 +4982,93 @@ test('after a worker task ends, refreshed workerInfo clears the finished task so
   assert.match(lastInfo2.mergeable[name]?.disabledReason, /uncommitted edits/);
   assert.ok(lastInfo2.pending.some((p) => p.lane === name && p.dirty === true));
   assert.ok(lastInfo2.discardable.includes(name));
+});
+
+test('discussion and brainstorm prompts (including summary turns) start with each agent\'s own usage line from live totals and cached quota', async () => {
+  const cwd = await tmp('usage-line-disc-');
+  const ctx = { cwd, agentSpecs: 'claude:A,codex:B', workerSpec: 'claude:W', state: { transcript: [], seen: new Map() }, sessions: new Map() };
+  Object.assign(ctx, await load(ctx, ''));
+  ctx.suggestTitle = async () => ({ title: 'Usage line' });
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  ctx.screen.quota = [
+    { provider: 'claude', label: '5h', used: 70, resets: null },
+    { provider: 'claude', label: 'week', used: 31, resets: null },
+    { provider: 'codex', label: '5h', used: 20, resets: null },
+    { provider: 'codex', label: 'week', used: 3, resets: null },
+  ];
+  ctx.screen.quotaAt = { measured: `${today} 09:42:00`, checked: now.toISOString() };
+  const fakeQuota = {
+    claude: { ok: true, parsed: { current_session: { used_percent: 70 }, current_week_all_models: { used_percent: 31 } } },
+    codex: { ok: true, parsed: { five_hour_limit: { used_percent: 20 }, weekly_limit: { used_percent: 3 } } },
+    last_update: `${today} 09:42:00`,
+  };
+  let meterCallsDuringRound = 0;
+  let meterCalls = 0;
+  ctx.usage = { ...ctx.usage, fetchQuota: async () => { meterCalls++; return fakeQuota; } };
+
+  const [a, b] = ctx.room.agents;
+  const aPrompts = [], bPrompts = [];
+  const aReplies = ['idea', 'PASS', '**Agreed**\n- idea'];
+  const bReplies = ['ok', 'PASS', 'PASS'];
+  a.turn = async (p) => { if (aPrompts.length < 2) meterCallsDuringRound = meterCalls; aPrompts.push(p); a.lastUsage = { input: 1200, cached: 800, output: 150 }; return aReplies.shift() ?? 'PASS'; };
+  b.turn = async (p) => { bPrompts.push(p); b.lastUsage = { input: 900, cached: 100, output: 50 }; return bReplies.shift() ?? 'PASS'; };
+
+  await handleLine('hello', ctx);
+  assert.equal(meterCallsDuringRound, 0);
+  // First turn of each agent: none yet + own provider's cached quota only.
+  assert.match(aPrompts[0], /^\[your reported usage this session: none yet · claude quota 70% 5h \/ 31% week, meter at 09:42\]\n\nYou are A/);
+  assert.doesNotMatch(aPrompts[0].split('\n')[0], /codex/);
+  assert.match(bPrompts[0], /^\[your reported usage this session: none yet · codex quota 20% 5h \/ 3% week, meter at 09:42\]\n\nYou are B/);
+  assert.doesNotMatch(bPrompts[0].split('\n')[0], /claude/);
+  // Second turn within the same round: reads updated ctx.totals, never the other agent's figures.
+  assert.match(aPrompts[1], /^\[your reported usage this session: 1 turn, 1\.2k in \(800 cached\) \/ 150 out · claude quota 70% 5h \/ 31% week, meter at 09:42\]\n\n/);
+  assert.match(bPrompts[1], /^\[your reported usage this session: 1 turn, 900 in \(100 cached\) \/ 50 out · codex quota 20% 5h \/ 3% week, meter at 09:42\]\n\n/);
+  // Summary turn (auto-summarize) also carries the updated line.
+  assert.match(aPrompts[2], /^\[your reported usage this session: 2 turns, 2\.4k in \(1\.6k cached\) \/ 300 out · claude quota 70% 5h \/ 31% week, meter at 09:42\]\n\n/);
+  assert.match(aPrompts[2], /asked for a summary/);
+
+  // Brainstorm prompt also carries the line at the top.
+  ctx.state.brainstorm = true;
+  assert.match(ctx.room.promptFor(a), /^\[your reported usage this session: 3 turns, 3\.6k in \(2\.4k cached\) \/ 450 out · claude quota 70% 5h \/ 31% week, meter at 09:42\]\n\n/);
+});
+
+test('worker prompt starts with only the worker\'s own usage line from ctx.totals and cached quota', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const cwd = await tmp('usage-line-worker-');
+  await gitRoom(cwd);
+  const ctx = { cwd, agentSpecs: 'claude:A', workerSpec: 'codex:W', state: { transcript: [], seen: new Map() }, sessions: new Map() };
+  Object.assign(ctx, await load(ctx, ''));
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  ctx.totals.A = { turns: 9, input: 99000, cached: 50000, output: 4000 }; // another agent's totals: must never appear
+  ctx.screen.quota = [
+    { provider: 'claude', label: '5h', used: 70, resets: null },
+    { provider: 'codex', label: '5h', used: 20, resets: null },
+    { provider: 'codex', label: 'week', used: 3, resets: null },
+  ];
+  ctx.screen.quotaAt = { measured: `${today} 09:42:00`, checked: now.toISOString() };
+  let meterCallsBeforeTurn = 0;
+  let meterCalls = 0;
+  ctx.usage = { ...ctx.usage, fetchQuota: async () => { meterCalls++; return null; } };
+
+  const got = [];
+  ctx.worker.turn = async (p) => {
+    if (got.length === 0) meterCallsBeforeTurn = meterCalls;
+    got.push(p);
+    ctx.worker.lastUsage = { input: 5000, cached: 3000, output: 400 };
+    return 'done';
+  };
+  queueWork(ctx, 'first work');
+  await ctx.workQueue;
+  assert.equal(meterCallsBeforeTurn, 0);
+  assert.match(got[0], /^\[your reported usage this session: none yet · codex quota 20% 5h \/ 3% week, meter at 09:42\]\n\n/);
+  assert.doesNotMatch(got[0].split('\n')[0], /claude|99\.0k/);
+
+  // Restore cached quota (refreshQuota after turn 1 overwrote it with null because our stub returned null) and run turn 2.
+  ctx.screen.quota = [{ provider: 'codex', label: '5h', used: 21, resets: null }, { provider: 'codex', label: 'week', used: 4, resets: null }];
+  ctx.screen.quotaAt = { measured: `${today} 09:43:00`, checked: now.toISOString() };
+  queueWork(ctx, 'second work');
+  await ctx.workQueue;
+  assert.match(got[1], /^\[your reported usage this session: 1 turn, 5\.0k in \(3\.0k cached\) \/ 400 out · codex quota 21% 5h \/ 4% week, meter at 09:43\]\n\nsecond work$/);
 });

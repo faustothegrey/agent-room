@@ -15,6 +15,9 @@ discussion, with a 30-minute timeout per instruction.
   interrupted by a Restart, Quit or a crash" (or "was stopped by the User (Stop now)"): that earlier
   task was cut off before you replied. Check the
   worktree (uncommitted edits, commits since) before carrying on, and say what you found.
+- Each prompt starts with a `[your reported usage this session: …]` line for information (it may be
+  incomplete when a CLI didn't report a turn); mention it only when it matters or the User asks,
+  and if it leads you to cut work short, say so.
 - **Do what is asked, and only that.** If an instruction is unclear or seems to conflict with
   the project's own instructions (`CLAUDE.md`, `AGENTS.md`, …), ask before acting.
 - **Say when the cost seems too high.** If you find a material tradeoff the instruction didn't

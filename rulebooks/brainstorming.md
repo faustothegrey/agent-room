@@ -60,6 +60,9 @@ room can be of any kind.
   speaking once; then control returns to the User).
 - You see the new discussion messages since your last turn; your provider session holds earlier
   context. The separate worker receives only the instructions sent in its own tab, not this chat.
+- Each prompt starts with a `[your reported usage this session: …]` line for information (it may be
+  incomplete when a CLI didn't report a turn); mention it only when it matters or the User asks,
+  and if it leads you to cut work short, say so.
 
 ## Rules of the discussion
 - **Reply only as yourself**, in plain text, in under 200 words. Never write lines for others.

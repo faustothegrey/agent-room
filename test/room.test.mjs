@@ -338,3 +338,18 @@ test('discussion agents take turns in the selected row order', async () => {
   await room.round('Hello');
   assert.deepEqual(turns, ['Agy', 'Claude2', 'Codex']);
 });
+
+test('usageLine callback is read per prompt (including summary turns) and placed at the top', async () => {
+  const counts = { A: 0, B: 0 };
+  const a = fakeAgent('A', ['a1', 'PASS', '**Agreed**\n- x']);
+  const b = fakeAgent('B', ['b1', 'PASS', 'PASS']);
+  const room = createRoom([a, b], { transcript: [], seen: new Map() }, undefined, (agent) => `[usage ${agent.name} #${++counts[agent.name]}]`);
+  await room.round('hi');
+  await room.summary();
+  assert.match(a.prompts[0], /^\[usage A #1\]\n\nYou are A/);
+  assert.match(a.prompts[1], /^\[usage A #2\]\n\nNew messages/);
+  assert.match(a.prompts[2], /^\[usage A #3\]\n\nNew messages[\s\S]*asked for a summary/);
+  assert.match(b.prompts[0], /^\[usage B #1\]\n\nYou are B/);
+  assert.match(b.prompts[1], /^\[usage B #2\]\n\nNew messages/);
+  assert.match(b.prompts[2], /^\[usage B #3\]\n\nNew messages[\s\S]*latest message from A/);
+});

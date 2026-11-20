@@ -107,6 +107,40 @@ export function quotaGauges(quota, providers) {
   });
 }
 
+// One-line self-usage header for an agent's or worker's prompt, holding only that agent's own
+// cumulative reported session total and its own provider's cached quota snapshot.
+function meterTime(measured, now = new Date()) {
+  if (!measured) return '';
+  const text = String(measured).trim();
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(text);
+  if (!m) return text;
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return m[1] === today ? m[2] : `${m[1]} ${m[2]}`;
+}
+
+function formatProviderGauges(gauges, provider) {
+  const mine = Array.isArray(gauges) ? gauges.filter((g) => g?.provider === provider && typeof g.used === 'number') : [];
+  if (!mine.length) return null;
+  const grouped = new Map();
+  for (const g of mine) {
+    const key = g.group ?? '';
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(`${g.used}% ${g.label}`);
+  }
+  const parts = [...grouped.entries()].map(([group, items]) => (group ? `${group} ` : '') + items.join(' / '));
+  return `${provider} quota ${parts.join(', ')}`;
+}
+
+export function agentUsageLine({ total, provider, gauges, measured, now = new Date() } = {}) {
+  const usagePart = total?.turns
+    ? `${total.turns} turn${total.turns === 1 ? '' : 's'}, ${k(total.input)} in (${k(total.cached)} cached) / ${k(total.output)} out`
+    : 'none yet';
+  const quotaText = formatProviderGauges(gauges, provider);
+  const at = quotaText ? meterTime(measured, now) : '';
+  const quotaPart = quotaText ? `${quotaText}${at ? `, meter at ${at}` : ''}` : 'quota unavailable';
+  return `[your reported usage this session: ${usagePart} · ${quotaPart}]`;
+}
+
 // The full /usage report: session totals per agent, then the quotas.
 export function usageReport({ totals, agents, quota, url = METER_URL }) {
   const lines = ['Usage this session (from the CLIs\' own reports):'];

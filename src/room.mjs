@@ -30,7 +30,7 @@ export async function closingStatement(agent, { dir, workerReports = '' }, instr
   return statement;
 }
 
-export function createRoom(agents, state = { transcript: [], seen: new Map() }, instr = defaultInstructions) {
+export function createRoom(agents, state = { transcript: [], seen: new Map() }, instr = defaultInstructions, usageLine = null) {
   const { intro, summaryFormat, draftTask, reviewTask } = instr;
   const names = new Set();
   for (const a of agents) {
@@ -55,6 +55,8 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
   // `task`: extra instructions for this turn only (used by /summary).
   function promptFor(agent, task) {
     const parts = [];
+    const usage = usageLine?.(agent);
+    if (usage) parts.push(usage);
     // state.briefing (set by ui.mjs once the discussion folder exists): where to write, and so on.
     if (seen.get(agent.name) === 0) parts.push(intro(agent, activeAgents()), ...(state.briefing ? [state.briefing] : []));
     // After a Resume or Restart (ui.mjs): one sentence, in each agent's next prompt only.

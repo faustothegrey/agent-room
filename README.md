@@ -563,6 +563,12 @@ Quotas come from the optional local meter at `http://127.0.0.1:9899` (override w
 the header and usage report say so; the room still works. For Agy, the meter’s Antigravity
 model entries supply the highest used percentage in each available window. Agy login is not monitored.
 
+Each prompt to a discussion agent (in discussions and brainstorms, summary turns included) and to
+the worker starts with one line showing only that agent's own cumulative reported session usage
+(turns, input with cached, output) and its own provider's cached quota windows with the meter's
+measurement time ("none yet" or "quota unavailable" when missing), without adding a meter request
+per turn.
+
 ## Launch options and commands
 
 Agent specifications use `provider[:name[:model]]`; discussion agents are comma-separated.
