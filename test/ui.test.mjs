@@ -4495,3 +4495,91 @@ test('Close with pending work: allowed with unresolved edits (hold and files kep
   assert.doesNotMatch(readFileSync(`${cleanDir}/closing-statement.md`, 'utf8'), /Worker work pending on/);
   assert.ok(hostname().length > 0);
 });
+
+test('Close and Discard: refuses with a queued task or mid-operation, previews commits/edits/untracked/ignored summary, detects changes between clicks, saves unique discard ref, removes worktree and branch, clears hold/session, and closes', async () => {
+  const { writeFileSync, mkdirSync, readFileSync, existsSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, discardPreview, closeAndDiscard } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  let releaseRunning;
+  const runningGate = new Promise((r) => { releaseRunning = r; });
+  const { first, git } = await multiRoom({ worker: async (ctx, p) => {
+    if (p.endsWith('slow task')) {
+      writeFileSync(`${ctx.workerDir.path}/a.txt`, 'v1\n');
+      inTree(ctx.workerDir.path, 'add', 'a.txt');
+      inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.discussion.name}] add a.txt`);
+      await runningGate;
+    }
+    return 'ok';
+  } });
+  writeFileSync(`${first.cwd}/.gitignore`, 'dist/\n*.log\n');
+  git('add', '.gitignore'); git('commit', '-q', '-m', 'add gitignore');
+
+  await handleLine('discard-topic', first);
+  const { name, dir } = first.discussion;
+
+  // 1. Refusal while a task is running or queued (names them).
+  queueWork(first, 'slow task');
+  queueWork(first, 'queued followup');
+  await until(() => workerLane(first, name).running);
+  await assert.rejects(
+    () => discardPreview(first, name),
+    (err) => /running or queued/.test(err.message) && err.message.includes('"slow task"') && err.message.includes('"queued followup"'),
+  );
+  releaseRunning();
+  await first.workQueue;
+
+  const tree = first.workerDir.path;
+  // Create tracked edit, untracked file, and ignored files in a folder (summarised, not listed one-by-one).
+  writeFileSync(`${tree}/a.txt`, 'edited\n');
+  writeFileSync(`${tree}/untracked.txt`, 'u1\n');
+  mkdirSync(`${tree}/dist/sub`, { recursive: true });
+  writeFileSync(`${tree}/dist/one.js`, '1');
+  writeFileSync(`${tree}/dist/sub/two.js`, '2');
+  writeFileSync(`${tree}/debug.log`, 'log');
+
+  // 2. Preview listing (commits, tracked edits, untracked files, ignored-files summary by top-level folder).
+  const firstClick = await discardPreview(first, name);
+  const p1 = firstClick.preview;
+  assert.equal(p1.commits.length, 1);
+  assert.match(p1.commits[0].subject, /add a\.txt/);
+  assert.deepEqual(p1.tracked.map((t) => t.path), ['a.txt']);
+  assert.deepEqual(p1.untracked, ['untracked.txt']);
+  assert.ok(p1.ignored.some((i) => i.label === 'dist/ 2 files'), `expected dist/ 2 files, got ${JSON.stringify(p1.ignored)}`);
+  assert.ok(p1.ignored.some((i) => i.label === 'debug.log'), `expected debug.log, got ${JSON.stringify(p1.ignored)}`);
+  assert.ok(!p1.ignored.some((i) => i.label.includes('one.js') || i.label.includes('two.js')));
+
+  // 3. A change between the two clicks (even inside an already-listed untracked file) returns { changed: true, preview } and deletes nothing.
+  writeFileSync(`${tree}/untracked.txt`, 'u2-modified\n');
+  const changedRes = await closeAndDiscard(first, name, p1.snapshot);
+  assert.equal(changedRes.changed, true);
+  assert.notEqual(changedRes.preview.snapshot, p1.snapshot);
+  assert.ok(existsSync(tree), 'worktree must not be removed when snapshot changed');
+
+  // Also detects a change in an ignored file's size/mtime.
+  writeFileSync(`${tree}/dist/one.js`, '111111');
+  const changedIgnored = await closeAndDiscard(first, name, changedRes.preview.snapshot);
+  assert.equal(changedIgnored.changed, true);
+
+  // 4. Mid-rebase / mid-merge refusal.
+  const gitDir = inTree(tree, 'rev-parse', '--absolute-git-dir');
+  writeFileSync(`${gitDir}/MERGE_HEAD`, git('rev-parse', 'HEAD') + '\n');
+  await assert.rejects(() => discardPreview(first, name), /mid-merge/);
+  const { unlinkSync } = await import('node:fs');
+  unlinkSync(`${gitDir}/MERGE_HEAD`);
+
+  // 5. Confirm with fresh snapshot: saves refs/discarded/<name>/<ts>, removes worktree and branch, clears hold/session, and closes with closing-statement line.
+  const tipBefore = git('rev-parse', `worker/${name}`);
+  const finalPreview = await discardPreview(first, name);
+  const done = await closeAndDiscard(first, name, finalPreview.preview.snapshot);
+  assert.equal(done.ok, true);
+  assert.match(done.savedRef, new RegExp(`^refs/discarded/${name}/\\d{8}-\\d{6}`));
+  assert.equal(git('rev-parse', done.savedRef), tipBefore);
+  assert.equal(existsSync(tree), false, 'worktree removed');
+  assert.throws(() => git('rev-parse', '--verify', `refs/heads/worker/${name}`), 'branch deleted');
+  assert.equal(workerLane(first, name).blockedBy, null);
+  assert.ok(first.screen.room.closedDiscussions.includes(name));
+  const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
+  assert.ok(stmt.includes(`Worker work discarded: 1 commit kept at \`${done.savedRef}\`.`));
+});

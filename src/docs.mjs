@@ -575,6 +575,16 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #peers-buttons { display: flex; justify-content: flex-end; margin-top: 1rem; }
 #ask-text { margin: 0 0 1rem; overflow-wrap: anywhere; }
 #ask-buttons { display: flex; justify-content: flex-end; gap: .5rem; }
+.discard-dialog { width: min(38rem, 92vw); max-height: 85vh; border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.2rem; overflow: auto; }
+.discard-dialog::backdrop { background: #0006; }
+.discard-dialog h3 { margin: 0 0 .5rem; font-size: .95rem; }
+.discard-dialog h4 { margin: .65rem 0 .25rem; font-size: .78rem; color: var(--dim); text-transform: uppercase; letter-spacing: .03em; }
+.discard-dialog ul { margin: 0; padding-left: 1.2rem; max-height: 10rem; overflow-y: auto; font-size: .8rem; font-family: ui-monospace, monospace; }
+.discard-dialog .discard-warn { color: #d97706; font-size: .82rem; margin: .4rem 0; }
+.discard-dialog .discard-err { color: #ef4444; font-size: .82rem; margin: .5rem 0 0; overflow-wrap: anywhere; }
+.discard-dialog .discard-note { color: var(--dim); font-size: .78rem; margin: .4rem 0; }
+.discard-dialog .discard-buttons { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .9rem; }
+.discard-dialog .danger { color: #ef4444; border-color: #ef4444; }
 #rooms { max-width: min(28rem, 80vw); font: inherit; font-size: .75rem; }
 #disc { font-size: .75rem; color: var(--dim); line-height: 1.35; }
 #disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
@@ -837,7 +847,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b id="room-name">agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">New brainstorm</button><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
+<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">New brainstorm</button><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
 <div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 <div id="busy" aria-hidden="true"></div>
 </header>
@@ -1144,8 +1154,15 @@ const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a discussion to send work.
 let workerInfoShown = null, workPlaceholder = null;
 function showWorkerInfo(info) {
   const pendingChanged = JSON.stringify(info?.pending ?? null) !== JSON.stringify(workerPending);
+  const nextDiscardable = info?.discardable ?? [];
+  const discardableChanged = JSON.stringify(nextDiscardable) !== JSON.stringify([...workerDiscardable]);
   workerInfoShown = info;
-  if (pendingChanged) { workerPending = info?.pending ?? null; updateCloseButton(); renderDiscussions(); } // its rows and Close label follow pending worker work
+  if (pendingChanged || discardableChanged) {
+    workerPending = info?.pending ?? null;
+    workerDiscardable = new Set(nextDiscardable);
+    updateCloseButton();
+    renderDiscussions();
+  } // its rows and Close/Discard actions follow pending work and existing worker lanes
   workPlaceholder ??= wbox.placeholder;
   if (room?.brainstorm) setWorkerInfo({ lines: [BRAINSTORM_NO_WORK], disabled: true });
   else {
@@ -1590,6 +1607,69 @@ function updateCloseButton() {
   const label = room?.brainstorm ? 'Close brainstorm' : closeActionLabel(activeLane);
   if (b.dataset.armed) b.dataset.label = label;
   else b.textContent = label;
+  const d = $('closediscard');
+  if (d) d.hidden = b.hidden || !activeLane || !!room?.brainstorm || !workerDiscardable?.has(activeLane) || !!room?.closedDiscussions?.includes(activeLane);
+}
+async function startDiscard(name) {
+  try {
+    const res = await post('__discard', { name });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    showDiscardDialog(name, data.preview, false);
+  } catch (err) { status(err.message, true); }
+}
+function showDiscardDialog(name, initialPreview, initialChanged) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'discard-dialog';
+  let current = initialPreview;
+  const render = (preview, changed, errMsg = '') => {
+    current = preview;
+    dialog.replaceChildren();
+    const h = document.createElement('h3'); h.textContent = 'Close and Discard ' + name + '?'; dialog.append(h);
+    if (changed) {
+      const w = document.createElement('p'); w.className = 'discard-warn';
+      w.textContent = 'The worktree or branch changed since your first click. Review the updated list below and confirm again.';
+      dialog.append(w);
+    }
+    const note = document.createElement('p'); note.className = 'discard-note';
+    note.textContent = preview.commits.length
+      ? 'Commits will be saved to a recovery ref under refs/discarded/' + name + '/… (commits only; uncommitted, untracked and ignored files are deleted for good).'
+      : 'Nothing committed to save; the worktree and branch will be removed and all uncommitted, untracked and ignored files deleted for good.';
+    dialog.append(note);
+    const section = (title, items) => {
+      const sh = document.createElement('h4'); sh.textContent = title + ' (' + items.length + ')'; dialog.append(sh);
+      if (!items.length) { const p = document.createElement('p'); p.className = 'discard-note'; p.textContent = 'None.'; dialog.append(p); return; }
+      const ul = document.createElement('ul');
+      for (const text of items) { const li = document.createElement('li'); li.textContent = text; ul.append(li); }
+      dialog.append(ul);
+    };
+    section('Commits not in main', preview.commits.map((c) => c.hash + ' ' + c.subject));
+    section('Tracked edits', preview.tracked.map((t) => t.status + ' ' + t.path));
+    section('Untracked files', preview.untracked);
+    section('Ignored files (by top-level folder)', preview.ignored.map((i) => i.label));
+    const errEl = document.createElement('p'); errEl.className = 'discard-err'; errEl.textContent = errMsg;
+    if (errMsg) dialog.append(errEl);
+    const buttons = document.createElement('div'); buttons.className = 'discard-buttons';
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.onclick = () => dialog.close();
+    const confirm = document.createElement('button'); confirm.type = 'button'; confirm.className = 'danger'; confirm.textContent = 'Confirm Close and Discard';
+    confirm.onclick = async () => {
+      confirm.disabled = true; cancel.disabled = true;
+      try {
+        const res = await post('__discard', { name, snapshot: current.snapshot });
+        if (!res.ok) throw new Error(await res.text());
+        const out = await res.json();
+        if (out.changed) { render(out.preview, true); return; }
+        dialog.close();
+      } catch (err) {
+        render(current, false, err.message);
+      }
+    };
+    buttons.append(cancel, confirm); dialog.append(buttons);
+  };
+  render(initialPreview, initialChanged);
+  dialog.onclose = () => dialog.remove();
+  document.body.append(dialog);
+  dialog.showModal();
 }
 function updateReplicaView() {
   updateDiscWorkers();
@@ -1914,7 +1994,7 @@ function discussionsIn(prefix) {
 // Worker work not yet in main, from the Worker tab's checks (showWorkerInfo): each lane's
 // { lane: its discussion or null for worker/main, branch, ahead: commits not in main, dirty }.
 // null: not known (no checks yet, or no worker here), so rows say nothing about it.
-let workerPending = null;
+let workerPending = null, workerDiscardable = new Set();
 function renderDiscussions() {
   const container = $('discussions-pane');
   if (!container) return;
@@ -2037,6 +2117,11 @@ function renderDiscussions() {
         const close = el('button', '', closeActionLabel(d));
         close.onclick = () => { closeMenus(); send('/close ' + d); };
         items.append(close);
+        if (workerDiscardable.has(d)) {
+          const discard = el('button', 'danger', 'Close and Discard');
+          discard.onclick = () => { closeMenus(); startDiscard(d); };
+          items.append(discard);
+        }
       }
       for (const [label, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
         const b = el('button', '', label);
@@ -3114,6 +3199,11 @@ confirmed($('newdisc'), () => send('/new'), null, () => !room?.multi && room?.st
 confirmed($('newbrainstorm'), () => send('/brainstorm'), null, () => !room?.multi && room?.started);
 confirmed($('convert'), () => { closeMenus(); send('/convert ' + room.active); }, 'Click again: it moves to discussions/', () => true);
 confirmed($('closedisc'), () => send('/close'), 'Click again: this discussion closes (its agents stop)', () => !!room?.started);
+$('closediscard').onclick = () => {
+  closeMenus();
+  const activeLane = !room?.brainstorm && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
+  if (activeLane) startDiscard(activeLane);
+};
 $('summary').onclick = () => send('/summary');
 $('reload').onclick = () => send('/reload');
 // Two clicks to quit or shut down, so a stray click doesn't end anything.
@@ -3555,7 +3645,7 @@ function handleScreen(req, res, url, dir, screen) {
       (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
-  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom', '/__retry', '/__agent-enabled', '/__cancelclose', '/__stopworker'].includes(url.pathname)) {
+  if (['/__say', '/__show', '/__work', '/__workerinfo', '/__newroom', '/__retry', '/__agent-enabled', '/__cancelclose', '/__stopworker', '/__discard'].includes(url.pathname)) {
     if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain; charset=utf-8', 'Refused: only the room page can send input.'); return true; }
     readJson(req, url.pathname === '/__say' ? ATTACH_TOTAL * 1.4 : undefined).then((body) => {
       if (url.pathname === '/__newroom') {
@@ -3579,6 +3669,16 @@ function handleScreen(req, res, url, dir, screen) {
         if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before cancelling Close.');
         if (!screen.cancelClose?.(body?.name)) return send(409, 'text/plain; charset=utf-8', 'Close is no longer waiting for the worker.');
         return send(204, 'text/plain', '');
+      }
+      if (url.pathname === '/__discard') {
+        if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before discarding worker work.');
+        if (!screen.discardPreview || !screen.closeAndDiscard) return send(409, 'text/plain; charset=utf-8', 'Close and Discard is unavailable.');
+        const name = typeof body?.name === 'string' ? body.name.trim() : '';
+        if (!name) return send(400, 'text/plain; charset=utf-8', 'Discussion name is required.');
+        const act = body?.snapshot ? screen.closeAndDiscard(name, String(body.snapshot)) : screen.discardPreview(name);
+        return Promise.resolve(act).then(
+          (result) => send(200, 'application/json', JSON.stringify(result)),
+          (err) => send(409, 'text/plain; charset=utf-8', err.message));
       }
       if (url.pathname === '/__agent-enabled') {
         if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before changing discussion agents.');

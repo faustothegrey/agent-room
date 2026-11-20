@@ -83,3 +83,5 @@ Stop now: only this task's programs are killed, queued instructions are cancelle
 branchDiagram: behind main, diverged, main merged into branch twice, and history longer than the limit (real git repos)
 leftover edits hold their own lane for their origin, which can recover them; other lanes go on; they block Archive and Defer; unknown leftovers hold their lane
 Close with pending work: allowed with unresolved edits (hold and files kept), appends pending-work line to closing-statement.md, and refuses tasks queued behind an unresolved-edits hold
+Stop now with a real program: the worker's process group is killed through its monitored turn, and its last-turn record is an error
+Close and Discard: refuses with a queued task or mid-operation, previews commits/edits/untracked/ignored summary, detects changes between clicks, saves unique discard ref, removes worktree and branch, clears hold/session, and closes

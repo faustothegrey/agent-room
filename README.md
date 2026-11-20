@@ -51,7 +51,7 @@ the server's version. An amber ⚠ to the right of **Server** means a replicatio
 (hover for how many); click it to open **Peers…**. **Current discussion** (green): on the left, the selected
 discussion's or brainstorm's title (**New brainstorm** before a brainstorm's first message), or **No discussion started**, with its state under it (who is thinking, or your
 turn); **Actions ▾** holds **Summarize**, **New discussion**, **New brainstorm**, **Turn into a discussion** (when a
-brainstorm is shown) and (on the screen) **Close** (**Close with pending work** when the worker branch has unmerged commits or uncommitted edits; **Close brainstorm** for a brainstorm); on the right, every open discussion whose worker is working is listed, one per line,
+brainstorm is shown), **Close** (**Close with pending work** when the worker branch has unmerged commits or uncommitted edits; **Close brainstorm** for a brainstorm), and **Close and Discard** (when the discussion has a worker worktree or branch); on the right, every open discussion whose worker is working is listed, one per line,
 as `<title> · Worker is working` (the shown discussion included). **Monitoring** (amber): the monitor panel, with the subscription usage gauges
 and a warning per provider (below).
 
@@ -311,7 +311,7 @@ agent with the provider and model set in that discussion's **Worker · provider 
 (not the discussion agents, nor the worker's own session) then reads the discussion's notes and
 transcripts and writes a closing statement pointing to `pending-instructions.md` (the system messages name its provider and model, when it starts and when the discussion is closed); when the branch has pending work, agent-room appends `Worker work pending on <node or host>: \`worker/<name>\`, N commits not in main, uncommitted edits: yes/no, worktree \`<path>\`.` to `closing-statement.md`. agent-room writes the one
 current `closing-statement.md`, ends the sessions and marks the discussion closed. Unresolved worker
-edits do not prevent Close: the worktree's queue hold stays as it is, and resuming the discussion later finds the edits still there. If Close fails or is cancelled, the discussion stays open or paused and
+edits do not prevent Close: the worktree's queue hold stays as it is, and resuming the discussion later finds the edits still there. **Close and Discard** (beside Close in **Actions ▾** and each row's menu in **Discussions**, shown only when the discussion has a worker worktree or branch) closes the discussion and deletes its worker worktree and branch after two clicks: it refuses while a worker task for the discussion is running or queued, or while its worktree is mid-merge, mid-rebase or mid-revert; the first click lists commits not in main, tracked edits, untracked files, and ignored files summarised by top-level folder and snapshots them; the second click re-checks the snapshot (asking again if anything changed), saves any unmerged commits to a unique `refs/discarded/<name>/<YYYYMMDD-HHMMSS>` ref (commits only, not uncommitted or ignored files), removes the worktree (`git worktree remove --force`), deletes `worker/<name>` (`git branch -D`), clears the lane's hold and saved worker session, and closes the discussion with a `Worker work discarded: …` line in `closing-statement.md`. If any step fails partway, it stops, leaves the discussion open, and reports what was and wasn't done. If Close fails or is cancelled, the discussion stays open or paused and
 can be retried. **Quit room** ends the room, and Restart brings back every open discussion and
 brainstorm from its checkpoint (not empty ones). Only closed discussions replicate; replication sends the closing statement (including any pending-work line) but never the worker branch or worktree. Each discussion keeps its own worker settings and
 session. In the terminal one discussion is open at
@@ -729,8 +729,9 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   These checks are made again after each task and whenever the Worker tab is shown.
 - Before each instruction, the discussion's branch catches up with the room's `HEAD`, by
   fast-forward only, when it is strictly behind it and its worktree is clean. Otherwise it is left
-  as it is, and the tab says why. agent-room's own code never resets, merges, rebases or deletes a
-  worktree or its branch, and never touches the room's own index, branch or files. The worker
+  as it is, and the tab says why. agent-room's own code never resets, merges or rebases a
+  worktree or its branch, never touches the room's own index, branch or files, and deletes a
+  worktree or branch only on **Close and Discard** after you confirm its preview. The worker
   itself may do such Git actions in its worktree when you explicitly ask (a rollback's reverts,
   merging main into its branch to catch up or for rollback, or abandoning an attempt after listing
   the edits and getting your approval).

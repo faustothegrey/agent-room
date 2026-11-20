@@ -462,36 +462,62 @@ test('the Close action switches between Close and Close with pending work in Act
     querySelectorAll() { return []; },
     addEventListener() {},
   });
-  const closedisc = node('button'), winfo = node('div'), wbox = node('textarea');
+  const closedisc = node('button'), closediscard = node('button'), winfo = node('div'), wbox = node('textarea');
   let renders = 0;
   const harness = new Function('$', 'document', 'window', 'matchMedia', 'wbox', 'renderDiscussions',
-    'let room = { active: "discussions/2026-11-19-a", brainstorm: false }, workerPending = null, ended = false, restarting = false;\n' +
+    'let room = { active: "discussions/2026-11-19-a", brainstorm: false }, workerPending = null, workerDiscardable = new Set(), ended = false, restarting = false;\n' +
     closeCode + '\n' + winfoCode + '\nreturn { showWorkerInfo, closeActionLabel, updateCloseButton, setRoom: (r) => { room = r; updateCloseButton(); } };'
-  )((id) => (id === 'closedisc' ? closedisc : id === 'winfo' ? winfo : node(id)),
+  )((id) => (id === 'closedisc' ? closedisc : id === 'closediscard' ? closediscard : id === 'winfo' ? winfo : node(id)),
     { createElement: node, getElementById: () => null, head: node('head') }, {}, () => ({ matches: false }), wbox, () => { renders++; });
 
-  // No pending work: Close in Actions and for every discussion row.
-  harness.showWorkerInfo({ lines: [], pending: [] });
+  // No pending work: Close in Actions and for every discussion row; Close and Discard hidden until a worktree/branch exists.
+  harness.showWorkerInfo({ lines: [], pending: [], discardable: [] });
   assert.equal(closedisc.textContent, 'Close');
+  assert.equal(closediscard.hidden, true);
   assert.equal(harness.closeActionLabel('2026-11-19-a'), 'Close');
   assert.equal(harness.closeActionLabel('2026-11-19-b'), 'Close');
 
-  // Pending work on discussion a: switches to Close with pending work for a, stays Close for b.
+  // Pending work and discardable lane on discussion a: switches to Close with pending work and shows Close and Discard.
   const before = renders;
-  harness.showWorkerInfo({ lines: [], pending: [{ lane: '2026-11-19-a', branch: 'worker/2026-11-19-a', ahead: 2, dirty: false }] });
+  harness.showWorkerInfo({ lines: [], pending: [{ lane: '2026-11-19-a', branch: 'worker/2026-11-19-a', ahead: 2, dirty: false }], discardable: ['2026-11-19-a'] });
   assert.equal(closedisc.textContent, 'Close with pending work');
+  assert.equal(closediscard.hidden, false);
   assert.equal(harness.closeActionLabel('2026-11-19-a'), 'Close with pending work');
   assert.equal(harness.closeActionLabel('2026-11-19-b'), 'Close');
   assert.equal(renders, before + 1);
 
-  // Pending work cleared: returns to Close.
-  harness.showWorkerInfo({ lines: [], pending: [] });
+  // Pending work cleared: returns to Close; no discardable lane hides Close and Discard.
+  harness.showWorkerInfo({ lines: [], pending: [], discardable: [] });
   assert.equal(closedisc.textContent, 'Close');
+  assert.equal(closediscard.hidden, true);
   assert.equal(harness.closeActionLabel('2026-11-19-a'), 'Close');
 
-  // Brainstorm stays Close brainstorm.
+  // Brainstorm stays Close brainstorm and hides Close and Discard.
   harness.setRoom({ active: 'brainstorms/2026-11-19-idea', brainstorm: true });
   assert.equal(closedisc.textContent, 'Close brainstorm');
+  assert.equal(closediscard.hidden, true);
+});
+
+test('POST /__discard previews and confirms Close and Discard only from the room page', async () => {
+  const calls = [];
+  const s = await serve(fixture(), {
+    clients: new Set(), transcript: [],
+    discardPreview: async (name) => { calls.push(['preview', name]); return { ok: true, preview: { name, snapshot: 'snap1' } }; },
+    closeAndDiscard: async (name, snap) => { calls.push(['confirm', name, snap]); return snap === 'snap1' ? { ok: true } : { changed: true, preview: { name, snapshot: 'snap2' } }; },
+  });
+  try {
+    assert.equal((await postFrom(s, '/__discard', { name: '2026-11-19-a' }, { origin: 'https://evil.example' })).status, 403);
+    const r1 = await postFrom(s, '/__discard', { name: '2026-11-19-a' });
+    assert.equal(r1.status, 200);
+    assert.equal((await r1.json()).preview.snapshot, 'snap1');
+    const r2 = await postFrom(s, '/__discard', { name: '2026-11-19-a', snapshot: 'stale' });
+    assert.equal(r2.status, 200);
+    assert.equal((await r2.json()).changed, true);
+    const r3 = await postFrom(s, '/__discard', { name: '2026-11-19-a', snapshot: 'snap1' });
+    assert.equal(r3.status, 200);
+    assert.equal((await r3.json()).ok, true);
+    assert.deepEqual(calls, [['preview', '2026-11-19-a'], ['confirm', '2026-11-19-a', 'stale'], ['confirm', '2026-11-19-a', 'snap1']]);
+  } finally { s.close(); }
 });
 
 test('the Worker tab\'s stop buttons: /__stopworker reaches the room only from its page, with a known mode; each button asks to click again', async () => {

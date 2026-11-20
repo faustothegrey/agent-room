@@ -8,7 +8,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
-import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -417,6 +417,8 @@ function wire(ctx) {
   ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
   ctx.screen.stopWorker = (mode) => stopWorker(ctx, mode);
   ctx.screen.cancelClose = (name) => cancelClose(ctx, name);
+  ctx.screen.discardPreview = (name) => discardPreview(ctx, name);
+  ctx.screen.closeAndDiscard = (name, snapshot) => closeAndDiscard(ctx, name, snapshot);
   ctx.screen.setAgentEnabled = (name, enabled, member) => setAgentEnabled(ctx, name, enabled, { member });
 }
 
@@ -1679,12 +1681,12 @@ async function pendingWorkLine(ctx, name) {
   return `Worker work pending on ${where}: \`${place.branch}\`, ${plural(ahead, 'commit')} not in main, uncommitted edits: ${dirty ? 'yes' : 'no'}, worktree \`${place.path}\`.`;
 }
 
-async function closeNamedDiscussion(ctx, name) {
+async function closeNamedDiscussion(ctx, name, { extraLine = null, rethrow = false } = {}) {
   const d = discussionRef(join(ctx.cwd, 'discussions'), name);
-  if (!d) return note(ctx, `✗ No discussion "${name}".`, true);
+  if (!d) { const msg = `No discussion "${name}".`; note(ctx, `✗ ${msg}`, true); if (rethrow) throw new Error(msg); return false; }
   const shop = shopOf(ctx), closing = shop.closing ??= new Map();
-  if (closing.has(d.name)) return note(ctx, `✗ ${d.name} is already closing.`, true);
-  if (closedDiscussions(ctx).includes(d.name)) return note(ctx, `✗ ${d.name} is already closed.`, true);
+  if (closing.has(d.name)) { const msg = `${d.name} is already closing.`; note(ctx, `✗ ${msg}`, true); if (rethrow) throw new Error(msg); return false; }
+  if (closedDiscussions(ctx).includes(d.name)) { const msg = `${d.name} is already closed.`; note(ctx, `✗ ${msg}`, true); if (rethrow) throw new Error(msg); return false; }
   const opened = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, d.name));
   const blockedQueued = () => lanesOf(shop).flatMap((l) =>
     l.blockedBy ? l.tasks.filter((t) => t.owner === d.name && l.blockedBy.owner !== t.owner) : []);
@@ -1708,7 +1710,7 @@ async function closeNamedDiscussion(ctx, name) {
       await new Promise((resolve) => { c.wake = resolve; setTimeout(resolve, 100); });
     }
     c.wake = null;
-    if (c.cancelled) return note(ctx, `Close cancelled for ${d.name}.`);
+    if (c.cancelled) { note(ctx, `Close cancelled for ${d.name}.`); return false; }
     if (ctx.stopped || opened?.stopped) throw new Error('The room stopped while Close was waiting.');
     c.waiting = false;
     showHeader(ctx);
@@ -1725,8 +1727,8 @@ async function closeNamedDiscussion(ctx, name) {
     const writer = `${spec.provider[0].toUpperCase() + spec.provider.slice(1)} (${modelLabel(spec.provider, spec.model)})`;
     note(ctx, `Closing ${d.name}: ${writer} is writing the closing statement…`);
     const statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports }, target.closingAgent?.());
-    const pendingLine = await pendingWorkLine(target, d.name).catch(() => null);
-    const body = pendingLine ? `${statement.trimEnd()}\n\n${pendingLine}\n` : `${statement}\n`;
+    const appendedLine = extraLine ?? await pendingWorkLine(target, d.name).catch(() => null);
+    const body = appendedLine ? `${statement.trimEnd()}\n\n${appendedLine}\n` : `${statement}\n`;
     const file = join(target.discussion.dir, 'closing-statement.md');
     const temp = `${file}.${process.pid}.tmp`;
     const previous = existsSync(file) ? readFileSync(file) : null;
@@ -1779,12 +1781,280 @@ async function closeNamedDiscussion(ctx, name) {
     }
     note(ctx, `Closed ${d.name}. Closing statement written by ${writer}.`);
     if (snapshot) saveClosed(ctx, target, snapshot);
+    return true;
   } catch (err) {
     note(ctx, `✗ Could not close ${d.name}: ${err.message}`, true);
+    if (rethrow) throw err;
+    return false;
   } finally {
     closing.delete(d.name);
     showHeader(ctx);
   }
+}
+
+// ── Close and Discard ─────────────────────────────────────────────────
+// Two-click confirmation: first click previews everything that would be lost (commits not in main,
+// tracked edits, untracked files, ignored files summarised by top-level folder) and snapshots it;
+// second click re-checks the snapshot before saving refs/discarded/<name>/<timestamp>, removing
+// the worktree and branch, clearing the lane's hold and saved worker session, and closing.
+function worktreeOperation(privateDir) {
+  if (existsSync(join(privateDir, 'MERGE_HEAD'))) return 'merge';
+  if (existsSync(join(privateDir, 'rebase-merge')) || existsSync(join(privateDir, 'rebase-apply'))) return 'rebase';
+  if (existsSync(join(privateDir, 'REVERT_HEAD')) || existsSync(join(privateDir, 'sequencer'))) return 'revert';
+  return null;
+}
+const gitRaw = (dir, ...args) => new Promise((done, fail) => execFile('git', ['-C', dir, ...args], { maxBuffer: 1 << 24 },
+  (err, out, errOut) => (err ? fail(new Error(`git ${args[0]}: ${(errOut || err.message).trim()}`)) : done(out))));
+function fileContentHash(fullPath) {
+  try {
+    const st = lstatSync(fullPath);
+    if (st.isSymbolicLink()) return `symlink:${readlinkSync(fullPath)}`;
+    if (st.isDirectory()) return 'dir';
+    return createHash('sha256').update(readFileSync(fullPath)).digest('hex');
+  } catch { return 'missing'; }
+}
+// Walks an ignored folder without following symlinks, collecting count + metadata hash (size, mtime).
+function walkIgnoredMeta(rootDir, relDir, hash) {
+  let count = 0;
+  const walk = (abs, rel) => {
+    let entries;
+    try { entries = readdirSync(abs, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)); }
+    catch { return; }
+    for (const e of entries) {
+      const childAbs = join(abs, e.name), childRel = rel ? `${rel}/${e.name}` : e.name;
+      let st;
+      try { st = lstatSync(childAbs); } catch { continue; }
+      if (st.isSymbolicLink()) {
+        count++;
+        hash.update(`L\0${childRel}\0${st.size}\0${st.mtimeMs}\n`);
+      } else if (st.isDirectory()) {
+        walk(childAbs, childRel);
+      } else {
+        count++;
+        hash.update(`F\0${childRel}\0${st.size}\0${st.mtimeMs}\n`);
+      }
+    }
+  };
+  walk(join(rootDir, relDir), relDir);
+  return count;
+}
+function parseStatusZ(raw) {
+  const parts = raw.split('\0');
+  const tracked = [], untracked = [];
+  for (let i = 0; i < parts.length; i++) {
+    const entry = parts[i];
+    if (!entry) continue;
+    const xy = entry.slice(0, 2), path = entry.slice(3);
+    if (xy === '??') untracked.push(path);
+    else if (xy !== '!!') {
+      const renamed = xy[0] === 'R' || xy[0] === 'C' || xy[1] === 'R' || xy[1] === 'C';
+      const orig = renamed ? parts[++i] : null;
+      tracked.push({ status: xy.trim() || xy, path, ...(orig && { orig }) });
+    }
+  }
+  return { tracked, untracked };
+}
+async function inspectDiscard(ctx, name) {
+  const d = discussionRef(join(ctx.cwd, 'discussions'), name);
+  if (!d) throw new Error(`No discussion "${name}".`);
+  const shop = shopOf(ctx), closing = shop.closing ??= new Map();
+  if (closing.has(d.name)) throw new Error(`${d.name} is already closing.`);
+  if (closedDiscussions(ctx).includes(d.name)) throw new Error(`${d.name} is already closed.`);
+  const tasks = [...runningTasks(shop), ...queuedTasks(shop)].filter((t) => t.owner === d.name);
+  if (tasks.length) {
+    const names = tasks.map((t) => `"${firstLine(t.text)}"`).join(', ');
+    throw new Error(`Cannot Close and Discard ${d.name}: ${plural(tasks.length, 'worker task')} running or queued (${names}).`);
+  }
+  const place = await lanePlace(ctx, d.name);
+  if (place.disabled) throw new Error(place.disabled);
+  const worktreeExists = existsSync(place.path) && (await worktrees(place.top)).some((w) => w.path === real(place.path));
+  const branchHead = await git(place.top, 'rev-parse', '--verify', '-q', `refs/heads/${place.branch}^{commit}`).catch(() => null);
+  const branchExists = !!branchHead;
+  if (!worktreeExists && !branchExists) throw new Error(`${d.name} has no worker worktree or branch to discard.`);
+  if (worktreeExists) {
+    const privateDir = await git(place.path, 'rev-parse', '--absolute-git-dir');
+    const op = worktreeOperation(privateDir);
+    if (op) throw new Error(`Cannot Close and Discard ${d.name}: its worktree is mid-${op}. Resolve or abort it first.`);
+  }
+
+  let commits = [];
+  if (branchExists) {
+    const main = await mainRef(place.top);
+    const logOut = await git(place.top, 'log', '--format=%h%x1f%s', `${main}..refs/heads/${place.branch}`);
+    commits = logOut ? logOut.split('\n').filter(Boolean).map((l) => {
+      const [hash, ...rest] = l.split('\x1f');
+      return { hash, subject: rest.join('\x1f') };
+    }) : [];
+  }
+
+  let tracked = [], untracked = [], ignored = [];
+  const snap = createHash('sha256');
+  snap.update(`branch:${branchHead ?? 'none'}\nworktree:${worktreeExists}\n`);
+
+  if (worktreeExists) {
+    const [statusZ, diffCached, ignoredZ] = await Promise.all([
+      gitRaw(place.path, 'status', '--porcelain', '-z', '-uall'),
+      gitRaw(place.path, 'diff', '--cached'),
+      gitRaw(place.path, 'status', '--porcelain', '-z', '--ignored=matching'),
+    ]);
+    snap.update(`status:${statusZ}\ncached:${createHash('sha256').update(diffCached).digest('hex')}\n`);
+    const parsed = parseStatusZ(statusZ);
+    tracked = parsed.tracked;
+    untracked = parsed.untracked.sort();
+    for (const t of tracked) snap.update(`T\0${t.status}\0${t.path}\0${fileContentHash(join(place.path, t.path))}\n`);
+    for (const u of untracked) snap.update(`U\0${u}\0${fileContentHash(join(place.path, u))}\n`);
+
+    // Summarise ignored files by top-level folder with count + metadata hash (no content hashing).
+    const groups = new Map();
+    const getGroup = (key, isDir) => {
+      if (!groups.has(key)) groups.set(key, { key, isDir, count: 0, hash: createHash('sha256') });
+      return groups.get(key);
+    };
+    const ignoredEntries = ignoredZ.split('\0').filter((e) => e.startsWith('!! ')).map((e) => e.slice(3)).sort();
+    for (const entry of ignoredEntries) {
+      const clean = entry.replace(/\/$/, '');
+      const full = join(place.path, clean);
+      let st;
+      try { st = lstatSync(full); } catch { continue; }
+      const topFolder = clean.includes('/') ? `${clean.split('/')[0]}/` : null;
+      if (st.isSymbolicLink()) {
+        const g = getGroup(topFolder ?? clean, !!topFolder);
+        g.count++;
+        g.hash.update(`L\0${clean}\0${st.size}\0${st.mtimeMs}\n`);
+      } else if (st.isDirectory()) {
+        const key = topFolder ?? `${clean}/`;
+        const g = getGroup(key, true);
+        g.count += walkIgnoredMeta(place.path, clean, g.hash);
+      } else {
+        const g = getGroup(topFolder ?? clean, !!topFolder);
+        g.count++;
+        g.hash.update(`F\0${clean}\0${st.size}\0${st.mtimeMs}\n`);
+      }
+    }
+    ignored = [...groups.values()].sort((a, b) => a.key.localeCompare(b.key)).map((g) => {
+      const metaDigest = g.hash.digest('hex');
+      snap.update(`I\0${g.key}\0${g.count}\0${metaDigest}\n`);
+      const label = g.isDir ? `${g.key} ${g.count.toLocaleString('en-US')} ${g.count === 1 ? 'file' : 'files'}` : g.key;
+      return { key: g.key, count: g.count, label };
+    });
+  }
+
+  return {
+    d, place, branchHead, worktreeExists, branchExists,
+    preview: {
+      name: d.name, branch: place.branch, path: place.path, worktreeExists, branchExists,
+      commits, tracked, untracked, ignored, snapshot: snap.digest('hex'),
+    },
+  };
+}
+
+function discardTimestamp(now = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+async function saveDiscardRef(top, name, tip) {
+  const baseTs = discardTimestamp();
+  const zero = '0'.repeat(40);
+  for (let n = 1; n <= 100; n++) {
+    const ref = `refs/discarded/${name}/${n === 1 ? baseTs : `${baseTs}-${n}`}`;
+    try {
+      await git(top, 'update-ref', ref, tip, zero);
+      return ref;
+    } catch {
+      if (!(await gitOk(top, 'rev-parse', '--verify', '-q', ref))) throw new Error(`Could not save recovery ref ${ref}.`);
+    }
+  }
+  throw new Error(`Could not allocate a unique refs/discarded/${name}/${baseTs} ref.`);
+}
+
+export async function discardPreview(ctx, name) {
+  const { preview } = await inspectDiscard(ctx, name);
+  return { ok: true, preview };
+}
+
+export async function closeAndDiscard(ctx, name, snapshot) {
+  const info = await inspectDiscard(ctx, name);
+  if (!snapshot || info.preview.snapshot !== snapshot) {
+    return { changed: true, preview: info.preview };
+  }
+  const { d, place, branchHead, worktreeExists, branchExists, preview } = info;
+  const shop = shopOf(ctx);
+  const done = [];
+  const failReport = (step, err, notDone) => {
+    const summary = `Close and Discard for ${d.name} stopped at "${step}": ${err.message}. Done: ${done.length ? done.join('; ') : 'nothing'}. Not done: ${notDone.join('; ')}. The discussion was left open.`;
+    note(ctx, `✗ ${summary}`, true);
+    throw new Error(summary);
+  };
+
+  let savedRef = null;
+  if (branchExists && preview.commits.length > 0) {
+    try {
+      savedRef = await saveDiscardRef(place.top, d.name, branchHead);
+      done.push(`saved ${plural(preview.commits.length, 'commit')} at ${savedRef}`);
+    } catch (err) {
+      failReport('save recovery ref', err, [
+        ...(worktreeExists ? [`worktree ${place.path} not removed`] : []),
+        `branch ${place.branch} not deleted`,
+        'lane hold and worker session not cleared',
+        'discussion not closed',
+      ]);
+    }
+  }
+  if (worktreeExists) {
+    try {
+      await git(place.top, 'worktree', 'remove', '--force', place.path);
+      done.push(`removed worktree ${place.path}`);
+    } catch (err) {
+      failReport('remove worktree', err, [
+        ...(branchExists ? [`branch ${place.branch} not deleted`] : []),
+        'lane hold and worker session not cleared',
+        'discussion not closed',
+      ]);
+    }
+  }
+  if (branchExists) {
+    try {
+      await git(place.top, 'branch', '-D', place.branch);
+      done.push(`deleted branch ${place.branch}`);
+    } catch (err) {
+      failReport('delete branch', err, [
+        'lane hold and worker session not cleared',
+        'discussion not closed',
+      ]);
+    }
+  }
+  // Clear the lane's hold and saved worker session.
+  const lane = laneState(shop, d.name);
+  lane.blockedBy = null;
+  lane.holdContext = null;
+  lane.inspectionError = null;
+  if (lane.recheck) { clearTimeout(lane.recheck); lane.recheck = null; }
+  const opened = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, d.name));
+  if (opened) {
+    const wName = parseSpec(opened.workerSpec ?? 'claude', true).name;
+    const ws = opened.sessions?.get(`worker:${wName}`);
+    if (ws) for (const k of Object.keys(ws)) delete ws[k];
+    opened.workerBriefed = false;
+    opened.workerTree = null;
+    opened.workerLabel = null;
+    if (opened.workerDir) opened.workerDir.path = null;
+  }
+  const cp = readCheckpoint(ctx, d.name);
+  if (cp && !cp.invalid && Array.isArray(cp.sessions)) {
+    writeCheckpoint(ctx, d.name, { ...cp, sessions: cp.sessions.filter(([k]) => !String(k).startsWith('worker:')) });
+  }
+  done.push('cleared lane hold and worker session');
+  await refreshWorker(ctx).catch(() => {});
+
+  const discardLine = savedRef
+    ? `Worker work discarded: ${plural(preview.commits.length, 'commit')} kept at \`${savedRef}\`.`
+    : 'Worker work discarded: nothing committed.';
+  try {
+    await closeNamedDiscussion(ctx, d.name, { extraLine: discardLine, rethrow: true });
+  } catch (err) {
+    failReport('close discussion', err, ['discussion not closed']);
+  }
+  return { ok: true, savedRef };
 }
 
 // ── The worker queues ─────────────────────────────────────────────────
@@ -3060,8 +3330,7 @@ export async function worktreeStatus(place) {
     git(place.top, 'merge-base', 'HEAD', place.branch).then((sha) => sha.slice(0, 7), () => 'no common commit'),
     git(place.path, 'status', '--porcelain').then((out) => out !== '')]);
   const privateDir = await git(place.path, 'rev-parse', '--absolute-git-dir');
-  const operation = existsSync(join(privateDir, 'MERGE_HEAD')) ? 'merge' :
-    existsSync(join(privateDir, 'REVERT_HEAD')) || existsSync(join(privateDir, 'sequencer')) ? 'revert/sequencer' : null;
+  const operation = worktreeOperation(privateDir);
   return { exists, head, roomDirty, ahead, behind, base, treeDirty: dirty || !!operation, operation };
 }
 
@@ -3159,13 +3428,23 @@ async function workerInfo(ctx, seen = new Map(), own = null) {
     const mine = await of(own);
     const lines = [...mine.lines], lanes = [{ ...mine, own: true }];
     if (!seen.has('lanes')) seen.set('lanes', existingLanes(ctx));
-    for (const other of await seen.get('lanes')) {
+    const existing = await seen.get('lanes');
+    for (const other of existing) {
       if (other.path === own.path) continue;
       const o = await of(other);
       if (o.review) { lines.push(...o.lines); lanes.push(o); }
     }
+    if (!seen.has('discardable')) {
+      seen.set('discardable', (async () => {
+        const branchRefs = await git(own.top, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/worker/').catch(() => '');
+        const fromBranches = branchRefs.split('\n').filter(Boolean).map((r) => r.slice('worker/'.length)).filter((n) => n && n !== 'main');
+        const fromWorktrees = existing.map((l) => l.lane).filter(Boolean);
+        return [...new Set([...fromWorktrees, ...fromBranches])].sort();
+      })());
+    }
     return { lines, lanes: lanes.map(({ lines, summary, own, diagram }) => ({ lines, summary, own: !!own, ...(diagram && { diagram }) })),
-      pending: lanes.filter((l) => l.review).map((l) => l.pending) };
+      pending: lanes.filter((l) => l.review).map((l) => l.pending),
+      discardable: await seen.get('discardable') };
   } catch (err) { return { lines: [`✗ ${err.message}`], error: true }; }
 }
 
