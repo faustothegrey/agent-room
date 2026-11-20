@@ -3265,11 +3265,9 @@ export async function branchDiagram(place, { limit = BRANCH_DIAGRAM_LIMIT } = {}
   // Replay both sides into Mermaid gitGraph commands, checking that every merge targets the
   // other branch's current tip and never violates Mermaid's own gitGraph rules.
   const baseCommit = await gitCommitInfo(place.top, base);
-  const lines = [];
-  if (roomBranch !== 'main') {
-    lines.push('---', 'config:', '  gitGraph:', `    mainBranchName: "${roomBranch}"`, '---');
-  }
-  lines.push('gitGraph TB:');
+  const lines = ['---', 'config:', '  gitGraph:', '    rotateCommitLabel: false'];
+  if (roomBranch !== 'main') lines.push(`    mainBranchName: "${roomBranch}"`);
+  lines.push('---', 'gitGraph TB:');
   lines.push(`  commit id: "${formatDiagramLabel(baseCommit)}"${baseCommit.parents.length > 1 ? ' tag: "merge"' : ''}`);
   lines.push(`  branch "${place.branch}"`);
 

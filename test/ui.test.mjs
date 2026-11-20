@@ -4222,6 +4222,7 @@ test('branchDiagram: behind main, diverged, main merged into branch twice, and h
 
   const checkGraph = async (d) => {
     assert.ok(d && d.graph && !d.note, `expected graph, got: ${JSON.stringify(d)}`);
+    assert.match(d.graph, /^---\nconfig:\n  gitGraph:\n    rotateCommitLabel: false\n/);
     const ast = await parse('gitGraph', d.graph);
     assert.ok(ast.statements.length > 0);
     return d.graph;
@@ -4379,7 +4380,7 @@ test('branchDiagram: falls back to a plain-text note when gitGraph cannot draw t
 
     const res = await branchDiagram(place);
     assert.ok(res.graph && !res.note);
-    assert.match(res.graph, /mainBranchName: "feature\/dev"/);
+    assert.match(res.graph, /^---\nconfig:\n  gitGraph:\n    rotateCommitLabel: false\n    mainBranchName: "feature\/dev"\n---\ngitGraph TB:\n/);
     const ast = await parse('gitGraph', res.graph);
     assert.ok(ast.statements.length > 0);
   }
