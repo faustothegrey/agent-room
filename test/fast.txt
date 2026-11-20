@@ -226,3 +226,4 @@ branchDiagram: strips leading [label] from subjects and tags third-branch merges
 the Close action switches between Close and Close with pending work in Actions and Discussions
 POST /__discard previews and confirms Close and Discard only from the room page
 POST /__merge and POST /__catchup enforce same-origin and wire preview, confirm and catch-up
+showMergeDialog omits ignored files and mentions untracked files only when present

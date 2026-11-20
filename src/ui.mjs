@@ -1932,7 +1932,7 @@ function parseStatusZ(raw) {
 // Shared snapshot collector for Close and Discard (Step 3) and Close and Merge (Step 4):
 // snapshots the branch tip, tracked diff/status, content hashes for tracked/untracked files,
 // and metadata (count, size, mtime) for ignored files summarised by top-level folder.
-async function collectWorktreeSnapshot(place, branchHead, worktreeExists) {
+async function collectWorktreeSnapshot(place, branchHead, worktreeExists, { includeIgnored = true } = {}) {
   let tracked = [], untracked = [], ignored = [];
   const snap = createHash('sha256');
   snap.update(`branch:${branchHead ?? 'none'}\nworktree:${worktreeExists}\n`);
@@ -1941,7 +1941,7 @@ async function collectWorktreeSnapshot(place, branchHead, worktreeExists) {
     const [statusZ, diffCached, ignoredZ] = await Promise.all([
       gitRaw(place.path, 'status', '--porcelain', '-z', '-uall'),
       gitRaw(place.path, 'diff', '--cached'),
-      gitRaw(place.path, 'status', '--porcelain', '-z', '--ignored=matching'),
+      includeIgnored ? gitRaw(place.path, 'status', '--porcelain', '-z', '--ignored=matching') : Promise.resolve(''),
     ]);
     snap.update(`status:${statusZ}\ncached:${createHash('sha256').update(diffCached).digest('hex')}\n`);
     const parsed = parseStatusZ(statusZ);
@@ -1950,38 +1950,40 @@ async function collectWorktreeSnapshot(place, branchHead, worktreeExists) {
     for (const t of tracked) snap.update(`T\0${t.status}\0${t.path}\0${fileContentHash(join(place.path, t.path))}\n`);
     for (const u of untracked) snap.update(`U\0${u}\0${fileContentHash(join(place.path, u))}\n`);
 
-    const groups = new Map();
-    const getGroup = (key, isDir) => {
-      if (!groups.has(key)) groups.set(key, { key, isDir, count: 0, hash: createHash('sha256') });
-      return groups.get(key);
-    };
-    const ignoredEntries = ignoredZ.split('\0').filter((e) => e.startsWith('!! ')).map((e) => e.slice(3)).sort();
-    for (const entry of ignoredEntries) {
-      const clean = entry.replace(/\/$/, '');
-      const full = join(place.path, clean);
-      let st;
-      try { st = lstatSync(full); } catch { continue; }
-      const topFolder = clean.includes('/') ? `${clean.split('/')[0]}/` : null;
-      if (st.isSymbolicLink()) {
-        const g = getGroup(topFolder ?? clean, !!topFolder);
-        g.count++;
-        g.hash.update(`L\0${clean}\0${st.size}\0${st.mtimeMs}\n`);
-      } else if (st.isDirectory()) {
-        const key = topFolder ?? `${clean}/`;
-        const g = getGroup(key, true);
-        g.count += walkIgnoredMeta(place.path, clean, g.hash);
-      } else {
-        const g = getGroup(topFolder ?? clean, !!topFolder);
-        g.count++;
-        g.hash.update(`F\0${clean}\0${st.size}\0${st.mtimeMs}\n`);
+    if (includeIgnored) {
+      const groups = new Map();
+      const getGroup = (key, isDir) => {
+        if (!groups.has(key)) groups.set(key, { key, isDir, count: 0, hash: createHash('sha256') });
+        return groups.get(key);
+      };
+      const ignoredEntries = ignoredZ.split('\0').filter((e) => e.startsWith('!! ')).map((e) => e.slice(3)).sort();
+      for (const entry of ignoredEntries) {
+        const clean = entry.replace(/\/$/, '');
+        const full = join(place.path, clean);
+        let st;
+        try { st = lstatSync(full); } catch { continue; }
+        const topFolder = clean.includes('/') ? `${clean.split('/')[0]}/` : null;
+        if (st.isSymbolicLink()) {
+          const g = getGroup(topFolder ?? clean, !!topFolder);
+          g.count++;
+          g.hash.update(`L\0${clean}\0${st.size}\0${st.mtimeMs}\n`);
+        } else if (st.isDirectory()) {
+          const key = topFolder ?? `${clean}/`;
+          const g = getGroup(key, true);
+          g.count += walkIgnoredMeta(place.path, clean, g.hash);
+        } else {
+          const g = getGroup(topFolder ?? clean, !!topFolder);
+          g.count++;
+          g.hash.update(`F\0${clean}\0${st.size}\0${st.mtimeMs}\n`);
+        }
       }
+      ignored = [...groups.values()].sort((a, b) => a.key.localeCompare(b.key)).map((g) => {
+        const metaDigest = g.hash.digest('hex');
+        snap.update(`I\0${g.key}\0${g.count}\0${metaDigest}\n`);
+        const label = g.isDir ? `${g.key} ${g.count.toLocaleString('en-US')} ${g.count === 1 ? 'file' : 'files'}` : g.key;
+        return { key: g.key, count: g.count, label };
+      });
     }
-    ignored = [...groups.values()].sort((a, b) => a.key.localeCompare(b.key)).map((g) => {
-      const metaDigest = g.hash.digest('hex');
-      snap.update(`I\0${g.key}\0${g.count}\0${metaDigest}\n`);
-      const label = g.isDir ? `${g.key} ${g.count.toLocaleString('en-US')} ${g.count === 1 ? 'file' : 'files'}` : g.key;
-      return { key: g.key, count: g.count, label };
-    });
   }
   return { tracked, untracked, ignored, snapshot: snap.digest('hex') };
 }
@@ -2272,14 +2274,14 @@ async function inspectCloseMerge(ctx, name, { selfLock = null } = {}) {
 
   const [logOut, worktreeSnap, activeNotice] = await Promise.all([
     git(place.top, 'log', '--format=%h%x1f%s', `${state.roomHead}..${state.branchHead}`),
-    collectWorktreeSnapshot(place, state.branchHead, state.worktreeExists),
+    collectWorktreeSnapshot(place, state.branchHead, state.worktreeExists, { includeIgnored: false }),
     activeWorkNotice(ctx, d.name, place, state.targetBranch),
   ]);
   const commits = logOut ? logOut.split('\n').filter(Boolean).map((l) => {
     const [hash, ...rest] = l.split('\x1f');
     return { hash, subject: rest.join('\x1f') };
   }) : [];
-  // activeNotice is informational only and intentionally excluded from the snapshot.
+  // activeNotice and gitignored files are intentionally excluded from the Close and Merge snapshot.
   const mergeSnap = createHash('sha256')
     .update(`target:${state.targetBranch}\nroomHead:${state.roomHead}\nwt:${worktreeSnap.snapshot}\n`)
     .digest('hex');
@@ -2289,7 +2291,7 @@ async function inspectCloseMerge(ctx, name, { selfLock = null } = {}) {
     preview: {
       name: d.name, branch: place.branch, targetBranch: state.targetBranch,
       title: `Merge ${place.branch} into ${state.targetBranch}`,
-      path: place.path, commits, untracked: worktreeSnap.untracked, ignored: worktreeSnap.ignored,
+      path: place.path, commits, untracked: worktreeSnap.untracked,
       ...(activeNotice && { activeNotice }),
       snapshot: mergeSnap,
     },

@@ -4704,15 +4704,18 @@ test('Close and Merge: greyed-out reasons, Catch up when main moved, change betw
   assert.equal(git('rev-parse', 'main'), mainAfterMove);
   assert.equal(existsSync(tree), true);
 
-  // 3. Two-click preview + change between clicks (ignored file added in worktree).
+  // 3. Two-click preview: ignored files are omitted and changes to them do not invalidate the snapshot;
+  // a real change (such as a new commit on the branch) returns { changed: true } without merging.
   mkdirSync(`${tree}/cache`, { recursive: true });
   writeFileSync(`${tree}/cache/c1.bin`, 'abc');
   const p1 = await closeMergePreview(first, name);
   assert.equal(p1.ok, true);
   assert.equal(p1.preview.title, `Merge worker/${name} into main`);
-  assert.ok(p1.preview.ignored.some((i) => i.label === 'cache/ 1 file'));
+  assert.equal(p1.preview.ignored, undefined);
   writeFileSync(`${tree}/cache/c2.bin`, 'def');
-  const changed = await closeAndMerge(first, name, p1.preview.snapshot);
+  const p1AfterIgnored = await closeMergePreview(first, name);
+  assert.equal(p1AfterIgnored.preview.snapshot, p1.preview.snapshot, 'ignored-file change must not change merge snapshot');
+  const changed = await closeAndMerge(first, name, 'stale-snapshot');
   assert.equal(changed.changed, true);
   assert.equal(git('rev-parse', 'main'), mainAfterMove, 'must not merge when snapshot changed');
 

@@ -570,6 +570,32 @@ test('POST /__merge and POST /__catchup enforce same-origin and wire preview, co
   } finally { s.close(); }
 });
 
+test('showMergeDialog omits ignored files and mentions untracked files only when present', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const fn = source.slice(source.indexOf('function showMergeDialog('), source.indexOf('async function startDiscard('));
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', children: [],
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    showModal() {}, close() {}, remove() {},
+  });
+  const dialogs = [];
+  const doc = { createElement: node, body: { append(el) { dialogs.push(el); } } };
+  const showMergeDialog = new Function('document', 'post', 'showCatchUpDialog', `${fn}\nreturn showMergeDialog;`)(doc, async () => ({ ok: true, json: async () => ({}) }), () => {});
+
+  const texts = (el) => [el.textContent, ...el.children.flatMap(texts)].filter(Boolean);
+  showMergeDialog('topic', { title: 'Merge worker/topic into main', commits: [{ hash: 'abc1234', subject: 'work' }], untracked: [], snapshot: 's1' }, false);
+  const t1 = texts(dialogs[0]).join('\n');
+  assert.ok(t1.includes('After merging, the worktree and branch will be removed and the discussion closed.'));
+  assert.ok(!/ignored/i.test(t1));
+  assert.ok(!/Untracked files/.test(t1));
+
+  showMergeDialog('topic', { title: 'Merge worker/topic into main', commits: [{ hash: 'abc1234', subject: 'work' }], untracked: ['notes.tmp'], snapshot: 's2' }, false);
+  const t2 = texts(dialogs[1]).join('\n');
+  assert.ok(t2.includes('Untracked files in the worktree will be deleted for good: notes.tmp'));
+  assert.ok(!/ignored/i.test(t2));
+});
+
 test('the Worker tab\'s stop buttons: /__stopworker reaches the room only from its page, with a known mode; each button asks to click again', async () => {
   const calls = [];
   const s = await serve(fixture(), { clients: new Set(), transcript: [], stopWorker: (mode) => { if (mode !== 'after' && mode !== 'now') throw new Error('Unknown stop'); calls.push(mode); } });
