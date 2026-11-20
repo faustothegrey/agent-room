@@ -5072,3 +5072,41 @@ test('worker prompt starts with only the worker\'s own usage line from ctx.total
   await ctx.workQueue;
   assert.match(got[1], /^\[your reported usage this session: 1 turn, 5\.0k in \(3\.0k cached\) \/ 400 out · codex quota 21% 5h \/ 4% week, meter at 09:43\]\n\nsecond work$/);
 });
+
+test('a detached worker from another discussion reports usage unavailable instead of none yet or the new discussion\'s totals', async () => {
+  const { queueWork } = await import('../src/ui.mjs');
+  const cwd = await tmp('usage-line-detached-');
+  await gitRoom(cwd);
+  const ctx = { cwd, agentSpecs: 'claude:A', workerSpec: 'codex:W', noScreen: true, state: { transcript: [], seen: new Map() }, sessions: new Map() };
+  Object.assign(ctx, await load(ctx, ''));
+  ctx.suggestTitle = async () => ({ title: 'First' });
+  ctx.room.agents[0].turn = async () => 'PASS';
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const fakeQuota = {
+    codex: { ok: true, parsed: { five_hour_limit: { used_percent: 20 }, weekly_limit: { used_percent: 3 } } },
+    last_update: `${today} 09:42:00`,
+  };
+  ctx.screen.quota = [{ provider: 'codex', label: '5h', used: 20, resets: null }, { provider: 'codex', label: 'week', used: 3, resets: null }];
+  ctx.screen.quotaAt = { measured: fakeQuota.last_update, checked: now.toISOString() };
+  ctx.usage = { ...ctx.usage, fetchQuota: async () => fakeQuota };
+
+  await handleLine('hello', ctx);
+  const got = [];
+  let releaseFirst;
+  ctx.worker.turn = async (p) => {
+    got.push(p);
+    return got.length === 1 ? new Promise((r) => { releaseFirst = r; }) : 'second done';
+  };
+  queueWork(ctx, 'first task');
+  queueWork(ctx, 'queued from old discussion');
+  await until(() => releaseFirst);
+
+  await handleLine('/new', ctx);
+  ctx.totals.W = { turns: 7, input: 77000, cached: 1000, output: 500 }; // new discussion's totals: must not leak to old worker
+  releaseFirst('first done');
+  await ctx.workQueue;
+  assert.equal(got.length, 2);
+  assert.match(got[1], /^\[your reported usage this session: usage unavailable · codex quota 20% 5h \/ 3% week, meter at 09:42\]\n\nqueued from old discussion$/);
+  assert.doesNotMatch(got[1].split('\n')[0], /none yet|77\.0k/);
+});

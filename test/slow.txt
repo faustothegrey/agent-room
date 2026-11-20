@@ -93,3 +93,5 @@ the worker's worktree links the room's node_modules and ignores the link
 after a worker task ends, refreshed workerInfo clears the finished task so Close and Merge is enabled without clicking Worker tab, and reflects holds for uncommitted edits
 Stop after this task: the running instruction finishes and is reported as usual; queued ones are cancelled; auto dev pauses; other discussions' workers go on
 worker prompt starts with only the worker's own usage line from ctx.totals and cached quota
+branchDiagram: falls back to a plain-text note when gitGraph cannot draw the history faithfully, and supports non-main room branches
+a detached worker from another discussion reports usage unavailable instead of none yet or the new discussion's totals

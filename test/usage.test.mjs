@@ -185,6 +185,16 @@ test('agentUsageLine formats only the agent\'s own totals and provider quota, wi
     '[your reported usage this session: 2 turns, 4.2k in (400 cached) / 120 out · quota unavailable]',
   );
 
+  // Unavailable session usage (e.g. a detached worker from another discussion) says "usage unavailable", not "none yet".
+  assert.equal(
+    agentUsageLine({ total: undefined, usageUnavailable: true, provider: 'claude', gauges, measured: QUOTA.last_update, now: sameDay }),
+    '[your reported usage this session: usage unavailable · claude quota 70% 5h / 31% week, meter at 13:44]',
+  );
+  assert.equal(
+    agentUsageLine({ usageUnavailable: true, provider: 'agy', gauges: null, measured: null }),
+    '[your reported usage this session: usage unavailable · quota unavailable]',
+  );
+
   // Agy grouped gauges (Gemini and Argon).
   const agyQuota = { last_update: '2026-11-14 10:30:00', antigravity: { ok: true, parsed: {
     groups: {

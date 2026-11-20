@@ -131,10 +131,12 @@ function formatProviderGauges(gauges, provider) {
   return `${provider} quota ${parts.join(', ')}`;
 }
 
-export function agentUsageLine({ total, provider, gauges, measured, now = new Date() } = {}) {
-  const usagePart = total?.turns
-    ? `${total.turns} turn${total.turns === 1 ? '' : 's'}, ${k(total.input)} in (${k(total.cached)} cached) / ${k(total.output)} out`
-    : 'none yet';
+export function agentUsageLine({ total, usageUnavailable = false, provider, gauges, measured, now = new Date() } = {}) {
+  const usagePart = usageUnavailable
+    ? 'usage unavailable'
+    : total?.turns
+      ? `${total.turns} turn${total.turns === 1 ? '' : 's'}, ${k(total.input)} in (${k(total.cached)} cached) / ${k(total.output)} out`
+      : 'none yet';
   const quotaText = formatProviderGauges(gauges, provider);
   const at = quotaText ? meterTime(measured, now) : '';
   const quotaPart = quotaText ? `${quotaText}${at ? `, meter at ${at}` : ''}` : 'quota unavailable';

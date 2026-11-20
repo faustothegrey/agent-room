@@ -566,8 +566,9 @@ model entries supply the highest used percentage in each available window. Agy l
 Each prompt to a discussion agent (in discussions and brainstorms, summary turns included) and to
 the worker starts with one line showing only that agent's own cumulative reported session usage
 (turns, input with cached, output) and its own provider's cached quota windows with the meter's
-measurement time ("none yet" or "quota unavailable" when missing), without adding a meter request
-per turn.
+measurement time ("none yet" when no turns have been reported, "usage unavailable" when a worker
+from another discussion runs a task whose session totals aren't loaded here, or "quota unavailable"
+when there is no meter data for its provider), without adding a meter request per turn.
 
 ## Launch options and commands
 
