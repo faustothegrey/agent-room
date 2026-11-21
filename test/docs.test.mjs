@@ -1183,11 +1183,14 @@ test('right pane three tabs, header disc-workers, and docLabel behavior', async 
   const s = await serve(root, { clients: new Set(), transcript: [] });
   try {
     const html = await (await s.get('/__room')).text();
-    assert.match(html, /id="tab-discussions"/);
+    assert.match(html, /id="list-panel"/);
+    assert.match(html, /id="list-pane"/);
+    assert.match(html, /id="list-split"/);
+    assert.match(html, /id="list-toggle"/);
+    assert.doesNotMatch(html, /id="tab-discussions"/);
+    assert.doesNotMatch(html, /id="tab-brainstorms"/);
     assert.match(html, /id="tab-explorer"/);
     assert.match(html, /id="tab-document"/);
-    assert.match(html, /id="discussions"/);
-    assert.match(html, /id="discussions-pane"/);
     assert.match(html, /id="explorer"/);
     assert.match(html, /id="pane"/);
     assert.match(html, /id="docpane"/);
@@ -1290,7 +1293,7 @@ test('peek lifecycle: tab indicator, banner, Back to current, revealDoc immunity
   const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
     'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
     'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
-    'const renderAttachments = () => {};\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {};\n' +
     code + '\n' +
     'return { ' +
     '  setRoom, updateTabs, renderExplorer, revealDoc, showDoc, ' +
@@ -1394,7 +1397,7 @@ test('Room checkout in Explorer lists root files including discussions/README.md
   const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
     'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
     'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
-    'const renderAttachments = () => {};\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {};\n' +
     code + '\n' +
     'return { ' +
     '  setRoom, renderExplorer, ' +
@@ -1488,7 +1491,7 @@ test('Explorer marks the shown file with .shown and aria-current, and wraps leve
   const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
     'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
     'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
-    'const renderAttachments = () => {};\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {};\n' +
     code + '\n' +
     'return { ' +
     '  setRoom, showDoc, renderExplorer, ' +
@@ -1578,10 +1581,8 @@ test('Discussions tab: active discussions keep the User\'s order in localStorage
   const KEY = 'agent-room.discussion-order:/tmp/project';
   const filesFor = (names) => ['discussions/README.md', ...names.map((n) => 'discussions/' + n + '/notes.md'), 'discussions/archive/2026-11-01-old/notes.md'];
   const rows = () => {
-    const list = els['discussions-pane'].firstChild.children;
-    const heading = list.findIndex((c) => c.tag === 'h3' && c.textContent === 'Discussions');
-    const end = list.findIndex((c, i) => i > heading && c.tag === 'h3');
-    return list.slice(heading + 1, end).filter((c) => c.className.includes('discussion-row'));
+    const discSec = els['list-pane'].firstChild.children.find((c) => c.dataset?.section === 'discussions');
+    return (discSec?.children ?? []).filter((c) => c.className.includes('discussion-row'));
   };
   const names = () => rows().map((r) => r.children.find((c) => c.className === 'discussion-block').children[0].title.replace('discussions/', ''));
   const menuButton = (name, label) => {
@@ -1738,7 +1739,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'send', 'notes', 'noteText', 'openNotes',
     'let tab = "talk", replica = null, localThinking = "Claude", yourTurn = false, localInput = true, box = { hidden: false }, wbox = {};\n' +
     'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
-    'const renderAttachments = () => {};\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {};\n' +
     'const notesDirty = () => notes.editing && noteText.value !== notes.base;\n' +
     code + '\n' +
     notesCode + '\n' +
@@ -1770,11 +1771,13 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   });
   harness.renderDiscussions();
 
-  const list = els['discussions-pane'].firstChild;
-  const rows = list.children.filter((c) => c.tag === 'div' && c.className.includes('discussion-row'));
+  const list = els['list-pane'].firstChild;
+  const sectionOf = (key) => list.children.find((c) => c.dataset?.section === key);
+  const rows = sectionOf('discussions').children.filter((c) => c.tag === 'div' && c.className.includes('discussion-row'));
   const rowFor = (name) => rows.find((r) => r.children.find((c) => c.className !== 'drag-handle')?.children?.[0]?.title === 'discussions/' + name); // active rows start with the drag handle
-  const continueBtn = (name) => rowFor(name).children.find((c) => c.tag === 'button' && c.textContent === 'Continue');
-  const resumeBtn = (name) => rowFor(name).children.find((c) => c.tag === 'button' && c.textContent === 'Resume');
+  const menuItems = (row) => row.children.find((c) => c.tag === 'details').children[1].children;
+  const continueBtn = (name) => menuItems(rowFor(name)).find((c) => c.tag === 'button' && c.textContent === 'Continue');
+  const resumeBtn = (name) => menuItems(rowFor(name)).find((c) => c.tag === 'button' && c.textContent === 'Resume');
   const label = (name) => rowFor(name).children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent;
   assert.equal(label('2026-11-15-current'), 'current · started');
   assert.equal(label('2026-11-15-open'), 'open, paused');
@@ -1787,30 +1790,28 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   assert.ok(!resumeBtn('2026-11-13-paused'));
   assert.ok(resumeBtn('2026-11-14-closed'));
   assert.ok(!continueBtn('2026-11-14-closed'));
-  const moveButton = (name, label) => rowFor(name).children.find((c) => c.tag === 'details').children[1].children.find((c) => c.textContent === label);
+  const moveButton = (name, label) => menuItems(rowFor(name)).find((c) => c.textContent === label);
   for (const action of ['Archive', 'Defer']) {
     assert.equal(moveButton('2026-11-13-paused', action).disabled, true);
     assert.match(moveButton('2026-11-13-paused', action).title, /Close the discussion/);
     assert.equal(moveButton('2026-11-14-closed', action).disabled, false);
   }
-  const sectionRow = (name) => els['discussions-pane'].firstChild.children.filter((c) => c.tag === 'details').flatMap((c) => c.children)
+  const sectionRow = (name) => els['list-pane'].firstChild.children.find((c) => c.dataset?.section === 'archived-deferred').children
     .find((r) => r.className?.includes('discussion-row') && r.children[0].children[0].title.endsWith('/' + name));
   const sectionLabel = (name) => sectionRow(name).children[0].children.find((c) => c.className === 'local-label').textContent;
   assert.equal(sectionLabel('2026-11-12-archived'), 'archived');
   assert.equal(sectionLabel('2026-11-11-archived-closed'), 'archived · closed');
   assert.equal(sectionLabel('2026-11-10-deferred'), 'deferred');
   assert.equal(sectionLabel('2026-11-09-deferred-closed'), 'deferred · closed');
-  assert.equal(sectionRow('2026-11-12-archived').children.find((c) => c.tag === 'button')?.textContent, 'Continue');
-  assert.equal(sectionRow('2026-11-12-archived').children.find((c) => c.tag === 'button')?.title, 'Continue: makes it active first');
-  assert.equal(sectionRow('2026-11-11-archived-closed').children.find((c) => c.tag === 'button')?.textContent, 'Resume');
-  assert.equal(sectionRow('2026-11-11-archived-closed').children.find((c) => c.tag === 'button')?.title, 'Resume: makes it active first');
-  assert.equal(sectionRow('2026-11-10-deferred').children.find((c) => c.tag === 'button')?.textContent, 'Continue');
-  assert.equal(sectionRow('2026-11-09-deferred-closed').children.find((c) => c.tag === 'button')?.textContent, 'Resume');
+  assert.equal(menuItems(sectionRow('2026-11-12-archived'))[0]?.textContent, 'Continue');
+  assert.equal(menuItems(sectionRow('2026-11-12-archived'))[0]?.title, 'Continue: makes it active first');
+  assert.equal(menuItems(sectionRow('2026-11-11-archived-closed'))[0]?.textContent, 'Resume');
+  assert.equal(menuItems(sectionRow('2026-11-11-archived-closed'))[0]?.title, 'Resume: makes it active first');
+  assert.equal(menuItems(sectionRow('2026-11-10-deferred'))[0]?.textContent, 'Continue');
+  assert.equal(menuItems(sectionRow('2026-11-09-deferred-closed'))[0]?.textContent, 'Resume');
 
-  // 1. Open discussion, clean notes: Continue navigates straight to openHere.url during a round without sending /resume.
-  let stopped = 0;
-  continueBtn('2026-11-15-open').onclick({ stopPropagation() { stopped++; } });
-  assert.equal(stopped, 1);
+  // 1. Open discussion, clean notes: Continue (or clicking the row) navigates straight to openHere.url during a round without sending /resume.
+  continueBtn('2026-11-15-open').onclick();
   assert.equal(location.href, '/r/open-id/__room');
   assert.deepEqual(sent, []);
 
@@ -1819,7 +1820,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   notes.editing = true;
   notes.base = 'saved body';
   noteText.value = 'My draft';
-  continueBtn('2026-11-15-open').onclick({ stopPropagation() {} });
+  continueBtn('2026-11-15-open').onclick();
   assert.equal(location.href, '/r/current-id/__room');
   assert.equal(openedNotes, 1);
   assert.equal(els['notes-ask'].hidden, false);
@@ -1833,7 +1834,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   assert.equal(noteText.value, 'My draft');
 
   // Discard changes resets the note and completes the navigation to openHere.url.
-  continueBtn('2026-11-15-open').onclick({ stopPropagation() {} });
+  continueBtn('2026-11-15-open').onclick();
   const discardBtn = els['notes-ask-buttons'].children.find((b) => b.textContent === 'Discard changes');
   discardBtn.onclick();
   assert.equal(els['notes-ask'].hidden, true);
@@ -1843,23 +1844,23 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
 
   // 3. Closed discussion: Resume still sends /resume <name>.
   location.href = '/r/current-id/__room';
-  resumeBtn('2026-11-14-closed').onclick({ stopPropagation() {} });
+  resumeBtn('2026-11-14-closed').onclick();
   assert.equal(location.href, '/r/current-id/__room');
   assert.deepEqual(sent, ['/resume 2026-11-14-closed']);
 
-  // 4. While peeking, the current discussion offers Unpeek to return to it.
-  const freshRow = (name) => els['discussions-pane'].firstChild.children
+  // 4. While peeking, the current discussion offers Back to this discussion in its menu (and clicking its row leaves peek).
+  const freshRow = (name) => els['list-pane'].firstChild.children.find((c) => c.dataset?.section === 'discussions').children
     .filter((c) => c.tag === 'div' && c.className?.includes('discussion-row'))
     .find((r) => r.children.find((c) => c.className === 'discussion-block')?.children[0].title === 'discussions/' + name);
   harness.setPeeking({ name: '2026-11-14-closed', title: '2026-11-14-closed' });
   harness.renderDiscussions();
-  const unpeek = freshRow('2026-11-15-current').children.find((c) => c.tag === 'button' && c.textContent === 'Unpeek');
-  assert.ok(unpeek);
-  unpeek.onclick({ stopPropagation() {} });
+  const backItem = menuItems(freshRow('2026-11-15-current')).find((c) => c.tag === 'button' && c.textContent === 'Back to this discussion');
+  assert.ok(backItem);
+  backItem.onclick();
   assert.deepEqual(sent, ['/resume 2026-11-14-closed', '/peek']);
   harness.setPeeking(null);
   harness.renderDiscussions();
-  assert.ok(!freshRow('2026-11-15-current').children.some((c) => c.tag === 'button' && c.textContent === 'Unpeek'));
+  assert.ok(!menuItems(freshRow('2026-11-15-current')).some((c) => c.tag === 'button' && c.textContent === 'Back to this discussion'));
 
   // 5. Closing phases: waiting shows Cancel close; writing hides Cancel close; header status follows active discussion.
   harness.setRoom({
@@ -1930,7 +1931,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   harness.setWorker({ pending: null, merged: [] });
   harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-15-current', started: false, open: [] });
   harness.renderDiscussions();
-  const current = els['discussions-pane'].firstChild.children.find((r) => r.className?.includes('discussion-row') && r.children.find((c) => c.className === 'discussion-block')?.children[0].title === 'discussions/2026-11-15-current');
+  const current = els['list-pane'].firstChild.children.find((c) => c.dataset?.section === 'discussions').children.find((r) => r.className?.includes('discussion-row') && r.children.find((c) => c.className === 'discussion-block')?.children[0].title === 'discussions/2026-11-15-current');
   assert.equal(current.children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent, 'current');
 });
 
@@ -2011,11 +2012,11 @@ test('Brainstorms tab: rows by title with their actions, and an order of their o
 
   const KEY = 'agent-room.brainstorm-order:/tmp/project', DKEY = 'agent-room.discussion-order:/tmp/project';
   const files = (brainstorms) => ['discussions/2026-11-10-d/notes.md', ...brainstorms.map((n) => 'brainstorms/' + n + '/transcripts/session.md')];
-  const rows = () => els['brainstorms-pane'].firstChild.children.filter((c) => c.className.includes('discussion-row'));
+  const rows = () => els['list-pane'].firstChild.children.find((c) => c.dataset?.section === 'brainstorms').children.filter((c) => c.className.includes('discussion-row'));
   const block = (r) => r.children.find((c) => c.className === 'discussion-block');
   const titles = () => rows().map((r) => block(r).children[0].textContent);
   const row = (title) => rows().find((r) => block(r).children[0].textContent === title);
-  const buttons = (title) => row(title).children.filter((c) => c.tag === 'button').map((b) => b.textContent);
+  const menuLabels = (title) => row(title).children.find((c) => c.tag === 'details').children[1].children.filter((b) => b.tag === 'button').map((b) => b.textContent);
   const action = (title, label) => row(title).children.find((c) => c.tag === 'details').children[1].children.find((b) => b.textContent.startsWith(label) || b.dataset.label === label);
   const click = (b) => b.onclick({ stopPropagation() {} });
   const open = [
@@ -2033,17 +2034,16 @@ test('Brainstorms tab: rows by title with their actions, and an order of their o
   assert.equal(store.get(DKEY), JSON.stringify(['2026-11-10-d'])); // the Discussions order, apart
   assert.ok(row('Current idea').className.includes('in-use'));
   assert.ok(row('Closed idea').children.some((c) => c.className === 'drag-handle'));
-  // Resume for a closed one, Go to for one open elsewhere, neither for the one shown.
-  assert.ok(!buttons('Current idea').includes('Resume') && !buttons('Current idea').includes('Go to'));
-  assert.ok(buttons('Open idea').includes('Go to'));
-  assert.ok(buttons('Closed idea').includes('Resume'));
-  click(row('Closed idea').children.find((c) => c.textContent === 'Resume'));
+  // Resume for a closed one, Go to for one open elsewhere, neither for the one shown (in the ⋯ menu).
+  assert.ok(!menuLabels('Current idea').includes('Resume') && !menuLabels('Current idea').includes('Go to'));
+  assert.ok(menuLabels('Open idea').includes('Go to'));
+  assert.ok(menuLabels('Closed idea').includes('Resume'));
+  click(action('Closed idea', 'Resume'));
   assert.equal(sent.at(-1), '/resume brainstorms/2026-11-12-closed');
-  click(row('Open idea').children.find((c) => c.textContent === 'Go to'));
+  click(action('Open idea', 'Go to'));
   assert.equal(location.href, '/r/x-d2/__room');
-  // The actions menu: Close, Turn into a discussion, Start fresh, Delete, Move up / Move down; no Archive or Defer.
-  const labels = row('Closed idea').children.find((c) => c.tag === 'details').children[1].children.filter((b) => b.tag === 'button').map((b) => b.textContent);
-  assert.deepEqual(labels, ['Close', 'Turn into a discussion', 'Start fresh', 'Delete', 'Move up', 'Move down']);
+  // The actions menu: Resume, Peek files, Close, Turn into a discussion, Start fresh, Delete, Move up / Move down; no Archive or Defer.
+  assert.deepEqual(menuLabels('Closed idea'), ['Resume', 'Peek files', 'Close', 'Turn into a discussion', 'Start fresh', 'Delete', 'Move up', 'Move down']);
   assert.equal(action('Closed idea', 'Close').disabled, true); // not open
   assert.equal(action('Open idea', 'Close').disabled, false);
   click(action('Open idea', 'Close'));
@@ -2158,9 +2158,10 @@ test('displayTitle helper and UI titles hide YYYY-MM-DD- across rows, header, ta
   harness.renderDiscussions();
   harness.renderBrainstorms();
 
-  const discList = els['discussions-pane'].firstChild;
-  const activeBtns = discList.children
-    .filter((c) => c.className?.includes('discussion-row'))
+  const boardList = els['list-pane'].firstChild;
+  const sectionRows = (key) => (boardList.children.find((c) => c.dataset?.section === key)?.children ?? [])
+    .filter((c) => c.className?.includes('discussion-row'));
+  const activeBtns = [...sectionRows('discussions'), ...sectionRows('peers')]
     .map((r) => r.children.find((c) => c.className === 'discussion-block').children[0])
     .map((b) => [b.textContent, b.title]);
   assert.deepEqual(activeBtns, [
@@ -2170,9 +2171,7 @@ test('displayTitle helper and UI titles hide YYYY-MM-DD- across rows, header, ta
     ['Peer Topic', 'discussions/2026-11-15-peer-topic'],
     ['peer raw', 'discussions/2026-11-14-peer-raw'],
   ]);
-  const sectionBtns = discList.children
-    .filter((c) => c.tag === 'details')
-    .flatMap((d) => d.children.filter((c) => c.className?.includes('discussion-row')))
+  const sectionBtns = sectionRows('archived-deferred')
     .map((r) => r.children.find((c) => c.className === 'discussion-block').children[0])
     .map((b) => [b.textContent, b.title]);
   assert.deepEqual(sectionBtns, [
@@ -2180,8 +2179,7 @@ test('displayTitle helper and UI titles hide YYYY-MM-DD- across rows, header, ta
     ['later one', 'discussions/deferred/2026-11-16-later-one'],
   ]);
 
-  const brainRows = els['brainstorms-pane'].firstChild.children
-    .filter((c) => c.className?.includes('discussion-row'))
+  const brainRows = sectionRows('brainstorms')
     .map((r) => {
       const block = r.children.find((c) => c.className === 'discussion-block');
       return [block.children[0].textContent, block.children[0].title, block.children[1].textContent];
@@ -2229,7 +2227,7 @@ test('displayTitle helper and UI titles hide YYYY-MM-DD- across rows, header, ta
     ],
   });
   harness.renderBrainstorms();
-  const currentBrainRows = els['brainstorms-pane'].firstChild.children
+  const currentBrainRows = (els['list-pane'].firstChild.children.find((c) => c.dataset?.section === 'brainstorms')?.children ?? [])
     .filter((c) => c.className?.includes('discussion-row'))
     .map((r) => {
       const block = r.children.find((c) => c.className === 'discussion-block');
@@ -2240,4 +2238,161 @@ test('displayTitle helper and UI titles hide YYYY-MM-DD- across rows, header, ta
     ['open idea', 'brainstorms/2026-11-19-open-idea', 'open'],
     ['Closed Idea', 'brainstorms/2026-11-18-closed-idea', 'closed'],
   ]);
+});
+
+test('while peeking a closed board, /__say (messages/attachments) and /__work are refused with 409 while /peek and /resume pass', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'peek-guard-'));
+  const said = [], worked = [];
+  const screen = {
+    clients: new Set(), transcript: [],
+    room: { active: 'discussions/2026-11-20-live' },
+    peek: { name: '2026-11-01-closed', ref: '2026-11-01-closed', path: 'discussions/2026-11-01-closed', kind: 'discussion', title: 'Closed', messages: [], doc: null },
+    say: (t) => { said.push(t); },
+    work: (t) => { worked.push(t); },
+  };
+  const s = await serve(root, screen);
+  try {
+    const r1 = await postFrom(s, '/__say', { text: 'hello wrong board' });
+    assert.equal(r1.status, 409);
+    assert.match(await r1.text(), /peeking/i);
+    const r2 = await postFrom(s, '/__say', { text: 'note', files: [{ name: 'a.txt', data: Buffer.from('hi').toString('base64') }] });
+    assert.equal(r2.status, 409);
+    const r3 = await postFrom(s, '/__work', { text: 'run task on wrong board' });
+    assert.equal(r3.status, 409);
+    assert.match(await r3.text(), /peeking/i);
+    assert.deepEqual(said, []);
+    assert.deepEqual(worked, []);
+
+    assert.equal((await postFrom(s, '/__say', { text: '/peek' })).status, 204);
+    assert.equal((await postFrom(s, '/__say', { text: '/resume 2026-11-01-closed' })).status, 204);
+    assert.deepEqual(said, ['/peek', '/resume 2026-11-01-closed']);
+  } finally {
+    s.close();
+  }
+});
+
+test('List panel: collapsible sections, row click switches active or peeks closed (chat and files), and peeking disables both composers', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const workerInfoCode = source.slice(source.indexOf('let workerInfoShown ='), source.indexOf('// Mermaid for the Worker tab'));
+  const classListFor = () => {
+    const s = new Set();
+    return { toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(...c) { c.forEach((x) => s.add(x)); }, remove(...c) { c.forEach((x) => s.delete(x)); }, contains(cls) { return s.has(cls); } };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', placeholder: '', disabled: false, hidden: false, open: false, children: [], dataset: {}, style: {}, classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; }, querySelector() { return null; }, addEventListener() {}, setAttribute() {}, getAttribute() { return null; },
+  });
+  const els = {}, sent = [], location = { href: '/r/live/__room' };
+  const box = node('textarea'); box.placeholder = 'Message the agents';
+  const wbox = node('textarea'); wbox.placeholder = 'Instructions for the worker';
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'send', 'box', 'wbox',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, ended = false, restarting = false;\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane"), attaching = false, pending = [];\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (act) => act();\n' +
+    'const BRAINSTORM_NO_WORK = "Turn this brainstorm into a discussion to send work.";\n' +
+    'function setWorkerInfo(info) { if (!info) return; wbox.disabled = !!info.disabled; if (info.disabled) wbox.placeholder = info.lines[0]; }\n' +
+    workerInfoCode + '\n' + code + '\n' +
+    'return { setRoom, renderBoards, renderExplorer, setPeeking, updateReplicaView, showWorkerInfo, getPeek: () => peek, ' +
+    '  setReplica: (r) => { replica = r; }, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
+  )((id) => els[id] || (els[id] = node(id)), { createElement: node, title: '' }, location, null, null, () => {}, (cb) => cb(), () => {}, (cmd) => sent.push(cmd), box, wbox);
+
+  harness.setFiles([
+    'discussions/2026-11-20-live/notes.md',
+    'discussions/2026-11-19-open/notes.md',
+    'discussions/2026-11-18-closed/notes.md',
+    'discussions/archive/2026-11-10-old/notes.md',
+    'brainstorms/2026-11-17-open-b/transcripts/s.md',
+    'brainstorms/2026-11-16-closed-b/transcripts/s.md',
+  ]);
+  harness.setReplica({ node: 'Mac', addresses: ['127.0.0.1:5566'], peers: [], own: {}, received: [{ discussion: 'd-peer', node: 'Linux', commit: 'abc', round: 2, name: '2026-11-15-peer', title: 'Peer Talk', local: false }] });
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-20-live',
+    discussion: 'Live',
+    started: true,
+    closedDiscussions: ['2026-11-18-closed', '2026-11-10-old'],
+    open: [
+      { active: 'discussions/2026-11-20-live', title: 'Live', started: true, current: true, url: '/r/live/__room' },
+      { active: 'discussions/2026-11-19-open', title: 'Open', started: true, current: false, url: '/r/open/__room' },
+      { active: 'brainstorms/2026-11-17-open-b', title: 'Open B', started: true, current: false, url: '/r/open-b/__room' },
+    ],
+  });
+  harness.renderBoards();
+
+  // Default section folding and counts
+  const sections = Object.fromEntries(els['list-pane'].firstChild.children.map((d) => [d.dataset.section, d]));
+  assert.equal(sections['discussions'].open, true);
+  assert.equal(sections['discussions'].children[0].textContent, 'Discussions (3)');
+  assert.equal(sections['brainstorms'].open, true);
+  assert.equal(sections['brainstorms'].children[0].textContent, 'Brainstorms (2)');
+  assert.equal(sections['archived-deferred'].open, false);
+  assert.equal(sections['archived-deferred'].children[0].textContent, 'Archived · Deferred (1)');
+  assert.equal(sections['peers'].open, false);
+  assert.equal(sections['peers'].children[0].textContent, 'Received from peers (1)');
+
+  const findEntry = (secKey, path) => sections[secKey].children
+    .filter((c) => c.className?.includes('discussion-row'))
+    .map((r) => r.children.find((c) => c.className === 'discussion-block').children[0])
+    .find((b) => b.title === path);
+
+  // 4. Clicking an active discussion or open brainstorm switches to it directly (like Go to).
+  findEntry('discussions', 'discussions/2026-11-19-open').onclick();
+  assert.equal(location.href, '/r/open/__room');
+  assert.deepEqual(sent, []);
+  findEntry('brainstorms', 'brainstorms/2026-11-17-open-b').onclick();
+  assert.equal(location.href, '/r/open-b/__room');
+  assert.deepEqual(sent, []);
+
+  // 5. Clicking a closed discussion or closed brainstorm peeks read-only (chat + files) without resuming.
+  findEntry('discussions', 'discussions/2026-11-18-closed').onclick();
+  assert.equal(sent.at(-1), '/peek 2026-11-18-closed');
+  assert.equal(harness.getPeek()?.path, 'discussions/2026-11-18-closed');
+  assert.equal(harness.getPeek()?.readonly, true);
+
+  findEntry('archived-deferred', 'discussions/archive/2026-11-10-old').onclick();
+  assert.equal(sent.at(-1), '/peek archive/2026-11-10-old');
+  assert.equal(harness.getPeek()?.path, 'discussions/archive/2026-11-10-old');
+
+  findEntry('brainstorms', 'brainstorms/2026-11-16-closed-b').onclick();
+  assert.equal(sent.at(-1), '/peek brainstorms/2026-11-16-closed-b');
+  assert.equal(harness.getPeek()?.path, 'brainstorms/2026-11-16-closed-b');
+  assert.ok(!sent.some((s) => s.startsWith('/resume')));
+
+  // 6. Entering peek disables both Discussion and Worker message boxes with notices, Back, and Resume.
+  harness.setPeeking({ name: '2026-11-16-closed-b', ref: 'brainstorms/2026-11-16-closed-b', path: 'brainstorms/2026-11-16-closed-b', kind: 'brainstorm', title: 'Closed B', doc: null });
+  harness.updateReplicaView();
+  assert.equal(box.disabled, true);
+  assert.equal(wbox.disabled, true);
+  assert.equal(els['remote-view'].hidden, false);
+  assert.equal(els['work-remote-view'].hidden, false);
+  assert.match(els['remote-view'].children[0].textContent, /Read-only/);
+  assert.match(els['work-remote-view'].children[0].textContent, /Read-only/);
+
+  // Refreshing worker info while peeking must NOT re-enable wbox.
+  harness.showWorkerInfo({ lines: ['branch worker/live'], disabled: false });
+  assert.equal(wbox.disabled, true);
+
+  // Explicit Resume and Back buttons in the peek banner
+  const resumeBtn = els['remote-view'].children.find((c) => c.tag === 'button' && c.textContent === 'Resume');
+  const backBtn = els['work-remote-view'].children.find((c) => c.tag === 'button' && c.textContent === 'Back');
+  assert.ok(resumeBtn);
+  assert.ok(backBtn);
+  resumeBtn.onclick();
+  assert.equal(sent.at(-1), '/resume brainstorms/2026-11-16-closed-b');
+  backBtn.onclick();
+  assert.equal(sent.at(-1), '/peek');
+
+  // Leaving peek re-enables both composers and clears the synced Explorer peek.
+  harness.setPeeking(null);
+  harness.updateReplicaView();
+  assert.equal(box.disabled, false);
+  assert.equal(wbox.disabled, false);
+  assert.equal(els['remote-view'].hidden, true);
+  assert.equal(els['work-remote-view'].hidden, true);
+  assert.equal(harness.getPeek(), null);
 });

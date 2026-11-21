@@ -424,6 +424,40 @@ test('/peek then /peek restores the live discussion transcript', async () => {
   assert.deepEqual(ctx.docs.resetEvent(ctx.screen).messages.map((m) => m.speaker), live);
 });
 
+test('/peek shows a closed brainstorm read-only without starting sessions, and refuses an open brainstorm', async () => {
+  const { mkdirSync, writeFileSync, realpathSync } = await import('node:fs');
+  const { dirname } = await import('node:path');
+  const ctx = await freshSession(['from A', 'from B'], async () => ({ title: 'Open idea' }));
+  mkdirSync(`${ctx.cwd}/brainstorms/2026-11-03-closed-idea`, { recursive: true });
+  const cp = await checkpointPath(ctx.cwd, 'brainstorms/2026-11-03-closed-idea');
+  mkdirSync(dirname(cp), { recursive: true });
+  writeFileSync(cp, JSON.stringify({
+    version: 1, root: realpathSync(ctx.cwd), brainstorm: true,
+    discussion: { name: '2026-11-03-closed-idea', title: 'Closed idea' },
+    state: { transcript: [{ speaker: 'User', text: 'sketch' }, { speaker: 'A', text: 'nice' }] },
+  }));
+
+  await handleLine('/peek brainstorms/2026-11-03-closed-idea', ctx);
+  assert.equal(ctx.screen.peek.name, '2026-11-03-closed-idea');
+  assert.equal(ctx.screen.peek.ref, 'brainstorms/2026-11-03-closed-idea');
+  assert.equal(ctx.screen.peek.path, 'brainstorms/2026-11-03-closed-idea');
+  assert.equal(ctx.screen.peek.kind, 'brainstorm');
+  assert.equal(ctx.screen.peek.title, 'Closed idea');
+  assert.deepEqual(ctx.screen.peek.messages.map((m) => m.speaker), ['User', 'A']);
+  assert.equal(ctx.discussion, undefined); // no session started
+  assert.ok(!ctx.agentsStarted);
+
+  await handleLine('/peek', ctx);
+  assert.equal(ctx.screen.peek, null);
+
+  // An open brainstorm cannot be peeked.
+  await handleLine('/brainstorm', ctx);
+  await handleLine('hello brainstorm', ctx);
+  const openName = ctx.discussion.name;
+  await handleLine(`/peek brainstorms/${openName}`, ctx);
+  assert.equal(ctx.screen.peek, null);
+});
+
 test('Restart keeps the launch flags that matter: the same port, agents, worker and dev mode, in the discussion in use', () => {
   // The agents and worker are the room's current ones (ctx), not the launch flags.
   const ctx = { cwd: '/r', agentSpecs: 'claude:Ada', workerSpec: 'codex:W', discussion: { name: '2026-11-03-a-topic' } };

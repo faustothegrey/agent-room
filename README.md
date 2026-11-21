@@ -154,19 +154,13 @@ worker's, as their panels list them ("<provider> default" for CLI default).
     as unknown. No Retry is offered; the discussion's next instruction tells the worker once that
     its previous one was stopped. Uncommitted edits hold the worktree for this discussion, as
     below.
-- **Discussions**, **Brainstorms**, **Explorer** and **Document** (right pane, four tabs):
-  - In **Brainstorms**, the room's brainstorms, each by its display title (saved title, or the folder
-    name without its leading date and with spaces; hover for its folder path) and its status
-    (current, open or closed), in your order (drag the ⠿ handle,
-    or **Move up** / **Move down**; kept in this browser per room, apart from the Discussions order;
-    new ones go on top). **Resume** (**Go to** for one open in another window's context), and in
-    **Actions**: **Close**, **Turn into a discussion**, **Start fresh**, **Delete** (two clicks; it removes
-    the folder, transcripts and drawings included, and the checkpoint: uncommitted files are lost for
-    good; disabled while the brainstorm is open). No Archive or Defer. Clicking a title shows its
-    files in Explorer, as for a discussion.
-  - In **Discussions**, browse discussions by their display title (saved title, or the folder name without its leading date and with spaces; hover for the folder path), with the active ones first, check their state, and manage them (Continue, Resume, Go to, Archive, Defer, and actions menu). Archived and deferred discussions are kept in their own sections; received discussions from peers show **Peek files** and **View chat** buttons. Rows show state and actions only, no inline files. A row whose worker branch has work not yet in main says so in amber under its state, such as **⚠ Worker: 2 commits not merged into main · uncommitted changes**; `worker/main`, or a branch whose discussion isn't in the active list, gets such a line above the list. A discussion whose work is in the room's current branch (commits labelled `[<name>]`, open or closed, in any list) shows **merged** in its state — replacing **no changes** when nothing is pending, and alongside the **⚠ Worker: …** warning if new unmerged commits or uncommitted edits exist (a rolled-back discussion may still show **merged**). Otherwise, an active row with nothing pending says **no changes** in its state. These come from the Worker tab's checks, made again after each worker task and whenever the Discussions or Worker tab is clicked.
+- **Boards** (left list panel, collapsible to a `«`/`»` strip and resizable by dragging its divider, both remembered per browser):
+  - Organized into collapsible sections: **Discussions** (active, open by default), **Brainstorms** (open by default), **Archived · Deferred** (folded by default with count), and **Received from peers** (folded by default with count, when peers have discussions).
+  - Each row shows its display title (saved title, or the folder name without its leading date and with spaces; hover for the folder path), its state (`current`, `open`, `paused`, `not started`, `closed`, `merged`, `no changes`, or closing phase), and any amber worker warning (`⚠ Worker: 2 commits not merged into main · uncommitted changes`; `worker/main` or non-active unmerged branches appear above the active list). Active discussions and brainstorms each keep your drag-and-drop / **Move up** / **Move down** order per room in this browser.
+  - Clicking an **active** board's row switches to it (like Go to / Continue). Clicking a **closed** discussion (active, archived or deferred) or **closed** brainstorm peeks at it read-only — **chat and files** together, without starting any agent or worker session. Secondary row actions (**Resume** / **Continue**, **Peek files**, **Close**, **Close and Merge**, **Close and Discard**, **Archive**, **Defer**, **Make active**, **Turn into a discussion**, **Start fresh**, **Delete**, **Move up** / **Move down**, rollback, and peers' **View chat**) live in each row's **`⋯`** menu.
+  - **Peek**: while peeking at a closed board, both the Discussion and Worker message boxes are disabled with a read-only notice, a **Back** button to return to the active discussion, and an explicit **Resume** button. An orange banner ("Looking at <name> · Back to current") and an orange dot on the Explorer tab also mark the peek, and Document's path line names the peeked board.
+- **Explorer** and **Document** (right pane, two tabs):
   - In **Explorer**, view one tree at a time, chosen with the bar `[ Discussion | Room checkout | Worker copy ]` (Worker copy is coming soon). Under the bar, a line shows the folder and branch. **Discussion** shows the active (or peeked) discussion's files. **Room checkout** shows the room's root checkout, excluding hidden and gitignored files (non-discussion files in `discussions/`, such as `discussions/README.md`, remain reachable). Code, config, and other text files open as plain text in Document; supported images and PDFs stay viewable; files that cannot be displayed are greyed out ("can't be shown here").
-  - **Peek**: clicking another discussion's name in Discussions shows its files in Explorer without switching discussions. An orange banner ("Looking at <name> · Back to current") and an orange dot on the Explorer tab indicate the peek; Document's path line names the peeked discussion.
   - In **Document**, view the chosen file with its path. Each tab keeps its place when you switch; Document is disabled until a file is chosen. The chosen document stays selected when agents edit other files, and open documents check for changes every two seconds. Drag the divider to resize the panes. Browsing is available during agent turns and does not notify the agents.
   - **Tables and pointing.** A ```` ```csv ```` block in a Markdown document shows as a table with
     column letters and row numbers (```` ```csv runs ```` names it `runs`). A cell starting with `=` is a
@@ -274,11 +268,11 @@ and is not delivered to the agents.
     deferred/                  # postponed discussions, moved here whole
 ```
 
-**Archive and deferred.** Each local discussion row in **Discussions** has **Archive** and **Defer**
-buttons (or `/move <folder-name> archive|deferred`), which move the whole discussion, documents and
+**Archive and deferred.** Each local discussion row's **`⋯`** menu in **Boards** has **Archive** and **Defer**
+actions (or `/move <folder-name> archive|deferred`), which move the whole discussion, documents and
 transcripts, into `discussions/archive/` or `discussions/deferred/`; **Make active**
 (`/move archive/<folder-name> active`) moves it back. `archive/` and `deferred/` are created when
-first needed, and always listed at the bottom of **Discussions**, after the active discussions.
+first needed, and listed in the folded **Archived · Deferred** section of **Boards**.
 Archive and Defer require a closed discussion, with the reason in a tooltip. Make active leaves it
 closed until Resume. New discussion names also skip names already
 taken in `archive/` and `deferred/`.
@@ -686,7 +680,7 @@ not replicated. Transcripts are included even if the project's ignore rules excl
 error leaves discussion files in place. Sending runs in the background; unreachable peers retry
 while the discussion remains closed, with a delay capped at five minutes, including after restart.
 
-Received-only discussions appear under **Received from peers · read-only** in **Discussions**, with the peer name, **Peek files** and **View chat**. Mixed discussions keep one local row with **Peek files** and **View chat** for the peer version. **View chat** opens that peer's conversation read-only,
+Received-only discussions appear under **Received from peers** (folded by default) in **Boards**, with the peer name, and **View chat** and **Peek files** in the row's **`⋯`** menu. Mixed discussions keep one local row with **Peek files** and **View chat** for the peer version. **View chat** opens that peer's conversation read-only,
 without starting or stopping agents. **Back to <node>'s line** returns to the local conversation when that discussion has a local line.
 The header keeps Restart and Quit room in its menus; ⓘ on each row shows node details on hover or keyboard focus, and Peers… is in the room's **agent-room ▾** menu.
 New received rounds do not change an open View. Each browser pins its selected snapshot;
