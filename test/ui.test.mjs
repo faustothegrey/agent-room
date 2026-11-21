@@ -1649,7 +1649,7 @@ test('Close waits for running and queued worker reports before asking the agents
   let finish;
   ctx.worker.turn = async (p) => p.endsWith('first task') ? new Promise((r) => { finish = r; }) : 'second report';
   const prompts = [];
-  for (const agent of ctx.room.agents) agent.turn = async (p) => { prompts.push(p); return 'statement pending-instructions.md'; };
+  ctx.closingAgent = () => ({ name: 'W', turn: async (p) => { prompts.push(p); return 'statement pending-instructions.md'; } });
   queueWork(ctx, 'first task');
   await until(() => finish);
   queueWork(ctx, 'second task');
@@ -1657,7 +1657,7 @@ test('Close waits for running and queued worker reports before asking the agents
   assert.equal(prompts.length, 0);
   finish('first report');
   await closing;
-  assert.equal(prompts.length, 2);
+  assert.equal(prompts.length, 1);
   assert.match(prompts[0], /first report/);
   assert.match(prompts[0], /second report/);
   assert.ok(ctx.screen.room.closedDiscussions.length);
@@ -1727,19 +1727,21 @@ test('a paused discussion can be closed without replacing the current discussion
   const cwd = await tmp('close-paused-'), bin = `${cwd}/bin`;
   mkdirSync(bin);
   writeFileSync(`${bin}/claude`, '#!/bin/sh\nprintf \'%s\\n\' "{\\"result\\":\\"Claude draft pending-instructions.md\\"}"\n', { mode: 0o755 });
-  writeFileSync(`${bin}/codex`, '#!/bin/sh\nprintf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"Codex final pending-instructions.md"}}\'\n', { mode: 0o755 });
   const ctx = await savedRoom(cwd, 'close-paused');
+  delete ctx.closingAgent;
   Object.assign(ctx.sessions.get('B'), { threadId: 'prior-thread' });
   await handleLine('decide', ctx);
   const { name, dir } = ctx.discussion;
   await handleLine('/new', ctx);
+  await handleLine('second', ctx);
+  const current = ctx.discussion.name;
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path}`;
   try { await handleLine(`/close ${name}`, ctx); }
   finally { process.env.PATH = path; }
-  assert.equal(ctx.discussion, null);
+  assert.equal(ctx.discussion.name, current);
   assert.ok(ctx.screen.room.closedDiscussions.includes(name));
-  assert.match(readFileSync(`${dir}/closing-statement.md`, 'utf8'), /Codex final pending-instructions\.md/);
+  assert.match(readFileSync(`${dir}/closing-statement.md`, 'utf8'), /Claude draft pending-instructions\.md/);
 });
 
 test('closed state persists independently of checkpoints, and Resume clears it', async () => {
