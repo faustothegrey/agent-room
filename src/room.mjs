@@ -21,10 +21,7 @@ export function formatMessages(messages) {
 
 // Runs one turn of `agent`, applies `check(reply, attempt)` (returning a list of problems, empty
 // when fine), and on problems asks the same session once to reply again.
-export async function formattedTurn(agent, prompt, optionsOrCheck, retryPromptArg) {
-  const { check, retryPrompt, onTurn, onProblems } = typeof optionsOrCheck === 'function'
-    ? { check: optionsOrCheck, retryPrompt: retryPromptArg }
-    : (optionsOrCheck ?? {});
+export async function formattedTurn(agent, prompt, { check, retryPrompt, onTurn, onProblems } = {}) {
   const first = await agent.turn(prompt);
   await onTurn?.(first, 1);
   const problems = (await check?.(first, 1)) ?? [];

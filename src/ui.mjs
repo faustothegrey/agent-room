@@ -13,6 +13,7 @@ import { homedir, hostname, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as defaultInstructions from './instructions.mjs';
+import { formattedTurn as defaultFormattedTurn } from './room.mjs';
 
 export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--port 5566] [--no-screen] [--open] [--reopen NAME] [--dev]
                   [--node NAME [--peer NAME=http://ADDRESS:PORT ...]]
@@ -281,7 +282,7 @@ export async function load(ctx, v) {
   const instructions = readFileSync(instr.rulebookPath('brainstorming'), 'utf8');
   const workerInstructions = readFileSync(instr.rulebookPath('worker'), 'utf8');
   const { createAgent, claudeTitle, run, findLeftovers, parseCodexEvents, parseAgyOutput } = await import(`./agents.mjs${v}`);
-  const { createRoom, closingStatement } = await import(`./room.mjs${v}`);
+  const { createRoom, closingStatement, formattedTurn } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
   const usage = await import(`./usage.mjs${v}`);
   // Replication is loaded only with --node.
@@ -351,7 +352,8 @@ export async function load(ctx, v) {
     closingStatement: (options, agent = createAgent(wProvider, { name: wName, model: wModel, cwd: ctx.cwd, runner, session: {} })) =>
       closingStatement(agent, options, instr),
     suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }, instr),
-    instructions: instr };
+    instructions: instr,
+    formattedTurn };
 }
 
 export const UPDATE_NEEDS_RESTART = 'This update changes the worker\'s queues: Restart to apply it (Reload can\'t).';
@@ -1124,18 +1126,19 @@ function reattachWorker(ctx, worker) {
 // A task of a discussion left meanwhile has ended: its worker session, briefing, Worker-tab entries
 // and task records go into that discussion's checkpoint, only if it is still the checkpoint of that
 // session (not one Start fresh replaced, nor a later session's).
-function saveLeftWorker(ctx, worker, usage = null) {
+function saveLeftWorker(ctx, worker, usages = []) {
   const s = worker.seat, d = s.discussion;
   if (!d || s.brainstorm || !s.id) return;
   const saved = readCheckpoint(ctx, d.name);
   if (!saved || saved.invalid || saved.fresh || saved.workerSeat !== s.id) return;
   const shop = shopOf(ctx), kept = Array.isArray(saved.worker) ? saved.worker : [];
   const known = new Set(kept.map((m) => JSON.stringify(m)));
+  const list = Array.isArray(usages) ? usages : (usages ? [usages] : []);
   try {
     writeCheckpoint(ctx, d.name, { ...saved,
       sessions: [...(saved.sessions ?? []).filter(([k]) => k !== s.key), [s.key, s.session ?? {}]],
       workerBriefed: s.briefed, workerTree: s.tree, workerLabel: s.label, workerHandoff: s.handoff,
-      ...(usage && { totals: { ...(saved.totals ?? {}), [worker.name]: ctx.usage.addUsage(saved.totals?.[worker.name], usage) } }),
+      ...(list.length && { totals: { ...(saved.totals ?? {}), [worker.name]: list.reduce((tot, u) => ctx.usage.addUsage(tot, u), saved.totals?.[worker.name]) } }),
       worker: [...kept, ...shop.log.filter((m) => m.origin === s.origin && !known.has(JSON.stringify(m)))],
       work: workOf(shop, d.name) });
   } catch (err) { note(ctx, `✗ Couldn't save ${d.name}'s worker session in its checkpoint: ${err.message}`, true); }
@@ -4059,39 +4062,14 @@ async function readTested(place) {
     return r.version === 1 && /^[0-9a-f]{40,64}$/.test(r.branch) && /^[0-9a-f]{40,64}$/.test(r.main) && ['passed', 'failed'].includes(r.result) ? r : null;
   } catch { return null; }
 }
-// Runs one turn of `agent`, applies `check(reply, attempt)` (returning a list of problems, empty
-// when fine), and on problems asks the same session once to reply again.
-export async function formattedTurn(agent, prompt, optionsOrCheck, retryPromptArg) {
-  const { check, retryPrompt, onTurn, onProblems } = typeof optionsOrCheck === 'function'
-    ? { check: optionsOrCheck, retryPrompt: retryPromptArg }
-    : (optionsOrCheck ?? {});
-  const first = await agent.turn(prompt);
-  await onTurn?.(first, 1);
-  const problems = (await check?.(first, 1)) ?? [];
-  if (!problems.length) return { text: first, problems: [], retried: false };
-  await onProblems?.(problems, first);
-  const again = typeof retryPrompt === 'function' ? await retryPrompt(problems, first) : retryPrompt;
-  agent.lastUsage = null;
-  const second = await agent.turn(again);
-  await onTurn?.(second, 2);
-  return { text: second, problems: (await check?.(second, 2)) ?? [], firstProblems: problems, retried: true };
-}
 const TESTED_FULL = /^Tested: ([0-9a-f]{40,64}) with (?:main|\S+) ([0-9a-f]{40,64}): tests (passed|failed)\.?$/;
 const TESTED_SHORT = /^Tested: ([0-9a-f]{7,64}) with (?:main|\S+) ([0-9a-f]{7,64}): tests (passed|failed)\.?$/i;
 const TESTED_ANY = /^\s*[*_`]*Tested\b/i;
 const DOCS_LINE = /^\s*(?:[-*]\s+)?(?:\*\*)?Docs:(?:\*\*)?\s+\S/i;
 // Checks a worker report's formal structure against the task's Git state. Returns a list of problems.
-export function checkWorkerReport(arg1, arg2 = {}) {
-  const reply = typeof arg1 === 'string' ? arg1 : arg1?.reply ?? '';
-  const state = typeof arg1 === 'string' ? (arg2 ?? {}) : { ...arg1, ...(arg1?.git ?? {}) };
-  const askedCatchUp = state.askedCatchUp ?? (typeof state.task === 'string' &&
-    (/Before the instruction below, first merge main into /i.test(state.task) || /^Catch up with \S+: merge \S+ into /i.test(state.task)));
-  const oweTested = state.oweTested !== undefined
-    ? Boolean(state.oweTested)
-    : Boolean(askedCatchUp && !state.mergePending && state.mainInHead);
-  const oweDocs = state.oweDocs !== undefined
-    ? Boolean(state.oweDocs)
-    : Boolean((state.ownNonMergeCommits ?? state.ownCommits ?? 0) > 0);
+export function checkWorkerReport(reply, { askedCatchUp = false, mergePending = false, mainInHead = false, ownCommits = 0 } = {}) {
+  const oweTested = Boolean(askedCatchUp && !mergePending && mainInHead);
+  const oweDocs = ownCommits > 0;
   const lines = String(reply ?? '').split('\n');
   let lastIdx = lines.length - 1;
   while (lastIdx >= 0 && !lines[lastIdx].trim()) lastIdx--;
@@ -4133,7 +4111,6 @@ export function checkWorkerReport(arg1, arg2 = {}) {
   }
   return problems;
 }
-export const checkReport = checkWorkerReport;
 async function workerGitFacts(place, { before, mainAtStart, askedCatchUp = false } = {}) {
   const [head, gitDir, unmerged] = await Promise.all([
     git(place.path, 'rev-parse', 'HEAD'),
@@ -4264,7 +4241,8 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   const told = work ? [...work.interrupted] : [];
   if (!rollback && recovery && shop.rollbacks?.get(label)?.task === recovery.task) rollback = shop.rollbacks.get(label);
   if (rollback) { rollback.status = 'running'; showHeader(ctx); }
-  let before = null, mainAtStart = null, leftUsage = null;
+  let before = null, mainAtStart = null;
+  const leftUsages = [];
   const history = own.handoff ? screen.worker.filter((m) => m.owner === owner && m.speaker).map((m) =>
     `${m.speaker}${m.error ? ' (failed)' : ''}:\n${m.html}`).join('\n\n') : '';
   // The task's context, read once, here, before anything awaits: its discussion (for the briefing
@@ -4349,7 +4327,8 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
         if (!seat && ownerOf(ctx) === owner) toScreen(ctx, { type: 'note', text: msg, error: err });
       };
       let turnStart = t0, beforeRetrySnap = null, beforeRetryHead = null;
-      const turnResult = await formattedTurn(worker, prompt, {
+      const runFormatted = ctx.formattedTurn ?? defaultFormattedTurn;
+      const turnResult = await runFormatted(worker, prompt, {
         onTurn: async (raw, attempt) => {
           const replyText = raw || '(no reply)';
           if (attempt === 1) {
@@ -4363,7 +4342,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
             }
           }
           if (worker.lastUsage && worker === ctx.worker) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
-          else if (worker.lastUsage) leftUsage = ctx.usage.addUsage(leftUsage, worker.lastUsage);
+          else if (worker.lastUsage) leftUsages.push(worker.lastUsage);
           const meta = [`${Math.round((Date.now() - turnStart) / 1000)}s`, ctx.usage.formatUsage(worker.lastUsage)].filter(Boolean).join(' · ');
           workLog(`**${worker.name}** (worker, ${meta})\n\n${replyText}\n\n`);
           out(ctx, `\n${bold(worker.name)}${dim(` (worker, ${meta})`)} › ${replyText}\n`);
@@ -4459,7 +4438,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   }
   // Its worker session and briefing, in its own discussion's checkpoint: the one in use, or the one
   // left meanwhile (saveLeftWorker).
-  if (worker === ctx.worker) saveCheckpoint(ctx); else if (worker.seat) saveLeftWorker(ctx, worker, leftUsage);
+  if (worker === ctx.worker) saveCheckpoint(ctx); else if (worker.seat) saveLeftWorker(ctx, worker, leftUsages);
   showHeader(ctx);
   await refreshWorker(ctx).catch(() => {}); // the tab's checks are current when the task counts as done
   refreshQuota(ctx).catch(() => {});

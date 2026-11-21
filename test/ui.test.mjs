@@ -958,7 +958,7 @@ test('the Worker tab checks each branch with work not in main: whether it contai
   const lines = () => ctx.screen.workerInfo.lines;
   let reply;
   ctx.worker.turn = async (p) => { got.push(p); return typeof reply === 'function' ? reply() : reply; };
-  reply = () => { const tree = ctx.workerDir.path; writeFileSync(`${tree}/shared.txt`, 'worker\n'); git('-C', tree, 'commit', '-q', '-am', `[${name}] change`); return 'committed'; };
+  reply = () => { const tree = ctx.workerDir.path; writeFileSync(`${tree}/shared.txt`, 'worker\n'); git('-C', tree, 'commit', '-q', '-am', `[${name}] change`); return 'committed\nDocs: none needed, because test.'; };
   await work(ctx, 'change it');
   const main1 = git('rev-parse', 'main');
   assert.ok(lines().includes(`${branch} contains current main (${main1.slice(0, 7)}).`));
@@ -1446,7 +1446,7 @@ test('terminal: a task that leaves edits after the room switched holds its own d
   // Back in A: its own instruction resolves the edits, told of A's task.
   await handleLine(`/resume ${a}`, ctx);
   assert.deepEqual([ctx.totals.W?.input, ctx.totals.W?.output], [100, 7]);
-  ctx.worker.turn = async (p) => { prompts.push(['A again', p]); git('-C', tree, 'add', 'wip.txt'); git('-C', tree, 'commit', '-q', '-m', `[${a}] finished`); return 'resolved'; };
+  ctx.worker.turn = async (p) => { prompts.push(['A again', p]); git('-C', tree, 'add', 'wip.txt'); git('-C', tree, 'commit', '-q', '-m', `[${a}] finished`); return 'resolved\nDocs: none needed, because test.'; };
   queueWork(ctx, 'finish it'); await ctx.workQueue;
   assert.match(prompts.at(-1)[1], new RegExp(`Uncommitted edits are left in your worktree from the earlier task from \\[${a}\\] "edit things in A"`));
   assert.equal(workerLane(ctx, a).blockedBy, null);
@@ -2343,7 +2343,7 @@ test('on the screen, New discussion keeps the discussion open with its sessions;
 test('one workshop per folder: tasks labelled by origin, one worker session, lane and queue each, reports back there; Close discussion; Quit room closes them all', async () => {
   const { readFileSync, realpathSync } = await import('node:fs');
   const { queueWork, reloaded } = await import('../src/ui.mjs');
-  const commit = (msg) => (ctx) => { const g = (...a) => require('node:child_process').execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]); g('commit', '-q', '--allow-empty', '-m', msg); return 'committed'; };
+  const commit = (msg) => (ctx) => { const g = (...a) => require('node:child_process').execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]); g('commit', '-q', '--allow-empty', '-m', msg); return 'committed\nDocs: none needed, because test.'; };
   const { createRequire } = await import('node:module');
   const require = createRequire(import.meta.url);
   const { first, gotoOf, pageOf, contexts } = await multiRoom({ worker: (ctx, p) => commit(ctx === contexts()[0] ? `[${ctx.discussion.name}] done` : 'no label')(ctx) });
@@ -2494,7 +2494,7 @@ test('leftover edits hold their own lane for their origin, which can recover the
   const { first, git, contexts } = await multiRoom({ worker: (ctx, p) => {
     if (p.endsWith('make wip')) writeFileSync(`${ctx.workerDir.path}/wip.txt`, 'half done\n');
     if (p.endsWith('finish it')) { inTree(ctx, 'add', 'wip.txt'); inTree(ctx, 'commit', '-q', '-m', `[${ctx.discussion.name}] finished`); }
-    return 'ok';
+    return 'ok\nDocs: none needed, because test.';
   } });
   await handleLine('topic-a', first);
   await handleLine('/new', first);
@@ -2707,7 +2707,7 @@ test('Stage 2: completed work is reported once before a round, including Worker 
     const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
     writeFileSync(`${tree}/changed.txt`, String(commits.length));
     g('add', 'changed.txt'); g('commit', '-qm', `[${c.discussion.name}] completed`);
-    commits.push(g('rev-parse', 'HEAD')); return 'done';
+    commits.push(g('rev-parse', 'HEAD')); return 'done\nDocs: none needed, because test.';
   } });
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
@@ -2743,7 +2743,7 @@ test('Stage 2: Defer refuses labelled commits absent from main and permits them 
   const { execFileSync } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
   const { first, contexts, git } = await multiRoom({ worker: (c) => {
-    execFileSync('git', ['-C', c.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', `[${c.discussion.name}] done`]); return 'done';
+    execFileSync('git', ['-C', c.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', `[${c.discussion.name}] done`]); return 'done\nDocs: none needed, because test.';
   } });
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
@@ -2777,7 +2777,7 @@ test('Stage 2: private owner records survive restart and recovery, invalid recor
       assert.equal(readFileSync(record, 'utf8'), original); // recovery doesn't replace ownership
       g('add', 'wip'); g('commit', '-qm', `[${c.state.brainstorm ? 'brainstorm' : c.discussion.name}] recovered`);
     }
-    return 'ok';
+    return 'ok\nDocs: none needed, because test.';
   } });
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
@@ -2837,6 +2837,8 @@ test('Stage 3: a diverged clean worker is instructed to merge main normally befo
       assert.match(p, /If it clashes, do not force it or do the requested task/);
       assert.match(p, new RegExp(`After a successful merge, run the project's tests \\(npm test, if it has them\\) and report their real output, then end your reply with the line "Tested: <full commit ID of worker/${c.discussion.name}> with main <full commit ID of main>: tests passed"`));
       execFileSync('git', ['-C', c.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', 'main', '-m', `[${c.discussion.name}] catch up with main`]);
+      const head = execFileSync('git', ['-C', c.workerDir.path, 'rev-parse', 'HEAD']).toString().trim();
+      return `done\nTested: ${head} with main ${git('rev-parse', 'main')}: tests passed`;
     }
     return 'done';
   } });
@@ -2937,7 +2939,7 @@ test('Stage 3: rollback includes merged implementation, never restores prior rol
     const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'pipe' }).toString().trim();
     if (p.endsWith('implement')) {
       writeFileSync(`${tree}/feature.txt`, 'feature\n'); g('add', 'feature.txt'); g('commit', '-qm', `[${c.discussion.name}] implement`);
-      implementation = g('rev-parse', 'HEAD'); return 'implemented';
+      implementation = g('rev-parse', 'HEAD'); return 'implemented\nDocs: none needed, because test.';
     }
     assert.match(p, /INCLUDING those already merged into main/);
     assert.match(p, /never revert a rollback and restore changes already removed/);
@@ -3044,7 +3046,7 @@ test('failed worktree inspection blocks even the holding origin recovery in its 
       git('-C', tree, 'add', 'wip'); git('-C', tree, 'commit', '-qm', `[${c.discussion.name}] repaired`);
     }
     if (p.endsWith('other work')) otherRan = true;
-    return 'done';
+    return 'done\nDocs: none needed, because test.';
   } });
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
@@ -3598,7 +3600,7 @@ test('retry runs before later queued instructions and reports commits made since
   queueWork(ctx, 'later');
   git('-C', ctx.workerDir.path, 'commit', '-q', '--allow-empty', '-m', `[${ctx.discussion.name}] later work`);
   await retryWork(ctx, failure.id);
-  release('done');
+  release('done\nDocs: none needed, because test.');
   await ctx.workQueue;
   assert.deepEqual(prompts.map((p) => p.split('\n').at(-1)), ['original', 'in progress', 'original', 'later']);
   assert.match(prompts[2], /failed once/);
@@ -4474,7 +4476,7 @@ test('Close with pending work: allowed with unresolved edits (hold and files kep
       inTree(ctx, 'commit', '-q', '-m', `[${ctx.discussion.name}] committed step`);
       writeFileSync(`${ctx.workerDir.path}/wip.txt`, 'uncommitted\n');
     }
-    return 'ok';
+    return 'ok\nDocs: none needed, because test.';
   } });
   await handleLine('pending-topic', first);
   const { name, dir } = first.discussion;
@@ -4537,7 +4539,7 @@ test('Close and Discard: refuses with a queued task or mid-operation, previews c
       inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.discussion.name}] add a.txt`);
       await runningGate;
     }
-    return 'ok';
+    return 'ok\nDocs: none needed, because test.';
   } });
   writeFileSync(`${first.cwd}/.gitignore`, 'dist/\n*.log\n');
   git('add', '.gitignore'); git('commit', '-q', '-m', 'add gitignore');
@@ -4626,7 +4628,7 @@ test('Close and Merge: greyed-out reasons, Catch up when main moved, change betw
       writeFileSync(`${tree}/shared.txt`, 'worker-v1\n');
       inTree(tree, 'add', 'shared.txt');
       inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] add shared`);
-      return 'committed without tested line';
+      return 'committed without tested line\nDocs: none needed, because test.';
     }
     if (replyMode === 'test-fail') {
       return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests failed`;
@@ -4795,13 +4797,13 @@ test('Close and Merge active-work notice and shared room lock with Close and Dis
       writeFileSync(`${tree}/a.txt`, 'a\n');
       inTree(tree, 'add', 'a.txt');
       inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] a`);
-      return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+      return `Docs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
     }
     if (p.endsWith('commit b')) {
       writeFileSync(`${tree}/b.txt`, 'b\n');
       inTree(tree, 'add', 'b.txt');
       inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] b`);
-      return 'ok';
+      return 'ok\nDocs: none needed, because test.';
     }
     if (p.endsWith('run b')) { await otherGate; return 'ok'; }
     return 'ok';
@@ -4880,7 +4882,7 @@ test('plain Close implicitly cleans up an already-merged clean branch (removing 
       writeFileSync(`${ctx.workerDir.path}/done.txt`, 'ok\n');
       inTree(ctx.workerDir.path, 'add', 'done.txt');
       inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.discussion.name}] done`);
-      return 'ok';
+      return 'ok\nDocs: none needed, because test.';
     } });
     writeFileSync(`${first.cwd}/.gitignore`, 'node_modules/\n');
     git('add', '.gitignore'); git('commit', '-q', '-m', 'ignore node_modules');
@@ -4919,7 +4921,7 @@ test('plain Close implicitly cleans up an already-merged clean branch (removing 
       writeFileSync(`${ctx.workerDir.path}/done.txt`, 'ok\n');
       inTree(ctx.workerDir.path, 'add', 'done.txt');
       inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.discussion.name}] done`);
-      return 'ok';
+      return 'ok\nDocs: none needed, because test.';
     } });
     await handleLine('merged-untracked', first);
     const { name, dir } = first.discussion;
@@ -4976,7 +4978,7 @@ test('after a worker task ends, refreshed workerInfo clears the finished task so
       writeFileSync(`${tree}/feat.txt`, 'ok\n');
       inTree(tree, 'add', 'feat.txt');
       inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] add feat`);
-      return `Tested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+      return `Docs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
     }
     if (mode === 'leave-dirty') {
       writeFileSync(`${tree}/uncommitted.txt`, 'wip\n');
@@ -5163,22 +5165,24 @@ test('closing one of two open discussions removes it from the other page\'s open
 });
 
 test('checkWorkerReport and formattedTurn: good reports, Tested/Docs rules, conflict stop, pure catch-up, and generic one-retry helper', async () => {
-  const { checkWorkerReport, formattedTurn } = await import('../src/ui.mjs');
+  const { checkWorkerReport } = await import('../src/ui.mjs');
+  const { formattedTurn } = await import('../src/room.mjs');
   const branchId = 'a'.repeat(40), mainId = 'b'.repeat(40);
   const testedLine = `Tested: ${branchId} with main ${mainId}: tests passed`;
+  const bothOwed = { askedCatchUp: true, mergePending: false, mainInHead: true, ownCommits: 1 };
 
   // 1. A good report (with both Docs: and Tested:).
-  assert.deepEqual(checkWorkerReport(`Done.\n\nDocs: updated README.md.\n${testedLine}`, { oweDocs: true, oweTested: true }), []);
+  assert.deepEqual(checkWorkerReport(`Done.\n\nDocs: updated README.md.\n${testedLine}`, bothOwed), []);
 
   // 2. Tested: missing, bold, short IDs, not last.
-  assert.match(checkWorkerReport('Done.\nDocs: none needed, because internal.', { oweDocs: true, oweTested: true }).join('\n'), /has no Tested: line/);
-  assert.match(checkWorkerReport(`Done.\nDocs: none needed, because internal.\n**${testedLine}**`, { oweDocs: true, oweTested: true }).join('\n'), /bold or styled Tested: line/);
-  assert.match(checkWorkerReport('Done.\nDocs: none needed, because internal.\nTested: aaaaaaa with main bbbbbbb: tests passed', { oweDocs: true, oweTested: true }).join('\n'), /short commit IDs/);
-  assert.match(checkWorkerReport(`Done.\nDocs: none needed, because internal.\n${testedLine}\nTrailing line.`, { oweDocs: true, oweTested: true }).join('\n'), /not the reply's last non-empty line/);
+  assert.match(checkWorkerReport('Done.\nDocs: none needed, because internal.', bothOwed).join('\n'), /has no Tested: line/);
+  assert.match(checkWorkerReport(`Done.\nDocs: none needed, because internal.\n**${testedLine}**`, bothOwed).join('\n'), /bold or styled Tested: line/);
+  assert.match(checkWorkerReport('Done.\nDocs: none needed, because internal.\nTested: aaaaaaa with main bbbbbbb: tests passed', bothOwed).join('\n'), /short commit IDs/);
+  assert.match(checkWorkerReport(`Done.\nDocs: none needed, because internal.\n${testedLine}\nTrailing line.`, bothOwed).join('\n'), /not the reply's last non-empty line/);
 
   // 3. Docs: missing or after Tested:.
-  assert.match(checkWorkerReport(`Done.\n${testedLine}`, { oweDocs: true, oweTested: true }).join('\n'), /has no Docs: line/);
-  const afterTested = checkWorkerReport(`Done.\n${testedLine}\nDocs: none needed, because internal.`, { oweDocs: true, oweTested: true }).join('\n');
+  assert.match(checkWorkerReport(`Done.\n${testedLine}`, bothOwed).join('\n'), /has no Docs: line/);
+  const afterTested = checkWorkerReport(`Done.\n${testedLine}\nDocs: none needed, because internal.`, bothOwed).join('\n');
   assert.match(afterTested, /Docs: line after its Tested: line/);
   assert.match(afterTested, /not the reply's last non-empty line/);
 
@@ -5198,7 +5202,10 @@ test('checkWorkerReport and formattedTurn: good reports, Tested/Docs rules, conf
   // 6. formattedTurn generic helper: asks the same session at most once.
   const calls = [];
   const fakeAgent = { turn: async (p) => { calls.push(p); return calls.length === 1 ? 'bad' : 'good'; } };
-  const ok = await formattedTurn(fakeAgent, 'initial', (r) => (r === 'good' ? [] : ['missing tag']), (probs) => `fix: ${probs.join(',')}`);
+  const ok = await formattedTurn(fakeAgent, 'initial', {
+    check: (r) => (r === 'good' ? [] : ['missing tag']),
+    retryPrompt: (probs) => `fix: ${probs.join(',')}`,
+  });
   assert.deepEqual(ok, { text: 'good', problems: [], firstProblems: ['missing tag'], retried: true });
   assert.deepEqual(calls, ['initial', 'fix: missing tag']);
 });
