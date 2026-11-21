@@ -518,8 +518,12 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 <title>agent-room</title><style>
 :root { color-scheme: light dark; --line: #8884; --dim: #888; }
 * { box-sizing: border-box; }
-body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: var(--list, 240px) 7px var(--left, 38%) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
-body.list-collapsed { grid-template-columns: 32px 0 var(--left, 38%) 7px 1fr; }
+body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: var(--list, 240px) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+body.list-collapsed { grid-template-columns: 32px 0 1fr; }
+#main-panel { display: grid; min-width: 0; min-height: 0; grid-template-columns: var(--left, 55%) 7px 1fr; grid-template-rows: 1fr; }
+#main-panel.stacked { grid-template-columns: 1fr; grid-template-rows: var(--top, 55%) 7px 1fr; }
+#main-panel.side-closed { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+#main-panel.side-closed > #split, #main-panel.side-closed > #right { display: none; }
 /* The header: three zones, room (left), current discussion (middle), monitoring (right).
    Rare room and server actions sit in the ▾ menus; the gauges never shrink. */
 #header { position: relative; grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(16rem, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
@@ -676,18 +680,28 @@ body.list-collapsed #list-title, body.list-collapsed #list-pane { display: none;
 body.list-collapsed #list-head { justify-content: center; padding: .35rem 0; }
 body.list-collapsed #list-split { display: none; }
 #left { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-#tabs, #subtabs { display: flex; border-bottom: 1px solid var(--line); }
-#subtabs { --accent: #3b82f6; --tint: #3b82f612; }
+#tabs, #subtabs { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+#subtabs { --accent: #3b82f6; --tint: #3b82f618; }
 .tab:disabled { opacity: .45; cursor: default; }
-.tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: .45rem .9rem; font-size: .9rem; }
-.tab.on { border-bottom-color: #3b82f6; font-weight: 600; }
+.tab[hidden] { display: none; }
+.tab { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: none; padding: .45rem .85rem; font-size: .88rem; color: var(--dim); }
+.tab:hover:not(:disabled):not(.on) { color: CanvasText; background: #8881; }
+.tab.on { border-bottom-color: var(--accent, #3b82f6); background: var(--tint, #3b82f618); color: CanvasText; font-weight: 600; }
 .tab.news::after { content: ' •'; color: #3b82f6; }
 #tab-explorer.peeking::after { content: ' ●'; color: #f59e0b; }
+#tab-terminal.running::after { content: ' ●'; color: #22c55e; }
+#side-open { margin-left: auto; margin-right: .35rem; }
+#side-controls { margin-left: auto; display: flex; align-items: center; gap: .15rem; padding-right: .3rem; }
+.pane-ctrl { border: 0; background: none; padding: .2rem .45rem; font-size: .82rem; color: var(--dim); border-radius: 4px; }
+.pane-ctrl:hover { background: #8882; color: CanvasText; }
+.pane-ctrl[hidden] { display: none; }
 .view { flex: 1; display: flex; flex-direction: column; min-height: 0; } .view[hidden] { display: none; }
 #split, #list-split { cursor: col-resize; background: var(--line); background-clip: content-box; padding: 0 3px; touch-action: none; }
-#split:hover, #split:focus-visible, #list-split:hover, #list-split:focus-visible, body.resizing #split, body.resizing-list #list-split { background-color: #3b82f6; outline: none; }
+#main-panel.stacked > #split { cursor: row-resize; padding: 3px 0; }
+#split:hover, #split:focus-visible, #list-split:hover, #list-split:focus-visible, body.resizing #split, body.resizing-v #split, body.resizing-list #list-split { background-color: #3b82f6; outline: none; }
 body.resizing, body.resizing-list { cursor: col-resize; user-select: none; }
-body.resizing iframe, body.resizing-list iframe { pointer-events: none; } /* the document would swallow the drag */
+body.resizing-v { cursor: row-resize; user-select: none; }
+body.resizing iframe, body.resizing-v iframe, body.resizing-list iframe { pointer-events: none; } /* the document would swallow the drag */
 .chat-wrap { position: relative; display: flex; flex: 1; min-height: 0; }
 .chat-wrap::before, #explorer::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .07; background: 0 0 / 240px repeat; }
 .chat-wrap::before { background-image: ${DOODLE}; } #explorer::before { background-image: ${DOODLE_EXPLORER}; }
@@ -711,7 +725,7 @@ a.mention { text-decoration: underline dotted; cursor: pointer; }
 #follow-label { margin-left: auto; display: flex; align-items: center; gap: .3rem; white-space: nowrap; opacity: .8; }
 #attach-row { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-top: .35rem; font-size: .8rem; }
 #attach { font-size: .8rem; padding: .1rem .5rem; }
-.ref { font-family: ui-monospace, Menlo, monospace; font-size: .9em; background: #e07a1026; border: 1px solid transparent; border-radius: 4px; padding: 0 .25em; cursor: default; } .ref:hover { border-color: #e07a10; }
+.ref { font-family: ui-monospace, Menlo, monospace; font-size: .9em; background: #e07a1026; border: 1px solid transparent; border-radius: 4px; padding: 0 .25em; cursor: pointer; } .ref:hover { border-color: #e07a10; }
 #attachments .chip, #pointed .chip { display: inline-flex; align-items: center; gap: .25rem; padding: .05rem .2rem .05rem .5rem; border: 1px solid var(--line); border-radius: 9px; margin-right: .3rem; }
 #attachments .chip button, #pointed .chip button { border: 0; background: none; padding: 0 .25rem; font-size: .8rem; cursor: pointer; }
 .box { width: 100%; min-height: 3.2rem; resize: vertical; font: inherit; padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--line); }
@@ -723,14 +737,15 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #current { color: var(--dim); } #feed { margin-left: auto; }
 #siblings { max-height: 60vh; overflow-y: auto; } #siblings .shown { font-weight: 600; }
 #pane, #docpane { flex: 1; min-height: 0; }
-/* The terminal pane (host-shell.mjs): a shell on this computer, shown only in pages opened on this computer. */
-#hostshell { border-top: 1px solid var(--line); } #hostshell[hidden], #hostshell-term[hidden] { display: none; }
-#hostshell-toggle { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: .3rem .6rem; font-size: .8rem; }
-#hostshell-term { height: 16rem; padding: .3rem; background: #1e1e1e; overflow: hidden; }
-/* The Notes pane (notes.mjs): the User's own notes, in the same place and only one of the two open. */
-#notes { border-top: 1px solid var(--line); } #notes[hidden], #notes-body[hidden], #notes-ask[hidden] { display: none; }
-#notes-toggle { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: .3rem .6rem; font-size: .8rem; }
-#notes-body { height: 16rem; display: grid; grid-template-columns: minmax(8rem, 30%) 1fr; }
+/* The Terminal tab (host-shell.mjs): a shell on this computer, shown only in pages opened on this computer. */
+#terminal-bar { display: flex; align-items: center; gap: .5rem; padding: .3rem .6rem; border-bottom: 1px solid var(--line); font-size: .8rem; }
+#terminal-status { color: var(--dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#terminal-bar button { font-size: .78rem; padding: .12rem .5rem; }
+#terminal-bar button[hidden] { display: none; }
+#hostshell-term { flex: 1; min-height: 0; padding: .3rem; background: #1e1e1e; overflow: hidden; }
+/* The My notes tab (notes.mjs): the User's own notes for this room's folder, on this computer only. */
+#notes[hidden], #notes-ask[hidden] { display: none; }
+#notes-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(8rem, 32%) 1fr; }
 #notes-side { display: flex; flex-direction: column; gap: .3rem; min-height: 0; padding: .3rem; border-right: 1px solid var(--line); }
 #notes-new { align-self: flex-start; font-size: .8rem; } #notes-list { overflow-y: auto; min-height: 0; }
 #notes-list .note { display: block; width: 100%; text-align: left; border: 0; border-radius: 4px; background: none; padding: .2rem .4rem; font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -875,8 +890,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
   <div id="list-pane"></div>
 </aside>
 <div id="list-split" role="separator" aria-orientation="vertical" aria-label="Resize the boards list" tabindex="0" title="Drag to resize"></div>
+<div id="main-panel">
 <div id="left">
-  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button class="tab" id="tab-providers" role="tab" title="Default providers and models for new discussions: members and worker together">Providers</button><button class="tab" id="tab-instructions" role="tab" title="The prompts and rulebooks sent to each agent, and when">Instructions</button></div>
+  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button class="tab" id="tab-providers" role="tab" title="Default providers and models for new discussions: members and worker together">Providers</button><button class="tab" id="tab-instructions" role="tab" title="The prompts and rulebooks sent to each agent, and when">Instructions</button><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></div>
   <div class="view" id="talk">
     <details class="agent-settings" id="talk-settings">
       <summary>Discussion members · <span id="talk-models">provider & model</span></summary>
@@ -894,7 +910,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <div class="composer" id="composer"><div class="mention-offer" hidden></div>
       <div id="remote-view" hidden></div>
       <div id="autodev" role="status" hidden></div>
-      <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"></textarea>
+      <textarea class="box" id="box" placeholder="Message to the agents… (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"></textarea>
       <div id="attach-row"><button type="button" id="attach" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)">📎 Attach</button><input type="file" id="attach-input" multiple hidden><span id="attachments"></span><span id="pointed"></span></div>
     </div>
   </div>
@@ -928,7 +944,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <div class="chat-wrap"><div class="chat" id="wchat"></div><button class="scroll-end" id="work-end" aria-label="Scroll to latest worker messages" title="Scroll to latest messages" hidden>↓</button></div>
     <div class="composer" id="wcomposer"><div class="mention-offer" hidden></div>
       <div id="work-remote-view" hidden></div>
-      <textarea class="box" id="wbox" placeholder="Instructions for the worker (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands."></textarea>
+      <textarea class="box" id="wbox" placeholder="Instruction to the worker… (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands."></textarea>
       <div class="tools"><span class="hint" id="whint"></span><span id="wstop" hidden><button id="wstop-after" title="The running instruction finishes and is reported as usual; this discussion's queued instructions are cancelled, and auto dev pauses">Stop after this task</button> <button id="wstop-now" title="The running instruction's programs are stopped at once; this discussion's queued instructions are cancelled, auto dev pauses, and what it left in the worktree is reported">Stop now</button></span></div>
     </div>
   </div>
@@ -936,18 +952,22 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </div>
 <div id="split" role="separator" aria-orientation="vertical" aria-label="Resize the chat and the document" tabindex="0" title="Drag to resize"></div>
 <div id="right">
-  <div id="subtabs" role="tablist"><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button></div>
+  <div id="subtabs" role="tablist"><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button><button class="tab" id="tab-notes" role="tab" hidden title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder.">My notes</button><button class="tab" id="tab-terminal" role="tab" hidden title="A shell on this computer, in the room's folder. Only from this computer, not from other devices.">Terminal</button><span id="side-controls"><button type="button" id="split-orient" class="pane-ctrl" title="Stack conversation above side pane" aria-label="Stack conversation above side pane">⇅</button><button type="button" id="side-close" class="pane-ctrl" title="Close side pane" aria-label="Close side pane">✕</button></span></div>
   <div class="view" id="explorer"><div id="pane"></div></div>
   <div class="view" id="document" hidden>
     <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button><label id="follow-label" title="When an agent or the worker names a file in a new message, show it here at once (this browser only)"><input type="checkbox" id="follow"> Follow mentions</label></div>
     <div id="docpane"></div>
   </div>
-  <div id="notes" hidden><button id="notes-toggle" aria-expanded="false" title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder.">▸ Notes (this computer only)</button><div id="notes-body" hidden>
+  <div class="view" id="notes" hidden><div id="notes-body">
     <div id="notes-side"><button id="notes-new" title="Start a new note: the first line is its title">New</button><div id="notes-list"></div></div>
     <div id="notes-main"><div id="notes-ask" role="alertdialog" aria-labelledby="notes-ask-text" hidden><span id="notes-ask-text"></span><span id="notes-ask-buttons"></span></div><textarea class="box" id="notes-text" aria-label="Note" placeholder="Choose a note, or New. The first line is the note's title." disabled></textarea>
       <div id="notes-bar"><button id="notes-save" disabled title="Save this note (nothing is saved until you press Save)">Save</button><button id="notes-remove" disabled>Remove</button><span id="notes-status" role="status"></span></div></div>
   </div></div>
-  <div id="hostshell" hidden><button id="hostshell-toggle" aria-expanded="false" title="A shell on this computer, in the room's folder. Only from this computer, not from other devices.">▸ Terminal (this computer only)</button><div id="hostshell-term" hidden></div></div>
+  <div class="view" id="terminal" hidden>
+    <div id="terminal-bar"><span id="terminal-status">Shell in this room’s folder (this computer only)</span><button type="button" id="terminal-start" hidden title="Start a fresh shell">Start shell</button><button type="button" id="terminal-end" hidden title="Stop the running shell">End shell</button></div>
+    <div id="hostshell-term"></div>
+  </div>
+</div>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -1299,24 +1319,32 @@ function setWorking(name) {
   tabTitles();
 }
 
-// The dividers: #list-split resizes the Boards list panel, and #split resizes the chat vs the
-// right pane. Neither main pane gets narrower than MIN. Widths and list collapse state are kept in
-// this browser, per address: rooms on the usual port (5566) share them.
-const split = $('split'), listSplit = $('list-split'), listToggle = $('list-toggle');
-const MIN = 260, LIST_MIN = 160, LIST_MAX = 420;
-const KEY = 'agent-room:left', LIST_KEY = 'agent-room:list', LIST_COLLAPSED_KEY = 'agent-room:list-collapsed';
-const listAreaWidth = () => (document.body.classList.contains('list-collapsed') ? 32 : $('list-panel').getBoundingClientRect().width + listSplit.offsetWidth);
+// The dividers: #list-split resizes the Boards list panel, and #split resizes the conversation vs
+// the side pane (horizontally when side by side, vertically when stacked). Widths, heights,
+// orientation, list collapse and side-pane close state are kept in this browser, per address.
+const mainPanel = $('main-panel'), split = $('split'), listSplit = $('list-split'), listToggle = $('list-toggle');
+const splitOrient = $('split-orient'), sideCloseBtn = $('side-close'), sideOpenBtn = $('side-open');
+const MIN = 260, MIN_H = 140, LIST_MIN = 160, LIST_MAX = 420;
+const KEY = 'agent-room:left', TOP_KEY = 'agent-room:top', LIST_KEY = 'agent-room:list';
+const LIST_COLLAPSED_KEY = 'agent-room:list-collapsed', ORIENT_KEY = 'agent-room:split-orient', SIDE_CLOSED_KEY = 'agent-room:side-closed';
+let stacked = false, sideClosed = false;
 function setLeft(px) {
-  const room = document.documentElement.clientWidth - listAreaWidth() - split.offsetWidth;
-  const w = Math.round(Math.max(MIN, Math.min(Math.max(MIN, room - MIN), px)));
-  document.body.style.setProperty('--left', w + 'px');
+  const avail = mainPanel.getBoundingClientRect().width - split.offsetWidth;
+  const w = Math.round(Math.max(MIN, Math.min(Math.max(MIN, avail - MIN), px)));
+  mainPanel.style.setProperty('--left', w + 'px');
   return w;
+}
+function setTop(px) {
+  const avail = mainPanel.getBoundingClientRect().height - split.offsetHeight;
+  const h = Math.round(Math.max(MIN_H, Math.min(Math.max(MIN_H, avail - MIN_H), px)));
+  mainPanel.style.setProperty('--top', h + 'px');
+  return h;
 }
 function setList(px) {
   const max = Math.max(LIST_MIN, Math.min(LIST_MAX, document.documentElement.clientWidth - MIN * 2 - 14));
   const w = Math.round(Math.max(LIST_MIN, Math.min(max, px)));
   document.body.style.setProperty('--list', w + 'px');
-  if (document.body.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
+  if (!stacked && !sideClosed && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
   return w;
 }
 function setListCollapsed(collapsed, save = true) {
@@ -1326,20 +1354,58 @@ function setListCollapsed(collapsed, save = true) {
   listToggle.setAttribute('aria-label', collapsed ? 'Expand boards list' : 'Collapse boards list');
   listToggle.title = collapsed ? 'Expand boards list' : 'Collapse boards list';
   if (save) { try { localStorage.setItem(LIST_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch {} }
-  if (document.body.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
+  if (!stacked && !sideClosed && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
+}
+function setStacked(on, save = true) {
+  stacked = !!on;
+  mainPanel.classList.toggle('stacked', stacked);
+  split.setAttribute('aria-orientation', stacked ? 'horizontal' : 'vertical');
+  splitOrient.textContent = stacked ? '⇆' : '⇅';
+  splitOrient.title = stacked ? 'Place conversation and side pane side by side' : 'Stack conversation above side pane';
+  splitOrient.setAttribute('aria-label', splitOrient.title);
+  if (save) { try { localStorage.setItem(ORIENT_KEY, stacked ? 'stacked' : 'side'); } catch {} }
+  if (stacked) {
+    try { const t = Number(localStorage.getItem(TOP_KEY)); if (t) setTop(t); } catch {}
+  } else {
+    try { const l = Number(localStorage.getItem(KEY)); if (l) setLeft(l); } catch {}
+  }
+  if (typeof hostShell !== 'undefined' && hostShell?.fit) requestAnimationFrame(() => { try { hostShell.fit.fit(); } catch {} });
+}
+function setSideClosed(closed, save = true) {
+  sideClosed = !!closed;
+  mainPanel.classList.toggle('side-closed', sideClosed);
+  if (sideOpenBtn) sideOpenBtn.hidden = !sideClosed;
+  if (save) { try { localStorage.setItem(SIDE_CLOSED_KEY, sideClosed ? '1' : '0'); } catch {} }
+  if (!sideClosed) {
+    if (typeof subtab !== 'undefined' && subtab === 'terminal' && typeof hostShell !== 'undefined' && hostShell?.fit) {
+      requestAnimationFrame(() => { try { hostShell.fit.fit(); hostShell.term?.focus(); } catch {} });
+    }
+    if (!stacked && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
+    if (stacked && mainPanel.style.getPropertyValue('--top')) setTop($('left').getBoundingClientRect().height);
+  }
 }
 const keep = (w) => { try { localStorage.setItem(KEY, String(w)); } catch {} };
+const keepTop = (h) => { try { localStorage.setItem(TOP_KEY, String(h)); } catch {} };
 const keepList = (w) => { try { localStorage.setItem(LIST_KEY, String(w)); } catch {} };
 try {
   const savedList = Number(localStorage.getItem(LIST_KEY)); if (savedList) setList(savedList);
   if (localStorage.getItem(LIST_COLLAPSED_KEY) === '1') setListCollapsed(true, false);
+  if (localStorage.getItem(ORIENT_KEY) === 'stacked') setStacked(true, false);
+  if (localStorage.getItem(SIDE_CLOSED_KEY) === '1') setSideClosed(true, false);
   const saved = Number(localStorage.getItem(KEY)); if (saved) setLeft(saved);
+  const savedTop = Number(localStorage.getItem(TOP_KEY)); if (savedTop) setTop(savedTop);
 } catch {}
 listToggle.onclick = () => {
   const next = !document.body.classList.contains('list-collapsed');
   setListCollapsed(next);
   if (!next) post('__workerinfo', {}).catch(() => {});
 };
+splitOrient.onclick = () => setStacked(!stacked);
+sideCloseBtn.onclick = () => {
+  if (subtab === 'notes' && typeof notesDirty === 'function' && notesDirty()) return notesGuard(() => setSideClosed(true));
+  setSideClosed(true);
+};
+sideOpenBtn.onclick = () => setSideClosed(false);
 listSplit.addEventListener('pointerdown', (e) => {
   if (document.body.classList.contains('list-collapsed')) return;
   e.preventDefault();
@@ -1366,29 +1432,40 @@ listSplit.addEventListener('keydown', (e) => {
 split.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   split.setPointerCapture(e.pointerId);
-  document.body.classList.add('resizing');
-  const leftStart = () => $('left').getBoundingClientRect().left;
-  const move = (ev) => setLeft(ev.clientX - leftStart() - 3);
+  const vert = stacked;
+  document.body.classList.add(vert ? 'resizing-v' : 'resizing');
+  const rect = () => mainPanel.getBoundingClientRect();
+  const move = (ev) => (vert ? setTop(ev.clientY - rect().top - 3) : setLeft(ev.clientX - rect().left - 3));
   const stop = (ev) => {
     split.removeEventListener('pointermove', move);
     split.removeEventListener('pointerup', stop);
     split.removeEventListener('pointercancel', stop);
-    document.body.classList.remove('resizing');
-    keep(setLeft(ev.clientX - leftStart() - 3));
+    document.body.classList.remove('resizing', 'resizing-v');
+    if (vert) keepTop(setTop(ev.clientY - rect().top - 3));
+    else keep(setLeft(ev.clientX - rect().left - 3));
   };
   split.addEventListener('pointermove', move);
   split.addEventListener('pointerup', stop);
   split.addEventListener('pointercancel', stop);
 });
 split.addEventListener('keydown', (e) => {
-  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-  e.preventDefault();
-  keep(setLeft($('left').getBoundingClientRect().width + (e.key === 'ArrowLeft' ? -24 : 24)));
+  if (stacked) {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    keepTop(setTop($('left').getBoundingClientRect().height + (e.key === 'ArrowUp' ? -24 : 24)));
+  } else {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    keep(setLeft($('left').getBoundingClientRect().width + (e.key === 'ArrowLeft' ? -24 : 24)));
+  }
 });
-// A narrower window must not squeeze one side below MIN.
+// A narrower/shorter window must not squeeze one side below MIN/MIN_H.
 window.addEventListener('resize', () => {
   if (!document.body.classList.contains('list-collapsed') && document.body.style.getPropertyValue('--list')) setList($('list-panel').getBoundingClientRect().width);
-  if (document.body.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
+  if (!sideClosed) {
+    if (stacked && mainPanel.style.getPropertyValue('--top')) setTop($('left').getBoundingClientRect().height);
+    else if (!stacked && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
+  }
 });
 function message(m, live = false) {
   localMessages.push(m);
@@ -1508,10 +1585,34 @@ const effectiveExplorerMode = () => (hasDiscussionTree() ? explorerMode : 'root'
 function showSub(name) {
   if (name === 'document' && !doc) return;
   subtab = name;
-  $('explorer').hidden = name !== 'explorer'; $('document').hidden = name !== 'document';
-  $('tab-explorer').classList.toggle('on', name === 'explorer'); $('tab-document').classList.toggle('on', name === 'document');
+  $('explorer').hidden = name !== 'explorer';
+  $('document').hidden = name !== 'document';
+  if ($('notes')) $('notes').hidden = name !== 'notes';
+  if ($('terminal')) $('terminal').hidden = name !== 'terminal';
+  $('tab-explorer').classList.toggle('on', name === 'explorer');
+  $('tab-document').classList.toggle('on', name === 'document');
+  if ($('tab-notes')) $('tab-notes').classList.toggle('on', name === 'notes');
+  if ($('tab-terminal')) $('tab-terminal').classList.toggle('on', name === 'terminal');
+  if (typeof notes !== 'undefined' && notes) notes.open = name === 'notes';
+  if (name === 'notes' && typeof openNotes === 'function') openNotes();
+  if (name === 'terminal' && typeof openHostShell === 'function') {
+    if (typeof hostShell === 'undefined' || !hostShell) openHostShell();
+    else requestAnimationFrame(() => { try { hostShell.fit?.fit(); hostShell.term?.focus(); } catch {} });
+  }
 }
-$('tab-explorer').onclick = () => { showSub('explorer'); revealDoc(); };
+function selectSub(name) {
+  if (name === 'document' && !doc) return;
+  const run = () => {
+    if (typeof sideClosed !== 'undefined' && sideClosed && typeof setSideClosed === 'function') setSideClosed(false);
+    showSub(name);
+    if (name === 'explorer') revealDoc();
+  };
+  if (subtab === 'notes' && name !== 'notes' && typeof notesDirty === 'function' && notesDirty()) return notesGuard(run);
+  run();
+}
+$('tab-explorer').onclick = () => selectSub('explorer');
+if ($('tab-notes')) $('tab-notes').onclick = () => selectSub('notes');
+if ($('tab-terminal')) $('tab-terminal').onclick = () => selectSub('terminal');
 // Back to Explorer with a local file shown: if that file is inside the tree Explorer is showing now,
 // unfold its parent folders and scroll it into view. Never re-enters a peek that was ended.
 async function revealDoc() {
@@ -1532,7 +1633,7 @@ async function revealDoc() {
   await openFiles();
   requestAnimationFrame(() => [...pane.querySelectorAll('.entry.file')].find((b) => b.classList.contains('shown'))?.scrollIntoView({ block: 'center' }));
 }
-$('tab-document').onclick = () => showSub('document');
+$('tab-document').onclick = () => selectSub('document');
 // Document's path line: names the discussion (current, peeked or received) or "Room checkout", plus the file's path inside it.
 function docLabel(file) {
   if (!file) return 'No document shown.';
@@ -1580,6 +1681,7 @@ function showDoc(file) {
   $('current').title = doc || ''; // the full path, on hover
   $('tab-document').disabled = !doc;
   if (!doc) { docpane.replaceChildren(); updateTabTitle(); if (subtab === 'document') showSub('explorer'); return; }
+  if (typeof sideClosed !== 'undefined' && sideClosed && typeof setSideClosed === 'function') setSideClosed(false);
   if (!same) { docpane.innerHTML = '<iframe id="doc"></iframe>'; docpane.firstChild.src = urlFor(doc); }
   updateTabTitle();
   showSub('document');
@@ -3351,10 +3453,22 @@ function renderPointed() {
     chip.append(x); return chip;
   }));
 }
-// A [[D4]] in the chat: hovering it highlights that cell in the shown document.
+// A [[D4]] in the chat: hovering highlights that cell/box/mark; clicking reopens the side pane
+// to Document (if closed) and highlights it.
+function highlightRef(refName, on) {
+  const frame = document.getElementById('doc');
+  if (frame?.contentWindow) frame.contentWindow.postMessage({ type: 'agent-room:highlight', ref: refName, on }, location.origin);
+}
 for (const [type, on] of [['mouseover', true], ['mouseout', false]]) document.addEventListener(type, (e) => {
-  const ref = e.target.closest && e.target.closest('.ref[data-ref]'), frame = document.getElementById('doc');
-  if (ref && frame) frame.contentWindow.postMessage({ type: 'agent-room:highlight', ref: ref.dataset.ref, on }, location.origin);
+  const ref = e.target.closest && e.target.closest('.ref[data-ref]');
+  if (ref) highlightRef(ref.dataset.ref, on);
+});
+document.addEventListener('click', (e) => {
+  const ref = e.target.closest && e.target.closest('.ref[data-ref]');
+  if (!ref) return;
+  if (typeof sideClosed !== 'undefined' && sideClosed && typeof setSideClosed === 'function') setSideClosed(false);
+  if (doc) showSub('document');
+  highlightRef(ref.dataset.ref, true);
 });
 // Moves the chips into the message's text as it is sent (not into a command).
 function withPointing() {
@@ -3639,52 +3753,75 @@ events.onmessage = (e) => {
   if (ev.type === 'restarting') { restarting = true; commandBusy = true; updateBusy(); status('Restarting the server: this page reloads when the new one answers.'); events.close(); box.disabled = true; wbox.disabled = true; }
 };
 
-// The terminal pane (host-shell.mjs, after ghostty-web's demo): opening it fetches the token and
-// opens a WebSocket, and the server starts a fresh shell; collapsing it or reloading the page
-// closes the socket, and the server ends the shell. Shown only in pages opened on this computer
-// (the server refuses the others anyway).
-const SHELL_LABEL = 'Terminal (this computer only)';
+// The Terminal tab (host-shell.mjs, after ghostty-web's demo): opening it fetches the token and
+// opens a WebSocket, and the server starts a fresh shell. Switching to another tab or closing the
+// side pane hides the terminal while keeping the shell alive (shown by a green dot on the tab).
+// End shell, reloading the page, or stopping the server ends it. Shown only in pages opened on
+// this computer (the server refuses the others anyway).
 let hostShell = null;
-if (['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname)) $('hostshell').hidden = false;
-// Opening the terminal collapses Notes, after asking about unsaved changes there.
-$('hostshell-toggle').onclick = () => (hostShell ? closeHostShell() : notesGuard(() => { closeNotes(); openHostShell(); }));
+const isLocalPage = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
+if (isLocalPage && $('tab-terminal')) $('tab-terminal').hidden = false;
+function updateTerminalUI() {
+  const alive = !!(hostShell && hostShell.alive);
+  if ($('tab-terminal')) $('tab-terminal').classList.toggle('running', alive);
+  if ($('terminal-end')) $('terminal-end').hidden = !alive;
+  if ($('terminal-start')) $('terminal-start').hidden = alive;
+}
 function closeHostShell() {
-  try { hostShell.ws?.close(); } catch {}
-  try { hostShell.term?.dispose(); } catch {}
-  hostShell = null; $('hostshell-term').hidden = true; $('hostshell-term').replaceChildren();
-  $('hostshell-toggle').textContent = '▸ ' + SHELL_LABEL; $('hostshell-toggle').setAttribute('aria-expanded', 'false');
+  if (hostShell) {
+    try { hostShell.ws?.close(); } catch {}
+    try { hostShell.term?.dispose(); } catch {}
+  }
+  hostShell = null;
+  $('hostshell-term').replaceChildren();
+  if ($('terminal-status')) $('terminal-status').textContent = 'Shell ended. Click Start shell for a new shell.';
+  updateTerminalUI();
 }
 async function openHostShell() {
-  const box = $('hostshell-term'); box.hidden = false;
-  $('hostshell-toggle').textContent = '▾ ' + SHELL_LABEL; $('hostshell-toggle').setAttribute('aria-expanded', 'true');
-  // Open from the first click: a click while it loads collapses it, and each step below stops then.
-  const shell = hostShell = { term: null, ws: null };
+  const box = $('hostshell-term');
+  box.replaceChildren();
+  if ($('terminal-status')) $('terminal-status').textContent = 'Shell running in this room’s folder (this computer only)';
+  // Start on first open: End shell while loading cancels it, and each step below stops then.
+  const shell = hostShell = { term: null, ws: null, fit: null, alive: true };
+  updateTerminalUI();
   const { init, Terminal, FitAddon } = await import('./__shell/ghostty-web.js');
   await init();
-  if (hostShell !== shell) return; // collapsed meanwhile
+  if (hostShell !== shell) return; // ended meanwhile
   const term = shell.term = new Terminal({ fontSize: 13, fontFamily: 'ui-monospace, Menlo, monospace', cursorBlink: true });
-  const fit = new FitAddon(); term.loadAddon(fit); term.open(box); fit.fit(); fit.observeResize();
+  const fit = shell.fit = new FitAddon(); term.loadAddon(fit); term.open(box); fit.fit(); fit.observeResize();
   let token;
   try {
     const r = await fetch('__shell/token', { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status + ' ' + await r.text());
     token = (await r.json()).token;
-  } catch (err) { term.write('\\r\\nNo terminal: ' + err.message + '\\r\\n'); return; }
-  if (hostShell !== shell) return; // collapsed meanwhile
+  } catch (err) {
+    if (hostShell === shell) { shell.alive = false; updateTerminalUI(); }
+    term.write('\\r\\nNo terminal: ' + err.message + '\\r\\n');
+    return;
+  }
+  if (hostShell !== shell) return; // ended meanwhile
   const params = new URLSearchParams({ token, cols: term.cols, rows: term.rows });
   const ws = shell.ws = new WebSocket((location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + location.pathname.replace(/[^/]*$/, '') + '__shell/ws?' + params);
   ws.onmessage = (e) => term.write(e.data);
-  ws.onclose = () => { if (hostShell === shell) term.write('\\r\\n\\x1b[31mConnection closed. Collapse and open the pane for a new shell.\\x1b[0m\\r\\n'); };
+  ws.onclose = () => {
+    if (hostShell === shell) {
+      shell.alive = false;
+      updateTerminalUI();
+      if ($('terminal-status')) $('terminal-status').textContent = 'Shell exited. Click Start shell for a new shell.';
+      term.write('\\r\\n\\x1b[31mConnection closed. Click Start shell for a new shell.\\x1b[0m\\r\\n');
+    }
+  };
   term.onData((data) => { if (ws.readyState === WebSocket.OPEN) ws.send(data); });
   term.onResize(({ cols, rows }) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
   term.focus();
 }
+if ($('terminal-end')) $('terminal-end').onclick = () => closeHostShell();
+if ($('terminal-start')) $('terminal-start').onclick = () => openHostShell();
 
-// The Notes pane (notes.mjs): the User's notes for this room's folder, on this computer only. A note
-// is saved only by Save. Unsaved changes are never dropped without asking: inside the pane before
-// another note, New, collapsing, the terminal or another room; the browser's leave-page warning
-// otherwise; a refresh after a code change keeps them (refreshPage).
-const NOTES_LABEL = 'Notes (this computer only)';
+// The My notes tab (notes.mjs): the User's notes for this room's folder, on this computer only. A note
+// is saved only by Save. Unsaved changes are never dropped without asking: inside the tab before
+// another note, New, switching tabs, closing the side pane, or another room; the browser's leave-page
+// warning otherwise; a refresh after a code change keeps them (refreshPage).
 const notes = { open: false, list: [], id: null, base: '', editing: false, session: 0 }; // id null: a new note; base: its saved text
 // session: changed whenever the editor starts something else (setEditor, clearEditor, a read). A
 // save or read response is applied to the editor only if the session it started in is still current;
@@ -3692,9 +3829,9 @@ const notes = { open: false, list: [], id: null, base: '', editing: false, sessi
 const noteText = $('notes-text');
 const notesDirty = () => notes.editing && noteText.value !== notes.base;
 function noteDraft() { return notesDirty() ? { id: notes.id, base: notes.base, text: noteText.value } : null; }
-if (['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname)) {
-  $('notes').hidden = false;
-  if (noteDraftKept) openNotes(noteDraftKept);
+if (isLocalPage) {
+  if ($('tab-notes')) $('tab-notes').hidden = false;
+  if (noteDraftKept) { setSideClosed(false, false); showSub('notes'); openNotes(noteDraftKept); }
 }
 addEventListener('beforeunload', (e) => { if (notesDirty() && !refreshing) { e.preventDefault(); e.returnValue = ''; } });
 function notesStatus(text, error) { $('notes-status').textContent = text; $('notes-status').className = error ? 'error' : ''; }
@@ -3713,7 +3850,8 @@ const noteTitle = () => noteText.value.split('\\n')[0].replace(/^\\s*#+\\s*/, ''
 // Runs act now, or once the User agrees to discard the unsaved changes (cancel: if they don't).
 function notesGuard(act, cancel) {
   if (!notesDirty()) return act();
-  if (!notes.open) openNotes();
+  if (typeof sideClosed !== 'undefined' && sideClosed && typeof setSideClosed === 'function') setSideClosed(false);
+  if (!notes.open) { if (typeof showSub === 'function') showSub('notes'); else openNotes(); }
   notesAsk('"' + noteTitle() + '" has unsaved changes.', [
     ['Discard changes', () => { noteText.value = notes.base; act(); }],
     ['Keep editing', () => { cancel?.(); noteText.focus(); }],
@@ -3760,9 +3898,7 @@ async function readNote(id) {
   } catch (err) { if (notes.session === session) notesStatus('✗ ' + err.message, true); loadNotes().catch(() => {}); }
 }
 async function openNotes(draft) {
-  if (hostShell) closeHostShell();
-  notes.open = true; $('notes-body').hidden = false;
-  $('notes-toggle').textContent = '▾ ' + NOTES_LABEL; $('notes-toggle').setAttribute('aria-expanded', 'true');
+  notes.open = true;
   if (draft) setEditor(draft.id, draft.text, draft.base);
   try { await loadNotes(); } catch (err) { return notesStatus('✗ Notes: ' + err.message, true); }
   if (!draft) return;
@@ -3771,10 +3907,8 @@ async function openNotes(draft) {
 }
 function closeNotes() {
   if (!notes.open) return;
-  clearEditor(); notes.open = false; $('notes-body').hidden = true;
-  $('notes-toggle').textContent = '▸ ' + NOTES_LABEL; $('notes-toggle').setAttribute('aria-expanded', 'false');
+  clearEditor(); notes.open = false;
 }
-$('notes-toggle').onclick = () => (notes.open ? notesGuard(closeNotes) : openNotes());
 $('notes-new').onclick = () => notesGuard(() => { setEditor(null, ''); notesStatus('A new note: the first line is its title. Nothing is saved until Save.'); noteText.focus(); });
 $('notes-save').onclick = async () => {
   const text = noteText.value, id = notes.id, session = notes.session, title = noteTitle();

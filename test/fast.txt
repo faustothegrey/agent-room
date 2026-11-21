@@ -239,3 +239,4 @@ workerInfo.merged lists discussions with labelled commits in HEAD without needin
 while peeking a closed board, /__say (messages/attachments) and /__work are refused with 409 while /peek and /resume pass
 /peek shows a closed brainstorm read-only without starting sessions, and refuses an open brainstorm
 List panel: collapsible sections, row click switches active or peeks closed (chat and files), and peeking disables both composers
+Side pane: four tabs (Explorer/Document/My notes/Terminal), close/reopen, [[D4]] reopen, split orientation, and Terminal survival

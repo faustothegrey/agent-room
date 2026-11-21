@@ -2396,3 +2396,132 @@ test('List panel: collapsible sections, row click switches active or peeks close
   assert.equal(els['work-remote-view'].hidden, true);
   assert.equal(harness.getPeek(), null);
 });
+
+test('Side pane: four tabs (Explorer/Document/My notes/Terminal), close/reopen, [[D4]] reopen, split orientation, and Terminal survival', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'side-pane-'));
+  const s = await serve(root, { clients: new Set(), transcript: [] });
+  try {
+    const html = await (await s.get('/__room')).text();
+    assert.match(html, /id="main-panel"/);
+    assert.match(html, /id="tab-explorer"/);
+    assert.match(html, /id="tab-document"/);
+    assert.match(html, /id="tab-notes"[^>]*hidden[^>]*>My notes<\/button>/);
+    assert.match(html, /id="tab-terminal"[^>]*hidden[^>]*>Terminal<\/button>/);
+    assert.match(html, /id="split-orient"/);
+    assert.match(html, /id="side-close"/);
+    assert.match(html, /id="side-open"/);
+    assert.match(html, /id="terminal-end"/);
+    assert.doesNotMatch(html, /id="hostshell"/);
+    assert.doesNotMatch(html, /id="notes-toggle"/);
+    assert.match(html, /placeholder="Message to the agents…/);
+    assert.match(html, /placeholder="Instruction to the worker…/);
+
+    const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+    const dividerCode = source.slice(source.indexOf('// The dividers:'), source.indexOf('function message('));
+    const subCode = source.slice(source.indexOf('let subtab ='), source.indexOf('function docLabel('));
+    const refCode = source.slice(source.indexOf('// A [[D4]] in the chat:'), source.indexOf('// Moves the chips'));
+    const classListFor = () => {
+      const set = new Set();
+      return { toggle(cls, v) { if (v === undefined ? !set.has(cls) : v) set.add(cls); else set.delete(cls); },
+        add(...c) { c.forEach((x) => set.add(x)); }, remove(...c) { c.forEach((x) => set.delete(x)); }, contains(cls) { return set.has(cls); } };
+    };
+    const node = (tag = 'div') => ({
+      tag, className: '', textContent: '', title: '', value: '', hidden: false, disabled: false, children: [], dataset: {},
+      style: { props: {}, setProperty(k, v) { this.props[k] = v; }, getPropertyValue(k) { return this.props[k] || ''; } },
+      attrs: {}, setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return this.attrs[k] ?? null; },
+      offsetWidth: 7, offsetHeight: 7, getBoundingClientRect: () => ({ width: 800, height: 600, left: 0, top: 0 }),
+      classList: classListFor(),
+      append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+      addEventListener() {}, focus() {},
+    });
+    const els = {};
+    const $ = (id) => els[id] || (els[id] = node(id));
+    const docListeners = {};
+    const posted = [];
+    const docFrame = { contentWindow: { postMessage: (msg, origin) => posted.push([msg, origin]) } };
+    const document = {
+      body: node('body'),
+      documentElement: { clientWidth: 1200, clientHeight: 800 },
+      createElement: node,
+      getElementById: (id) => (id === 'doc' ? docFrame : els[id] || null),
+      addEventListener: (type, fn) => { (docListeners[type] ||= []).push(fn); },
+    };
+    const store = new Map();
+    const localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
+    const window = { addEventListener() {} };
+    let shellStarts = 0, shellStops = 0, notesOpens = 0, guardCalls = 0, fitCalls = 0;
+    const harness = new Function('$', 'document', 'window', 'localStorage', 'location', 'requestAnimationFrame', 'post',
+      'let viewing = null, room = { active: "discussions/2026-11-21-a" }, doc = "discussions/2026-11-21-a/notes.md";\n' +
+      'let hostShell = null, notes = { open: false, editing: false, base: "" }, noteText = { value: "" };\n' +
+      'const notesDirty = () => notes.editing && noteText.value !== notes.base;\n' +
+      'const openNotes = () => { notes.open = true; };\n' +
+      'const openHostShell = () => { hostShell = { alive: true, fit: { fit: () => {} }, term: { focus: () => {} } }; $("tab-terminal").classList.add("running"); };\n' +
+      'const closeHostShell = () => { hostShell = null; $("tab-terminal").classList.remove("running"); };\n' +
+      'const notesGuard = (act) => { if (!notesDirty()) return act(); $("notes-ask").hidden = false; $("notes-ask")._discard = () => { noteText.value = notes.base; $("notes-ask").hidden = true; act(); }; };\n' +
+      'const openFiles = async () => {}, pane = { querySelectorAll: () => [] }, expandedLines = new Set(), inDiscussion = () => false;\n' +
+      dividerCode + '\n' + subCode + '\n' + refCode + '\n' +
+      'return { setStacked, setSideClosed, showSub, selectSub, notes, noteText, getHostShell: () => hostShell, closeHostShell, getSubtab: () => subtab, isSideClosed: () => sideClosed, isStacked: () => stacked };'
+    )($, document, window, localStorage, { origin: 'http://127.0.0.1:5566' }, (cb) => cb(), async () => {});
+
+    // 1. Switching to Terminal starts a shell and marks #tab-terminal.running; switching away or closing side pane keeps it alive.
+    $('tab-terminal').onclick();
+    assert.equal(harness.getSubtab(), 'terminal');
+    assert.ok(harness.getHostShell()?.alive);
+    assert.equal($('tab-terminal').classList.contains('running'), true);
+
+    $('tab-explorer').onclick();
+    assert.equal(harness.getSubtab(), 'explorer');
+    assert.equal($('terminal').hidden, true);
+    assert.ok(harness.getHostShell()?.alive); // still running!
+    assert.equal($('tab-terminal').classList.contains('running'), true);
+
+    // 2. Close side pane with ✕: hides side pane, shows side-open, keeps Terminal alive; side-open restores last tab.
+    $('side-close').onclick();
+    assert.equal(harness.isSideClosed(), true);
+    assert.equal($('main-panel').classList.contains('side-closed'), true);
+    assert.equal($('side-open').hidden, false);
+    assert.ok(harness.getHostShell()?.alive);
+
+    // 3. Clicking [[D4]] in chat while side pane is closed reopens it to Document and highlights D4.
+    const refEl = { dataset: { ref: 'D4' } };
+    for (const fn of docListeners.click) fn({ target: { closest: (sel) => (sel === '.ref[data-ref]' ? refEl : null) } });
+    assert.equal(harness.isSideClosed(), false);
+    assert.equal(harness.getSubtab(), 'document');
+    assert.deepEqual(posted.at(-1), [{ type: 'agent-room:highlight', ref: 'D4', on: true }, 'http://127.0.0.1:5566']);
+
+    // 4. Split orientation toggle switches between side-by-side and stacked and remembers in localStorage.
+    assert.equal(harness.isStacked(), false);
+    assert.equal($('split-orient').textContent || '⇅', '⇅');
+    $('split-orient').onclick();
+    assert.equal(harness.isStacked(), true);
+    assert.equal($('main-panel').classList.contains('stacked'), true);
+    assert.equal($('split').getAttribute('aria-orientation'), 'horizontal');
+    assert.equal($('split-orient').textContent, '⇆');
+    assert.equal(store.get('agent-room:split-orient'), 'stacked');
+    $('split-orient').onclick();
+    assert.equal(harness.isStacked(), false);
+    assert.equal($('split').getAttribute('aria-orientation'), 'vertical');
+    assert.equal($('split-orient').textContent, '⇅');
+    assert.equal(store.get('agent-room:split-orient'), 'side');
+
+    // 5. My notes unsaved-changes prompt guards switching tabs and closing the side pane.
+    $('tab-notes').onclick();
+    assert.equal(harness.getSubtab(), 'notes');
+    harness.notes.editing = true;
+    harness.notes.base = 'saved';
+    harness.noteText.value = 'unsaved edit';
+    $('notes-ask').hidden = true;
+    $('tab-explorer').onclick();
+    assert.equal(harness.getSubtab(), 'notes'); // stayed on My notes until user confirms
+    assert.equal($('notes-ask').hidden, false);
+    $('notes-ask')._discard();
+    assert.equal(harness.getSubtab(), 'explorer');
+
+    // Explicit End shell stops it and removes the running dot.
+    harness.closeHostShell();
+    assert.equal(harness.getHostShell(), null);
+    assert.equal($('tab-terminal').classList.contains('running'), false);
+  } finally {
+    s.close();
+  }
+});

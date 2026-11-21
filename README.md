@@ -156,10 +156,11 @@ worker's, as their panels list them ("<provider> default" for CLI default).
     below.
 - **Boards** (left list panel, collapsible to a `«`/`»` strip and resizable by dragging its divider, both remembered per browser):
   - Organized into collapsible sections: **Discussions** (active, open by default), **Brainstorms** (open by default), **Archived · Deferred** (folded by default with count), and **Received from peers** (folded by default with count, when peers have discussions).
-  - Each row shows its display title (saved title, or the folder name without its leading date and with spaces; hover for the folder path), its state (`current`, `open`, `paused`, `not started`, `closed`, `merged`, `no changes`, or closing phase), and any amber worker warning (`⚠ Worker: 2 commits not merged into main · uncommitted changes`; `worker/main` or non-active unmerged branches appear above the active list). Active discussions and brainstorms each keep your drag-and-drop / **Move up** / **Move down** order per room in this browser.
+  - Each row shows its display title (saved title, or the folder name without its leading date and with spaces; hover for the folder path), its state (`current`, `open`, `paused`, `not started`, `closed`, `merged`, `no changes`, or closing phase), and any amber worker warning (`⚠ Worker: 2 commits not merged into main · uncommitted changes`; `worker/main` or non-active unmerged branches appear above the active list). Worker branch status is rechecked after each worker task, when expanding the **Boards** list panel, and when clicking the **Worker** tab. Active discussions and brainstorms each keep your drag-and-drop / **Move up** / **Move down** order per room in this browser.
   - Clicking an **active** board's row switches to it (like Go to / Continue). Clicking a **closed** discussion (active, archived or deferred) or **closed** brainstorm peeks at it read-only — **chat and files** together, without starting any agent or worker session. Secondary row actions (**Resume** / **Continue**, **Peek files**, **Close**, **Close and Merge**, **Close and Discard**, **Archive**, **Defer**, **Make active**, **Turn into a discussion**, **Start fresh**, **Delete**, **Move up** / **Move down**, rollback, and peers' **View chat**) live in each row's **`⋯`** menu.
   - **Peek**: while peeking at a closed board, both the Discussion and Worker message boxes are disabled with a read-only notice, a **Back** button to return to the active discussion, and an explicit **Resume** button. An orange banner ("Looking at <name> · Back to current") and an orange dot on the Explorer tab also mark the peek, and Document's path line names the peeked board.
-- **Explorer** and **Document** (right pane, two tabs):
+- **Side pane** (**Explorer**, **Document**, **My notes** and **Terminal** — four mutually exclusive tabs, one at a time):
+  - **Close, reopen, and split orientation.** Click **`✕`** in the side pane header to close the side pane so Discussion/Worker takes the full Main panel; click **◫ Side pane** in the Discussion/Worker header to reopen it to the last selected tab. Clicking a `[[D4]]` / diagram / chart reference, a file link, or a **📄 Show …** button in chat while the side pane is closed reopens it to **Document** (and highlights the reference). Click **`⇅`/`⇆`** beside **`✕`** to switch the Main panel between side-by-side and stacked (conversation above, side pane below), dragging the divider in either direction; orientation and pane sizes are remembered per browser.
   - In **Explorer**, view one tree at a time, chosen with the bar `[ Discussion | Room checkout | Worker copy ]` (Worker copy is coming soon). Under the bar, a line shows the folder and branch. **Discussion** shows the active (or peeked) discussion's files. **Room checkout** shows the room's root checkout, excluding hidden and gitignored files (non-discussion files in `discussions/`, such as `discussions/README.md`, remain reachable). Code, config, and other text files open as plain text in Document; supported images and PDFs stay viewable; files that cannot be displayed are greyed out ("can't be shown here").
   - In **Document**, view the chosen file with its path. Each tab keeps its place when you switch; Document is disabled until a file is chosen. The chosen document stays selected when agents edit other files, and open documents check for changes every two seconds. Drag the divider to resize the panes. Browsing is available during agent turns and does not notify the agents.
   - **Tables and pointing.** A ```` ```csv ```` block in a Markdown document shows as a table with
@@ -168,7 +169,7 @@ worker's, as their panels list them ("<provider> default" for CLI default).
     errors show as `#REF`, `#CYCLE`, `#DIV/0` or `#VALUE`. Click a cell to point at it: a chip appears by
     the message box, and your next message ends with one `[pointing at: …]` line naming the cell, its value,
     its row and column labels and its formula (✕ on a chip drops it; commands never carry it). A
-    `[[D4]]` or `[[runs!D4]]` in the chat highlights that cell in the shown document while you hover it.
+    `[[D4]]` or `[[runs!D4]]` in the chat highlights that cell in the shown document while you hover it, and clicking it reopens the side pane to Document if closed.
   - **Diagrams.** A ```` ```mermaid ```` block is drawn as a diagram (Mermaid, loaded only for documents
     that have one; a diagram with an error shows Mermaid's message). In a flowchart, click a box to point
     at it the same way (`[pointing at: diagram box Worker ("The worker") in …]`), and `[[Worker]]` in the
@@ -188,21 +189,20 @@ worker's, as their panels list them ("<provider> default" for CLI default).
     message box offer them (**📄 Show notes.md**; ✕ dismisses, your next message clears them). With
     **Follow mentions** on (Document's bar; off by default, remembered by this browser only), the first
     file named is shown at once instead; otherwise the chosen document stays as it is.
-- **Terminal** (below Explorer/Document, collapsed): a shell on this computer, in the room's
-  folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening it starts a
-  fresh shell; collapsing it, reloading the page or stopping the server ends it. It appears only
-  in pages opened on this computer (`127.0.0.1` or `localhost`); see **Access and limits**.
-- **Notes** (in the same place, collapsed; only one of Notes and Terminal is open, so opening
-  Notes ends the shell): your own free-text notes for this room's folder. **New**, a list of
-  notes (title and last-saved date), and an editor with **Save** and **Remove**; a note's first
-  line is its title. A note is saved only by **Save**; **Remove** asks inside the pane first.
-  Unsaved changes are never dropped without asking: the pane asks before another note, New,
-  collapsing it, opening the Terminal or switching room in this window; leaving or reloading the
-  page gets the browser's leave-page warning, and the automatic refresh after a code change keeps
-  them. Notes are Markdown files in `~/.local/share/agent-room/notes/<hash of the room folder>/`,
-  one per note, named by time and random letters (never the title): never in the room's folder,
-  never replicated, and the agents are not told about them. Like the Terminal, only in pages opened on this
-  computer.
+  - **My notes** (local pages only: `127.0.0.1` or `localhost`): your own free-text notes for this room's folder (separate from a discussion's `notes.md`). **New**, a list of
+    notes (title and last-saved date), and an editor with **Save** and **Remove**; a note's first
+    line is its title. A note is saved only by **Save**; **Remove** asks inside the tab first.
+    Unsaved changes are never dropped without asking: the tab asks before another note, New,
+    switching side-pane tabs, closing the side pane, or switching room in this window; leaving or reloading the
+    page gets the browser's leave-page warning, and the automatic refresh after a code change keeps
+    them. Notes are Markdown files in `~/.local/share/agent-room/notes/<hash of the room folder>/`,
+    one per note, named by time and random letters (never the title): never in the room's folder,
+    never replicated, and the agents are not told about them.
+  - **Terminal** (local pages only: `127.0.0.1` or `localhost`; see **Access and limits**): a shell on this computer, in the room's
+    folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening the tab starts a
+    fresh shell; switching to another tab or closing the side pane hides the terminal while keeping
+    the shell running (shown by a green dot on the **Terminal** tab). Click **End shell** inside the
+    tab to stop it (reloading the page or stopping the server also ends it).
 - **Transcripts** are in each discussion's (and brainstorm's) `transcripts/` folder, under **Explorer**. On an
   earlier session's transcript, **Send to agents** asks the discussion agents to read it as
   background; it does not resume its sessions.
