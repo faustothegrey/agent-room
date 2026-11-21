@@ -1805,7 +1805,8 @@ async function closeNamedDiscussion(ctx, name, { extraLine = null, rethrow = fal
     const spec = parseSpec(target.workerSpec ?? 'claude', true);
     const writer = `${spec.provider[0].toUpperCase() + spec.provider.slice(1)} (${modelLabel(spec.provider, spec.model)})`;
     note(ctx, `Closing ${d.name}: ${writer} is writing the closing statement…`);
-    const statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports }, target.closingAgent?.());
+    const onFormatNote = (text, err) => { log(target, `_(${text})_\n\n`); note(ctx, text, err); };
+    const statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports, onFormatNote }, target.closingAgent?.());
     const cleanupLine = extraLine ? null : await cleanupMergedOnClose(target, d.name).catch((err) => {
       const msg = `Worker worktree/branch cleanup failed (${err.message}): nothing removed.`;
       note(ctx, `✗ ${msg}`, true);
@@ -2788,6 +2789,67 @@ export function summarySteps(summary) {
   if (!Number.isSafeInteger(n) || n < 1) return null;
   return n;
 }
+function nextStepBlocks(summary) {
+  const lines = String(summary ?? '').split('\n');
+  const start = lines.findIndex((l) => /^[\s*_#-]*Next step[\s*_:]*$/i.test(l));
+  if (start < 0) return { lines, start, end: lines.length, sectionLines: [], blocks: [] };
+  let end = lines.findIndex((l, i) => i > start && NEXT_STEP_END(l));
+  if (end < 0) end = lines.length;
+  const sectionLines = lines.slice(start + 1, end);
+  const blocks = [];
+  sectionLines.forEach((l, i) => {
+    if (!BLOCK_LABEL.test(l)) return;
+    let j = i + 1;
+    while (j < sectionLines.length && !sectionLines[j].trim()) j++;
+    const from = j;
+    while (j < sectionLines.length && QUOTED.test(sectionLines[j])) j++;
+    if (j > from) blocks.push({ label: i, from, to: j });
+  });
+  return { lines, start, end, sectionLines, blocks };
+}
+function isInlineMultiLineInstruction(summary, instr) {
+  if (!instr?.text || !instr.text.includes('\n')) return false;
+  return nextStepBlocks(summary).blocks.length === 0;
+}
+function linesOutsideInstruction(summary) {
+  const { lines, start, end, sectionLines, blocks } = nextStepBlocks(summary);
+  if (start < 0) return lines;
+  if (blocks.length === 1) {
+    const b = blocks[0];
+    return [...lines.slice(0, start + 1 + b.from), ...lines.slice(start + 1 + b.to)];
+  }
+  const section = sectionLines.join('\n');
+  const openIdx = section.search(INLINE_OPEN);
+  if (openIdx < 0) return lines;
+  const closeIdx = Math.max(section.lastIndexOf('"'), section.lastIndexOf('”'));
+  if (closeIdx <= openIdx) return lines;
+  const strippedSection = (section.slice(0, openIdx) + section.slice(closeIdx + 1)).split('\n');
+  return [...lines.slice(0, start + 1), ...strippedSection, ...lines.slice(end)];
+}
+// Checks a newly drafted or revised summary before other agents review it. Returns a list of problems.
+export function checkSummary(summary, { autoDev = null } = {}) {
+  const mode = typeof autoDev === 'string' ? autoDev : autoDev?.status ?? null;
+  const problems = [];
+  const instr = summaryInstruction(summary);
+  if (instr?.error) problems.push(instr.error);
+  else if (isInlineMultiLineInstruction(summary, instr)) {
+    problems.push('its Next step uses inline quotes for a multi-line instruction (use "Send to the Worker:" alone on its line followed by a > block quote)');
+  }
+  if (mode === 'running') {
+    const outcome = summaryOutcome(summary);
+    if (!outcome) problems.push('the summary has no Outcome line (end with Outcome: SEND, Outcome: FINISH or Outcome: WAIT FOR USER)');
+    else if (outcome === 'SEND' && !instr) problems.push('the summary says SEND, but its Next step has no instruction for the worker');
+    const stepsLines = linesOutsideInstruction(summary).filter((l) => /^[\s*_`-]*Steps left:/i.test(l));
+    if (stepsLines.length > 0 && (stepsLines.length > 1 || summarySteps(summary) === null)) {
+      problems.push('Steps left: must be a whole number above 0 just before the Outcome line');
+    }
+  } else if (mode === 'paused') {
+    const outcome = summaryOutcome(summary);
+    if (outcome === 'SEND') problems.push('auto dev is paused: Outcome must be FINISH or WAIT FOR USER, not SEND');
+    else if (!outcome) problems.push('the summary has no Outcome line (end with Outcome: FINISH or Outcome: WAIT FOR USER)');
+  }
+  return problems;
+}
 function latestAgreed(ctx) {
   const t = ctx.state.transcript;
   for (let i = t.length - 1; i >= 0; i--) if (t[i].outcome === 'agreed') return { index: i, instruction: summaryInstruction(t[i].text), steps: summarySteps(t[i].text) };
@@ -2903,6 +2965,9 @@ function decide(ctx, run, status) {
   const s = { index: ctx.state.transcript.length - 1, instruction: summaryInstruction(result.text) };
   if (!s.instruction) return pauseAutoDev(ctx, 'the summary says SEND, but its Next step has no instruction for the worker');
   if (s.instruction.error) return pauseAutoDev(ctx, `the instruction can't be sent: ${s.instruction.error}`);
+  if (isInlineMultiLineInstruction(result.text, s.instruction)) {
+    return pauseAutoDev(ctx, 'the instruction can\'t be sent: its Next step uses inline quotes for a multi-line instruction (use "Send to the Worker:" alone on its line followed by a > block quote)');
+  }
   const steps = summarySteps(result.text);
   if (steps !== null) {
     const proposed = Math.min(15, run.cycle + steps + 2);
@@ -3442,12 +3507,18 @@ async function runSummary(ctx, auto = false, extra) {
   // A paused auto dev run: this summary (asked for, or after a User round) may finish it.
   const paused = !extra && ctx.autoDev?.status === 'paused' ? ctx.autoDev : null;
   if (paused) extra = pausedTask(paused);
+  const autoDevMode = paused ? 'paused' : (extra && ctx.autoDev?.status === 'running' ? 'running' : null);
   let started = 0;
   let turns = 0;
   let used;
   log(ctx, auto ? '_(auto-summary)_\n\n' : '_(summary requested)_\n\n');
   ctx.busy = true;
   const { status, result } = await ctx.room.summary({ extra,
+    check: (text) => checkSummary(text, { autoDev: autoDevMode }),
+    onFormatNote(text, err) {
+      log(ctx, `_(${text})_\n\n`);
+      note(ctx, text, err);
+    },
     onTurnStart(agent, { turn, of }) {
       started = Date.now();
       const label = `${agent.name} (summary, turn ${turn} of at most ${of})`;

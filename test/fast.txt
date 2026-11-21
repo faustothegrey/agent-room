@@ -230,3 +230,6 @@ agentUsageLine formats only the agent's own totals and provider quota, with none
 discussion and brainstorm prompts (including summary turns) start with each agent's own usage line from live totals and cached quota
 closing one of two open discussions removes it from the other page's open list once its quit finishes
 checkWorkerReport and formattedTurn: good reports, Tested/Docs rules, conflict stop, pure catch-up, and generic one-retry helper
+summary format check: draft fixed on retry (only corrected version is reviewed), reviewer PASS not checked, revision still wrong after one retry, and retry answered with PASS keeps first reply
+closingStatement format check: fixed on retry and still wrong after one retry
+checkSummary: inline-form rule, Outcome and Steps left rules while running and while paused, and auto dev blocks invalid instructions

@@ -5318,3 +5318,53 @@ test('worker report format retry flow: retry that changes HEAD keeps changes, lo
   const place = await workerPlace(ctx.cwd, name);
   assert.equal((await mergeReadiness(ctx, place)).canMerge, true, 'recordTested ran against the new HEAD after retry');
 });
+
+test('checkSummary: inline-form rule, Outcome and Steps left rules while running and while paused, and auto dev blocks invalid instructions', async () => {
+  const { checkSummary } = await import('../src/ui.mjs');
+
+  // 1. Missing Next step is not a problem by itself; one-line inline instruction (with quotes inside) is fine; multi-line inline instruction is rejected.
+  assert.deepEqual(checkSummary('**Agreed**\n- point only'), []);
+  assert.deepEqual(checkSummary('**Next step**\n- Send to the Worker: "Fix \\"the\\" test on one line."'), []);
+  assert.match(checkSummary('**Next step**\n- Send to the Worker: "Line one.\nLine two."').join('\n'),
+    /uses inline quotes for a multi-line instruction/);
+  assert.deepEqual(checkSummary('**Next step**\n- Send to the Worker:\n> Line one.\n> Line two.'), []);
+  assert.match(checkSummary('**Next step**\n- Send to the Worker: <angle>').join('\n'), /no quoted instruction/);
+
+  // 2. While auto dev is running: Outcome required (SEND, FINISH or WAIT FOR USER); SEND requires an instruction; Steps left (if any) must be a whole number > 0 just before Outcome.
+  assert.match(checkSummary('**Agreed**\n- x', { autoDev: 'running' }).join('\n'), /no Outcome line/);
+  assert.match(checkSummary('**Agreed**\n- x\n\nOutcome: SEND', { autoDev: 'running' }).join('\n'), /says SEND, but its Next step has no instruction/);
+  assert.deepEqual(checkSummary('**Agreed**\n- x\n\nOutcome: FINISH', { autoDev: 'running' }), []);
+  assert.deepEqual(checkSummary('**Agreed**\n- x\n\nOutcome: WAIT FOR USER', { autoDev: 'running' }), []);
+  assert.deepEqual(checkSummary('**Next step**\n- Send to the Worker: "Do it"\n\nSteps left: 3\nOutcome: SEND', { autoDev: 'running' }), []);
+  for (const badSteps of ['Steps left: 0', 'Steps left: -2', 'Steps left: 1.5', 'Steps left: nope', 'Steps left: 3\nextra line']) {
+    assert.match(
+      checkSummary(`**Next step**\n- Send to the Worker: "Do it"\n\n${badSteps}\nOutcome: SEND`, { autoDev: 'running' }).join('\n'),
+      /Steps left: must be a whole number above 0 just before the Outcome line/,
+    );
+  }
+  // A "Steps left:" line inside a block-quoted instruction is instruction text, not metadata.
+  assert.deepEqual(
+    checkSummary('**Next step**\n- Send to the Worker:\n> Keep Steps left: 0 as text.\n\nOutcome: SEND', { autoDev: 'running' }),
+    [],
+  );
+
+  // 3. While auto dev is paused: Outcome must be FINISH or WAIT FOR USER (never SEND or missing).
+  assert.deepEqual(checkSummary('**Agreed**\n- done\n\nOutcome: FINISH', { autoDev: 'paused' }), []);
+  assert.deepEqual(checkSummary('**Agreed**\n- wait\n\nOutcome: WAIT FOR USER', { autoDev: 'paused' }), []);
+  assert.match(checkSummary('**Next step**\n- Send to the Worker: "Do it"\n\nOutcome: SEND', { autoDev: 'paused' }).join('\n'),
+    /auto dev is paused: Outcome must be FINISH or WAIT FOR USER, not SEND/);
+  assert.match(checkSummary('**Agreed**\n- no outcome', { autoDev: 'paused' }).join('\n'), /no Outcome line/);
+
+  // 4. In auto dev, a summary whose multi-line inline instruction is not fixed on retry pauses the run and is never sent.
+  const ctx = await scriptedCtx(['spoke', 'PASS', 'PASS', summaryWith('Line 1\nLine 2', 'SEND'), 'PASS', 'PASS']);
+  ctx.discussion = { name: 'test-disc' };
+  ctx.autoDev = { status: 'running', cycle: 1, limit: 5, waiting: false };
+  ctx.notes = [];
+  ctx.docs = { ...ctx.docs, broadcast: (s, ev) => { if (ev.type === 'note') ctx.notes.push(ev.text); } };
+  ctx.workerReports = [{ text: 'worker done', run: ctx.autoDev, retry: false, owner: 'test-disc' }];
+  await handleLine('/autodev report', ctx);
+  assert.equal(ctx.autoDev.status, 'paused');
+  assert.match(ctx.autoDev.reason, /uses inline quotes for a multi-line instruction/);
+  assert.ok(ctx.notes.some((n) => n.startsWith('Format check: A\'s summary ') && n.includes('uses inline quotes for a multi-line instruction')));
+  assert.ok(ctx.notes.some((n) => n.startsWith('Format check: still wrong:')));
+});
