@@ -456,7 +456,7 @@ function header(ctx) {
     transcript: ctx.logPath ? relative(ctx.cwd, ctx.logPath).split(sep).join('/') : null,
     checkpoints: checkpoints(ctx), // the saved discussions, for Explorer's Resume (see "Checkpoints")
     closedDiscussions: closedDiscussions(ctx),
-    closingDiscussions: [...(shopOf(ctx).closing?.entries() ?? [])].filter(([, c]) => c.waiting).map(([name]) => name),
+    closingDiscussions: Object.fromEntries([...(shopOf(ctx).closing?.entries() ?? [])].map(([name, c]) => [name, c.waiting ? 'waiting' : 'writing'])),
     back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
     code: ctx.code ?? null, // the version this process runs (see codeInfo)
     rollbacks: [...(shopOf(ctx).rollbacks?.values() ?? [])].map(({ name, status, report, commit }) => ({ name, status, report, commit })),
@@ -905,7 +905,7 @@ function saveCheckpoint(ctx) {
     });
     ctx.checkpointError = null;
   } catch (err) {
-    if (ctx.checkpointError !== err.message) note(ctx, `✗ Couldn't save this ${ctx.state.brainstorm ? 'brainstorm' : 'discussion'}'s checkpoint: ${err.message}. Resume would continue from an earlier one.`, true);
+    if (ctx.checkpointError !== err.message) note(ctx, `✗ Couldn't save this ${ctx.state.brainstorm ? 'brainstorm' : 'discussion'}'s checkpoint: ${err.message}. ${ctx.state.brainstorm ? 'Resume' : 'Continue'} would continue from an earlier one.`, true);
     ctx.checkpointError = err.message;
   }
 }
@@ -1397,7 +1397,7 @@ async function convertBrainstorm(ctx, ref) {
   }
   showHeader(ctx);
   if (open) refreshWorker(open).catch(() => {});
-  note(ctx, `Turned the brainstorm ${name} into the discussion ${name}, in discussions/: ${open ? 'its agents carry on' : 'Resume it to carry on'} with the same sessions, told of the new folder; the worker starts fresh with its first task.`);
+  note(ctx, `Turned the brainstorm ${name} into the discussion ${name}, in discussions/: ${open ? 'its agents carry on' : 'Continue it to carry on'} with the same sessions, told of the new folder; the worker starts fresh with its first task.`);
 }
 
 // /delete brainstorms/<name> (Delete): its folder (transcripts, drawings) and checkpoint are removed
@@ -1627,7 +1627,7 @@ async function newDiscussionBeside(ctx) {
   if (fresh(ctx)) return note(ctx, 'No discussion started yet: your next message starts a new one.');
   const next = await openBeside(ctx);
   goto(ctx, next);
-  note(ctx, `New discussion: ${ctx.discussion?.name ?? 'this one'} stays open (${ctx.state.brainstorm ? 'Brainstorms' : 'Discussions'}: Resume shows it again).`);
+  note(ctx, `New discussion: ${ctx.discussion?.name ?? 'this one'} stays open (${ctx.state.brainstorm ? 'Brainstorms: Go to' : 'Discussions: Continue'} shows it again).`);
 }
 // /brainstorm on the screen: beside the open discussions and brainstorms (in this context if it is empty).
 async function newBrainstormBeside(ctx) {
@@ -2319,7 +2319,7 @@ export async function catchUpWithBranch(ctx, name) {
   const d = discussionRef(join(ctx.cwd, 'discussions'), name);
   if (!d) throw new Error(`No discussion "${name}".`);
   const opened = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, d.name));
-  if (!opened) throw new Error(`Resume ${d.name} first so its worker can catch up.`);
+  if (!opened) throw new Error(`Continue ${d.name} first so its worker can catch up.`);
   const place = await lanePlace(opened, d.name);
   if (place.disabled) throw new Error(place.disabled);
   const state = await mergeReadiness(opened, place);
@@ -3397,7 +3397,7 @@ export async function restart(hub, rooms, values) {
 
 function removedHint(command, name) {
   const n = name || '<name>';
-  if (command === 'pause') return 'Pause is gone: every discussion saves itself after each round, and Resume continues it where it stopped.';
+  if (command === 'pause') return 'Pause is gone: every discussion saves itself after each round, and Continue (or /resume) continues it where it stopped.';
   if (command === 'autosummary') return 'Auto-summarize is always on now (in discussions, not brainstorms): a summary follows every round in which an agent spoke.';
   return `/${command} is now /resume ${n} (it continues where the discussion stopped, or starts from its handoff if it was never saved), or /fresh ${n} to start new sessions from its handoff.`;
 }

@@ -1594,14 +1594,47 @@ test('Close waits for queued work, refuses instructions and can be cancelled', a
   const queued = { owner: name, origin: ctx };
   lane.tasks.push(queued);
   const closing = handleLine('/close', ctx);
-  assert.deepEqual(ctx.screen.room.closingDiscussions, [name]);
+  assert.deepEqual(ctx.screen.room.closingDiscussions, { [name]: 'waiting' });
   queueWork(ctx, 'not accepted');
   assert.deepEqual(lane.tasks, [queued]);
   assert.equal(cancelClose(ctx, name), true);
   await closing;
+  assert.deepEqual(ctx.screen.room.closingDiscussions, {});
   assert.equal(ctx.discussion.name, name);
   assert.deepEqual(ctx.screen.room.closedDiscussions, []);
   lane.tasks.length = 0;
+});
+
+test('Close reports waiting then writing phases in room.closingDiscussions, and cancelClose works only while waiting', async () => {
+  const { cancelClose } = await import('../src/ui.mjs');
+  const ctx = await savedRoom(await tmp('close-phases-'), 'close-phases');
+  await handleLine('decide', ctx);
+  const name = ctx.discussion.name, lane = workerLane(ctx, name);
+  let finishTask, startWriting, finishWriting;
+  const writingStarted = new Promise((r) => { startWriting = r; });
+  const writingDone = new Promise((r) => { finishWriting = r; });
+  const taskDone = new Promise((r) => { finishTask = r; });
+  const queued = { owner: name, origin: ctx, finished: taskDone };
+  lane.tasks.push(queued);
+  ctx.closingAgent = () => ({
+    name: 'W',
+    turn: async () => {
+      startWriting();
+      await writingDone;
+      return 'Statement: pending-instructions.md';
+    },
+  });
+  const closing = handleLine('/close', ctx);
+  assert.deepEqual(ctx.screen.room.closingDiscussions, { [name]: 'waiting' });
+  lane.tasks.length = 0;
+  finishTask();
+  await writingStarted;
+  assert.deepEqual(ctx.screen.room.closingDiscussions, { [name]: 'writing' });
+  assert.equal(cancelClose(ctx, name), false);
+  finishWriting();
+  await closing;
+  assert.deepEqual(ctx.screen.room.closingDiscussions, {});
+  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
 });
 
 test('a reopened discussion retains its statement briefing across restart before its first message', async () => {
