@@ -3252,7 +3252,7 @@ test('a worker task from a discussion with no full checkpoint yet is recorded to
   let saved;
   await eventually(() => existsSync(file) && !!(saved = JSON.parse(readFileSync(file, 'utf8'))).work?.running?.before);
   assert.deepEqual([saved.fresh, saved.summary, saved.sessions, saved.work.running.task], [true, null, undefined, 'early task']);
-  assert.deepEqual(ctx.screen.room.checkpoints.find((c) => c.name === '2026-11-01-old'), { name: '2026-11-01-old', at: saved.at, kind: 'fresh', summary: false });
+  assert.deepEqual(ctx.screen.room.checkpoints.find((c) => c.name === '2026-11-01-old'), { name: '2026-11-01-old', at: saved.at, kind: 'fresh', summary: false, title: '2026-11-01-old' });
 
   const after = await savedRoom(cwd, 'unsaved-2');
   await handleLine('/resume 2026-11-01-old', after);

@@ -957,7 +957,7 @@ test('the attach row (and pointing chips) is shown for a brainstorm, and the att
   const $ = (id) => els[id] || (els[id] = node(id));
   const harness = new Function('$', 'document', 'box',
     'let room = null, viewing = null, peeking = null, localInput = true, attaching = false, pending = [], viewExpired = false, viewNotice = null, localThinking = null, localWorking = null, replica = { node: "local", own: {}, received: [] };\n' +
-    'const updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, renderAutoDev = () => {}, updateCloseButton = () => {}, talkStatus = () => "", receivedTime = () => "";\n' +
+    'const updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, renderAutoDev = () => {}, updateCloseButton = () => {}, talkStatus = () => "", receivedTime = () => "", currentTitle = () => "", updateTabTitle = () => {}, displayTitle = (n, t) => t || n || "";\n' +
     viewCode + '\n' + attachCode + '\n' +
     'return { update: (r, v = null, p = null) => { room = r; viewing = v; peeking = p; updateReplicaView(); } };'
   )($, { createElement: node, createTextNode: () => ({}) }, node('textarea'));
@@ -1069,13 +1069,14 @@ test('the room header shows the folder basename, puts the full path in #replica-
 
   // Exercise setRoom and updateReplicaHeader from the page script.
   const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const titleCode = source.slice(source.indexOf('function displayTitle('), source.indexOf('let subtab ='));
   const replicaCode = source.slice(source.indexOf('const receivedTime ='), source.indexOf('// The status under the title'));
   const roomCode = source.slice(source.indexOf('let room = null;\nfunction setRoom('), source.indexOf('// Settings stay outside'));
   const node = (tag = 'span') => ({ tag, textContent: '', title: '', hidden: false, dataset: {}, children: [],
     replaceChildren(...items) { this.children = items; }, append(...items) { this.children.push(...items); } });
   const els = { 'room-name': node('b'), 'replica-header': node('span'), disc: node('span'), code: node('span') };
   const harness = new Function('$', 'document', 'location', 'viewing', 'renderAutoDev',
-    'let replica = null;\n' + replicaCode + '\nfunction updateReplicaView() { updateReplicaHeader(); }\n' + roomCode +
+    'let replica = null;\n' + titleCode + '\n' + replicaCode + '\nfunction updateReplicaView() { updateReplicaHeader(); }\n' + roomCode +
     '\nreturn { setRoom, setReplica: (r) => { replica = r; updateReplicaHeader(); } };')(
     (id) => els[id], { createElement: (tag) => node(tag) }, { port: '5566' }, null, () => {});
 
@@ -1193,6 +1194,7 @@ test('right pane three tabs, header disc-workers, and docLabel behavior', async 
 
     // Exercise updateDiscWorkers
     const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+    const titleCode = source.slice(source.indexOf('function displayTitle('), source.indexOf('let subtab ='));
     const workerCode = source.slice(source.indexOf('function updateDiscWorkers() {'), source.indexOf('function updateReplicaView() {'));
     const node = (tag = 'span') => ({
       tag, textContent: '', style: {}, children: [], hidden: false,
@@ -1200,32 +1202,32 @@ test('right pane three tabs, header disc-workers, and docLabel behavior', async 
       replaceChildren(...items) { this.children = items; },
     });
     const discWorkers = node('div');
-    const fn = new Function('$', 'document', 'room', workerCode + '; return updateDiscWorkers;')((id) => id === 'disc-workers' ? discWorkers : null, { createElement: node }, {
+    const fn = new Function('$', 'document', 'room', titleCode + '\n' + workerCode + '; return updateDiscWorkers;')((id) => id === 'disc-workers' ? discWorkers : null, { createElement: node }, {
       open: [
-        { title: 'Topic A', working: true },
-        { title: 'Topic B', working: false },
-        { title: 'Topic C', working: 'W' },
+        { active: 'discussions/2026-11-13-topic-a', title: 'Topic A', working: true },
+        { active: 'discussions/2026-11-13-topic-b', title: 'Topic B', working: false },
+        { active: 'discussions/2026-11-13-topic-c', title: '2026-11-13-topic-c', working: 'W' },
       ],
     });
     fn();
     assert.equal(discWorkers.hidden, false);
     assert.equal(discWorkers.children.length, 2);
     assert.match(discWorkers.children[0].children[1], /Topic A · Worker is working/);
-    assert.match(discWorkers.children[1].children[1], /Topic C · Worker is working/);
+    assert.match(discWorkers.children[1].children[1], /topic c · Worker is working/);
 
     // Exercise docLabel
-    const labelCode = source.slice(source.indexOf('function docLabel(file) {'), source.indexOf('function showDoc(file) {'));
-    const docLabelFn = new Function('replica', 'peek',
+    const labelCode = source.slice(source.indexOf('function docLabel(file) {'), source.indexOf('function currentTitle() {'));
+    const docLabelFn = new Function('replica', 'peek', 'room',
       'const isDiscussion = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(name);\n' +
       'const SECTIONS = { archive: "Archived", deferred: "Deferred" };\n' +
-      labelCode + '; return docLabel;')(null, null);
+      titleCode + '\n' + labelCode + '; return docLabel;')(null, null, null);
     assert.equal(docLabelFn(null), 'No document shown.');
     assert.equal(docLabelFn('README.md'), 'Room checkout · README.md');
     assert.equal(docLabelFn('src/index.js'), 'Room checkout · src/index.js');
-    assert.equal(docLabelFn('discussions/2026-11-13-topic/notes.md'), '2026-11-13-topic · notes.md');
-    assert.equal(docLabelFn('discussions/archive/2026-11-10-old/notes.md'), '2026-11-10-old · notes.md');
+    assert.equal(docLabelFn('discussions/2026-11-13-topic/notes.md'), 'topic · notes.md');
+    assert.equal(docLabelFn('discussions/archive/2026-11-10-old/notes.md'), 'old · notes.md');
     assert.equal(docLabelFn('discussions/README.md'), 'Room checkout · discussions/README.md');
-    assert.equal(docLabelFn('__received/2026-11-13-topic/peer1/abc123/notes.md'), '2026-11-13-topic · notes.md');
+    assert.equal(docLabelFn('__received/2026-11-13-topic/peer1/abc123/notes.md'), 'topic · notes.md');
   } finally {
     s.close();
   }
@@ -1307,7 +1309,7 @@ test('peek lifecycle: tab indicator, banner, Back to current, revealDoc immunity
   await harness.renderExplorer();
   const banner = els['pane'].children[0]?.children?.[0]; // inside #files container
   assert.ok(banner);
-  assert.equal(banner.children[0].children[0].textContent, '2026-11-13-other');
+  assert.equal(banner.children[0].children[0].textContent, 'other');
   const backBtn = banner.children[1];
   assert.equal(backBtn.textContent, 'Back to current');
 
@@ -1576,9 +1578,9 @@ test('Discussions tab: active discussions keep the User\'s order in localStorage
     const end = list.findIndex((c, i) => i > heading && c.tag === 'h3');
     return list.slice(heading + 1, end).filter((c) => c.className.includes('discussion-row'));
   };
-  const names = () => rows().map((r) => r.children.find((c) => c.className === 'discussion-block').children[0].textContent);
+  const names = () => rows().map((r) => r.children.find((c) => c.className === 'discussion-block').children[0].title.replace('discussions/', ''));
   const menuButton = (name, label) => {
-    const row = rows().find((r) => r.children.find((c) => c.className === 'discussion-block').children[0].textContent === name);
+    const row = rows().find((r) => r.children.find((c) => c.className === 'discussion-block').children[0].title === 'discussions/' + name);
     return row.children.find((c) => c.tag === 'details').children[1].children.find((b) => b.textContent === label);
   };
 
@@ -1765,7 +1767,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
 
   const list = els['discussions-pane'].firstChild;
   const rows = list.children.filter((c) => c.tag === 'div' && c.className.includes('discussion-row'));
-  const rowFor = (name) => rows.find((r) => r.children.find((c) => c.className !== 'drag-handle')?.children?.[0]?.textContent === name); // active rows start with the drag handle
+  const rowFor = (name) => rows.find((r) => r.children.find((c) => c.className !== 'drag-handle')?.children?.[0]?.title === 'discussions/' + name); // active rows start with the drag handle
   const resumeBtn = (name) => rowFor(name).children.find((c) => c.tag === 'button' && c.textContent === 'Resume');
   const label = (name) => rowFor(name).children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent;
   assert.equal(label('2026-11-15-current'), 'current · started');
@@ -1780,7 +1782,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
     assert.equal(moveButton('2026-11-14-closed', action).disabled, false);
   }
   const sectionLabel = (name) => list.children.filter((c) => c.tag === 'details').flatMap((c) => c.children)
-    .find((r) => r.className?.includes('discussion-row') && r.children[0].children[0].textContent === name)
+    .find((r) => r.className?.includes('discussion-row') && r.children[0].children[0].title.endsWith('/' + name))
     .children[0].children.find((c) => c.className === 'local-label').textContent;
   assert.equal(sectionLabel('2026-11-12-archived'), 'archived');
   assert.equal(sectionLabel('2026-11-11-archived-closed'), 'archived · closed');
@@ -1830,8 +1832,8 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   // 4. While peeking, the current discussion offers Unpeek to return to it.
   const freshRow = (name) => els['discussions-pane'].firstChild.children
     .filter((c) => c.tag === 'div' && c.className?.includes('discussion-row'))
-    .find((r) => r.children.find((c) => c.className === 'discussion-block')?.children[0].textContent === name);
-  harness.setPeeking({ title: '2026-11-14-closed' });
+    .find((r) => r.children.find((c) => c.className === 'discussion-block')?.children[0].title === 'discussions/' + name);
+  harness.setPeeking({ name: '2026-11-14-closed', title: '2026-11-14-closed' });
   harness.renderDiscussions();
   const unpeek = freshRow('2026-11-15-current').children.find((c) => c.tag === 'button' && c.textContent === 'Unpeek');
   assert.ok(unpeek);
@@ -1843,7 +1845,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
 
   harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-15-current', started: false, open: [] });
   harness.renderDiscussions();
-  const current = els['discussions-pane'].firstChild.children.find((r) => r.className?.includes('discussion-row') && r.children.find((c) => c.className === 'discussion-block')?.children[0].textContent === '2026-11-15-current');
+  const current = els['discussions-pane'].firstChild.children.find((r) => r.className?.includes('discussion-row') && r.children.find((c) => c.className === 'discussion-block')?.children[0].title === 'discussions/2026-11-15-current');
   assert.equal(current.children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent, 'current');
 });
 
@@ -1940,8 +1942,8 @@ test('Brainstorms tab: rows by title with their actions, and an order of their o
   harness.renderDiscussions();
   harness.renderBrainstorms();
 
-  // Rows by title (the folder name without a checkpoint title), newest first at first.
-  assert.deepEqual(titles(), ['Current idea', 'Open idea', 'Closed idea', '2026-11-11-untitled']);
+  // Rows by display title (without date), newest first at first.
+  assert.deepEqual(titles(), ['Current idea', 'Open idea', 'Closed idea', 'untitled']);
   assert.equal(store.get(KEY), JSON.stringify(['2026-11-14-current', '2026-11-13-open', '2026-11-12-closed', '2026-11-11-untitled']));
   assert.equal(store.get(DKEY), JSON.stringify(['2026-11-10-d'])); // the Discussions order, apart
   assert.ok(row('Current idea').className.includes('in-use'));
@@ -1982,16 +1984,175 @@ test('Brainstorms tab: rows by title with their actions, and an order of their o
   // Move up / Move down change only the Brainstorms order.
   assert.equal(action('Current idea', 'Move up').disabled, true);
   action('Current idea', 'Move down').onclick();
-  assert.deepEqual(titles(), ['Open idea', 'Current idea', 'Closed idea', '2026-11-11-untitled']);
-  action('2026-11-11-untitled', 'Move up').onclick();
-  assert.deepEqual(titles(), ['Open idea', 'Current idea', '2026-11-11-untitled', 'Closed idea']);
+  assert.deepEqual(titles(), ['Open idea', 'Current idea', 'Closed idea', 'untitled']);
+  action('untitled', 'Move up').onclick();
+  assert.deepEqual(titles(), ['Open idea', 'Current idea', 'untitled', 'Closed idea']);
   assert.equal(store.get(KEY), JSON.stringify(['2026-11-13-open', '2026-11-14-current', '2026-11-11-untitled', '2026-11-12-closed']));
   assert.equal(store.get(DKEY), JSON.stringify(['2026-11-10-d']));
   // A new brainstorm goes on top; one turned into a discussion leaves this order only.
   harness.setFiles(files(['2026-11-12-closed', '2026-11-13-open', '2026-11-14-current', '2026-11-11-untitled', '2026-11-15-new']));
   harness.renderBrainstorms();
-  assert.equal(titles()[0], '2026-11-15-new');
+  assert.equal(titles()[0], 'new');
   harness.forgetOrder('2026-11-13-open', 'brainstorms');
   assert.ok(!JSON.parse(store.get(KEY)).includes('2026-11-13-open'));
   assert.equal(store.get(DKEY), JSON.stringify(['2026-11-10-d']));
+});
+
+test('displayTitle helper and UI titles hide YYYY-MM-DD- across rows, header, tab title, and peek/view', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return { toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(...c) { c.forEach((x) => s.add(x)); }, remove(...c) { c.forEach((x) => s.delete(x)); }, contains(cls) { return s.has(cls); } };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', disabled: false, hidden: false, children: [], dataset: {}, style: {}, classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; }, querySelector() { return null; }, addEventListener() {}, setAttribute() {}, getAttribute() { return null; },
+  });
+  const els = {}, document = { createElement: node, title: '' };
+  const harness = new Function('$', 'document', 'location', 'renderAutoDev', 'requestAnimationFrame', 'setInterval',
+    'let tab = "talk", replica = null, viewing = null, peeking = null, localThinking = null, localWorking = null, viewExpired = false, viewNotice = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane"), attaching = false, pending = [];\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, send = () => {}, notesGuard = (act) => act();\n' +
+    code + '\n' +
+    'return { displayTitle, setRoom, renderDiscussions, renderBrainstorms, showDoc, updateReplicaView,\n' +
+    '  setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; },\n' +
+    '  setReplica: (r) => { replica = r; },\n' +
+    '  setPeeking: (p) => { peeking = p; updateReplicaView(); },\n' +
+    '  setViewing: (v) => { viewing = v; updateReplicaView(); } };'
+  )((id) => els[id] || (els[id] = node(id)), document, { href: '' }, () => {}, (cb) => cb(), () => {});
+
+  // 1. displayTitle helper
+  assert.equal(harness.displayTitle('2026-11-20-remove-date', 'Remove date from titles'), 'Remove date from titles');
+  assert.equal(harness.displayTitle('2026-11-20-remove-date'), 'remove date');
+  assert.equal(harness.displayTitle('2026-11-20-remove-date', ''), 'remove date');
+  assert.equal(harness.displayTitle('2026-11-20-remove-date', null), 'remove date');
+  assert.equal(harness.displayTitle('2026-11-20-remove-date', '2026-11-20-remove-date'), 'remove date');
+  assert.equal(harness.displayTitle('2026-11-20-1014'), '1014');
+  assert.equal(harness.displayTitle('1014'), '1014');
+  assert.equal(harness.displayTitle('10-14'), '10 14');
+
+  // 2. Discussion rows (active, archived, deferred, received from peers) and Brainstorm rows
+  harness.setFiles([
+    'discussions/2026-11-20-with-title/notes.md',
+    'discussions/2026-11-19-same-as-folder/notes.md',
+    'discussions/2026-11-18-no-checkpoint/notes.md',
+    'discussions/archive/2026-11-17-old-one/notes.md',
+    'discussions/deferred/2026-11-16-later-one/notes.md',
+    'brainstorms/2026-11-20-current-idea/transcripts/session.md',
+    'brainstorms/2026-11-19-open-idea/transcripts/session.md',
+    'brainstorms/2026-11-18-closed-idea/transcripts/session.md',
+  ]);
+  harness.setReplica({
+    node: 'Mac', addresses: ['127.0.0.1:5566'], own: {}, peers: [],
+    received: [
+      { discussion: 'd-1', node: 'Linux', commit: 'abc', round: 2, name: '2026-11-15-peer-topic', title: 'Peer Topic', local: null },
+      { discussion: 'd-2', node: 'Linux', commit: 'def', round: 1, name: '2026-11-14-peer-raw', title: '2026-11-14-peer-raw', local: null },
+    ],
+  });
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-19-same-as-folder',
+    discussion: '2026-11-19-same-as-folder', // resume path storing folder name as title
+    started: true,
+    open: [
+      { active: 'discussions/2026-11-19-same-as-folder', title: '2026-11-19-same-as-folder', started: true, current: true, url: '/r/a/__room' },
+      { active: 'brainstorms/2026-11-20-current-idea', title: 'Current Idea', started: true, current: false, url: '/r/b/__room' },
+      { active: 'brainstorms/2026-11-19-open-idea', title: '2026-11-19-open-idea', started: true, current: false, url: '/r/c/__room' },
+    ],
+    checkpoints: [
+      { name: '2026-11-20-with-title', at: 'x', kind: 'full', title: 'Saved Discussion Title' },
+      { name: '2026-11-17-old-one', at: 'x', kind: 'full', title: 'Archived Title' },
+      { name: 'brainstorms/2026-11-18-closed-idea', at: 'x', kind: 'full', title: 'Closed Idea' },
+    ],
+  });
+  harness.renderDiscussions();
+  harness.renderBrainstorms();
+
+  const discList = els['discussions-pane'].firstChild;
+  const activeBtns = discList.children
+    .filter((c) => c.className?.includes('discussion-row'))
+    .map((r) => r.children.find((c) => c.className === 'discussion-block').children[0])
+    .map((b) => [b.textContent, b.title]);
+  assert.deepEqual(activeBtns, [
+    ['Saved Discussion Title', 'discussions/2026-11-20-with-title'],
+    ['same as folder', 'discussions/2026-11-19-same-as-folder'],
+    ['no checkpoint', 'discussions/2026-11-18-no-checkpoint'],
+    ['Peer Topic', 'discussions/2026-11-15-peer-topic'],
+    ['peer raw', 'discussions/2026-11-14-peer-raw'],
+  ]);
+  const sectionBtns = discList.children
+    .filter((c) => c.tag === 'details')
+    .flatMap((d) => d.children.filter((c) => c.className?.includes('discussion-row')))
+    .map((r) => r.children.find((c) => c.className === 'discussion-block').children[0])
+    .map((b) => [b.textContent, b.title]);
+  assert.deepEqual(sectionBtns, [
+    ['Archived Title', 'discussions/archive/2026-11-17-old-one'],
+    ['later one', 'discussions/deferred/2026-11-16-later-one'],
+  ]);
+
+  const brainRows = els['brainstorms-pane'].firstChild.children
+    .filter((c) => c.className?.includes('discussion-row'))
+    .map((r) => {
+      const block = r.children.find((c) => c.className === 'discussion-block');
+      return [block.children[0].textContent, block.children[0].title, block.children[1].textContent];
+    });
+  assert.deepEqual(brainRows, [
+    ['Current Idea', 'brainstorms/2026-11-20-current-idea', 'open'],
+    ['open idea', 'brainstorms/2026-11-19-open-idea', 'open'],
+    ['Closed Idea', 'brainstorms/2026-11-18-closed-idea', 'closed'],
+  ]);
+
+  // 3. Header (#disc), browser tab title, and peek/view titles (including folder-name titles)
+  assert.equal(els['disc'].textContent, 'same as folder');
+  assert.equal(document.title, 'same as folder · agent-room');
+
+  harness.showDoc('discussions/2026-11-20-with-title/notes.md');
+  assert.equal(document.title, 'Saved Discussion Title · notes.md · agent-room');
+  harness.showDoc(null);
+  assert.equal(document.title, 'same as folder · agent-room');
+
+  harness.setPeeking({ name: '2026-11-17-old-one', title: '2026-11-17-old-one', doc: null });
+  assert.equal(els['disc'].textContent, 'old one');
+  assert.equal(els['disc-status'].textContent, 'peeking at old one · read-only');
+  assert.equal(document.title, 'old one · agent-room');
+  assert.match(els['remote-view'].children[0].textContent, /^Peeking at old one\./);
+
+  harness.setPeeking(null);
+  harness.setViewing({ name: '2026-11-14-peer-raw', title: '2026-11-14-peer-raw', node: 'Linux', round: 1, discussion: 'd-2', commit: 'def' });
+  assert.equal(els['disc'].textContent, 'peer raw');
+  assert.equal(document.title, 'peer raw · agent-room');
+  harness.setViewing(null);
+
+  // Brainstorm grey status line shows only current / open / closed (no folder name)
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'brainstorms/2026-11-20-current-idea',
+    brainstorm: true,
+    discussion: 'Current Idea',
+    started: true,
+    open: [
+      { active: 'brainstorms/2026-11-20-current-idea', title: 'Current Idea', started: true, current: true, url: '/r/b/__room' },
+      { active: 'brainstorms/2026-11-19-open-idea', title: '2026-11-19-open-idea', started: true, current: false, url: '/r/c/__room' },
+    ],
+    checkpoints: [
+      { name: 'brainstorms/2026-11-18-closed-idea', at: 'x', kind: 'full', title: 'Closed Idea' },
+    ],
+  });
+  harness.renderBrainstorms();
+  const currentBrainRows = els['brainstorms-pane'].firstChild.children
+    .filter((c) => c.className?.includes('discussion-row'))
+    .map((r) => {
+      const block = r.children.find((c) => c.className === 'discussion-block');
+      return [block.children[0].textContent, block.children[0].title, block.children[1].textContent];
+    });
+  assert.deepEqual(currentBrainRows, [
+    ['Current Idea', 'brainstorms/2026-11-20-current-idea', 'current'],
+    ['open idea', 'brainstorms/2026-11-19-open-idea', 'open'],
+    ['Closed Idea', 'brainstorms/2026-11-18-closed-idea', 'closed'],
+  ]);
 });

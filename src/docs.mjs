@@ -1393,6 +1393,26 @@ function setThinking(name) {
 }
 const urlFor = (file) => file.split('/').map(encodeURIComponent).join('/');
 const BINARY_FILE = /\.(icns|ico|bmp|tiff?|heic|avif|zip|tar|gz|tgz|bz2|xz|7z|rar|zst|dmg|pkg|iso|bin|exe|dll|so|dylib|a|o|wasm|woff2?|ttf|otf|eot|mp3|wav|ogg|flac|m4a|aac|mp4|mov|webm|avi|mkv|sqlite3?|db|pyc|class|jar)$/i;
+// Display title for a discussion or brainstorm: the saved title when it isn't just the folder
+// name; otherwise the folder name with its leading YYYY-MM-DD- stripped and hyphens as spaces.
+function displayTitle(name, title) {
+  const saved = typeof title === 'string' ? title.trim() : '';
+  if (saved && saved !== name) return saved;
+  return String(name ?? '').replace(/^[0-9]{4}-[0-9]{2}-[0-9]{2}-/, '').replace(/-/g, ' ');
+}
+function discussionTitle(name, path = 'discussions/' + name) {
+  const saved = room?.open?.find((o) => o.active === path)?.title
+    ?? (room?.active === path ? room.discussion : null)
+    ?? room?.checkpoints?.find((c) => c.name === name)?.title;
+  return displayTitle(name, saved);
+}
+function brainstormTitle(name) {
+  const path = 'brainstorms/' + name;
+  const saved = room?.open?.find((o) => o.active === path)?.title
+    ?? (room?.active === path ? room.discussion : null)
+    ?? room?.checkpoints?.find((c) => c.name === path)?.title;
+  return displayTitle(name, saved);
+}
 // The right pane's three subtabs: Discussions, Explorer, Document. Each keeps its place while
 // another is shown: Explorer its tree and scroll position, Document its file and scroll position.
 let subtab = 'explorer', explorerMode = 'discussion', peek = null, lastActiveKey = undefined;
@@ -1438,13 +1458,26 @@ function docLabel(file) {
   if (file.startsWith('__received/')) {
     const [, d, node, , ...rest] = file.split('/');
     const rec = replica?.received?.find((l) => l.discussion === d && l.node === node);
-    const name = (peek?.kind === 'received' && peek.discussion === d ? peek.name : null) || rec?.local || rec?.name || d;
-    return name + ' · ' + rest.join('/');
+    const raw = (peek?.kind === 'received' && peek.discussion === d ? peek.name : null) || rec?.local || rec?.name || d;
+    const title = (peek?.kind === 'received' && peek.discussion === d ? peek.title : null) || rec?.title;
+    return displayTitle(raw, title) + ' · ' + rest.join('/');
   }
   const p = file.split('/');
-  if ((p[0] === 'discussions' || p[0] === 'brainstorms') && p.length >= 3 && isDiscussion(p[1])) return p[1] + ' · ' + p.slice(2).join('/');
-  if (p[0] === 'discussions' && p.length >= 4 && SECTIONS[p[1]] && isDiscussion(p[2])) return p[2] + ' · ' + p.slice(3).join('/');
+  if (p[0] === 'discussions' && p.length >= 3 && isDiscussion(p[1])) return discussionTitle(p[1], 'discussions/' + p[1]) + ' · ' + p.slice(2).join('/');
+  if (p[0] === 'brainstorms' && p.length >= 3 && isDiscussion(p[1])) return brainstormTitle(p[1]) + ' · ' + p.slice(2).join('/');
+  if (p[0] === 'discussions' && p.length >= 4 && SECTIONS[p[1]] && isDiscussion(p[2])) return discussionTitle(p[2], 'discussions/' + p[1] + '/' + p[2]) + ' · ' + p.slice(3).join('/');
   return 'Room checkout · ' + file;
+}
+function currentTitle() {
+  if (viewing) return displayTitle(viewing.name, viewing.title);
+  if (peeking) return displayTitle(peeking.name, peeking.title);
+  if (room) return displayTitle(room.active?.split('/').at(-1), room.discussion);
+  return '';
+}
+function updateTabTitle() {
+  if (doc) { document.title = docLabel(doc) + ' · agent-room'; return; }
+  const title = currentTitle();
+  document.title = title && (viewing || peeking || room?.active || room?.brainstorm) ? title + ' · agent-room' : 'agent-room';
 }
 // A file chosen (here, on another page, or by the room) opens in Document, which comes to the front.
 function showDoc(file) {
@@ -1465,9 +1498,9 @@ function showDoc(file) {
   $('doc-menu').open = false;
   $('current').title = doc || ''; // the full path, on hover
   $('tab-document').disabled = !doc;
-  if (!doc) { docpane.replaceChildren(); if (subtab === 'document') showSub('explorer'); return; }
+  if (!doc) { docpane.replaceChildren(); updateTabTitle(); if (subtab === 'document') showSub('explorer'); return; }
   if (!same) { docpane.innerHTML = '<iframe id="doc"></iframe>'; docpane.firstChild.src = urlFor(doc); }
-  document.title = doc + ' · agent-room';
+  updateTabTitle();
   showSub('document');
 }
 // The file name's ▾ menu: the shown file's siblings (files in its folder), to switch without Explorer.
@@ -1568,7 +1601,7 @@ function updateReplicaHeader() {
 function talkStatus() {
   if (tab === 'work') return localWorking ? localWorking + ' is working' : 'idle';
   if (!room) return '';
-  if (peeking) return 'peeking at ' + peeking.title + ' · read-only';
+  if (peeking) return 'peeking at ' + displayTitle(peeking.name, peeking.title) + ' · read-only';
   if (viewing) return 'read-only';
   if (localThinking) return localThinking + ' is thinking';
   if (room.autoDev?.status === 'running') return 'Auto dev running';
@@ -1584,7 +1617,7 @@ function updateDiscWorkers() {
     const dot = document.createElement('span');
     dot.textContent = '● ';
     dot.style.color = '#f59e0b';
-    s.append(dot, o.title + ' · Worker is working');
+    s.append(dot, displayTitle(o.active?.split('/').at(-1), o.title) + ' · Worker is working');
     return s;
   }));
 }
@@ -1796,7 +1829,8 @@ function updateReplicaView() {
   updateReplicaHeader();
   renderAutoDev();
   const readOnly = !!(viewing || peeking);
-  if (room) { $('disc').textContent = viewing ? viewing.title : peeking ? peeking.title : room.discussion; $('disc').dataset.active = !readOnly && room.active ? 'true' : 'false'; }
+  if (room) { $('disc').textContent = currentTitle(); $('disc').dataset.active = !readOnly && room.active ? 'true' : 'false'; }
+  updateTabTitle();
   // Under the title, show the activity of the selected tab.
   $('disc-status').textContent = talkStatus();
   const panel = $('remote-view'); panel.hidden = !readOnly; panel.replaceChildren();
@@ -1828,7 +1862,7 @@ function updateReplicaView() {
   $('actions-menu').hidden = ['summary', 'new-discussion'].every((id) => $(id).hidden);
   if (peeking && !viewing) {
     const label = document.createElement('p');
-    label.textContent = 'Peeking at ' + peeking.title + '. Read-only.' + (peeking.doc ? '' : ' No notes to show.');
+    label.textContent = 'Peeking at ' + displayTitle(peeking.name, peeking.title) + '. Read-only.' + (peeking.doc ? '' : ' No notes to show.');
     panel.append(label);
     const back = document.createElement('button'); back.textContent = 'Back to the discussion in use'; back.onclick = () => send('/peek'); panel.append(back);
     return;
@@ -2168,7 +2202,9 @@ function renderDiscussions() {
     const block = el('div', 'discussion-block');
     if (canOrder) dragRow(row, d, discussions, 'discussions');
 
-    const nameBtn = el('button', 'entry discussion', d);
+    const label = discussionTitle(d, path);
+    const nameBtn = el('button', 'entry discussion', label);
+    nameBtn.title = path;
     nameBtn.onclick = () => {
       if (isCurrent) {
         peek = null;
@@ -2177,7 +2213,7 @@ function renderDiscussions() {
         renderExplorer();
         renderDiscussions();
       } else {
-        peek = { kind: 'local', path, name: d, readonly: false };
+        peek = { kind: 'local', path, name: d, title: label, readonly: false };
         explorerMode = 'discussion';
         showSub('explorer');
         renderExplorer();
@@ -2279,9 +2315,12 @@ function renderDiscussions() {
         const isPeeking = peek?.kind === 'received' && peek.discussion === line.discussion;
         const row = el('div', 'row discussion-row' + (isPeeking ? ' peeking' : ''));
         const block = el('div', 'discussion-block');
-        const nameBtn = el('button', 'entry discussion', line.name || line.local || line.discussion);
+        const folderName = line.name || line.local || line.discussion;
+        const label = displayTitle(folderName, line.title);
+        const nameBtn = el('button', 'entry discussion', label);
+        nameBtn.title = line.local ? 'discussions/' + line.local : isDiscussion(folderName) ? 'discussions/' + folderName : folderName;
         nameBtn.onclick = () => {
-          peek = { kind: 'received', discussion: line.discussion, node: line.node, commit: line.commit, round: line.round, name: line.name || line.local || line.discussion };
+          peek = { kind: 'received', discussion: line.discussion, node: line.node, commit: line.commit, round: line.round, name: folderName, title: line.title };
           explorerMode = 'discussion';
           showSub('explorer');
           renderExplorer();
@@ -2294,7 +2333,7 @@ function renderDiscussions() {
         const peekBtn = el('button', 'reopen', 'Peek files');
         peekBtn.title = 'Peek at this received discussion’s files in Explorer';
         peekBtn.onclick = () => {
-          peek = { kind: 'received', discussion: line.discussion, node: line.node, commit: line.commit, round: line.round, name: line.name || line.local || line.discussion };
+          peek = { kind: 'received', discussion: line.discussion, node: line.node, commit: line.commit, round: line.round, name: folderName, title: line.title };
           explorerMode = 'discussion';
           showSub('explorer');
           renderExplorer();
@@ -2328,9 +2367,11 @@ function renderDiscussions() {
       const isPeeking = peek?.kind === 'local' && peek.path === path;
       const row = el('div', 'row discussion-row' + (isPeeking ? ' peeking' : ''));
       const block = el('div', 'discussion-block');
-      const nameBtn = el('button', 'entry discussion', d);
+      const label = discussionTitle(d, path);
+      const nameBtn = el('button', 'entry discussion', label);
+      nameBtn.title = path;
       nameBtn.onclick = () => {
-        peek = { kind: 'local', path, name: d, readonly: true };
+        peek = { kind: 'local', path, name: d, title: label, readonly: true };
         explorerMode = 'discussion';
         showSub('explorer');
         renderExplorer();
@@ -2397,10 +2438,6 @@ function renderDiscussions() {
 // Brainstorms: the room's brainstorms (brainstorms/<date>-<title>/), in the User's order (as the
 // active discussions, with its own key), each by its title. Resume (Go to when open elsewhere),
 // Close, Turn into a discussion, Start fresh, Delete, Move up / Move down. No Archive or Defer.
-function brainstormTitle(name) {
-  const path = 'brainstorms/' + name;
-  return room?.open?.find((o) => o.active === path)?.title ?? room?.checkpoints?.find((c) => c.name === path)?.title ?? name;
-}
 function renderBrainstorms() {
   const container = $('brainstorms-pane');
   if (!container) return;
@@ -2426,17 +2463,18 @@ function renderBrainstorms() {
     const row = el('div', 'row discussion-row' + (isCurrent ? ' in-use' : '') + (isPeeking ? ' peeking' : ''));
     const block = el('div', 'discussion-block');
     if (canOrder) dragRow(row, b, names, 'brainstorms');
-    const nameBtn = el('button', 'entry brainstorm', brainstormTitle(b));
+    const label = brainstormTitle(b);
+    const nameBtn = el('button', 'entry brainstorm', label);
     nameBtn.title = path;
     nameBtn.onclick = () => {
-      peek = isCurrent ? null : { kind: 'local', path, name: b, readonly: false };
+      peek = isCurrent ? null : { kind: 'local', path, name: b, title: label, readonly: false };
       explorerMode = 'discussion';
       showSub('explorer');
       renderExplorer();
       renderBrainstorms();
     };
     block.append(nameBtn);
-    block.append(el('div', 'local-label', (isCurrent ? 'current' : openHere ? 'open' : 'closed') + ' · ' + b));
+    block.append(el('div', 'local-label', isCurrent ? 'current' : openHere ? 'open' : 'closed'));
     row.append(block);
     if (canAct) {
       if (openHere) {
@@ -2496,7 +2534,7 @@ async function renderExplorer() {
   if (peek) {
     const banner = el('div', 'peek-banner');
     const note = el('span', '', 'Looking at ');
-    const bold = el('b', '', peek.name);
+    const bold = el('b', '', displayTitle(peek.name, peek.title));
     note.append(bold);
     banner.append(note);
     const backBtn = el('button', '', 'Back to current');
@@ -2538,7 +2576,7 @@ async function renderExplorer() {
     subline.textContent = roomFolder + '/ · ' + roomBranchName;
   } else {
     if (peek?.kind === 'received') {
-      subline.textContent = peek.name + ' (' + peek.node + ')';
+      subline.textContent = displayTitle(peek.name, peek.title) + ' (' + peek.node + ')';
     } else {
       const activePath = peek?.kind === 'local' ? peek.path : room?.active;
       subline.textContent = activePath ? activePath + '/' : '';
@@ -2673,7 +2711,7 @@ function setRoom(r) {
   if (fresh) { $('talk-settings').open = true; if (localInput) showTab('providers'); }
   renderAutoDev();
   $('room-name').textContent = r.folder?.replace(/[/]+$/, '').split('/').pop() || r.folder || 'agent-room';
-  $('disc').textContent = r.discussion || '';
+  $('disc').textContent = displayTitle(r.active?.split('/').at(-1), r.discussion);
   $('disc').dataset.active = r.active ? 'true' : 'false';
   showVersion(r.code);
   updateReplicaView();

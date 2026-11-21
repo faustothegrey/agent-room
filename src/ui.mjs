@@ -832,8 +832,8 @@ function setClosed(ctx, name, closed, snapshot = null) {
   }
 }
 const listedCheckpoints = new Map(); // file → { stamp, entry }: the header lists them often
-// [{ name, at, kind: 'full' | 'fresh' }], for the page's Resume tooltips. A brainstorm's name is its
-// key, "brainstorms/<name>", with its title (the Brainstorms tab shows it).
+// [{ name, at, kind: 'full' | 'fresh', title }], for the page's Resume tooltips and row titles.
+// A brainstorm's name is its key, "brainstorms/<name>".
 function checkpoints(ctx) {
   const dir = checkpointDirectory(ctx);
   if (!existsSync(dir)) return [];
@@ -846,7 +846,8 @@ function checkpoints(ctx) {
       const saved = JSON.parse(readFileSync(file, 'utf8'));
       const entry = saved.version === 1 && saved.root === realpathSync(ctx.cwd) && typeof saved.discussion?.name === 'string'
         ? [{ name: (saved.brainstorm ? `${BRAINSTORMS}/` : '') + saved.discussion.name, at: saved.at, kind: saved.fresh ? 'fresh' : 'full',
-          ...(saved.fresh && { summary: !!saved.summary }), ...(saved.brainstorm && { title: typeof saved.discussion.title === 'string' ? saved.discussion.title : saved.discussion.name }) }] : [];
+          ...(saved.fresh && { summary: !!saved.summary }),
+          title: typeof saved.discussion.title === 'string' ? saved.discussion.title : saved.discussion.name }] : [];
       listedCheckpoints.set(file, { stamp, entry });
       return entry;
     } catch { return []; }
