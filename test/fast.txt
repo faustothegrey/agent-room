@@ -233,3 +233,4 @@ checkWorkerReport and formattedTurn: good reports, Tested/Docs rules, conflict s
 summary format check: draft fixed on retry (only corrected version is reviewed), reviewer PASS not checked, revision still wrong after one retry, and retry answered with PASS keeps first reply
 closingStatement format check: fixed on retry and still wrong after one retry
 checkSummary: inline-form rule, Outcome and Steps left rules while running and while paused, and auto dev blocks invalid instructions
+displayTitle helper and UI titles hide YYYY-MM-DD- across rows, header, tab title, and peek/view
