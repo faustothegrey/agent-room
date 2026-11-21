@@ -1992,6 +1992,30 @@ test('auto dev: reading the instruction only from Next step, and the Outcome lin
   assert.match(summaryInstruction('**Next step**\n- Send to the Worker:\n> a\n- and Send to the Worker: "b"').error, /more than one/);
   assert.match(summaryInstruction('**Next step**\n- Send to the Worker:\n> a\n\n> b').error, /broken by lines/);
   assert.match(summaryInstruction('**Next step**\n- Send to the Worker:\n\nthe fix').error, /no quoted instruction/);
+  // Bold lines alone inside both forms, case/bold label variations, quotes/escapes/indentation/nested >/placeholders in block quotes, and errors.
+  assert.deepEqual(summaryInstruction('**Next step**\n- **Send to the Worker:** "First part.\n\n**Tests**\nRun `npm test`."\n\n**Later**\n- review'),
+    { text: 'First part.\n\n**Tests**\nRun `npm test`.' });
+  assert.deepEqual(summaryInstruction('**Next step**\n- **send to the worker:**\n> First part.\n>\n> **Tests**\n> Run `npm test`.\n\n**Later**\n- review'),
+    { text: 'First part.\n\n**Tests**\nRun `npm test`.' });
+  assert.deepEqual(summaryInstruction('**Next step**\nSend to the Worker:\n> Fix "one", “two” and an unmatched " quote.\n> Keep \\"escaped\\" quotes as written.'),
+    { text: 'Fix "one", “two” and an unmatched " quote.\nKeep \\"escaped\\" quotes as written.' });
+  assert.deepEqual(summaryInstruction('**Next step**\nSend to the Worker:\n> Outer line\n> > nested quote\n> >> deeper quote'),
+    { text: 'Outer line\n> nested quote\n>> deeper quote' });
+  assert.match(summaryInstruction('**Next step**\nSend to the Worker:\n> first line\nmissing quote in the middle\n> third line').error, /broken by lines/);
+  assert.match(summaryInstruction('**Next step**\nSend to the Worker:\n> first line\n> second line\nmissing quote after the end\n\n**Later**\n- x').error, /followed by unquoted lines/);
+  assert.deepEqual(summaryInstruction('**Next step**\nSend to the Worker:\n> Explain headings:\n> **Later**\n> Outcome: SEND\n> and finish.\n\n**Later**\n- real later\n\nOutcome: SEND'),
+    { text: 'Explain headings:\n**Later**\nOutcome: SEND\nand finish.' });
+  assert.deepEqual(summaryInstruction('**Next step**\nSend to the Worker:\n>\n>   if (ok) {\n>     run(\\"now\\");\n>   }\n> '),
+    { text: '  if (ok) {\n    run(\\"now\\");\n  }' });
+  assert.deepEqual(summaryInstruction('**Next step**\n- send to the worker: "Old multi-line inline summary.\n\n**Checks**\n- keep \\"quotes\\" and <branch>\n- run tests"\n\nOutcome: SEND'),
+    { text: 'Old multi-line inline summary.\n\n**Checks**\n- keep \\"quotes\\" and <branch>\n- run tests' });
+  for (const wrapped of ['**Next step**\n- Send to the Worker: <do the task>', '**Next step**\n- Send to the Worker:\n<do the task>', '**Next step**\n- Send to the Worker: `do the task`']) {
+    const res = summaryInstruction(wrapped);
+    assert.match(res.error, /no quoted instruction/);
+    assert.match(res.error, /Send to the Worker: "…".*> block quote/);
+  }
+  assert.deepEqual(summaryInstruction('**Next step**\nSend to the Worker:\n> Merge worker/<branch> into <target>.\n> <placeholder> at start of line'),
+    { text: 'Merge worker/<branch> into <target>.\n<placeholder> at start of line' });
   assert.equal(summaryOutcome(summaryWith('x', 'SEND')), 'SEND');
   assert.equal(summaryOutcome('…\n**Outcome: WAIT FOR USER**'), 'WAIT FOR USER');
   assert.equal(summaryOutcome('Outcome: FINISH\nmore'), null);

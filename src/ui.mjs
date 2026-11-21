@@ -2721,13 +2721,17 @@ const pausedTask = (run) => [
 // quotation mark before the next section (**Later**) or the Outcome line, so it may hold quotes and
 // paragraphs; or the label alone on its line, followed (blank lines allowed) by one contiguous
 // Markdown block quote, whose lines lose their `>` and one following space.
-const BLOCK_LABEL = /^\s*(?:[-*]\s+)?(?:\*\*)?Send to the Worker:(?:\*\*)?\s*$/i;
+const BLOCK_LABEL = /^\s*(?:[-*]\s+)?\*{0,2}Send to the Worker\*{0,2}:\*{0,2}\s*$/i;
+const INLINE_OPEN = /\*{0,2}Send to the Worker\*{0,2}:\*{0,2}[ \t]*["“]/gi;
+const INLINE_PREFIX = /^\*{0,2}Send to the Worker\*{0,2}:\*{0,2}[ \t]*["“]/i;
+const NEXT_STEP_END = (l) => /^\s*(?:#+\s*(?:\*\*)?|\*\*)Later:?(\*\*)?[\s:]*$/i.test(l) || /^[\s*_`]*Outcome\b[\s*_`]*:/i.test(l);
+const STEPS_LINE = (l) => /^Steps left:\s*\d+$/i.test(l.replace(/[*_`]/g, '').trim());
 const QUOTED = /^\s*>/;
 export function summaryInstruction(summary) {
   const lines = String(summary ?? '').split('\n');
   const start = lines.findIndex((l) => /^[\s*_#-]*Next step[\s*_:]*$/i.test(l));
-  if (start < 0) return /Send to the Worker:/i.test(summary ?? '') ? { error: 'its "Send to the Worker" line isn\'t under a Next step heading' } : null;
-  let end = lines.findIndex((l, i) => i > start && (/^\s*\*\*[^*]+\*\*[\s:]*$/.test(l) || /^[\s*_]*Outcome:/i.test(l)));
+  if (start < 0) return /Send to the Worker\*{0,2}:/i.test(summary ?? '') ? { error: 'its "Send to the Worker" line isn\'t under a Next step heading' } : null;
+  let end = lines.findIndex((l, i) => i > start && NEXT_STEP_END(l));
   if (end < 0) end = lines.length;
   const sectionLines = lines.slice(start + 1, end);
   // Block-quoted instructions: each label line and the quote lines that follow it.
@@ -2742,17 +2746,23 @@ export function summaryInstruction(summary) {
   });
   const inBlock = (i) => blocks.some((b) => i === b.label || (i >= b.from && i < b.to));
   const section = sectionLines.filter((l, i) => !inBlock(i)).join('\n');
-  const opening = /Send to the Worker:\s*["“]/g;
-  const marks = section.match(opening)?.length ?? 0;
+  const unquoted = sectionLines.filter((l, i) => !inBlock(i) && !QUOTED.test(l)).join('\n');
+  const marks = unquoted.match(INLINE_OPEN)?.length ?? 0;
   if (marks + blocks.length > 1) return { error: 'its Next step holds more than one instruction for the worker' };
   if (blocks.length) {
     const b = blocks[0];
     if (sectionLines.slice(b.to).some((l) => QUOTED.test(l))) return { error: 'its block-quoted instruction is broken by lines that aren\'t quoted' };
-    const text = sectionLines.slice(b.from, b.to).map((l) => l.replace(/^\s*> ?/, '')).join('\n').trim();
+    const trailing = sectionLines.slice(b.to).filter((l) => l.trim());
+    if (trailing.length > 1 || (trailing.length === 1 && !STEPS_LINE(trailing[0])))
+      return { error: 'its block-quoted instruction is followed by unquoted lines' };
+    const quoted = sectionLines.slice(b.from, b.to).map((l) => l.replace(/^\s*> ?/, ''));
+    while (quoted.length && !quoted[0].trim()) quoted.shift();
+    while (quoted.length && !quoted.at(-1).trim()) quoted.pop();
+    const text = quoted.join('\n');
     return text ? { text } : { error: 'its block-quoted instruction is empty' };
   }
   if (!marks) return /Send to the Worker/i.test(section) ? { error: 'its Next step has no quoted instruction (Send to the Worker: "…", or the label alone followed by a > block quote)' } : null;
-  const after = section.slice(section.search(opening)).replace(/^Send to the Worker:\s*["“]/, '');
+  const after = section.slice(section.search(INLINE_OPEN)).replace(INLINE_PREFIX, '');
   const close = Math.max(after.lastIndexOf('"'), after.lastIndexOf('”'));
   if (close < 0) return { error: 'its quoted instruction has no closing quotation mark' };
   const text = after.slice(0, close).trim();
