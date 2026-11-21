@@ -2732,22 +2732,8 @@ const NEXT_STEP_END = (l) => /^\s*(?:#+\s*(?:\*\*)?|\*\*)Later:?(\*\*)?[\s:]*$/i
 const STEPS_LINE = (l) => /^Steps left:\s*\d+$/i.test(l.replace(/[*_`]/g, '').trim());
 const QUOTED = /^\s*>/;
 export function summaryInstruction(summary) {
-  const lines = String(summary ?? '').split('\n');
-  const start = lines.findIndex((l) => /^[\s*_#-]*Next step[\s*_:]*$/i.test(l));
+  const { start, sectionLines, blocks } = nextStepBlocks(summary);
   if (start < 0) return /Send to the Worker\*{0,2}:/i.test(summary ?? '') ? { error: 'its "Send to the Worker" line isn\'t under a Next step heading' } : null;
-  let end = lines.findIndex((l, i) => i > start && NEXT_STEP_END(l));
-  if (end < 0) end = lines.length;
-  const sectionLines = lines.slice(start + 1, end);
-  // Block-quoted instructions: each label line and the quote lines that follow it.
-  const blocks = [];
-  sectionLines.forEach((l, i) => {
-    if (!BLOCK_LABEL.test(l)) return;
-    let j = i + 1;
-    while (j < sectionLines.length && !sectionLines[j].trim()) j++;
-    const from = j;
-    while (j < sectionLines.length && QUOTED.test(sectionLines[j])) j++;
-    if (j > from) blocks.push({ label: i, from, to: j });
-  });
   const inBlock = (i) => blocks.some((b) => i === b.label || (i >= b.from && i < b.to));
   const section = sectionLines.filter((l, i) => !inBlock(i)).join('\n');
   const unquoted = sectionLines.filter((l, i) => !inBlock(i) && !QUOTED.test(l)).join('\n');
