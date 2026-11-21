@@ -2633,3 +2633,42 @@ test('Control bar: Boards / Providers / Instructions, full Main panel with Back,
     s.close();
   }
 });
+
+test('list-collapsed grid places #main-panel in the last column with a real width', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'list-collapsed-grid-'));
+  const s = await serve(root, { clients: new Set(), transcript: [] });
+  try {
+    const html = await (await s.get('/__room')).text();
+    const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] || '';
+    const bodyMatch = style.match(/body\s*\{[^}]*grid-template-columns:\s*([^;]+);/);
+    const collapsedMatch = style.match(/body\.list-collapsed\s*\{[^}]*grid-template-columns:\s*([^;]+);/);
+    assert.ok(bodyMatch, 'body grid-template-columns rule exists');
+    assert.ok(collapsedMatch, 'body.list-collapsed grid-template-columns rule exists');
+
+    // Split CSS track list while keeping var(...) intact.
+    const splitTracks = (s) => s.trim().match(/(?:[a-z-]+\([^)]*\)|[^\s]+)/gi) || [];
+    const bodyTracks = splitTracks(bodyMatch[1]);
+    const collapsedTracks = splitTracks(collapsedMatch[1]);
+
+    // Row 2 direct children of <body>, in DOM order: #control-bar, #list-panel, #list-split, #main-panel.
+    const row2 = ['control-bar', 'list-panel', 'list-split', 'main-panel'];
+    const positions = row2.map((id) => html.indexOf(`id="${id}"`));
+    for (let i = 1; i < positions.length; i++) {
+      assert.ok(positions[i - 1] > 0 && positions[i] > positions[i - 1], `${row2[i - 1]} precedes ${row2[i]}`);
+    }
+    assert.equal(bodyTracks.length, row2.length);
+    assert.equal(bodyTracks.at(-1), '1fr');
+
+    // When list-collapsed hides #list-split (display: none), #main-panel auto-places into the remaining visible slot.
+    const hidesListSplit = /body\.list-collapsed\s+#list-split\s*\{[^}]*display:\s*none/.test(style);
+    const visibleWhenCollapsed = row2.filter((id) => !(id === 'list-split' && hidesListSplit));
+    const mainColIndex = visibleWhenCollapsed.indexOf('main-panel');
+
+    assert.equal(collapsedTracks.length, visibleWhenCollapsed.length, 'collapsed grid track count matches visible row-2 children');
+    assert.equal(mainColIndex, collapsedTracks.length - 1, '#main-panel lands in the last column');
+    const mainTrack = collapsedTracks[mainColIndex];
+    assert.equal(mainTrack, '1fr', `#main-panel track should be 1fr, got ${mainTrack}`);
+  } finally {
+    s.close();
+  }
+});

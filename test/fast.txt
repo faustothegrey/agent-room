@@ -241,3 +241,4 @@ while peeking a closed board, /__say (messages/attachments) and /__work are refu
 List panel: collapsible sections, row click switches active or peeks closed (chat and files), and peeking disables both composers
 Side pane: four tabs (Explorer/Document/My notes/Terminal), close/reopen, [[D4]] reopen, split orientation, and Terminal survival
 Control bar: Boards / Providers / Instructions, full Main panel with Back, List panel collapse/restore, Monitor→Providers, and Terminal/My notes preserved
+list-collapsed grid places #main-panel in the last column with a real width
