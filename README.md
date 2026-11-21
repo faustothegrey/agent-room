@@ -722,10 +722,11 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   node, or a plain-text note when `gitGraph` cannot draw the history faithfully). For a branch with commits not in main it also says:
   - whether it contains main's current commit, naming it, or how many of main's commits it lacks;
   - the commits its worker last reported testing together, from its reply's last
-    `Tested: <branch commit> with main <main commit>: tests passed|failed` line (recorded only
-    if Git agrees: the branch commit is on the branch, it contains the main commit, which is
-    main's), and whether either branch has moved since. This is the worker's report: agent-room
-    doesn't run the tests itself;
+    `Tested: <branch commit> with main <main commit>: tests passed|failed` line (plain text,
+    with full 40-to-64-character hex commit IDs, as the reply's last non-empty line; recorded
+    only when it passes the report format check and Git agrees: the branch commit is on the
+    branch, it contains the main commit, which is main's), and whether either branch has moved
+    since. This is the worker's report: agent-room doesn't run the tests itself;
   - with Git 2.38 or newer, a merge preview: "clean", or the files that would conflict
     (`git merge-tree --write-tree`). It is advice only: it can go stale as soon as either branch
     moves, and a clean merge doesn't prove the combined code works. It changes no branch,
@@ -790,8 +791,18 @@ worker/<folder-name>` in the room); nothing is merged automatically.
 - The latest failed instruction in a discussion offers **Retry** with the current worker settings, or **Retry with…** to choose a provider and model. The chosen settings remain for later instructions. A retry runs ahead of later queued instructions and tells the worker the original instruction, failure, and commits made since, asking it to inspect the worktree and Git state first. The buttons return if the retry fails. They are not offered for interrupted instructions or brainstorms.
 - The worker commits every completed task on its branch, with a message starting with its origin
   in brackets (`[<discussion folder name>]`) and the commit ID in its reply.
-  agent-room reports commits without that label. Each instruction in the Worker tab shows its
-  origin, and its reply goes back to that discussion's transcript.
+  agent-room reports commits without that label. After each turn, agent-room also checks the
+  report's format against the task's Git state: `Tested:` (plain, full commit IDs, last non-empty
+  line) is required when the task asked to catch up, no merge is pending and `main`'s starting
+  commit is in `HEAD`; `Docs:` (before any `Tested:` line) is required when the worker made a
+  non-merge commit of its own. When a check fails, agent-room logs `Format check: …`, records a
+  fingerprint of `HEAD`, the index, tracked working-tree files and untracked files, and asks the
+  same worker session once for a complete corrected report with no new work (both replies and
+  their usage stay visible in the Worker tab and transcript; if the retry changed files or `HEAD`,
+  the changes are kept, the checks and `Tested:` recording re-run on the new state, and auto dev
+  pauses for review; if the retry still fails, the report goes back to the discussion with its
+  problems listed). Each instruction in the Worker tab shows its origin, and its reply goes back
+  to that discussion's transcript.
 - Before each discussion round, including one started by a worker report, a single chat and
   transcript notice lists other origins' completed labelled commits and changed files not yet
   reported to that discussion. Switching to it starts no agents and adds no notice. The record

@@ -5161,3 +5161,153 @@ test('closing one of two open discussions removes it from the other page\'s open
   assert.deepEqual(lastRoomEvent.open.map((o) => o.active), [`discussions/${first.discussion.name}`]);
   assert.ok(lastRoomEvent.closedDiscussions.includes(closedName));
 });
+
+test('checkWorkerReport and formattedTurn: good reports, Tested/Docs rules, conflict stop, pure catch-up, and generic one-retry helper', async () => {
+  const { checkWorkerReport, formattedTurn } = await import('../src/ui.mjs');
+  const branchId = 'a'.repeat(40), mainId = 'b'.repeat(40);
+  const testedLine = `Tested: ${branchId} with main ${mainId}: tests passed`;
+
+  // 1. A good report (with both Docs: and Tested:).
+  assert.deepEqual(checkWorkerReport(`Done.\n\nDocs: updated README.md.\n${testedLine}`, { oweDocs: true, oweTested: true }), []);
+
+  // 2. Tested: missing, bold, short IDs, not last.
+  assert.match(checkWorkerReport('Done.\nDocs: none needed, because internal.', { oweDocs: true, oweTested: true }).join('\n'), /has no Tested: line/);
+  assert.match(checkWorkerReport(`Done.\nDocs: none needed, because internal.\n**${testedLine}**`, { oweDocs: true, oweTested: true }).join('\n'), /bold or styled Tested: line/);
+  assert.match(checkWorkerReport('Done.\nDocs: none needed, because internal.\nTested: aaaaaaa with main bbbbbbb: tests passed', { oweDocs: true, oweTested: true }).join('\n'), /short commit IDs/);
+  assert.match(checkWorkerReport(`Done.\nDocs: none needed, because internal.\n${testedLine}\nTrailing line.`, { oweDocs: true, oweTested: true }).join('\n'), /not the reply's last non-empty line/);
+
+  // 3. Docs: missing or after Tested:.
+  assert.match(checkWorkerReport(`Done.\n${testedLine}`, { oweDocs: true, oweTested: true }).join('\n'), /has no Docs: line/);
+  const afterTested = checkWorkerReport(`Done.\n${testedLine}\nDocs: none needed, because internal.`, { oweDocs: true, oweTested: true }).join('\n');
+  assert.match(afterTested, /Docs: line after its Tested: line/);
+  assert.match(afterTested, /not the reply's last non-empty line/);
+
+  // 4. Conflict stop (asked to catch up, merge pending, no own commits): owes neither Tested: nor Docs:.
+  assert.deepEqual(checkWorkerReport('Merge conflict in shared.txt; stopped as instructed.', {
+    askedCatchUp: true, mergePending: true, mainInHead: false, ownCommits: 0,
+  }), []);
+
+  // 5. Pure catch-up (asked to catch up, main in HEAD, no merge pending, 0 own non-merge commits): owes Tested: only, no Docs:.
+  assert.deepEqual(checkWorkerReport(`Merged main and ran npm test.\n${testedLine}`, {
+    askedCatchUp: true, mergePending: false, mainInHead: true, ownCommits: 0,
+  }), []);
+  assert.match(checkWorkerReport('Merged main and ran npm test.', {
+    askedCatchUp: true, mergePending: false, mainInHead: true, ownCommits: 0,
+  }).join('\n'), /has no Tested: line/);
+
+  // 6. formattedTurn generic helper: asks the same session at most once.
+  const calls = [];
+  const fakeAgent = { turn: async (p) => { calls.push(p); return calls.length === 1 ? 'bad' : 'good'; } };
+  const ok = await formattedTurn(fakeAgent, 'initial', (r) => (r === 'good' ? [] : ['missing tag']), (probs) => `fix: ${probs.join(',')}`);
+  assert.deepEqual(ok, { text: 'good', problems: [], firstProblems: ['missing tag'], retried: true });
+  assert.deepEqual(calls, ['initial', 'fix: missing tag']);
+});
+
+test('worker report format retry flow: fixed on retry and still wrong after one retry', async () => {
+  const { writeFileSync, readFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, mergeReadiness, workerPlace } = await import('../src/ui.mjs');
+  const { ctx, got } = await workerRoom();
+  const git = await gitRoom(ctx.cwd);
+  writeFileSync(`${ctx.cwd}/a.txt`, 'base\n'); git('add', 'a.txt'); git('commit', '-q', '-m', 'base');
+  await handleLine('hello', ctx);
+  const name = ctx.discussion.name;
+  const inTree = (...a) => execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  // Case 1: Fixed on retry (first reply has short Tested: IDs and no Docs:; retry fixes both).
+  let step = 0;
+  ctx.worker.turn = async (p) => {
+    got.push(p);
+    step++;
+    if (step === 1) {
+      writeFileSync(`${ctx.workerDir.path}/a.txt`, 'v1\n');
+      inTree('commit', '-q', '-am', `[${name}] step 1`);
+      ctx.worker.lastUsage = { input: 100, cached: 0, output: 20 };
+      return `Done.\nTested: ${inTree('rev-parse', '--short', 'HEAD')} with main ${git('rev-parse', '--short', 'main')}: tests passed`;
+    }
+    ctx.worker.lastUsage = { input: 50, cached: 10, output: 15 };
+    return `Done.\nDocs: updated README.md.\nTested: ${inTree('rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+  };
+  writeFileSync(`${ctx.cwd}/m.txt`, 'main1\n'); git('add', 'm.txt'); git('commit', '-q', '-m', 'main advances');
+  queueWork(ctx, 'do step 1');
+  await ctx.workQueue;
+
+  assert.equal(step, 2, 'asked once to fix format');
+  assert.match(got[1], /Your report has a format problem:.*has no Docs: line.*short commit IDs/s);
+  assert.match(got[1], /Do no new work: do not run commands, do not edit files, and do not commit/);
+  // Both replies and their usage are kept in the Worker tab and transcript, and totals sum both turns.
+  const workerReplies1 = ctx.screen.worker.filter((m) => m.speaker === 'W');
+  assert.equal(workerReplies1.length, 2);
+  assert.deepEqual(ctx.totals.W, { turns: 2, input: 150, cached: 10, output: 35 });
+  assert.ok(ctx.screen.worker.some((m) => m.note?.startsWith('Format check: the W\'s report ') && m.note.endsWith('Asked once to fix it.')));
+  assert.ok(ctx.screen.worker.some((m) => m.note === 'Format check: fixed on retry.'));
+  assert.match(readFileSync(ctx.logPath, 'utf8'), /Format check: the W's report .* Asked once to fix it\.[\s\S]*Format check: fixed on retry\./);
+  const place = await workerPlace(ctx.cwd, name);
+  assert.equal((await mergeReadiness(ctx, place)).canMerge, true, 'valid Tested: line on retry is recorded');
+
+  // Case 2: Still wrong after one retry (short IDs rejected and not recorded; problems listed for discussion agents).
+  writeFileSync(`${ctx.cwd}/m.txt`, 'main2\n'); git('commit', '-q', '-am', 'main advances again');
+  const main2 = git('rev-parse', 'main');
+  const relayed = [];
+  ctx.autoDev = { status: 'running', cycle: 1, limit: 5, waiting: true };
+  ctx.say = (line) => relayed.push(line);
+  let step2 = 0;
+  ctx.worker.turn = async (p) => {
+    got.push(p);
+    step2++;
+    if (step2 === 1) {
+      inTree('merge', 'main', '--no-edit');
+      writeFileSync(`${ctx.workerDir.path}/a.txt`, 'v2\n');
+      inTree('commit', '-q', '-am', `[${name}] step 2`);
+    }
+    return `Still missing docs and using short IDs.\nTested: ${inTree('rev-parse', '--short', 'HEAD')} with main ${main2.slice(0, 7)}: tests passed`;
+  };
+  queueWork(ctx, 'do step 2', ctx.autoDev);
+  await ctx.workQueue;
+  assert.equal(step2, 2, 'only one retry attempt, no loop');
+  assert.ok(ctx.screen.worker.some((m) => m.note?.startsWith('Format check: still wrong:') && m.note.includes('has no Docs: line') && m.note.includes('short commit IDs')));
+  // Rejected short-ID Tested: line was NOT recorded for the new HEAD/main2.
+  assert.equal((await mergeReadiness(ctx, place)).canMerge, false);
+  // The report queued for the discussion agents uses the final reply and lists the remaining format problems.
+  assert.equal(ctx.workerReports?.length, 1);
+  assert.match(ctx.workerReports[0].text, /Still missing docs[\s\S]*Format check still wrong:.*has no Docs: line.*short commit IDs/);
+});
+
+test('worker report format retry flow: retry that changes HEAD keeps changes, logs it, re-runs checks and recordTested, and pauses auto dev', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, mergeReadiness, workerPlace } = await import('../src/ui.mjs');
+  const { ctx } = await workerRoom();
+  const git = await gitRoom(ctx.cwd);
+  writeFileSync(`${ctx.cwd}/f.txt`, 'base\n'); git('add', 'f.txt'); git('commit', '-q', '-m', 'base');
+  await handleLine('hello', ctx);
+  const name = ctx.discussion.name;
+  const inTree = (...a) => execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  ctx.autoDev = { status: 'running', cycle: 1, limit: 5, waiting: true };
+  ctx.say = () => {};
+  let attempt = 0, headAfterRetry = null;
+  ctx.worker.turn = async () => {
+    attempt++;
+    if (attempt === 1) {
+      writeFileSync(`${ctx.workerDir.path}/f.txt`, 'turn1\n');
+      inTree('commit', '-q', '-am', `[${name}] turn 1 commit`);
+      return 'Forgot Docs line on turn 1.';
+    }
+    // Misbehaving retry makes a new commit on HEAD and reports Docs: + Tested: for the new HEAD.
+    writeFileSync(`${ctx.workerDir.path}/f.txt`, 'turn2\n');
+    inTree('commit', '-q', '-am', `[${name}] extra commit during retry`);
+    headAfterRetry = inTree('rev-parse', 'HEAD');
+    return `Fixed report.\nDocs: none needed, because internal.\nTested: ${headAfterRetry} with main ${git('rev-parse', 'main')}: tests passed`;
+  };
+  queueWork(ctx, 'task with misbehaving retry', ctx.autoDev);
+  await ctx.workQueue;
+
+  assert.equal(attempt, 2);
+  assert.equal(inTree('rev-parse', 'HEAD'), headAfterRetry, 'changes made during retry are kept');
+  assert.ok(ctx.screen.worker.some((m) => m.note?.includes('format retry changed the worktree or HEAD (HEAD moved from')));
+  assert.equal(ctx.autoDev.status, 'paused');
+  assert.match(ctx.autoDev.reason, /format retry changed the worktree or HEAD/);
+  const place = await workerPlace(ctx.cwd, name);
+  assert.equal((await mergeReadiness(ctx, place)).canMerge, true, 'recordTested ran against the new HEAD after retry');
+});

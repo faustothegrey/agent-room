@@ -77,4 +77,7 @@ discussion, with a 30-minute timeout per instruction.
   and deferred research are historical context, not fresh implementation instructions.
 - **Reply briefly and in plain language:** what you changed (files), what you ran and its real
   result, and what you did not check. You get a turn only when the User sends an instruction,
-  so finish the job in one turn, or say clearly where you stopped and why.
+  so finish the job in one turn, or say clearly where you stopped and why. If your report's
+  format is wrong (a required `Docs:` or `Tested:` line is missing, out of order, styled, or
+  uses short commit IDs), agent-room sends it back once for you to reply with the complete
+  corrected report only, without doing new work, editing files or committing.

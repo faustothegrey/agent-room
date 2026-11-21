@@ -19,6 +19,24 @@ export function formatMessages(messages) {
   return messages.map((m) => `[${m.outcome ? `Summary, ${m.outcome}` : m.speaker}]: ${m.pass ? '(passed)' : m.text}`).join('\n\n');
 }
 
+// Runs one turn of `agent`, applies `check(reply, attempt)` (returning a list of problems, empty
+// when fine), and on problems asks the same session once to reply again.
+export async function formattedTurn(agent, prompt, optionsOrCheck, retryPromptArg) {
+  const { check, retryPrompt, onTurn, onProblems } = typeof optionsOrCheck === 'function'
+    ? { check: optionsOrCheck, retryPrompt: retryPromptArg }
+    : (optionsOrCheck ?? {});
+  const first = await agent.turn(prompt);
+  await onTurn?.(first, 1);
+  const problems = (await check?.(first, 1)) ?? [];
+  if (!problems.length) return { text: first, problems: [], retried: false };
+  await onProblems?.(problems, first);
+  const again = typeof retryPrompt === 'function' ? await retryPrompt(problems, first) : retryPrompt;
+  agent.lastUsage = null;
+  const second = await agent.turn(again);
+  await onTurn?.(second, 2);
+  return { text: second, problems: (await check?.(second, 2)) ?? [], firstProblems: problems, retried: true };
+}
+
 // The closing statement of a discussion: one turn of `agent`, a one-off session with the worker's
 // provider and model (see closeNamedDiscussion in ui.mjs), which reads the discussion's folder. The
 // caller installs it only when this succeeds, so a failed attempt can't replace the previous one.
