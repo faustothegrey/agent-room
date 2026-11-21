@@ -431,6 +431,8 @@ function wire(ctx) {
   ctx.screen.closeAndMerge = (name, snapshot) => closeAndMerge(ctx, name, snapshot);
   ctx.screen.catchUpMerge = (name) => catchUpWithBranch(ctx, name);
   ctx.screen.setAgentEnabled = (name, enabled, member) => setAgentEnabled(ctx, name, enabled, { member });
+  ctx.screen.getSchedule = () => getSchedule(ctx);
+  ctx.screen.saveSchedule = (body) => saveSchedule(ctx, body);
 }
 
 // The screen's header: the full root path, the active discussion (active: its folder, under the
@@ -3256,6 +3258,7 @@ export async function start(ctx) {
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   ctx.refreshQuota();
   watchMonitor(ctx);
+  startScheduler(ctx);
   ctx.code = { ...await codeInfo(), startedAt: ctx.screen.startedAt };
   if (ctx.replica) { ctx.project = await codeInfo(ctx.cwd); await pushReplica(ctx); }
   showHeader(ctx);
@@ -3292,6 +3295,7 @@ export async function reloaded(ctx) {
   if (ctx.hub) { ctx.hub.route = route; ctx.hub.upgrade = upgrade; } // the server's routing runs the new code too
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   watchMonitor(ctx);
+  startScheduler(ctx);
   log(ctx, '_(code reloaded)_\n\n');
   // A relay whose worker result can't come back any more: pause visibly rather than send again.
   const run = ctx.autoDev;
@@ -3312,6 +3316,7 @@ export async function reloaded(ctx) {
 export function ended(ctx, restarting = false) {
   if (ctx.replicaOwner && ctx.replica) ctx.replicate.stopPeers(ctx.replica); // its other discussions close with it (Quit room)
   clearInterval(ctx.quotaTimer);
+  stopSchedulerIfLast(ctx);
   if (!restarting) showHeader(ctx);
   return ctx.docs.endAll(ctx.screen, { type: restarting ? 'restarting' : 'ended' });
 }
@@ -3560,19 +3565,22 @@ async function runSummary(ctx, auto = false, extra) {
   return status;
 }
 
-// `speaker`: who the opening message is from (the User, or auto dev's "Worker report"). `run`: the
-// auto dev run this round belongs to: it is always summarized, and the summary decides what's next.
-async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
+// `speaker`: who the opening message is from (the User, auto dev's "Worker report", or "Scheduler").
+// `run`: the auto dev run this round belongs to: it is always summarized, and the summary decides what's next.
+// `beforeLap`: optional async hook checked before each lap after the first; returning a reason stops the round early.
+async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = null } = {}) {
   let started = 0;
   const roundStart = Date.now();
   let turns = 0;
   let ending = 'all passed';
+  let stoppedReason = null;
+  let failedError = null;
   let roundUsage;
   let spoke = 0; // agent replies that weren't passes or failures
   try {
     ctx.busy = true;
     workNotice(ctx);
-    await ctx.room.round(line, { speaker,
+    const roundRes = await ctx.room.round(line, { speaker, beforeLap,
       onTurnStart(agent) {
         started = Date.now();
         startThinking(ctx, agent.name);
@@ -3591,7 +3599,7 @@ async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
           roundUsage = ctx.usage.addUsage(roundUsage, m.usage);
           ctx.totals[m.speaker] = ctx.usage.addUsage(ctx.totals[m.speaker], m.usage);
         }
-        if (m.error) ending = `${m.speaker} failed`;
+        if (m.error) { ending = `${m.speaker} failed`; failedError = `${m.speaker}: ${m.text}`; }
         if (m.pass) return; // passes are logged, not shown
         if (!m.error) spoke++;
         out(ctx, m.error ? red(`\n✗ ${m.speaker} failed${secs}: ${m.text}\n`) : `\n${bold(m.speaker)}${dim(secs)} › ${m.text}\n`);
@@ -3603,6 +3611,11 @@ async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
         ending = 'lap cap reached';
       },
     }).finally(() => { ctx.busy = false; });
+    if (roundRes?.stopped) {
+      stoppedReason = roundRes.reason;
+      ending = 'stopped early';
+      ctx.state.transcript.push({ speaker, text: stoppedReason });
+    }
     const secs = Math.round((Date.now() - roundStart) / 1000);
     const providers = [...new Set(ctx.room.agents.map((a) => a.provider))];
     const quota = ctx.usage.quotaSummary(await refreshQuota(ctx).catch(() => null), providers);
@@ -3611,21 +3624,24 @@ async function runRound(line, ctx, { speaker = 'User', run = null } = {}) {
     const deciding = run && ctx.autoDev === run && run.status === 'running';
     if (deciding && ending.endsWith('failed')) pauseAutoDev(ctx, ending);
     // Auto-summarize (always on in discussions, not in brainstorms): after a round in which an agent
-    // spoke and none failed. Its own end line is then the "your turn" one; this round's line is just a note.
-    if (!ctx.state.brainstorm && (spoke || deciding) && !ending.endsWith('failed')) {
+    // spoke and none failed (and not stopped early by a quota guard). Its own end line is then the
+    // "your turn" one; this round's line is just a note.
+    if (!ctx.state.brainstorm && (spoke || deciding) && !ending.endsWith('failed') && !stoppedReason) {
       out(ctx, dim(`── round over · ${parts.filter(Boolean).join(' · ')} · summarizing ──`));
       toScreen(ctx, { type: 'note', text: `round over · ${parts.filter(Boolean).join(' · ')} · summarizing` });
       const summary = await runSummary(ctx, true, deciding ? autoDevTask(run) : undefined);
       captureRound(ctx);
       if (deciding) decide(ctx, run, summary);
-      return;
+      return { ending, stoppedReason, failedError, turns, spoke };
     }
     out(ctx, dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
     toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
     captureRound(ctx);
+    return { ending, stoppedReason, failedError, turns, spoke };
   } catch (err) {
     // An unknown @name: nothing was sent or recorded.
     note(ctx, `✗ ${err.message}`, true);
+    return { ending: 'failed', stoppedReason: null, failedError: err.message, turns, spoke };
   }
 }
 
@@ -4813,4 +4829,330 @@ async function pairWith(ctx, peer, confirm) {
   note(ctx, `Paired with ${peer} (${result.peer.root}). Its rounds will arrive here, and this room's rounds will be sent there.`);
   pushReplica(ctx);
   return result;
+}
+
+// ── Scheduler (recurring discussions) ─────────────────────────────────
+// Per-room schedule stored in agent-room's local state, outside the project's working tree:
+// ~/.local/state/agent-room/schedules/<sha256 of realpath(room folder)>.json
+const DEFAULT_QUOTA_FLOOR = 50;
+const SCHEDULE_EVERY_MS = 15_000;
+const SCHEDULE_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+
+export function scheduleFile(ctx) {
+  return ctx.scheduleFile ?? join(homedir(), '.local', 'state', 'agent-room', 'schedules',
+    createHash('sha256').update(realpathSync(ctx.cwd)).digest('hex') + '.json');
+}
+
+export function readSchedule(ctx) {
+  const file = scheduleFile(ctx);
+  const empty = () => ({ version: 1, root: realpathSync(ctx.cwd), quotaFloor: DEFAULT_QUOTA_FLOOR, tasks: [] });
+  if (!existsSync(file)) return empty();
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    if (!parsed || typeof parsed !== 'object') return empty();
+    const quotaFloor = typeof parsed.quotaFloor === 'number' && Number.isFinite(parsed.quotaFloor) && parsed.quotaFloor >= 0 && parsed.quotaFloor <= 100
+      ? parsed.quotaFloor : DEFAULT_QUOTA_FLOOR;
+    const tasks = Array.isArray(parsed.tasks) ? parsed.tasks.filter((t) => t && typeof t.id === 'string') : [];
+    return { version: 1, root: realpathSync(ctx.cwd), quotaFloor, tasks };
+  } catch {
+    return empty();
+  }
+}
+
+function writeSchedule(ctx, data) {
+  const file = scheduleFile(ctx);
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  const temp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify({ version: 1, root: realpathSync(ctx.cwd), quotaFloor: data.quotaFloor, tasks: data.tasks }, null, 2) + '\n', { mode: 0o600 });
+    renameSync(temp, file);
+  } finally {
+    if (existsSync(temp)) unlinkSync(temp);
+  }
+}
+
+function broadcastSchedule(ctx) {
+  for (const c of siblings(ctx)) if (!c.stopped && c.screen) toScreen(c, { type: 'schedule' });
+}
+
+function listScheduleDiscussions(ctx) {
+  const parent = join(ctx.cwd, 'discussions');
+  if (!existsSync(parent)) return [];
+  const savedTitles = new Map(checkpoints(ctx).map((c) => [c.name, c.title]));
+  const titleFor = (name) => savedTitles.get(name) ?? name.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/-/g, ' ');
+  const scan = (dir, section) => {
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && DATED.test(e.name))
+      .map((e) => ({ ref: section ? `${section}/${e.name}` : e.name, name: e.name, title: titleFor(e.name), section }))
+      .sort((a, b) => b.name.localeCompare(a.name));
+  };
+  return [
+    ...scan(parent, null),
+    ...SECTIONS.flatMap((s) => scan(join(parent, s), s)),
+  ];
+}
+
+export function getSchedule(ctx) {
+  const data = readSchedule(ctx);
+  const running = shopOf(ctx).schedulerRunningTasks ?? new Set();
+  return {
+    quotaFloor: data.quotaFloor,
+    tasks: data.tasks.map((t) => ({
+      id: t.id,
+      discussion: t.discussion,
+      prompt: t.prompt,
+      time: t.time,
+      enabled: !!t.enabled,
+      lastRun: t.lastRun ?? null,
+      running: running.has(t.id),
+    })),
+    discussions: listScheduleDiscussions(ctx),
+  };
+}
+
+function validateTaskInput(ctx, body) {
+  const discussion = String(body?.discussion ?? '').trim();
+  if (!discussion || !discussionRef(join(ctx.cwd, 'discussions'), discussion)) {
+    throw new Error('Choose an existing discussion from this room.');
+  }
+  const prompt = String(body?.prompt ?? '').trim();
+  if (!prompt) throw new Error('Enter a prompt for the scheduled run.');
+  const time = String(body?.time ?? '').trim();
+  if (!SCHEDULE_TIME_RE.test(time)) throw new Error('Enter a daily time in 24-hour HH:MM format.');
+  const enabled = body?.enabled === undefined ? true : !!body.enabled;
+  return { discussion, prompt, time, enabled };
+}
+
+export function saveSchedule(ctx, body) {
+  if (!body || typeof body !== 'object') throw new Error('Invalid schedule request.');
+  const data = readSchedule(ctx);
+  const action = body.action;
+  if (action === 'floor') {
+    const floor = Number(body.quotaFloor);
+    if (!Number.isFinite(floor) || floor < 0 || floor > 100) throw new Error('Quota floor must be a number between 0 and 100.');
+    data.quotaFloor = Math.round(floor);
+  } else if (action === 'add') {
+    const fields = validateTaskInput(ctx, body);
+    data.tasks.push({ id: randomBytes(8).toString('hex'), ...fields, lastRun: null, lastTriggerKey: null });
+  } else if (action === 'edit') {
+    const task = data.tasks.find((t) => t.id === body.id);
+    if (!task) throw new Error('Scheduled task not found.');
+    const fields = validateTaskInput(ctx, body);
+    const timeChanged = task.time !== fields.time;
+    Object.assign(task, fields);
+    if (timeChanged) task.lastTriggerKey = null;
+  } else if (action === 'toggle') {
+    const task = data.tasks.find((t) => t.id === body.id);
+    if (!task) throw new Error('Scheduled task not found.');
+    task.enabled = !!body.enabled;
+  } else if (action === 'delete') {
+    const before = data.tasks.length;
+    data.tasks = data.tasks.filter((t) => t.id !== body.id);
+    if (data.tasks.length === before) throw new Error('Scheduled task not found.');
+  } else {
+    throw new Error('Unknown schedule action.');
+  }
+  writeSchedule(ctx, data);
+  broadcastSchedule(ctx);
+  return getSchedule(ctx);
+}
+
+function recordTaskRun(ctx, taskId, status, reason, at) {
+  const data = readSchedule(ctx);
+  const task = data.tasks.find((t) => t.id === taskId);
+  if (!task) return;
+  task.lastRun = { at, status, reason: reason ?? null };
+  writeSchedule(ctx, data);
+  broadcastSchedule(ctx);
+}
+
+export async function runScheduledTask(ctx, taskId, { now = null, loadRoom = load } = {}) {
+  const startedAt = now ?? new Date();
+  const clockMs = () => (now ? now.getTime() : Date.now());
+  const at = startedAt.toISOString();
+  const data = readSchedule(ctx);
+  const task = data.tasks.find((t) => t.id === taskId);
+  if (!task) return null;
+  const parent = join(ctx.cwd, 'discussions');
+  const d = discussionRef(parent, task.discussion);
+  if (!d) {
+    recordTaskRun(ctx, taskId, 'skipped', `discussion "${task.discussion}" was not found`, at);
+    return { status: 'skipped', reason: `discussion "${task.discussion}" was not found` };
+  }
+  const shop = shopOf(ctx);
+  if (shop.closing?.has(d.name)) {
+    const reason = `${d.name} is closing`;
+    recordTaskRun(ctx, taskId, 'skipped', reason, at);
+    return { status: 'skipped', reason };
+  }
+  if (siblings(ctx).some((c) => !c.stopped && isDiscussion(c, d.name))) {
+    const reason = `${d.name} is open in a board`;
+    recordTaskRun(ctx, taskId, 'skipped', reason, at);
+    return { status: 'skipped', reason };
+  }
+  if ([...runningTasks(shop), ...queuedTasks(shop)].some((t) => (t.owner ?? ownerOf(t.origin)) === d.name)) {
+    const reason = `${d.name} is busy with a worker task`;
+    recordTaskRun(ctx, taskId, 'skipped', reason, at);
+    return { status: 'skipped', reason };
+  }
+  shop.schedulerRunning ??= new Set();
+  shop.schedulerRunningTasks ??= new Set();
+  if (shop.schedulerRunning.has(d.name)) {
+    const reason = `${d.name} already has a scheduled run in progress`;
+    recordTaskRun(ctx, taskId, 'skipped', reason, at);
+    return { status: 'skipped', reason };
+  }
+
+  // Determine the discussion's saved agents and check the quota floor before resuming.
+  const saved = readCheckpoint(ctx, d.name);
+  const agentSpecs = saved?.agentSpecs ?? roomDefaults(ctx).agents ?? ctx.agentSpecs ?? '';
+  const providers = [...new Set(agentSpecs.split(',').filter(Boolean).map((s) => parseSpec(s).provider))];
+  const quota = await ctx.usage.fetchQuota();
+  refreshQuota(ctx, quota).catch(() => {});
+  const preCheck = ctx.usage.checkQuotaFloor(quota, providers, data.quotaFloor, { now: clockMs() });
+  if (!preCheck.ok) {
+    recordTaskRun(ctx, taskId, 'skipped', preCheck.reason, at);
+    return { status: 'skipped', reason: preCheck.reason };
+  }
+
+  shop.schedulerRunning.add(d.name);
+  shop.schedulerRunningTasks.add(task.id);
+  broadcastSchedule(ctx);
+
+  let runCtx = null;
+  let createdBeside = false;
+  try {
+    if (ctx.hub?.addRoom) {
+      runCtx = await openBeside(ctx);
+      createdBeside = true;
+    } else {
+      const state = { transcript: [], seen: new Map() };
+      runCtx = { ...ctx, state, discussion: null, sessions: new Map(), programs: { running: new Set(), stopping: false },
+        screen: { clients: new Set(), transcript: state.transcript, worker: shop.log }, lastRound: null, logPath: null,
+        checkpointError: null, hub: null, noScreen: true };
+    }
+    if (ctx.closingAgent) runCtx.closingAgent = ctx.closingAgent;
+    if (d.section && !await moveDiscussion(runCtx, task.discussion, 'active')) {
+      throw new Error(`Could not move ${task.discussion} to active discussions.`);
+    }
+
+    // Resume the way a closed discussion is resumed: fresh sessions, its saved agents, its closing statement.
+    const release = await suspendTransfers(runCtx, d.name);
+    try {
+      if (saved && (saved.invalid || saved.version !== 1 || saved.root !== realpathSync(ctx.cwd) || saved.discussion?.name !== d.name)) {
+        throw new Error(`The checkpoint of ${d.name} is invalid.`);
+      }
+      const state = { transcript: [], seen: new Map() }, sessions = new Map();
+      const next = { ...runCtx, state, sessions, agentSpecs: saved?.agentSpecs ?? runCtx.agentSpecs, workerSpec: saved?.workerSpec ?? runCtx.workerSpec };
+      const loaded = await loadRoom(next, `?sched=${Date.now()}`);
+      const freshSaved = {
+        version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
+        discussion: { name: d.name, title: saved?.discussion?.title ?? d.name },
+        fresh: true, fromClosed: true, agentSpecs: next.agentSpecs, workerSpec: next.workerSpec,
+        work: saved?.work ?? workOf(shop, d.name),
+      };
+      writeCheckpoint(runCtx, d.name, freshSaved);
+      setClosed(runCtx, d.name, false);
+      Object.assign(runCtx, loaded, {
+        usage: ctx.usage ?? loaded.usage,
+        state, sessions, agentSpecs: next.agentSpecs, workerSpec: next.workerSpec,
+        freshSummary: null, lastRound: null, agentsStarted: false, workerBriefed: null,
+        workerTree: null, workerLabel: null, workerHandoff: false, workerSeat: randomBytes(6).toString('hex'),
+      });
+      runCtx.screen.transcript = state.transcript;
+      switchTo(runCtx, { name: d.name, dir: join(parent, d.name), title: freshSaved.discussion.title, continued: true });
+      runCtx.closedBriefing = true;
+      wire(runCtx);
+    } finally {
+      release();
+    }
+
+    if (!await openDiscussion(runCtx, task.prompt)) {
+      throw new Error(`Could not open transcript for ${d.name}.`);
+    }
+
+    const activeProviders = () => [...new Set(runCtx.room.agents
+      .filter((a) => !(runCtx.state.disabledAgents ?? []).includes(a.name))
+      .map((a) => a.provider))];
+
+    const roundRes = await runRound(task.prompt, runCtx, {
+      speaker: 'Scheduler',
+      beforeLap: async (lap) => {
+        const q = await runCtx.usage.fetchQuota();
+        refreshQuota(runCtx, q).catch(() => {});
+        const check = runCtx.usage.checkQuotaFloor(q, activeProviders(), readSchedule(ctx).quotaFloor, { now: clockMs() });
+        if (check.ok) return null;
+        return `Scheduled run stopped early by quota guard before lap ${lap + 1}: ${check.reason}`;
+      },
+    });
+
+    const extraLine = roundRes?.stoppedReason
+      ? `${roundRes.stoppedReason}. This run stopped early and is not a completed review.`
+      : roundRes?.failedError
+        ? `Scheduled run failed (${roundRes.failedError}). This run is not a completed review.`
+        : null;
+
+    await closeNamedDiscussion(runCtx, d.name, { extraLine, rethrow: true });
+
+    if (roundRes?.stoppedReason) {
+      recordTaskRun(ctx, taskId, 'stopped', roundRes.stoppedReason, at);
+      return { status: 'stopped', reason: roundRes.stoppedReason };
+    }
+    if (roundRes?.failedError) {
+      recordTaskRun(ctx, taskId, 'failed', roundRes.failedError, at);
+      return { status: 'failed', reason: roundRes.failedError };
+    }
+    recordTaskRun(ctx, taskId, 'ran', null, at);
+    return { status: 'ran', reason: null };
+  } catch (err) {
+    recordTaskRun(ctx, taskId, 'failed', err.message, at);
+    if (createdBeside && runCtx && !runCtx.stopped && fresh(runCtx)) closeContext(runCtx);
+    return { status: 'failed', reason: err.message };
+  } finally {
+    shop.schedulerRunning.delete(d.name);
+    shop.schedulerRunningTasks.delete(task.id);
+    broadcastSchedule(ctx);
+    showHeader(ctx);
+  }
+}
+
+export async function checkSchedule(ctx, now = null, opts = {}) {
+  const data = readSchedule(ctx);
+  if (!data.tasks.length) return [];
+  const current = now ?? new Date();
+  const today = day(current);
+  const nowTime = `${pad(current.getHours())}:${pad(current.getMinutes())}`;
+  const triggerKey = `${today} ${nowTime}`;
+  const due = [];
+  let changed = false;
+  for (const task of data.tasks) {
+    if (!task.enabled) continue;
+    if (task.time !== nowTime) continue;
+    if (task.lastTriggerKey === triggerKey) continue;
+    task.lastTriggerKey = triggerKey;
+    changed = true;
+    due.push(task.id);
+  }
+  if (changed) writeSchedule(ctx, data);
+  return Promise.all(due.map((id) => runScheduledTask(ctx, id, { ...opts, now })));
+}
+
+function startScheduler(ctx) {
+  const shop = shopOf(ctx);
+  shop.schedulerCtx = ctx;
+  shop.checkSchedule = () => {
+    const live = siblings(shop.schedulerCtx).find((c) => !c.stopped && c.room && c.usage);
+    if (live) checkSchedule(live).catch(() => {});
+  };
+  shop.schedulerTimer ??= setInterval(() => shop.checkSchedule?.(), SCHEDULE_EVERY_MS).unref();
+}
+
+function stopSchedulerIfLast(ctx) {
+  const shop = ctx.shop;
+  if (!shop?.schedulerTimer) return;
+  if (!siblings(ctx).some((c) => c !== ctx && !c.stopped)) {
+    clearInterval(shop.schedulerTimer);
+    shop.schedulerTimer = null;
+  }
 }

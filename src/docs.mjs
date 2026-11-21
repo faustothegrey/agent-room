@@ -866,6 +866,30 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .ins-piece .when { font-size: .7rem; color: var(--dim); margin-left: auto; white-space: nowrap; }
 .ins-intent { font-size: .76rem; color: var(--dim); padding: .1rem .6rem .45rem; }
 .ins-content { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .7rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; padding: .45rem .6rem; border-top: 1px solid var(--line); max-height: 42vh; overflow-y: auto; }
+/* The Schedule page: quota floor, task list, and add/edit form. */
+#schedule { overflow-y: auto; padding: .8rem 1rem; }
+.sched-section { margin-bottom: 1.2rem; max-width: 48rem; }
+.sched-section h3 { font-size: .85rem; margin: 0 0 .4rem; }
+.sched-floor-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.sched-floor-row input { width: 4.5rem; font: inherit; padding: .25rem .4rem; border: 1px solid var(--line); border-radius: 4px; }
+.sched-card { border: 1px solid var(--line); border-radius: 6px; padding: .6rem .75rem; margin: .5rem 0; background: Canvas; }
+.sched-card[data-enabled="false"] { opacity: .68; }
+.sched-head { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; margin-bottom: .35rem; }
+.sched-time { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; font-size: .82rem; padding: .1rem .35rem; border: 1px solid var(--line); border-radius: 4px; }
+.sched-disc { font-weight: 600; font-size: .86rem; }
+.sched-actions { margin-left: auto; display: flex; gap: .35rem; }
+.sched-prompt { font-size: .8rem; white-space: pre-wrap; overflow-wrap: anywhere; margin: .3rem 0; padding: .35rem .5rem; border-left: 2px solid var(--line); }
+.sched-last { font-size: .76rem; color: var(--dim); margin-top: .3rem; }
+.sched-last.ok { color: light-dark(#15803d, #86efac); }
+.sched-last.warn { color: light-dark(#b45309, #fcd34d); }
+.sched-last.err { color: light-dark(#b91c1c, #fca5a5); }
+.sched-form { display: flex; flex-direction: column; gap: .55rem; border: 1px solid var(--line); border-radius: 6px; padding: .75rem; background: Canvas; }
+.sched-form-row { display: flex; flex-wrap: wrap; gap: .6rem; }
+.sched-form label { display: flex; flex-direction: column; gap: .2rem; font-size: .8rem; }
+.sched-form label.grow { flex: 1; min-width: 14rem; }
+.sched-form label.inline { flex-direction: row; align-items: center; gap: .4rem; }
+.sched-form select, .sched-form input[type="time"], .sched-form textarea { font: inherit; padding: .35rem .45rem; border: 1px solid var(--line); border-radius: 4px; background: Canvas; color: CanvasText; }
+.sched-form-buttons { display: flex; gap: .5rem; align-items: center; }
 .providers-heading { font-size: .85rem; margin: .9rem 0 .2rem; }
 .settings-hint, .settings-status { font-size: .8rem; margin: .5rem 0; }
 .settings-hint { color: var(--dim); }
@@ -901,6 +925,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
   <button type="button" class="ctrl-btn on" id="ctrl-boards" aria-pressed="true" title="Boards and conversation"><span class="ctrl-ico">💬</span><span class="ctrl-lbl">Boards</span></button>
   <button type="button" class="ctrl-btn" id="ctrl-providers" aria-pressed="false" title="Default providers and models for new discussions, and provider health"><span class="ctrl-ico">⚙</span><span class="ctrl-lbl">Providers</span></button>
   <button type="button" class="ctrl-btn" id="ctrl-instructions" aria-pressed="false" title="The prompts and rulebooks sent to each agent, and when"><span class="ctrl-ico">📜</span><span class="ctrl-lbl">Instructions</span></button>
+  <button type="button" class="ctrl-btn" id="ctrl-schedule" aria-pressed="false" title="Scheduled recurring discussions and quota guard"><span class="ctrl-ico">⏰</span><span class="ctrl-lbl">Schedule</span></button>
 </nav>
 <aside id="list-panel" aria-label="Boards">
   <div id="list-head"><span id="list-title">Boards</span><button type="button" id="list-toggle" aria-expanded="true" aria-label="Collapse boards list" title="Collapse boards list">«</button></div>
@@ -925,6 +950,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <details class="providers-panel" id="health-details"><summary>Provider health · all rooms on this server <span id="health-warning" hidden>⚠</span></summary><button type="button" id="health-check">Check now</button><div id="provider-health" role="status"></div></details>
   </div>
   <div class="view" id="instructions" hidden><div id="instructions-pane"></div></div>
+  <div class="view" id="schedule" hidden><div id="schedule-pane"></div></div>
 </div>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></div>
@@ -1111,10 +1137,10 @@ function updateBackLabel() {
     const t = typeof currentTitle === 'function' ? currentTitle() : '';
     back.textContent = '← Back to ' + (t || 'the discussion');
   }
-  if (title) title.textContent = mainPage === 'providers' ? 'Providers' : mainPage === 'instructions' ? 'Instructions' : '';
+  if (title) title.textContent = mainPage === 'providers' ? 'Providers' : mainPage === 'instructions' ? 'Instructions' : mainPage === 'schedule' ? 'Schedule' : '';
 }
 function openMainPage(name) {
-  const next = name === 'providers' || name === 'instructions' ? name : null;
+  const next = name === 'providers' || name === 'instructions' || name === 'schedule' ? name : null;
   if (next) {
     if (mainPage === null) {
       listCollapsedBeforePage = document.body.classList.contains('list-collapsed');
@@ -1125,9 +1151,11 @@ function openMainPage(name) {
     $('main-page').hidden = false;
     $('providers').hidden = next !== 'providers';
     $('instructions').hidden = next !== 'instructions';
+    $('schedule').hidden = next !== 'schedule';
     updateBackLabel();
     if (next === 'providers' && typeof renderProviders === 'function') renderProviders();
     if (next === 'instructions' && typeof renderInstructions === 'function') renderInstructions();
+    if (next === 'schedule' && typeof renderSchedule === 'function') renderSchedule();
   } else {
     if (mainPage === null) return;
     mainPage = null;
@@ -1135,6 +1163,7 @@ function openMainPage(name) {
     $('main-page').hidden = true;
     $('providers').hidden = true;
     $('instructions').hidden = true;
+    $('schedule').hidden = true;
     if (listCollapsedBeforePage !== null && typeof setListCollapsed === 'function') {
       const restore = listCollapsedBeforePage;
       listCollapsedBeforePage = null;
@@ -1145,7 +1174,7 @@ function openMainPage(name) {
     }
   }
   const active = mainPage ?? 'boards';
-  for (const [id, key] of [['ctrl-boards', 'boards'], ['ctrl-providers', 'providers'], ['ctrl-instructions', 'instructions']]) {
+  for (const [id, key] of [['ctrl-boards', 'boards'], ['ctrl-providers', 'providers'], ['ctrl-instructions', 'instructions'], ['ctrl-schedule', 'schedule']]) {
     const b = $(id);
     if (!b) continue;
     b.classList.toggle('on', active === key);
@@ -1156,7 +1185,7 @@ function openMainPage(name) {
 
 // The two conversation tabs (Discussion and Worker). A worker reply while Discussion is shown marks Worker.
 function showTab(name) {
-  if (name === 'providers' || name === 'instructions') { openMainPage(name); return; }
+  if (name === 'providers' || name === 'instructions' || name === 'schedule') { openMainPage(name); return; }
   if (mainPage !== null) openMainPage(null);
   tab = name;
   $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work';
@@ -1177,8 +1206,184 @@ if ($('ctrl-boards')) $('ctrl-boards').onclick = () => {
 };
 if ($('ctrl-providers')) $('ctrl-providers').onclick = () => openMainPage(mainPage === 'providers' ? null : 'providers');
 if ($('ctrl-instructions')) $('ctrl-instructions').onclick = () => openMainPage(mainPage === 'instructions' ? null : 'instructions');
+if ($('ctrl-schedule')) $('ctrl-schedule').onclick = () => openMainPage(mainPage === 'schedule' ? null : 'schedule');
 if ($('main-page-back')) $('main-page-back').onclick = () => openMainPage(null);
 if ($('providers-done')) $('providers-done').onclick = () => openMainPage(null);
+
+// The Schedule page: quota floor, recurring discussion tasks, and last-run results.
+let scheduleEditingId = null;
+function formatScheduleRun(task) {
+  if (task.running) return { text: 'Running now…', cls: 'warn' };
+  const r = task.lastRun;
+  if (!r) return { text: 'Last run: never', cls: '' };
+  const at = r.at ? longDate(r.at) : '';
+  if (r.status === 'ran') return { text: 'Last run: ' + at + ' · ran', cls: 'ok' };
+  if (r.status === 'skipped') return { text: 'Last run: ' + at + ' · skipped' + (r.reason ? ' (' + r.reason + ')' : ''), cls: 'warn' };
+  if (r.status === 'stopped') return { text: 'Last run: ' + at + ' · stopped by the quota guard' + (r.reason ? ' (' + r.reason + ')' : ''), cls: 'warn' };
+  return { text: 'Last run: ' + at + ' · failed' + (r.reason ? ' (' + r.reason + ')' : ''), cls: 'err' };
+}
+async function renderSchedule(notice = '', isError = false) {
+  const pane = $('schedule-pane');
+  if (!pane) return;
+  try {
+    const res = await fetch('__schedule');
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    drawSchedule(data, notice, isError);
+  } catch (err) {
+    pane.textContent = "Couldn't load the schedule: " + err.message;
+  }
+}
+function drawSchedule(data, notice = '', isError = false) {
+  const pane = $('schedule-pane');
+  if (!pane) return;
+  pane.replaceChildren();
+  const statusEl = document.createElement('p');
+  statusEl.className = 'settings-status';
+  statusEl.setAttribute('role', 'status');
+  if (notice) { statusEl.textContent = notice; if (isError) statusEl.style.color = 'light-dark(#b91c1c, #fca5a5)'; }
+
+  async function mutate(payload, okMsg) {
+    try {
+      const res = await post('__schedule', payload);
+      if (!res.ok) throw new Error(await res.text());
+      const next = await res.json();
+      drawSchedule(next, okMsg, false);
+    } catch (err) {
+      statusEl.textContent = err.message;
+      statusEl.style.color = 'light-dark(#b91c1c, #fca5a5)';
+    }
+  }
+
+  // 1. Quota guard floor
+  const guardSec = document.createElement('section'); guardSec.className = 'sched-section';
+  const guardH = document.createElement('h3'); guardH.textContent = 'Quota guard'; guardSec.append(guardH);
+  const floorRow = document.createElement('div'); floorRow.className = 'sched-floor-row';
+  const floorLbl = document.createElement('label'); floorLbl.textContent = 'Minimum quota remaining (% for all providers): ';
+  const floorIn = document.createElement('input');
+  floorIn.type = 'number'; floorIn.id = 'sched-floor'; floorIn.min = '0'; floorIn.max = '100'; floorIn.step = '1';
+  floorIn.value = String(data.quotaFloor ?? 50);
+  const floorBtn = document.createElement('button'); floorBtn.type = 'button'; floorBtn.textContent = 'Save floor';
+  floorBtn.onclick = () => mutate({ action: 'floor', quotaFloor: Number(floorIn.value) }, 'Quota floor saved (' + floorIn.value + '%).');
+  floorRow.append(floorLbl, floorIn, floorBtn);
+  const guardHint = document.createElement('p'); guardHint.className = 'settings-hint';
+  guardHint.textContent = 'Checked before each scheduled run and before each lap across every agent’s 5-hour and weekly windows. Missing or stale meter readings skip or stop the run. Runs happen only while agent-room is open (no catch-up).';
+  guardSec.append(floorRow, guardHint);
+  pane.append(guardSec);
+
+  // 2. Task list
+  const listSec = document.createElement('section'); listSec.className = 'sched-section';
+  const listH = document.createElement('h3'); listH.textContent = 'Scheduled tasks (' + data.tasks.length + ')'; listSec.append(listH);
+  const discByRef = new Map((data.discussions || []).map((d) => [d.ref, d]));
+  if (!data.tasks.length) {
+    const empty = document.createElement('p'); empty.className = 'settings-hint';
+    empty.textContent = 'No scheduled tasks for this room yet.';
+    listSec.append(empty);
+  } else {
+    for (const task of data.tasks) {
+      const card = document.createElement('div'); card.className = 'sched-card'; card.dataset.enabled = task.enabled ? 'true' : 'false';
+      const head = document.createElement('div'); head.className = 'sched-head';
+      const toggle = document.createElement('input'); toggle.type = 'checkbox'; toggle.checked = !!task.enabled;
+      toggle.setAttribute('aria-label', 'Enable scheduled task for ' + task.discussion);
+      toggle.onchange = () => mutate({ action: 'toggle', id: task.id, enabled: toggle.checked }, toggle.checked ? 'Task enabled.' : 'Task disabled.');
+      const time = document.createElement('span'); time.className = 'sched-time'; time.textContent = task.time + ' daily';
+      const d = discByRef.get(task.discussion);
+      const disc = document.createElement('span'); disc.className = 'sched-disc';
+      disc.textContent = d ? d.title + (d.section ? ' (' + d.section + ')' : '') : task.discussion;
+      disc.title = 'discussions/' + task.discussion;
+      const actions = document.createElement('span'); actions.className = 'sched-actions';
+      const editBtn = document.createElement('button'); editBtn.type = 'button'; editBtn.textContent = 'Edit';
+      editBtn.onclick = () => { scheduleEditingId = task.id; drawSchedule(data); };
+      const delBtn = document.createElement('button'); delBtn.type = 'button'; delBtn.className = 'danger'; delBtn.textContent = 'Delete';
+      delBtn.onclick = () => {
+        if (delBtn.dataset.armed) {
+          if (scheduleEditingId === task.id) scheduleEditingId = null;
+          mutate({ action: 'delete', id: task.id }, 'Task deleted.');
+        } else {
+          delBtn.dataset.armed = '1'; delBtn.textContent = 'Confirm delete';
+          setTimeout(() => { delete delBtn.dataset.armed; delBtn.textContent = 'Delete'; }, 4000);
+        }
+      };
+      actions.append(editBtn, delBtn);
+      head.append(toggle, time, disc, actions);
+      const prompt = document.createElement('div'); prompt.className = 'sched-prompt'; prompt.textContent = task.prompt;
+      const runInfo = formatScheduleRun(task);
+      const last = document.createElement('div'); last.className = 'sched-last' + (runInfo.cls ? ' ' + runInfo.cls : ''); last.textContent = runInfo.text;
+      card.append(head, prompt, last);
+      listSec.append(card);
+    }
+  }
+  pane.append(listSec);
+
+  // 3. Add / Edit form
+  const editing = scheduleEditingId ? data.tasks.find((t) => t.id === scheduleEditingId) : null;
+  if (scheduleEditingId && !editing) scheduleEditingId = null;
+  const formSec = document.createElement('section'); formSec.className = 'sched-section';
+  const formH = document.createElement('h3'); formH.textContent = editing ? 'Edit scheduled task' : 'Add scheduled task'; formSec.append(formH);
+  const form = document.createElement('form'); form.className = 'sched-form'; form.id = 'sched-form';
+  const row = document.createElement('div'); row.className = 'sched-form-row';
+
+  const discLbl = document.createElement('label'); discLbl.className = 'grow'; discLbl.textContent = 'Discussion';
+  const discSel = document.createElement('select'); discSel.id = 'sched-discussion'; discSel.required = true;
+  const discussions = data.discussions || [];
+  if (!discussions.length) {
+    const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'No discussions in this room yet';
+    discSel.append(opt);
+  } else {
+    for (const d of discussions) {
+      const opt = document.createElement('option'); opt.value = d.ref;
+      opt.textContent = d.title + ' (' + d.ref + ')';
+      discSel.append(opt);
+    }
+    if (editing && !discByRef.has(editing.discussion)) {
+      const opt = document.createElement('option'); opt.value = editing.discussion;
+      opt.textContent = editing.discussion + ' (missing)';
+      discSel.append(opt);
+    }
+    if (editing) discSel.value = editing.discussion;
+  }
+  discLbl.append(discSel);
+
+  const timeLbl = document.createElement('label'); timeLbl.textContent = 'Daily time (local)';
+  const timeIn = document.createElement('input'); timeIn.type = 'time'; timeIn.id = 'sched-time'; timeIn.required = true;
+  timeIn.value = editing ? editing.time : '03:00';
+  timeLbl.append(timeIn);
+  row.append(discLbl, timeLbl);
+
+  const promptLbl = document.createElement('label'); promptLbl.textContent = 'Saved prompt (posted as Scheduler)';
+  const promptIn = document.createElement('textarea'); promptIn.id = 'sched-prompt'; promptIn.rows = 4; promptIn.required = true;
+  promptIn.placeholder = 'Write the prompt the Scheduler should post to this discussion…';
+  promptIn.value = editing ? editing.prompt : '';
+  promptLbl.append(promptIn);
+
+  const enLbl = document.createElement('label'); enLbl.className = 'inline';
+  const enIn = document.createElement('input'); enIn.type = 'checkbox'; enIn.id = 'sched-enabled';
+  enIn.checked = editing ? !!editing.enabled : true;
+  enLbl.append(enIn, 'Enabled');
+
+  const btns = document.createElement('div'); btns.className = 'sched-form-buttons';
+  const submitBtn = document.createElement('button'); submitBtn.type = 'submit';
+  submitBtn.textContent = editing ? 'Save changes' : 'Add task';
+  submitBtn.disabled = !discussions.length && !editing;
+  btns.append(submitBtn);
+  if (editing) {
+    const cancelBtn = document.createElement('button'); cancelBtn.type = 'button'; cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => { scheduleEditingId = null; drawSchedule(data); };
+    btns.append(cancelBtn);
+  }
+
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const payload = editing
+      ? { action: 'edit', id: editing.id, discussion: discSel.value, time: timeIn.value, prompt: promptIn.value, enabled: enIn.checked }
+      : { action: 'add', discussion: discSel.value, time: timeIn.value, prompt: promptIn.value, enabled: enIn.checked };
+    scheduleEditingId = null;
+    mutate(payload, editing ? 'Task updated.' : 'Task added.');
+  };
+  form.append(row, promptLbl, enLbl, btns);
+  formSec.append(form, statusEl);
+  pane.append(formSec);
+}
 // The Instructions tab: the prompt catalog, fetched once and rendered as expandable pieces.
 let instructionsLoaded = false;
 async function renderInstructions() {
@@ -3819,6 +4024,7 @@ events.onmessage = (e) => {
   if (ev.type === 'work') workMessage(ev.message, true);
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
   if (ev.type === 'monitor') showMonitor(ev.monitor);
+  if (ev.type === 'schedule' && mainPage === 'schedule') renderSchedule();
   if (ev.type === 'working') setWorking(ev.name);
   if (ev.type === 'workerinfo') showWorkerInfo(ev.info);
   if (ev.type === 'message') message(ev.message, true);
@@ -4139,6 +4345,21 @@ function handleScreen(req, res, url, dir, screen) {
     if (!screen.instructions) { send(409, 'text/plain', 'Instructions are unavailable in this room.'); return true; }
     try { send(200, 'application/json', JSON.stringify(screen.instructions())); }
     catch (err) { send(500, 'text/plain; charset=utf-8', err.message); }
+    return true;
+  }
+  // The Schedule page: recurring discussion tasks and quota floor for this room.
+  if (url.pathname === '/__schedule') {
+    if (!screen.getSchedule || !screen.saveSchedule) { send(409, 'text/plain', 'Schedule is unavailable in this room.'); return true; }
+    if (req.method === 'GET') {
+      Promise.resolve().then(() => screen.getSchedule()).then(
+        (data) => send(200, 'application/json', JSON.stringify(data)),
+        (err) => send(500, 'text/plain; charset=utf-8', err.message));
+      return true;
+    }
+    if (req.method !== 'POST' || !fromOwnPage(req)) { send(403, 'text/plain', 'Refused: only the room page can update the schedule.'); return true; }
+    readJson(req).then((body) => screen.saveSchedule(body)).then(
+      (result) => send(200, 'application/json', JSON.stringify(result)),
+      (err) => send(400, 'text/plain; charset=utf-8', err.message));
     return true;
   }
   if (url.pathname === '/__files') {

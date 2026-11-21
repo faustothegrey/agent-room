@@ -131,8 +131,10 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
     agents,
     promptFor,
     // Rejects on an unknown @name, before anything is recorded or sent. `speaker`: who the round's
-    // first message is from (auto dev's "Worker report", sent to every agent), the User by default.
-    async round(userText, { onTurnStart, onMessage, onNotice, speaker = 'User' } = {}) {
+    // first message is from (auto dev's "Worker report", or "Scheduler", sent to every agent), the User by default.
+    // `beforeLap`: optional async hook called with the 0-based lap number before each lap after the first;
+    // returning a truthy string stops the round early and passes it to onNotice.
+    async round(userText, { onTurnStart, onMessage, onNotice, speaker = 'User', beforeLap } = {}) {
       const selected = speaker === 'User' ? selectFor(userText) : activeAgents();
       const user = { speaker, text: userText };
       transcript.push(user);
@@ -140,6 +142,13 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
       const maxTurns = (state.brainstorm ? BRAINSTORM_MAX_LAPS : MAX_LAPS) * selected.length;
       let passes = 0;
       for (let turn = 0; turn < maxTurns; turn++) {
+        if (turn > 0 && turn % selected.length === 0 && beforeLap) {
+          const stop = await beforeLap(Math.floor(turn / selected.length));
+          if (stop) {
+            onNotice?.(typeof stop === 'string' ? stop : '(stopped early)');
+            return { stopped: true, reason: typeof stop === 'string' ? stop : 'stopped early' };
+          }
+        }
         const agent = selected[turn % selected.length];
         onTurnStart?.(agent);
         const entry = await takeTurn(agent);

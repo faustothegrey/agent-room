@@ -5493,3 +5493,151 @@ test('checkSummary: inline-form rule, Outcome and Steps left rules while running
   assert.ok(ctx.notes.some((n) => n.startsWith('Format check: A\'s summary ') && n.includes('uses inline quotes for a multi-line instruction')));
   assert.ok(ctx.notes.some((n) => n.startsWith('Format check: still wrong:')));
 });
+
+test('scheduler: CRUD in local state, skips open/closing/low-quota/stale runs, runs as Scheduler and closes, and stops early on mid-round quota drop', async () => {
+  const { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { getSchedule, saveSchedule, checkSchedule, runScheduledTask } = await import('../src/ui.mjs');
+  const { createRoom, closingStatement } = await import('../src/room.mjs');
+  const usageMod = await import('../src/usage.mjs');
+  const docsMod = await import('../src/docs.mjs');
+
+  const dir = mkdtempSync(join(tmpdir(), 'agent-room-sched-room-'));
+  const stateDir = mkdtempSync(join(tmpdir(), 'agent-room-sched-state-'));
+  const schedPath = join(stateDir, 'schedule.json');
+  const discName = '2026-11-21-nightly-review';
+  const discDir = join(dir, 'discussions', discName);
+  mkdirSync(join(discDir, 'transcripts'), { recursive: true });
+  writeFileSync(join(discDir, 'closing-statement.md'), 'Previous closing statement. See pending-instructions.md.\n');
+
+  const now = new Date(2026, 10, 21, 3, 0, 0); // 2026-11-21 03:00 local
+  const freshStamp = '2026-11-21 02:58:00';
+  let currentQuota = {
+    claude: { ok: true, parsed: { current_session: { used_percent: 20 }, current_week_all_models: { used_percent: 10 } } },
+    codex: { ok: true, parsed: { five_hour_limit: { used_percent: 15 }, weekly_limit: { used_percent: 5 } } },
+    last_update: freshStamp,
+  };
+
+  const makeCtx = () => {
+    const state = { transcript: [], seen: new Map() };
+    const screen = { clients: new Set(), transcript: state.transcript, worker: [] };
+    return {
+      cwd: dir,
+      scheduleFile: schedPath,
+      agentSpecs: 'claude:Claude,codex:Codex',
+      workerSpec: 'claude:Worker',
+      state,
+      sessions: new Map(),
+      screen,
+      docs: docsMod,
+      usage: { ...usageMod, fetchQuota: async () => currentQuota },
+      room: { agents: [{ name: 'Claude', provider: 'claude' }, { name: 'Codex', provider: 'codex' }] },
+      worker: { name: 'Worker', provider: 'claude' },
+      totals: {},
+      noScreen: true,
+      out: () => {},
+      closingAgent: () => ({ name: 'Worker', provider: 'claude', turn: async () => 'Updated closing statement. See pending-instructions.md.' }),
+    };
+  };
+
+  const ctx = makeCtx();
+  // 1. CRUD stored outside project dir
+  assert.equal(getSchedule(ctx).quotaFloor, 50);
+  const added = saveSchedule(ctx, { action: 'add', discussion: discName, prompt: 'Run nightly code review.', time: '03:00', enabled: true });
+  assert.equal(added.tasks.length, 1);
+  assert.ok(existsSync(schedPath), 'schedule stored in local state file outside room folder');
+  const taskId = added.tasks[0].id;
+  assert.equal(saveSchedule(ctx, { action: 'floor', quotaFloor: 60 }).quotaFloor, 60);
+  assert.equal(saveSchedule(ctx, { action: 'floor', quotaFloor: 50 }).quotaFloor, 50);
+  assert.equal(saveSchedule(ctx, { action: 'edit', id: taskId, discussion: discName, prompt: 'Review code for refactoring.', time: '03:00', enabled: true }).tasks[0].prompt, 'Review code for refactoring.');
+
+  // 2. Skip when discussion is open in a board
+  ctx.discussion = { name: discName, dir: discDir, title: 'Nightly review' };
+  const skipOpen = await runScheduledTask(ctx, taskId, { now });
+  assert.equal(skipOpen.status, 'skipped');
+  assert.match(skipOpen.reason, /open in a board/);
+  ctx.discussion = null;
+
+  // 3. Skip when quota is below floor or stale
+  currentQuota = { ...currentQuota, claude: { ok: true, parsed: { current_session: { used_percent: 55 }, current_week_all_models: { used_percent: 10 } } } };
+  const skipLow = await runScheduledTask(ctx, taskId, { now });
+  assert.equal(skipLow.status, 'skipped');
+  assert.match(skipLow.reason, /claude 5h has 45% remaining/);
+
+  currentQuota = { ...currentQuota, claude: { ok: true, parsed: { current_session: { used_percent: 20 }, current_week_all_models: { used_percent: 10 } } }, last_update: '2026-11-21 02:00:00' };
+  const skipStale = await runScheduledTask(ctx, taskId, { now });
+  assert.equal(skipStale.status, 'skipped');
+  assert.match(skipStale.reason, /stale/);
+
+  // 4. Happy path via checkSchedule at 03:00 (and no double-fire at 03:00, no catch-up at 03:05)
+  currentQuota = { ...currentQuota, last_update: freshStamp };
+  const seenPrompts = [];
+  const fakeLoad = (replies) => async (next) => {
+    let i = 0;
+    const makeAgent = (name, provider) => ({
+      name, provider,
+      turn: async (p) => { seenPrompts.push([name, p]); return replies[i++] ?? 'PASS'; },
+    });
+    const agents = [makeAgent('Claude', 'claude'), makeAgent('Codex', 'codex')];
+    const room = createRoom(agents, next.state);
+    const worker = { name: 'Worker', provider: 'claude', turn: async () => 'PASS' };
+    return {
+      room, worker, docs: docsMod, usage: ctx.usage,
+      closingStatement: (opts, ag) => closingStatement(ag ?? worker, opts),
+    };
+  };
+
+  // Wrong time (03:05) does nothing (no catch-up)
+  assert.deepEqual(await checkSchedule(ctx, new Date(2026, 10, 21, 3, 5, 0), { loadRoom: fakeLoad(['PASS', 'PASS']) }), []);
+  // Exact time (03:00) runs once, posts as Scheduler, reads closing statement, and closes
+  const ran = await checkSchedule(ctx, now, { loadRoom: fakeLoad(['Found 1 item.', 'PASS', 'PASS', '**Agreed**\n- 1 item', 'PASS']) });
+  assert.equal(ran.length, 1);
+  assert.equal(ran[0].status, 'ran');
+  assert.match(seenPrompts[0][1], /Previous closing statement/);
+  assert.match(seenPrompts[0][1], /\[Scheduler\]: Review code for refactoring\./);
+  assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'ran');
+  // Second tick in the same minute does not re-run
+  assert.deepEqual(await checkSchedule(ctx, new Date(2026, 10, 21, 3, 0, 30), { loadRoom: fakeLoad(['PASS', 'PASS']) }), []);
+
+  // 5. Mid-round quota drop before lap 2 stops early, writes reason in discussion and closing statement, records 'stopped'
+  let lapTurns = 0;
+  const dropLoad = async (next) => {
+    const makeAgent = (name, provider) => ({
+      name, provider,
+      turn: async () => {
+        lapTurns++;
+        // Drop quota below 50% during lap 1 so beforeLap(1) trips before lap 2
+        currentQuota = {
+          claude: { ok: true, parsed: { current_session: { used_percent: 65 }, current_week_all_models: { used_percent: 10 } } },
+          codex: { ok: true, parsed: { five_hour_limit: { used_percent: 15 }, weekly_limit: { used_percent: 5 } } },
+          last_update: freshStamp,
+        };
+        return `${name} lap 1 reply`;
+      },
+    });
+    const agents = [makeAgent('Claude', 'claude'), makeAgent('Codex', 'codex')];
+    const room = createRoom(agents, next.state);
+    const worker = { name: 'Worker', provider: 'claude', turn: async () => 'PASS' };
+    return {
+      room, worker, docs: docsMod, usage: ctx.usage,
+      closingStatement: (opts, ag) => closingStatement(ag ?? worker, opts),
+    };
+  };
+  currentQuota = {
+    claude: { ok: true, parsed: { current_session: { used_percent: 20 }, current_week_all_models: { used_percent: 10 } } },
+    codex: { ok: true, parsed: { five_hour_limit: { used_percent: 15 }, weekly_limit: { used_percent: 5 } } },
+    last_update: freshStamp,
+  };
+  const stopped = await runScheduledTask(ctx, taskId, { now, loadRoom: dropLoad });
+  assert.equal(stopped.status, 'stopped');
+  assert.match(stopped.reason, /quota guard before lap 2/);
+  assert.equal(lapTurns, 2, 'stopped before lap 2 without running lap 2 or auto-summary');
+  const closingText = readFileSync(join(discDir, 'closing-statement.md'), 'utf8');
+  assert.match(closingText, /stopped early and is not a completed review/i);
+  assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'stopped');
+
+  // 6. Toggle and delete
+  assert.equal(saveSchedule(ctx, { action: 'toggle', id: taskId, enabled: false }).tasks[0].enabled, false);
+  assert.equal(saveSchedule(ctx, { action: 'delete', id: taskId }).tasks.length, 0);
+});

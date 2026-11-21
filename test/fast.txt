@@ -242,3 +242,7 @@ List panel: collapsible sections, row click switches active or peeks closed (cha
 Side pane: four tabs (Explorer/Document/My notes/Terminal), close/reopen, [[D4]] reopen, split orientation, and Terminal survival
 Control bar: Boards / Providers / Instructions, full Main panel with Back, List panel collapse/restore, Monitor→Providers, and Terminal/My notes preserved
 list-collapsed grid places #main-panel in the last column with a real width
+round beforeLap hook checks before each subsequent lap and stops early with notice
+checkQuotaFloor: passes above floor, fails below floor on 5h or weekly, and rejects missing or stale meter readings
+Schedule Control bar button, page view, and /__schedule GET/POST endpoints
+scheduler: CRUD in local state, skips open/closing/low-quota/stale runs, runs as Scheduler and closes, and stops early on mid-round quota drop
