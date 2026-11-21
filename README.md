@@ -309,7 +309,7 @@ discussion's row. When the discussion has a worker worktree or branch that is al
 while waiting the row says **closing, waiting for worker** and offers **Cancel close**. Tasks queued behind an unresolved-edits hold can never start, so Close refuses at once and names them instead of waiting. A one-off
 agent with the provider and model set in that discussion's **Worker · provider & model** panel
 (not the discussion agents, nor the worker's own session) then reads the discussion's notes and
-transcripts and writes a closing statement pointing to `pending-instructions.md` (the system messages name its provider and model, when it starts and when the discussion is closed); when the branch has pending work, agent-room appends `Worker work pending on <node or host>: \`worker/<name>\`, N commits not in main, uncommitted edits: yes/no, worktree \`<path>\`.` to `closing-statement.md`. agent-room writes the one
+transcripts and writes a closing statement pointing to `pending-instructions.md` (the system messages name its provider and model, when it starts and when the discussion is closed; its format — non-empty, not `PASS`, and naming `pending-instructions.md` — is checked and retried once in the same session if needed, logging `Format check: …`, and Close fails if the retry is still wrong, keeping the previous statement); when the branch has pending work, agent-room appends `Worker work pending on <node or host>: \`worker/<name>\`, N commits not in main, uncommitted edits: yes/no, worktree \`<path>\`.` to `closing-statement.md`. agent-room writes the one
 current `closing-statement.md`, ends the sessions and marks the discussion closed. Unresolved worker
 edits do not prevent Close: the worktree's queue hold stays as it is, and resuming the discussion later finds the edits still there. **Close and Merge** (beside Close in **Actions ▾** and each row's menu in **Discussions**, shown when the discussion's branch has commits not in the room's current branch) merges `worker/<name>` into the room's current branch, cleans up its worktree and branch, and closes after two clicks: it is greyed out with the reason in its tooltip while the worktree has uncommitted edits or is mid-merge/rebase/revert, a worker task is running or queued, the room is on a detached HEAD, mid-operation or has tracked edits outside `discussions/`, the merge preview is not clean, or the worker has not recorded a passing `Tested:` line for the current tips. When the room's branch has moved ahead of `worker/<name>`, it offers **Catch up with `<branch>`** instead, sending the worker a catch-up task and stopping so you can review the report before clicking **Close and Merge** again. The first click names the target (`Merge worker/<name> into <branch>`), lists the commits to merge (and any untracked files in the worktree; removing the worktree also removes its gitignored files as transient, without warning about them in the dialog), shows an informational notice of any other discussions in a round, running/queued worker tasks, or other branches with unmerged commits (omitted when nothing else is active and no other branches have unmerged commits; never blocks the merge or invalidates the second click), and snapshots the state (excluding gitignored files); the second click re-checks everything, runs `git merge --no-ff` under a room-wide lock shared with **Close and Discard** so only one merge or discard runs at a time across the room (a second request refuses immediately, naming the operation in progress; on conflict, the merge is aborted and everything stays open), removes the worktree (`git worktree remove --force`), deletes the branch (`git branch -d`), clears the lane's hold and saved worker session, and closes with `Worker work merged into \`<branch>\` as \`<merge commit>\`.` in `closing-statement.md`. **Close and Discard** (beside Close in **Actions ▾** and each row's menu in **Discussions**, shown only when discarding would lose commits not in the room's current branch, tracked edits, or untracked files) closes the discussion and deletes its worker worktree and branch after two clicks (sharing the same room-wide lock with **Close and Merge**): it refuses while a worker task for the discussion is running or queued, or while its worktree is mid-merge, mid-rebase or mid-revert; the first click lists commits not in main, tracked edits, untracked files, and ignored files summarised by top-level folder and snapshots them; the second click re-checks the snapshot (asking again if anything changed), saves any unmerged commits to a unique `refs/discarded/<name>/<YYYYMMDD-HHMMSS>` ref (commits only, not uncommitted or ignored files), removes the worktree (`git worktree remove --force`), deletes `worker/<name>` (`git branch -D`), clears the lane's hold and saved worker session, and closes the discussion with a `Worker work discarded: …` line in `closing-statement.md`. If any step fails partway, it stops, leaves the discussion open, and reports what was and wasn't done. If Close fails or is cancelled, the discussion stays open or paused and
 can be retried. **Quit room** ends the room, and Restart brings back every open discussion and
@@ -514,14 +514,21 @@ independently of the selected discussion and worker models.
 **Summarize**, or `/summary`, asks the discussion agents to agree a summary by points under
 **Agreed**, **Not agreed**, **Next step** and **Later**, leaving out empty sections, with at most
 eight points under Agreed and Not agreed. **Next step** holds exactly one action for you: `Answer:`
-a question, `Send to the Worker: "…"` with the instruction word for word (or, for a long one,
-`Send to the Worker:` alone on its line followed by the instruction as a `>` block quote), or
+a question, `Send to the Worker: "…"` with a one-line instruction word for word (a multi-line
+instruction must instead follow `Send to the Worker:` alone on its line as a `>` block quote; saved
+summaries in the old multi-line inline form still resume), or
 `Do:` an action of your own; **Later** lists the remaining actions in order. An instruction for the worker is kept until
 you say it was sent, replaced or withdrawn. In a discussion, under Later it is referred to by
 name, with its full text in the discussion's `pending-instructions.md`; in a brainstorm, where
 agents write no notes, this applies to discussions only (see below). The format and what the code reads from it are
 in [the summary contract](docs/architecture.md#summary-contract). The drafter rotates between summaries. Writing
 or revising counts as accepting that version; every other agent must pass on it for agreement.
+Each draft or revision (never a reviewer's `PASS`) is checked for format before the next agent
+reviews it: on problems, agent-room logs `Format check: …` and asks the same agent once for a
+complete corrected summary, so only the corrected reply becomes the version the others review
+(both replies and their usage stay in the transcript; if the agent answers the retry with `PASS`,
+the retry counts as failed and its first reply stays the version; if the retry still fails, the
+summary goes on with its problems logged).
 Each agent gets at most three turns. Without agreement, the last revision is shown as
 **not agreed**. Only the result appears in the chat; the exchange is retained in the transcript.
 In a brainstorm, summaries work the same way, but their prompt leaves out the sentence about
@@ -547,8 +554,8 @@ worker still reports, but nothing more is sent), or when the cycle limit is reac
 the last report is still reviewed). When paused, the next agreed instruction is shown with **Restart
 auto dev**, which starts a new run. A summary can put `Steps left: N` immediately before its Outcome line to set the limit from the plan, including the step being sent; the limit rises only when the count rises (to cycles used + N + 2, at most 15); otherwise it stays or falls, so fix rounds use up its slack. This is a guardrail, not a cost cap: a corrected count can grant more cycles. While paused, any summary asks for `Outcome: FINISH`
 or `WAIT FOR USER` instead, and sends nothing. An agreed `FINISH`, running or paused, ends the run:
-review and merge the discussion's branch (`worker/<name>`) yourself, as ever. An instruction that can't be read reliably from Next step (two of them, no
-closing quotation mark…) is never sent, and the page says why. Reload keeps a run, its cycle count, a failure pause and its retry buttons,
+review and merge the discussion's branch (`worker/<name>`) yourself, as ever. During auto dev, each summary draft or revision is also checked before review for its `Outcome:` line (`SEND`, `FINISH` or `WAIT FOR USER` while running, with an instruction for `SEND` and any `Steps left:` line a whole number above 0 just before `Outcome:`; `FINISH` or `WAIT FOR USER` while paused). An instruction that can't be read reliably from Next step (two of them, no
+closing quotation mark, multi-line inline quotes in a new summary…) or a summary whose instruction or `Outcome:` failed the format check is never sent, and the page says why (a bad `Steps left:` line alone is logged and ignored). Reload keeps a run, its cycle count, a failure pause and its retry buttons,
 and what was sent; a relay whose result is lost pauses the run. Resume, Start fresh, Close discussion, Restart
 and Quit room end it (a resumed discussion comes back without its run); in the terminal, New
 discussion and New brainstorm do too (on the screen they leave the discussion and its run open). Auto dev is for discussions only, not brainstorms.
@@ -722,10 +729,18 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   node, or a plain-text note when `gitGraph` cannot draw the history faithfully). For a branch with commits not in main it also says:
   - whether it contains main's current commit, naming it, or how many of main's commits it lacks;
   - the commits its worker last reported testing together, from its reply's last
-    `Tested: <branch commit> with main <main commit>: tests passed|failed` line (recorded only
-    if Git agrees: the branch commit is on the branch, it contains the main commit, which is
-    main's), and whether either branch has moved since. This is the worker's report: agent-room
-    doesn't run the tests itself;
+    `Tested: <branch commit> with main <main commit>: tests passed|failed` line (plain text,
+    with full 40-to-64-character hex commit IDs, as the reply's last non-empty line; recorded
+    only when it passes the report format check and Git agrees: the branch commit is on the
+    branch, it contains the main commit, which is main's), and whether either branch has moved
+    since. The worker gives this line after a catch-up merge and after committing on a branch that
+    already contains `main` (skipping it if `HEAD` or `main` changed while tests ran). If a branch
+    has no recorded result (for example when its `Tested:` line was rejected or skipped), send the
+    worker: "Make no changes. First run `git rev-parse HEAD` and `git rev-parse main` and note
+    both IDs. Run `npm test` and report its real output. Then run both commands again: if either
+    ID changed, say so and give no `Tested:` line. Otherwise end your reply with
+    `Tested: <full HEAD commit ID> with main <full main commit ID>: tests passed`, or
+    `tests failed` if any test failed." This is the worker's report: agent-room doesn't run the tests itself;
   - with Git 2.38 or newer, a merge preview: "clean", or the files that would conflict
     (`git merge-tree --write-tree`). It is advice only: it can go stale as soon as either branch
     moves, and a clean merge doesn't prove the combined code works. It changes no branch,
@@ -790,8 +805,19 @@ worker/<folder-name>` in the room); nothing is merged automatically.
 - The latest failed instruction in a discussion offers **Retry** with the current worker settings, or **Retry with…** to choose a provider and model. The chosen settings remain for later instructions. A retry runs ahead of later queued instructions and tells the worker the original instruction, failure, and commits made since, asking it to inspect the worktree and Git state first. The buttons return if the retry fails. They are not offered for interrupted instructions or brainstorms.
 - The worker commits every completed task on its branch, with a message starting with its origin
   in brackets (`[<discussion folder name>]`) and the commit ID in its reply.
-  agent-room reports commits without that label. Each instruction in the Worker tab shows its
-  origin, and its reply goes back to that discussion's transcript.
+  agent-room reports commits without that label. After each turn, agent-room also checks the
+  report's format against the task's Git state: `Tested:` (plain, full commit IDs, last non-empty
+  line) is required when the task asked to catch up or the worker made a non-merge commit of its
+  own, with no merge pending, `main`'s starting commit in `HEAD`, and `main` unchanged during the
+  task (rollback tasks stay unchecked); `Docs:` (before any `Tested:` line) is required when the
+  worker made a non-merge commit of its own. When a check fails, agent-room logs `Format check: …`, records a
+  fingerprint of `HEAD`, the index, tracked working-tree files and untracked files, and asks the
+  same worker session once for a complete corrected report with no new work (both replies and
+  their usage stay visible in the Worker tab and transcript; if the retry changed files or `HEAD`,
+  the changes are kept, the checks and `Tested:` recording re-run on the new state, and auto dev
+  pauses for review; if the retry still fails, the report goes back to the discussion with its
+  problems listed). Each instruction in the Worker tab shows its origin, and its reply goes back
+  to that discussion's transcript.
 - Before each discussion round, including one started by a worker report, a single chat and
   transcript notice lists other origins' completed labelled commits and changed files not yet
   reported to that discussion. Switching to it starts no agents and adds no notice. The record

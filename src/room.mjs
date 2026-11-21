@@ -19,15 +19,46 @@ export function formatMessages(messages) {
   return messages.map((m) => `[${m.outcome ? `Summary, ${m.outcome}` : m.speaker}]: ${m.pass ? '(passed)' : m.text}`).join('\n\n');
 }
 
+// Runs one turn of `agent`, applies `check(reply, attempt)` (returning a list of problems, empty
+// when fine), and on problems asks the same session once to reply again.
+export async function formattedTurn(agent, prompt, { check, retryPrompt, onTurn, onProblems } = {}) {
+  const first = await agent.turn(prompt);
+  await onTurn?.(first, 1);
+  const problems = (await check?.(first, 1)) ?? [];
+  if (!problems.length) return { text: first, problems: [], retried: false };
+  await onProblems?.(problems, first);
+  const again = typeof retryPrompt === 'function' ? await retryPrompt(problems, first) : retryPrompt;
+  agent.lastUsage = null;
+  const second = await agent.turn(again);
+  await onTurn?.(second, 2);
+  return { text: second, problems: (await check?.(second, 2)) ?? [], firstProblems: problems, retried: true };
+}
+
+export function checkClosingStatement(text) {
+  const statement = String(text ?? '').trim();
+  if (!statement || isPass(statement)) return ['the reply was empty or PASS'];
+  if (!statement.includes('pending-instructions.md')) return ['it must point to pending-instructions.md'];
+  return [];
+}
+
 // The closing statement of a discussion: one turn of `agent`, a one-off session with the worker's
 // provider and model (see closeNamedDiscussion in ui.mjs), which reads the discussion's folder. The
 // caller installs it only when this succeeds, so a failed attempt can't replace the previous one.
-export async function closingStatement(agent, { dir, workerReports = '' }, instr = defaultInstructions) {
+export async function closingStatement(agent, { dir, workerReports = '', onFormatNote } = {}, instr = defaultInstructions) {
   const task = instr.closingTask({ dir, workerReports });
-  const statement = String(await agent.turn(task) ?? '').trim();
-  if (!statement || isPass(statement)) throw new Error(`${agent.name} did not provide a complete closing statement pointing to pending-instructions.md.`);
-  if (!statement.includes('pending-instructions.md')) throw new Error('The closing statement must point to pending-instructions.md.');
-  return statement;
+  const res = await formattedTurn(agent, task, {
+    check: checkClosingStatement,
+    onProblems: (problems) => onFormatNote?.(`Format check: ${agent.name}'s closing statement ${problems.join('; ')}. Asked once to fix it.`, true),
+    retryPrompt: (problems) => `Your closing statement has a format problem: ${problems.join('; ')}.\nReply again with the complete closing statement only, pointing to pending-instructions.md; do not write or rename any files.`,
+  });
+  if (res.retried) {
+    if (!res.problems.length) onFormatNote?.('Format check: fixed on retry.', false);
+    else onFormatNote?.(`Format check: still wrong: ${res.problems.join('; ')}.`, true);
+  }
+  if (res.problems.length) {
+    throw new Error(`${agent.name} did not provide a complete closing statement: ${res.problems.join('; ')}.`);
+  }
+  return String(res.text ?? '').trim();
 }
 
 export function createRoom(agents, state = { transcript: [], seen: new Map() }, instr = defaultInstructions, usageLine = null) {
@@ -42,6 +73,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
   // summary marks a turn of /summary (kept, but not shown). A summary's result is an entry
   // { speaker: 'Summary', text, outcome: 'agreed' | 'not agreed', by }.
   const { transcript, seen } = state;
+  const superseded = new WeakSet();
   for (const a of agents) if (!seen.has(a.name)) seen.set(a.name, 0);
 
   const activeAgents = () => agents.filter((a) => !(state.disabledAgents ?? []).includes(a.name));
@@ -49,7 +81,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
   function unseenFor(agent) {
     return transcript
       .slice(seen.get(agent.name))
-      .filter((m) => !m.error && m.speaker !== agent.name);
+      .filter((m) => !m.error && !superseded.has(m) && m.speaker !== agent.name);
   }
 
   // `task`: extra instructions for this turn only (used by /summary).
@@ -125,7 +157,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
     // "not agreed". Resolves to { status: 'agreed' | 'not agreed', result } (result is the recorded
     // Summary entry), { status: 'empty' } if the drafter had nothing to summarize, or
     // { status: 'failed' } if a turn failed.
-    async summary({ onTurnStart, onMessage, extra } = {}) {
+    async summary({ onTurnStart, onMessage, onFormatNote, check, extra } = {}) {
       const active = activeAgents();
       const n = active.length;
       const first = (state.summaries ?? 0) % n;
@@ -143,15 +175,58 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
       for (let turn = 0; turn < maxTurns; turn++) {
         const agent = order[turn % n];
         onTurnStart?.(agent, { turn: turn + 1, of: maxTurns });
-        const entry = await takeTurn(agent, version === null ? draftTask(state.brainstorm, extra) : reviewTask(author.name, state.brainstorm, extra));
-        entry.summary = true;
-        onMessage?.(entry);
-        if (entry.error) return { status: 'failed' };
-        if (entry.pass) {
+        const task = version === null ? draftTask(state.brainstorm, extra) : reviewTask(author.name, state.brainstorm, extra);
+        const prompt = promptFor(agent, task);
+        let firstEntry = null, secondEntry = null, turnResult;
+        try {
+          turnResult = await formattedTurn(agent, prompt, {
+            onTurn: (text, attempt) => {
+              const entry = isPass(text) ? { speaker: agent.name, text: 'PASS', pass: true, summary: true } : { speaker: agent.name, text, summary: true };
+              if (agent.lastUsage) entry.usage = agent.lastUsage;
+              seen.set(agent.name, transcript.length + 1);
+              if (state.restored?.pending) state.restored.pending = state.restored.pending.filter((name) => name !== agent.name);
+              transcript.push(entry);
+              if (attempt === 1) firstEntry = entry; else secondEntry = entry;
+              onMessage?.(entry);
+            },
+            check: async (text, attempt) => {
+              if (attempt === 1 && isPass(text)) return [];
+              if (attempt === 2 && isPass(text)) return ['replied PASS instead of the corrected summary'];
+              return check ? (await check(text)) ?? [] : [];
+            },
+            onProblems: (problems) => {
+              onFormatNote?.(`Format check: ${agent.name}'s summary ${problems.join('; ')}. Asked once to fix it.`, true);
+              onTurnStart?.(agent, { turn: turn + 1, of: maxTurns });
+            },
+            retryPrompt: (problems) => {
+              const usage = usageLine?.(agent);
+              const body = `Your summary has a format problem: ${problems.join('; ')}.\nReply again with the complete corrected summary only (not PASS, and not a list of changes).`;
+              return usage ? `${usage}\n\n${body}` : body;
+            },
+          });
+        } catch (err) {
+          const entry = { speaker: agent.name, text: err.message, error: true, summary: true };
+          transcript.push(entry);
+          onMessage?.(entry);
+          return { status: 'failed' };
+        }
+        if (firstEntry.pass) {
           if (version === null) return { status: 'empty' };
           if (++passes === n - 1) return finish('agreed');
         } else {
-          version = entry.text;
+          if (turnResult.retried) {
+            if (!turnResult.problems.length) onFormatNote?.('Format check: fixed on retry.', false);
+            else onFormatNote?.(`Format check: still wrong: ${turnResult.problems.join('; ')}.`, true);
+            if (secondEntry.pass) {
+              superseded.add(secondEntry);
+              version = firstEntry.text;
+            } else {
+              superseded.add(firstEntry);
+              version = secondEntry.text;
+            }
+          } else {
+            version = firstEntry.text;
+          }
           author = agent;
           passes = 0;
           if (n === 1) return finish('agreed');

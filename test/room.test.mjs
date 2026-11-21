@@ -353,3 +353,96 @@ test('usageLine callback is read per prompt (including summary turns) and placed
   assert.match(b.prompts[1], /^\[usage B #2\]\n\nNew messages/);
   assert.match(b.prompts[2], /^\[usage B #3\]\n\nNew messages[\s\S]*latest message from A/);
 });
+
+test('summary format check: draft fixed on retry (only corrected version is reviewed), reviewer PASS not checked, revision still wrong after one retry, and retry answered with PASS keeps first reply', async () => {
+  // 1. Draft fixed on retry: B reviews only the corrected version, B's PASS is never checked, and both A replies stay in transcript with their usage.
+  const checked = [];
+  const check = (text) => {
+    checked.push(text);
+    return text.includes('BAD') ? ['contains BAD'] : [];
+  };
+  const a = fakeAgent('A', ['**Agreed**\n- BAD draft', '**Agreed**\n- fixed draft']);
+  const origATurn = a.turn;
+  let aCall = 0;
+  a.turn = async (p) => {
+    const r = await origATurn(p);
+    a.lastUsage = { input: 100 + (++aCall * 10), cached: 0, output: 20 + aCall };
+    return r;
+  };
+  const b = fakeAgent('B', ['PASS']);
+  const notes = [];
+  const room = createRoom([a, b]);
+  const res = await room.summary({ check, onFormatNote: (msg, err) => notes.push([msg, err]) });
+  assert.equal(res.status, 'agreed');
+  assert.equal(res.result.text, '**Agreed**\n- fixed draft');
+  // Retry prompt names the problem and does not repeat the summary opening words.
+  assert.equal(a.prompts.length, 2);
+  assert.match(a.prompts[1], /Your summary has a format problem: contains BAD\./);
+  assert.doesNotMatch(a.prompts[1], /asked for a summary of the discussion|asked for a summary\. The latest/);
+  // B saw only the corrected draft, never the superseded BAD draft; B's PASS was never passed to check().
+  assert.equal(b.prompts.length, 1);
+  assert.match(b.prompts[0], /\[A\]: \*\*Agreed\*\*\n- fixed draft/);
+  assert.doesNotMatch(b.prompts[0], /BAD draft/);
+  assert.deepEqual(checked, ['**Agreed**\n- BAD draft', '**Agreed**\n- fixed draft']);
+  // Both of A's replies stay in the transcript with their own usage.
+  const aEntries = room.transcript.filter((m) => m.speaker === 'A');
+  assert.equal(aEntries.length, 2);
+  assert.deepEqual(aEntries.map((m) => [m.text, m.usage.input]), [['**Agreed**\n- BAD draft', 110], ['**Agreed**\n- fixed draft', 120]]);
+  assert.deepEqual(notes, [
+    ["Format check: A's summary contains BAD. Asked once to fix it.", true],
+    ['Format check: fixed on retry.', false],
+  ]);
+
+  // 2. Revision still wrong after one retry: summary goes on and logs Format check: still wrong.
+  const a2 = fakeAgent('A', ['**Agreed**\n- initial ok', 'PASS']);
+  const b2 = fakeAgent('B', ['**Agreed**\n- BAD rev 1', '**Agreed**\n- BAD rev 2']);
+  const notes2 = [];
+  const room2 = createRoom([a2, b2]);
+  const res2 = await room2.summary({ check, onFormatNote: (msg, err) => notes2.push([msg, err]) });
+  assert.equal(res2.status, 'agreed');
+  assert.equal(res2.result.text, '**Agreed**\n- BAD rev 2');
+  assert.equal(b2.prompts.length, 2);
+  assert.deepEqual(notes2, [
+    ["Format check: B's summary contains BAD. Asked once to fix it.", true],
+    ['Format check: still wrong: contains BAD.', true],
+  ]);
+
+  // 3. If the agent answers the retry with PASS, the retry counts as failed and its first reply stays the version.
+  const a3 = fakeAgent('A', ['**Agreed**\n- BAD but kept', 'PASS']);
+  const b3 = fakeAgent('B', ['PASS']);
+  const notes3 = [];
+  const room3 = createRoom([a3, b3]);
+  const res3 = await room3.summary({ check, onFormatNote: (msg, err) => notes3.push([msg, err]) });
+  assert.equal(res3.status, 'agreed');
+  assert.equal(res3.result.text, '**Agreed**\n- BAD but kept');
+  assert.match(b3.prompts[0], /\[A\]: \*\*Agreed\*\*\n- BAD but kept/);
+  assert.doesNotMatch(b3.prompts[0], /\[A\]: \(passed\)/);
+  assert.match(notes3[1][0], /^Format check: still wrong: replied PASS/);
+});
+
+test('closingStatement format check: fixed on retry and still wrong after one retry', async () => {
+  // 1. Fixed on retry.
+  const notes1 = [];
+  const writer1 = fakeAgent('W', ['Forgot the reference.', 'Complete statement see pending-instructions.md.']);
+  const out = await closingStatement(writer1, { dir: '/topic', onFormatNote: (m, err) => notes1.push([m, err]) });
+  assert.equal(out, 'Complete statement see pending-instructions.md.');
+  assert.equal(writer1.prompts.length, 2);
+  assert.match(writer1.prompts[1], /Your closing statement has a format problem: it must point to pending-instructions\.md\./);
+  assert.deepEqual(notes1, [
+    ["Format check: W's closing statement it must point to pending-instructions.md. Asked once to fix it.", true],
+    ['Format check: fixed on retry.', false],
+  ]);
+
+  // 2. Still wrong after one retry: throws with <name> did not provide a complete closing statement and the final reply's problem.
+  const notes2 = [];
+  const writer2 = fakeAgent('W', ['PASS', 'Still no file reference']);
+  await assert.rejects(
+    closingStatement(writer2, { dir: '/topic', onFormatNote: (m, err) => notes2.push([m, err]) }),
+    /^Error: W did not provide a complete closing statement: it must point to pending-instructions\.md\.$/,
+  );
+  assert.equal(writer2.prompts.length, 2);
+  assert.deepEqual(notes2, [
+    ["Format check: W's closing statement the reply was empty or PASS. Asked once to fix it.", true],
+    ['Format check: still wrong: it must point to pending-instructions.md.', true],
+  ]);
+});

@@ -13,6 +13,7 @@ import { homedir, hostname, networkInterfaces, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as defaultInstructions from './instructions.mjs';
+import { formattedTurn as defaultFormattedTurn } from './room.mjs';
 
 export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--port 5566] [--no-screen] [--open] [--reopen NAME] [--dev]
                   [--node NAME [--peer NAME=http://ADDRESS:PORT ...]]
@@ -281,7 +282,7 @@ export async function load(ctx, v) {
   const instructions = readFileSync(instr.rulebookPath('brainstorming'), 'utf8');
   const workerInstructions = readFileSync(instr.rulebookPath('worker'), 'utf8');
   const { createAgent, claudeTitle, run, findLeftovers, parseCodexEvents, parseAgyOutput } = await import(`./agents.mjs${v}`);
-  const { createRoom, closingStatement } = await import(`./room.mjs${v}`);
+  const { createRoom, closingStatement, formattedTurn } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
   const usage = await import(`./usage.mjs${v}`);
   // Replication is loaded only with --node.
@@ -351,7 +352,8 @@ export async function load(ctx, v) {
     closingStatement: (options, agent = createAgent(wProvider, { name: wName, model: wModel, cwd: ctx.cwd, runner, session: {} })) =>
       closingStatement(agent, options, instr),
     suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }, instr),
-    instructions: instr };
+    instructions: instr,
+    formattedTurn };
 }
 
 export const UPDATE_NEEDS_RESTART = 'This update changes the worker\'s queues: Restart to apply it (Reload can\'t).';
@@ -1124,18 +1126,19 @@ function reattachWorker(ctx, worker) {
 // A task of a discussion left meanwhile has ended: its worker session, briefing, Worker-tab entries
 // and task records go into that discussion's checkpoint, only if it is still the checkpoint of that
 // session (not one Start fresh replaced, nor a later session's).
-function saveLeftWorker(ctx, worker, usage = null) {
+function saveLeftWorker(ctx, worker, usages = []) {
   const s = worker.seat, d = s.discussion;
   if (!d || s.brainstorm || !s.id) return;
   const saved = readCheckpoint(ctx, d.name);
   if (!saved || saved.invalid || saved.fresh || saved.workerSeat !== s.id) return;
   const shop = shopOf(ctx), kept = Array.isArray(saved.worker) ? saved.worker : [];
   const known = new Set(kept.map((m) => JSON.stringify(m)));
+  const list = Array.isArray(usages) ? usages : (usages ? [usages] : []);
   try {
     writeCheckpoint(ctx, d.name, { ...saved,
       sessions: [...(saved.sessions ?? []).filter(([k]) => k !== s.key), [s.key, s.session ?? {}]],
       workerBriefed: s.briefed, workerTree: s.tree, workerLabel: s.label, workerHandoff: s.handoff,
-      ...(usage && { totals: { ...(saved.totals ?? {}), [worker.name]: ctx.usage.addUsage(saved.totals?.[worker.name], usage) } }),
+      ...(list.length && { totals: { ...(saved.totals ?? {}), [worker.name]: list.reduce((tot, u) => ctx.usage.addUsage(tot, u), saved.totals?.[worker.name]) } }),
       worker: [...kept, ...shop.log.filter((m) => m.origin === s.origin && !known.has(JSON.stringify(m)))],
       work: workOf(shop, d.name) });
   } catch (err) { note(ctx, `✗ Couldn't save ${d.name}'s worker session in its checkpoint: ${err.message}`, true); }
@@ -1802,7 +1805,8 @@ async function closeNamedDiscussion(ctx, name, { extraLine = null, rethrow = fal
     const spec = parseSpec(target.workerSpec ?? 'claude', true);
     const writer = `${spec.provider[0].toUpperCase() + spec.provider.slice(1)} (${modelLabel(spec.provider, spec.model)})`;
     note(ctx, `Closing ${d.name}: ${writer} is writing the closing statement…`);
-    const statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports }, target.closingAgent?.());
+    const onFormatNote = (text, err) => { log(target, `_(${text})_\n\n`); note(ctx, text, err); };
+    const statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports, onFormatNote }, target.closingAgent?.());
     const cleanupLine = extraLine ? null : await cleanupMergedOnClose(target, d.name).catch((err) => {
       const msg = `Worker worktree/branch cleanup failed (${err.message}): nothing removed.`;
       note(ctx, `✗ ${msg}`, true);
@@ -2721,38 +2725,34 @@ const pausedTask = (run) => [
 // quotation mark before the next section (**Later**) or the Outcome line, so it may hold quotes and
 // paragraphs; or the label alone on its line, followed (blank lines allowed) by one contiguous
 // Markdown block quote, whose lines lose their `>` and one following space.
-const BLOCK_LABEL = /^\s*(?:[-*]\s+)?(?:\*\*)?Send to the Worker:(?:\*\*)?\s*$/i;
+const BLOCK_LABEL = /^\s*(?:[-*]\s+)?\*{0,2}Send to the Worker\*{0,2}:\*{0,2}\s*$/i;
+const INLINE_OPEN = /\*{0,2}Send to the Worker\*{0,2}:\*{0,2}[ \t]*["“]/gi;
+const INLINE_PREFIX = /^\*{0,2}Send to the Worker\*{0,2}:\*{0,2}[ \t]*["“]/i;
+const NEXT_STEP_END = (l) => /^\s*(?:#+\s*(?:\*\*)?|\*\*)Later:?(\*\*)?[\s:]*$/i.test(l) || /^[\s*_`]*Outcome\b[\s*_`]*:/i.test(l);
+const STEPS_LINE = (l) => /^Steps left:\s*\d+$/i.test(l.replace(/[*_`]/g, '').trim());
 const QUOTED = /^\s*>/;
 export function summaryInstruction(summary) {
-  const lines = String(summary ?? '').split('\n');
-  const start = lines.findIndex((l) => /^[\s*_#-]*Next step[\s*_:]*$/i.test(l));
-  if (start < 0) return /Send to the Worker:/i.test(summary ?? '') ? { error: 'its "Send to the Worker" line isn\'t under a Next step heading' } : null;
-  let end = lines.findIndex((l, i) => i > start && (/^\s*\*\*[^*]+\*\*[\s:]*$/.test(l) || /^[\s*_]*Outcome:/i.test(l)));
-  if (end < 0) end = lines.length;
-  const sectionLines = lines.slice(start + 1, end);
-  // Block-quoted instructions: each label line and the quote lines that follow it.
-  const blocks = [];
-  sectionLines.forEach((l, i) => {
-    if (!BLOCK_LABEL.test(l)) return;
-    let j = i + 1;
-    while (j < sectionLines.length && !sectionLines[j].trim()) j++;
-    const from = j;
-    while (j < sectionLines.length && QUOTED.test(sectionLines[j])) j++;
-    if (j > from) blocks.push({ label: i, from, to: j });
-  });
+  const { start, sectionLines, blocks } = nextStepBlocks(summary);
+  if (start < 0) return /Send to the Worker\*{0,2}:/i.test(summary ?? '') ? { error: 'its "Send to the Worker" line isn\'t under a Next step heading' } : null;
   const inBlock = (i) => blocks.some((b) => i === b.label || (i >= b.from && i < b.to));
   const section = sectionLines.filter((l, i) => !inBlock(i)).join('\n');
-  const opening = /Send to the Worker:\s*["“]/g;
-  const marks = section.match(opening)?.length ?? 0;
+  const unquoted = sectionLines.filter((l, i) => !inBlock(i) && !QUOTED.test(l)).join('\n');
+  const marks = unquoted.match(INLINE_OPEN)?.length ?? 0;
   if (marks + blocks.length > 1) return { error: 'its Next step holds more than one instruction for the worker' };
   if (blocks.length) {
     const b = blocks[0];
     if (sectionLines.slice(b.to).some((l) => QUOTED.test(l))) return { error: 'its block-quoted instruction is broken by lines that aren\'t quoted' };
-    const text = sectionLines.slice(b.from, b.to).map((l) => l.replace(/^\s*> ?/, '')).join('\n').trim();
+    const trailing = sectionLines.slice(b.to).filter((l) => l.trim());
+    if (trailing.length > 1 || (trailing.length === 1 && !STEPS_LINE(trailing[0])))
+      return { error: 'its block-quoted instruction is followed by unquoted lines' };
+    const quoted = sectionLines.slice(b.from, b.to).map((l) => l.replace(/^\s*> ?/, ''));
+    while (quoted.length && !quoted[0].trim()) quoted.shift();
+    while (quoted.length && !quoted.at(-1).trim()) quoted.pop();
+    const text = quoted.join('\n');
     return text ? { text } : { error: 'its block-quoted instruction is empty' };
   }
   if (!marks) return /Send to the Worker/i.test(section) ? { error: 'its Next step has no quoted instruction (Send to the Worker: "…", or the label alone followed by a > block quote)' } : null;
-  const after = section.slice(section.search(opening)).replace(/^Send to the Worker:\s*["“]/, '');
+  const after = section.slice(section.search(INLINE_OPEN)).replace(INLINE_PREFIX, '');
   const close = Math.max(after.lastIndexOf('"'), after.lastIndexOf('”'));
   if (close < 0) return { error: 'its quoted instruction has no closing quotation mark' };
   const text = after.slice(0, close).trim();
@@ -2774,6 +2774,67 @@ export function summarySteps(summary) {
   const n = Number(match[1]);
   if (!Number.isSafeInteger(n) || n < 1) return null;
   return n;
+}
+function nextStepBlocks(summary) {
+  const lines = String(summary ?? '').split('\n');
+  const start = lines.findIndex((l) => /^[\s*_#-]*Next step[\s*_:]*$/i.test(l));
+  if (start < 0) return { lines, start, end: lines.length, sectionLines: [], blocks: [] };
+  let end = lines.findIndex((l, i) => i > start && NEXT_STEP_END(l));
+  if (end < 0) end = lines.length;
+  const sectionLines = lines.slice(start + 1, end);
+  const blocks = [];
+  sectionLines.forEach((l, i) => {
+    if (!BLOCK_LABEL.test(l)) return;
+    let j = i + 1;
+    while (j < sectionLines.length && !sectionLines[j].trim()) j++;
+    const from = j;
+    while (j < sectionLines.length && QUOTED.test(sectionLines[j])) j++;
+    if (j > from) blocks.push({ label: i, from, to: j });
+  });
+  return { lines, start, end, sectionLines, blocks };
+}
+function isInlineMultiLineInstruction(summary, instr) {
+  if (!instr?.text || !instr.text.includes('\n')) return false;
+  return nextStepBlocks(summary).blocks.length === 0;
+}
+function linesOutsideInstruction(summary) {
+  const { lines, start, end, sectionLines, blocks } = nextStepBlocks(summary);
+  if (start < 0) return lines;
+  if (blocks.length === 1) {
+    const b = blocks[0];
+    return [...lines.slice(0, start + 1 + b.from), ...lines.slice(start + 1 + b.to)];
+  }
+  const section = sectionLines.join('\n');
+  const openIdx = section.search(INLINE_OPEN);
+  if (openIdx < 0) return lines;
+  const closeIdx = Math.max(section.lastIndexOf('"'), section.lastIndexOf('”'));
+  if (closeIdx <= openIdx) return lines;
+  const strippedSection = (section.slice(0, openIdx) + section.slice(closeIdx + 1)).split('\n');
+  return [...lines.slice(0, start + 1), ...strippedSection, ...lines.slice(end)];
+}
+// Checks a newly drafted or revised summary before other agents review it. Returns a list of problems.
+export function checkSummary(summary, { autoDev = null } = {}) {
+  const mode = typeof autoDev === 'string' ? autoDev : autoDev?.status ?? null;
+  const problems = [];
+  const instr = summaryInstruction(summary);
+  if (instr?.error) problems.push(instr.error);
+  else if (isInlineMultiLineInstruction(summary, instr)) {
+    problems.push('its Next step uses inline quotes for a multi-line instruction (use "Send to the Worker:" alone on its line followed by a > block quote)');
+  }
+  if (mode === 'running') {
+    const outcome = summaryOutcome(summary);
+    if (!outcome) problems.push('the summary has no Outcome line (end with Outcome: SEND, Outcome: FINISH or Outcome: WAIT FOR USER)');
+    else if (outcome === 'SEND' && !instr) problems.push('the summary says SEND, but its Next step has no instruction for the worker');
+    const stepsLines = linesOutsideInstruction(summary).filter((l) => /^[\s*_`-]*Steps left:/i.test(l));
+    if (stepsLines.length > 0 && (stepsLines.length > 1 || summarySteps(summary) === null)) {
+      problems.push('Steps left: must be a whole number above 0 just before the Outcome line');
+    }
+  } else if (mode === 'paused') {
+    const outcome = summaryOutcome(summary);
+    if (outcome === 'SEND') problems.push('auto dev is paused: Outcome must be FINISH or WAIT FOR USER, not SEND');
+    else if (!outcome) problems.push('the summary has no Outcome line (end with Outcome: FINISH or Outcome: WAIT FOR USER)');
+  }
+  return problems;
 }
 function latestAgreed(ctx) {
   const t = ctx.state.transcript;
@@ -2890,6 +2951,9 @@ function decide(ctx, run, status) {
   const s = { index: ctx.state.transcript.length - 1, instruction: summaryInstruction(result.text) };
   if (!s.instruction) return pauseAutoDev(ctx, 'the summary says SEND, but its Next step has no instruction for the worker');
   if (s.instruction.error) return pauseAutoDev(ctx, `the instruction can't be sent: ${s.instruction.error}`);
+  if (isInlineMultiLineInstruction(result.text, s.instruction)) {
+    return pauseAutoDev(ctx, 'the instruction can\'t be sent: its Next step uses inline quotes for a multi-line instruction (use "Send to the Worker:" alone on its line followed by a > block quote)');
+  }
   const steps = summarySteps(result.text);
   if (steps !== null) {
     const proposed = Math.min(15, run.cycle + steps + 2);
@@ -3429,12 +3493,18 @@ async function runSummary(ctx, auto = false, extra) {
   // A paused auto dev run: this summary (asked for, or after a User round) may finish it.
   const paused = !extra && ctx.autoDev?.status === 'paused' ? ctx.autoDev : null;
   if (paused) extra = pausedTask(paused);
+  const autoDevMode = paused ? 'paused' : (extra && ctx.autoDev?.status === 'running' ? 'running' : null);
   let started = 0;
   let turns = 0;
   let used;
   log(ctx, auto ? '_(auto-summary)_\n\n' : '_(summary requested)_\n\n');
   ctx.busy = true;
   const { status, result } = await ctx.room.summary({ extra,
+    check: (text) => checkSummary(text, { autoDev: autoDevMode }),
+    onFormatNote(text, err) {
+      log(ctx, `_(${text})_\n\n`);
+      note(ctx, text, err);
+    },
     onTurnStart(agent, { turn, of }) {
       started = Date.now();
       const label = `${agent.name} (summary, turn ${turn} of at most ${of})`;
@@ -4049,10 +4119,79 @@ async function readTested(place) {
     return r.version === 1 && /^[0-9a-f]{40,64}$/.test(r.branch) && /^[0-9a-f]{40,64}$/.test(r.main) && ['passed', 'failed'].includes(r.result) ? r : null;
   } catch { return null; }
 }
+const TESTED_FULL = /^Tested: ([0-9a-f]{40,64}) with (?:main|\S+) ([0-9a-f]{40,64}): tests (passed|failed)\.?$/;
+const TESTED_SHORT = /^Tested: ([0-9a-f]{7,64}) with (?:main|\S+) ([0-9a-f]{7,64}): tests (passed|failed)\.?$/i;
+const TESTED_ANY = /^\s*[*_`]*Tested\b/i;
+const DOCS_LINE = /^\s*(?:[-*]\s+)?(?:\*\*)?Docs:(?:\*\*)?\s+\S/i;
+// Checks a worker report's formal structure against the task's Git state. Returns a list of problems.
+export function checkWorkerReport(reply, { askedCatchUp = false, mergePending = false, mainInHead = false, mainMoved = false, ownCommits = 0 } = {}) {
+  const oweTested = Boolean((askedCatchUp || ownCommits > 0) && !mergePending && mainInHead && !mainMoved);
+  const oweDocs = ownCommits > 0;
+  const lines = String(reply ?? '').split('\n');
+  let lastIdx = lines.length - 1;
+  while (lastIdx >= 0 && !lines[lastIdx].trim()) lastIdx--;
+  const problems = [];
+  const testedIndices = [];
+  let docsIdx = -1;
+  lines.forEach((l, i) => {
+    if (TESTED_ANY.test(l)) testedIndices.push(i);
+    if (docsIdx < 0 && DOCS_LINE.test(l)) docsIdx = i;
+  });
+  if (oweDocs && docsIdx < 0) {
+    problems.push('has no Docs: line (include "Docs: <what you updated>" or "Docs: none needed, because <reason>")');
+  }
+  if (!testedIndices.length) {
+    if (oweTested) problems.push('has no Tested: line (end with "Tested: <full branch commit ID> with main <full main commit ID>: tests passed|failed")');
+  } else {
+    const tIdx = testedIndices.at(-1);
+    const raw = lines[tIdx].trimEnd();
+    const trimmed = raw.trim();
+    const unstyled = trimmed.replace(/[*_`]/g, '').trim();
+    if (/^[*_`]+Tested\b/i.test(trimmed) || (unstyled !== trimmed && TESTED_SHORT.test(unstyled))) {
+      problems.push('has a bold or styled Tested: line (write plain "Tested: <full branch commit ID> with main <full main commit ID>: tests passed|failed")');
+    }
+    if (TESTED_FULL.test(unstyled)) {
+      if (raw !== trimmed && !/^[*_`]+Tested\b/i.test(trimmed)) {
+        problems.push('has leading spaces on its Tested: line');
+      }
+    } else if (TESTED_SHORT.test(unstyled)) {
+      problems.push('has short commit IDs in its Tested: line (use full 40-to-64-character hex commit IDs)');
+    } else if (!/^[*_`]+Tested\b/i.test(trimmed)) {
+      problems.push('has a malformed Tested: line (use "Tested: <full branch commit ID> with main <full main commit ID>: tests passed|failed")');
+    }
+    if (tIdx !== lastIdx || testedIndices.length > 1) {
+      problems.push('has a Tested: line that is not the reply\'s last non-empty line');
+    }
+  }
+  if (docsIdx >= 0 && testedIndices.length && docsIdx > testedIndices[0]) {
+    problems.push('has its Docs: line after its Tested: line (place Docs: before Tested:)');
+  }
+  return problems;
+}
+async function workerGitFacts(place, { before, mainAtStart, askedCatchUp = false } = {}) {
+  const [head, mainNow, gitDir, unmerged] = await Promise.all([
+    git(place.path, 'rev-parse', 'HEAD'),
+    git(place.path, 'rev-parse', 'main').catch(() => null),
+    git(place.path, 'rev-parse', '--absolute-git-dir'),
+    git(place.path, 'ls-files', '-u').catch(() => ''),
+  ]);
+  const mergePending = existsSync(join(gitDir, 'MERGE_HEAD')) || unmerged.trim() !== '';
+  const mainInHead = Boolean(mainAtStart && await gitOk(place.path, 'merge-base', '--is-ancestor', mainAtStart, head));
+  const mainMoved = Boolean(mainAtStart && mainNow && mainNow !== mainAtStart);
+  const ownCommits = before
+    ? Number(await git(place.path, 'rev-list', '--no-merges', '--count', `${before}..${head}`, ...(mainAtStart ? ['--not', mainAtStart] : [])).catch(() => '0'))
+    : 0;
+  return { before, mainAtStart, mainNow, head, askedCatchUp, mergePending, mainInHead, mainMoved, ownCommits };
+}
+async function worktreeFingerprint(place) {
+  const head = await git(place.path, 'rev-parse', 'HEAD');
+  const { snapshot } = await collectWorktreeSnapshot(place, head, existsSync(place.path), { includeIgnored: false });
+  return snapshot;
+}
 // The worker's last "Tested: <branch commit> with main <main commit>: tests passed|failed" line, if
 // Git agrees: the branch commit is on its branch, it contains the main commit, which is main's.
 async function recordTested(ctx, place, text, owner, label) {
-  const m = [...String(text).matchAll(/^Tested: ([0-9a-f]{7,64}) with (?:main|\S+) ([0-9a-f]{7,64}): tests (passed|failed)\.?$/gm)].at(-1);
+  const m = [...String(text).matchAll(/^Tested: ([0-9a-f]{7,64}) with (?:main|\S+) ([0-9a-f]{7,64}): tests (passed|failed)\.?[ \t]*$/gm)].at(-1);
   if (!m) return;
   try {
     const main = await mainRef(place.top);
@@ -4161,7 +4300,8 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   const told = work ? [...work.interrupted] : [];
   if (!rollback && recovery && shop.rollbacks?.get(label)?.task === recovery.task) rollback = shop.rollbacks.get(label);
   if (rollback) { rollback.status = 'running'; showHeader(ctx); }
-  let before = null, mainAtStart = null, leftUsage = null;
+  let before = null, mainAtStart = null;
+  const leftUsages = [];
   const history = own.handoff ? screen.worker.filter((m) => m.owner === owner && m.speaker).map((m) =>
     `${m.speaker}${m.error ? ' (failed)' : ''}:\n${m.html}`).join('\n\n') : '';
   // The task's context, read once, here, before anything awaits: its discussion (for the briefing
@@ -4193,7 +4333,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     show({ speaker: from, text });
     working(worker.name);
     const t0 = Date.now();
-    let entry;
+    let entry, formatProblems = [], retryChanged = false;
     try {
       // Its own worktree first (created, reattached or caught up); without one it doesn't run.
       // Preserve the existing safe fast-forward contract for ordinary tasks, while still telling
@@ -4228,32 +4368,77 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       const interrupted = instr.workerInterrupted(told);
       if (told.length) work.interrupted = work.interrupted.filter((r) => !told.includes(r));
       const retryBrief = t?.retry ? `Your earlier attempt at this instruction failed: ${t.retry.error}\nInspect the current worktree and Git state first, including uncommitted edits and any merge or revert in progress. Commits made since the failure:\n${t.retry.after ? (await git(place.path, 'log', '--format=%H %s', `${t.retry.after}..HEAD`).catch(() => '(could not read commits)') || '(none)') : '(the failure commit could not be determined)'}\n\n` : '';
-      const usageLine = ctx.usage.agentUsageLine({
+      const makeUsageLine = () => ctx.usage.agentUsageLine({
         total: worker === ctx.worker ? ctx.totals?.[worker.name] : undefined,
         usageUnavailable: worker !== ctx.worker,
         provider: worker.provider,
         gauges: ctx.screen?.quota,
         measured: ctx.screen?.quotaAt?.measured,
       });
-      const prompt = `${usageLine}\n\n` + interrupted + brief + tree + commit + retryBrief + leftover + merge + (history ? instr.workerHistory(history, text) : text);
+      const prompt = `${makeUsageLine()}\n\n` + interrupted + brief + tree + commit + retryBrief + leftover + merge + (history ? instr.workerHistory(history, text) : text);
       // Stopped while its worktree was prepared: its worker never starts.
       if (t?.stopNow) throw new Error('stopped by the User before the worker started');
       if (t) t.turnStarted = true;
-      entry = { speaker: worker.name, text: (await worker.turn(prompt)) || '(no reply)' };
-      // Its briefing is now known to the session: the context's, or the seat of a discussion left
-      // meanwhile (even if it was left while this turn ran).
-      const now = worker === ctx.worker ? null : worker.seat;
-      if (now) Object.assign(now, { ...(brief && { briefed: d?.dir ?? (own.brainstorm ? 'brainstorm' : null) }), tree: place.cwd, label, handoff: false });
-      else if (worker === ctx.worker) {
-        if (brief) ctx.workerBriefed = d?.dir ?? (ctx.state.brainstorm ? 'brainstorm' : null);
-        ctx.workerTree = place.cwd;
-        ctx.workerLabel = label;
-        ctx.workerHandoff = false;
+      const askedCatchUp = Boolean((mainBehind && !rollback) || /^Catch up with \S+: merge \S+ into /i.test(text));
+      const formatLog = (msg, err = false) => {
+        workLog(`_(${msg})_\n\n`);
+        workNote(ctx, msg, err, label, owner);
+        if (!seat && ownerOf(ctx) === owner) toScreen(ctx, { type: 'note', text: msg, error: err });
+      };
+      let turnStart = t0, beforeRetrySnap = null, beforeRetryHead = null;
+      const runFormatted = ctx.formattedTurn ?? defaultFormattedTurn;
+      const turnResult = await runFormatted(worker, prompt, {
+        onTurn: async (raw, attempt) => {
+          const replyText = raw || '(no reply)';
+          if (attempt === 1) {
+            const now = worker === ctx.worker ? null : worker.seat;
+            if (now) Object.assign(now, { ...(brief && { briefed: d?.dir ?? (own.brainstorm ? 'brainstorm' : null) }), tree: place.cwd, label, handoff: false });
+            else if (worker === ctx.worker) {
+              if (brief) ctx.workerBriefed = d?.dir ?? (ctx.state.brainstorm ? 'brainstorm' : null);
+              ctx.workerTree = place.cwd;
+              ctx.workerLabel = label;
+              ctx.workerHandoff = false;
+            }
+          }
+          if (worker.lastUsage && worker === ctx.worker) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
+          else if (worker.lastUsage) leftUsages.push(worker.lastUsage);
+          const meta = [`${Math.round((Date.now() - turnStart) / 1000)}s`, ctx.usage.formatUsage(worker.lastUsage)].filter(Boolean).join(' · ');
+          workLog(`**${worker.name}** (worker, ${meta})\n\n${replyText}\n\n`);
+          out(ctx, `\n${bold(worker.name)}${dim(` (worker, ${meta})`)} › ${replyText}\n`);
+          show({ speaker: worker.name, text: replyText }, meta);
+        },
+        check: async (raw, attempt) => {
+          if (attempt === 2 && beforeRetrySnap !== null) {
+            const afterSnap = await worktreeFingerprint(place);
+            if (afterSnap !== beforeRetrySnap) {
+              retryChanged = true;
+              const afterHead = await git(place.path, 'rev-parse', 'HEAD');
+              const detail = beforeRetryHead !== afterHead ? `HEAD moved from ${beforeRetryHead.slice(0, 7)} to ${afterHead.slice(0, 7)}` : 'files changed';
+              formatLog(`Format check: the ${worker.name}'s format retry changed the worktree or HEAD (${detail}); keeping the changes and pausing for review.`, true);
+            }
+          }
+          if (rollback) return [];
+          const facts = await workerGitFacts(place, { before, mainAtStart, askedCatchUp });
+          return checkWorkerReport(raw || '(no reply)', facts);
+        },
+        onProblems: async (problems) => {
+          if (t?.stopNow) throw new Error('stopped by the User');
+          beforeRetryHead = await git(place.path, 'rev-parse', 'HEAD');
+          beforeRetrySnap = await worktreeFingerprint(place);
+          formatLog(`Format check: the ${worker.name}'s report ${problems.join('; ')}. Asked once to fix it.`, true);
+          turnStart = Date.now();
+        },
+        retryPrompt: (problems) => `${makeUsageLine()}\n\nYour report has a format problem: ${problems.join('; ')}.\nReply again with the complete corrected report only. Do no new work: do not run commands, do not edit files, and do not commit.`,
+      });
+      entry = { speaker: worker.name, text: turnResult.text || '(no reply)' };
+      formatProblems = turnResult.problems;
+      if (turnResult.retried) {
+        if (!formatProblems.length) formatLog('Format check: fixed on retry.', false);
+        else formatLog(`Format check: still wrong: ${formatProblems.join('; ')}.`, true);
       }
-      // Its usage counts for its own discussion: the one in use, or the one left meanwhile (saveLeftWorker).
-      if (worker.lastUsage && worker === ctx.worker) ctx.totals[worker.name] = ctx.usage.addUsage(ctx.totals[worker.name], worker.lastUsage);
-      else if (worker.lastUsage) leftUsage = worker.lastUsage;
-      await recordTested(ctx, place, entry.text, owner, label); // its "Tested:" line, if Git agrees
+      if (!formatProblems.some((p) => p.includes('Tested:'))) {
+        await recordTested(ctx, place, entry.text, owner, label); // its "Tested:" line, if Git agrees
+      }
     } catch (err) {
       entry = { speaker: worker.name, text: err.message, error: true };
     }
@@ -4264,15 +4449,17 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       const r = { task: text, at: work?.running?.at ?? new Date(t0).toISOString(), before, lane: t.lane ?? null };
       entry.text = await leftBehind(ctx, label, r, { stopped: true, preparing: !t.turnStarted, place: lane?.path ? lane : null });
     }
-    const meta = [`${Math.round((Date.now() - t0) / 1000)}s`, entry.error ? '' : ctx.usage.formatUsage(worker.lastUsage)].filter(Boolean).join(' · ');
-    workLog(`**${worker.name}** (worker${entry.error ? ', failed' : ''}, ${meta})\n\n${entry.text}\n\n`);
-    out(ctx, entry.error ? red(`\n✗ ${worker.name} (worker) failed: ${entry.text}\n`) : `\n${bold(worker.name)}${dim(` (worker, ${meta})`)} › ${entry.text}\n`);
-    if (entry.error && !stopped && !ctx.stopped && record && ownerOf(ctx) === owner) {
-      const id = randomBytes(6).toString('hex');
-      ctx.retryFailure = { id, available: true, text: t.retry?.text ?? text, error: entry.text, after: lane?.path ? await git(lane.path, 'rev-parse', 'HEAD').catch(() => null) : null, sent: t.retry?.sent ?? t.sent, cycle, run, rollback };
-      entry.retryId = id;
+    if (entry.error) {
+      const meta = [`${Math.round((Date.now() - t0) / 1000)}s`].filter(Boolean).join(' · ');
+      workLog(`**${worker.name}** (worker, failed, ${meta})\n\n${entry.text}\n\n`);
+      out(ctx, red(`\n✗ ${worker.name} (worker) failed: ${entry.text}\n`));
+      if (!stopped && !ctx.stopped && record && ownerOf(ctx) === owner) {
+        const id = randomBytes(6).toString('hex');
+        ctx.retryFailure = { id, available: true, text: t.retry?.text ?? text, error: entry.text, after: lane?.path ? await git(lane.path, 'rev-parse', 'HEAD').catch(() => null) : null, sent: t.retry?.sent ?? t.sent, cycle, run, rollback };
+        entry.retryId = id;
+      }
+      show(entry, meta);
     }
-    show(entry, meta);
     showHeader(ctx);
     if (saveError) workNote(ctx, `✗ ${worker.name}: couldn't save to the transcript: ${saveError.message}`, true, label, owner);
     // Its commits must carry its label: one without it is reported, not trusted.
@@ -4293,7 +4480,16 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
     }
     if (rollback) await rollbackReport(ctx, rollback, entry, worker === ctx.worker ? null : worker.seat);
     if (stopped) stopReport(ctx, owner, started, entry.text);
-    else if (run && ownerOf(ctx) === owner) reportBack(ctx, run, entry, !!t?.retry);
+    else if (run && ownerOf(ctx) === owner) {
+      if (retryChanged && ctx.autoDev === run) {
+        if (run.status === 'running') pauseAutoDev(ctx, 'the worker\'s format retry changed the worktree or HEAD');
+        else if (run.status === 'paused') { run.reason = 'the worker\'s format retry changed the worktree or HEAD'; showHeader(ctx); }
+      }
+      const reported = !entry.error && formatProblems.length
+        ? { ...entry, text: `${entry.text}\n\nFormat check still wrong: ${formatProblems.join('; ')}.` }
+        : entry;
+      reportBack(ctx, run, reported, !!t?.retry);
+    }
   } finally {
     if (ctx.workingIn) shop.writing.delete(ctx.workingIn);
     ctx.workingIn = null;
@@ -4301,7 +4497,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   }
   // Its worker session and briefing, in its own discussion's checkpoint: the one in use, or the one
   // left meanwhile (saveLeftWorker).
-  if (worker === ctx.worker) saveCheckpoint(ctx); else if (worker.seat) saveLeftWorker(ctx, worker, leftUsage);
+  if (worker === ctx.worker) saveCheckpoint(ctx); else if (worker.seat) saveLeftWorker(ctx, worker, leftUsages);
   showHeader(ctx);
   await refreshWorker(ctx).catch(() => {}); // the tab's checks are current when the task counts as done
   refreshQuota(ctx).catch(() => {});

@@ -64,6 +64,10 @@ discussion, with a 30-minute timeout per instruction.
   test`, if it has them), report their real output, and end your reply with the line
   `Tested: <full commit ID of your branch> with main <full commit ID of main>: tests passed` (or
   `tests failed`), naming exactly the commits you tested. The Worker tab shows it to the User.
+  After you commit, if your branch contains main (`git merge-base --is-ancestor main HEAD`),
+  do the same: run the project's tests, report their real output, and end your reply with that
+  `Tested:` line. Note `git rev-parse HEAD` and `git rev-parse main` before the tests and check
+  them again afterwards; if either changed, say so and give no `Tested:` line.
   For rollback, inspect the intended set before any file
   changes; distinguish prior rollbacks from implementation and never undo a rollback to restore
   removed work. If the set or its dependencies are unclear, report before editing.
@@ -77,4 +81,7 @@ discussion, with a 30-minute timeout per instruction.
   and deferred research are historical context, not fresh implementation instructions.
 - **Reply briefly and in plain language:** what you changed (files), what you ran and its real
   result, and what you did not check. You get a turn only when the User sends an instruction,
-  so finish the job in one turn, or say clearly where you stopped and why.
+  so finish the job in one turn, or say clearly where you stopped and why. If your report's
+  format is wrong (a required `Docs:` or `Tested:` line is missing, out of order, styled, or
+  uses short commit IDs), agent-room sends it back once for you to reply with the complete
+  corrected report only, without doing new work, editing files or committing.

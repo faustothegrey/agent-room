@@ -95,3 +95,5 @@ Stop after this task: the running instruction finishes and is reported as usual;
 worker prompt starts with only the worker's own usage line from ctx.totals and cached quota
 branchDiagram: falls back to a plain-text note when gitGraph cannot draw the history faithfully, and supports non-main room branches
 a detached worker from another discussion reports usage unavailable instead of none yet or the new discussion's totals
+worker report format retry flow: fixed on retry and still wrong after one retry
+worker report format retry flow: retry that changes HEAD keeps changes, logs it, re-runs checks and recordTested, and pauses auto dev
