@@ -236,3 +236,8 @@ checkSummary: inline-form rule, Outcome and Steps left rules while running and w
 displayTitle helper and UI titles hide YYYY-MM-DD- across rows, header, tab title, and peek/view
 Close reports waiting then writing phases in room.closingDiscussions, and cancelClose works only while waiting
 workerInfo.merged lists discussions with labelled commits in HEAD without needing worker branches
+while peeking a closed board, /__say (messages/attachments) and /__work are refused with 409 while /peek and /resume pass
+/peek shows a closed brainstorm read-only without starting sessions, and refuses an open brainstorm
+List panel: collapsible sections, row click switches active or peeks closed (chat and files), and peeking disables both composers
+Side pane: four tabs (Explorer/Document/My notes/Terminal), close/reopen, [[D4]] reopen, split orientation, and Terminal survival
+Control bar: Boards / Providers / Instructions, full Main panel with Back, List panel collapse/restore, Monitor→Providers, and Terminal/My notes preserved

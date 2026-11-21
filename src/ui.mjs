@@ -53,7 +53,7 @@ Type a message to start a round; start it with @name to address one agent.
 Commands: /resume <name> (continue that discussion where it stopped: the same agent and worker
 sessions, and its chat; from its handoff if it was never saved; one in archive/ or deferred/ is made
 active first), /fresh <name> (Start fresh: new sessions there, from its handoff and notes and its
-latest saved summary; its saved sessions are discarded), /peek <name> (a closed discussion's conversation and notes, read-only, without reopening it; /peek alone returns), /docs (pick a document to view in the
+latest saved summary; its saved sessions are discarded), /peek <name> (a closed discussion's or brainstorm's conversation and notes, read-only, without reopening it; /peek alone returns), /docs (pick a document to view in the
 browser), /new (end this session; your next message starts a new discussion; the worker
 carries on), /brainstorm (New brainstorm: its first message names it, in DIR/brainstorms/<date>-<title>/,
 saved like a discussion but sending no work; /resume brainstorms/<name> and /fresh brainstorms/<name> as
@@ -1145,10 +1145,11 @@ function saveLeftWorker(ctx, worker, usages = []) {
   } catch (err) { note(ctx, `✗ Couldn't save ${d.name}'s worker session in its checkpoint: ${err.message}`, true); }
 }
 
-// /peek <name> (Peek): a closed discussion's conversation and notes, read-only, without reopening it:
-// no agent or worker session is touched, and it stays closed. /peek alone (or Back on the screen)
-// returns to the discussion in use. One in archive/ or deferred/ is peeked in place (it is never made
-// active). In the terminal the conversation is printed instead.
+// /peek <name> (Peek): a closed discussion's or closed brainstorm's conversation and notes,
+// read-only, without reopening it: no agent or worker session is touched, and it stays closed.
+// /peek alone (or Back on the screen) returns to the discussion in use. One in archive/ or
+// deferred/ is peeked in place (it is never made active). In the terminal the conversation is
+// printed instead.
 function peekDiscussion(ctx, ref) {
   const parent = join(ctx.cwd, 'discussions');
   if (!ref) {
@@ -1156,7 +1157,21 @@ function peekDiscussion(ctx, ref) {
     toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
     return note(ctx, 'Back to the discussion in use.');
   }
-  if (ref.startsWith(`${BRAINSTORMS}/`)) return note(ctx, '✗ Peek is for closed discussions, not brainstorms.', true);
+  if (ref.startsWith(`${BRAINSTORMS}/`)) {
+    const name = brainstormRef(ref), dir = name && join(ctx.cwd, BRAINSTORMS, name);
+    if (!name || !DATED.test(name) || !existsSync(dir)) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}.`, true);
+    if (siblings(ctx).some((c) => isBrainstorm(c, name))) return note(ctx, `✗ ${name} is not closed. Peek is for closed boards: the open ones are already on screen.`, true);
+    const saved = readCheckpoint(ctx, ref);
+    const transcript = Array.isArray(saved?.state?.transcript) ? saved.state.transcript : [];
+    if (ctx.noScreen) {
+      const body = transcript.length ? transcript.map((m) => `**${m.speaker}**\n\n${m.text ?? ''}`).join('\n\n') : 'This brainstorm has no saved conversation.';
+      return note(ctx, `${name}\n\n${body}\n`);
+    }
+    const notes = existsSync(join(dir, 'notes.md')) ? relative(ctx.cwd, join(dir, 'notes.md')).split(sep).join('/') : null;
+    ctx.screen.peek = { name, ref, path: `${BRAINSTORMS}/${name}`, kind: 'brainstorm', title: saved?.discussion?.title ?? name, messages: transcript.map(ctx.docs.messageView), doc: notes };
+    toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
+    return note(ctx, `Peeking at ${name} — read-only. Back (or /peek) returns to the discussion in use.`);
+  }
   const d = discussionRef(parent, ref);
   if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent}.`, true);
   if (shopOf(ctx).closing?.has(d.name)) return note(ctx, `✗ ${d.name} is closing.`, true);
@@ -1169,7 +1184,9 @@ function peekDiscussion(ctx, ref) {
   }
   const dir = join(parent, d.section ?? '', d.name);
   const notes = existsSync(join(dir, 'notes.md')) ? relative(ctx.cwd, join(dir, 'notes.md')).split(sep).join('/') : null;
-  ctx.screen.peek = { name: d.name, title: saved?.discussion?.title ?? d.name, messages: transcript.map(ctx.docs.messageView), doc: notes };
+  const refKey = d.section ? `${d.section}/${d.name}` : d.name;
+  const path = d.section ? `discussions/${d.section}/${d.name}` : `discussions/${d.name}`;
+  ctx.screen.peek = { name: d.name, ref: refKey, path, kind: 'discussion', title: saved?.discussion?.title ?? d.name, messages: transcript.map(ctx.docs.messageView), doc: notes };
   toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
   return note(ctx, `Peeking at ${d.name} — read-only. Back (or /peek) returns to the discussion in use.`);
 }
@@ -1444,7 +1461,7 @@ function endSession(ctx, why, onReset = null) {
   ctx.retryFailure = null;
   ctx.autoDev = null; // Resume, Start fresh, New discussion and New brainstorm end an auto dev run
   ctx.autoDevSent = [];
-  Object.assign(screen, { doc: null, thinking: null, status: null });
+  Object.assign(screen, { doc: null, thinking: null, status: null, peek: null });
   ctx.logPath = null;
   ctx.pendingLog = '';
   ctx.agentsStarted = false;

@@ -518,7 +518,24 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 <title>agent-room</title><style>
 :root { color-scheme: light dark; --line: #8884; --dim: #888; }
 * { box-sizing: border-box; }
-body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: var(--left, 38%) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: 62px var(--list, 240px) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+body.list-collapsed { grid-template-columns: 62px 32px 0 1fr; }
+#control-bar { display: flex; flex-direction: column; align-items: center; gap: .35rem; padding: .45rem .25rem; border-right: 1px solid var(--line); background: linear-gradient(#88812, #88812), Canvas; min-height: 0; }
+.ctrl-btn { width: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .12rem; padding: .42rem .15rem; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--dim); cursor: pointer; }
+.ctrl-btn:hover { background: #8882; color: CanvasText; }
+.ctrl-btn.on { background: #3b82f624; border-color: #3b82f666; color: CanvasText; font-weight: 600; }
+.ctrl-ico { font-size: 1.05rem; line-height: 1.1; }
+.ctrl-lbl { font-size: .62rem; line-height: 1.1; }
+#main-panel { display: grid; min-width: 0; min-height: 0; grid-template-columns: var(--left, 55%) 7px 1fr; grid-template-rows: 1fr; }
+#main-panel.stacked { grid-template-columns: 1fr; grid-template-rows: var(--top, 55%) 7px 1fr; }
+#main-panel.side-closed, #main-panel.showing-page { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+#main-panel.side-closed > #split, #main-panel.side-closed > #right { display: none; }
+#main-panel.showing-page > #left, #main-panel.showing-page > #split, #main-panel.showing-page > #right { display: none; }
+#main-page { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#main-page[hidden] { display: none; }
+#main-page-bar { display: flex; align-items: center; gap: .6rem; padding: .4rem .8rem; border-bottom: 1px solid var(--line); background: #88808; flex: none; }
+#main-page-back { font-size: .82rem; padding: .2rem .6rem; }
+#main-page-title { font-size: .9rem; font-weight: 600; color: var(--dim); }
 /* The header: three zones, room (left), current discussion (middle), monitoring (right).
    Rare room and server actions sit in the ▾ menus; the gauges never shrink. */
 #header { position: relative; grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(16rem, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
@@ -661,27 +678,47 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; gr
 #autodev.paused { border-color: #b08900; background: #b0890018; } #autodev .why, #autodev .hint { color: var(--dim); }
 #autodev p { margin: .25rem 0; } #autodev .next { white-space: pre-wrap; max-height: 6rem; overflow-y: auto; }
 .msg.report .who { color: #3a9a52; }
-#remote-view { border-bottom: 1px solid var(--line); padding-bottom: .5rem; margin-bottom: .5rem; font-size: .85rem; }
-#remote-view p { margin: .2rem 0; } #remote-view .local-activity { color: var(--dim); font-size: .75rem; }
+#remote-view, #work-remote-view { border-bottom: 1px solid var(--line); padding-bottom: .5rem; margin-bottom: .5rem; font-size: .85rem; }
+#remote-view p, #work-remote-view p { margin: .2rem 0; } #remote-view .local-activity { color: var(--dim); font-size: .75rem; }
+#remote-view button, #work-remote-view button { margin-right: .4rem; margin-top: .25rem; }
 .tools label { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); }
+#list-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--line); background: linear-gradient(#88808, #88808), Canvas; }
+#list-head { display: flex; align-items: center; justify-content: space-between; gap: .3rem; padding: .35rem .5rem; border-bottom: 1px solid var(--line); min-height: 2.2rem; }
+#list-title { font-size: .8rem; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#list-toggle { border: 0; background: none; padding: .1rem .35rem; font-size: .95rem; line-height: 1; color: var(--dim); }
+#list-toggle:hover { background: #8882; color: CanvasText; }
+#list-pane { flex: 1; min-height: 0; overflow-y: auto; }
+body.list-collapsed #list-title, body.list-collapsed #list-pane { display: none; }
+body.list-collapsed #list-head { justify-content: center; padding: .35rem 0; }
+body.list-collapsed #list-split { display: none; }
 #left { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-#tabs, #subtabs { display: flex; border-bottom: 1px solid var(--line); }
-#subtabs { --accent: #3b82f6; --tint: #3b82f612; }
+#tabs, #subtabs { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+#subtabs { --accent: #3b82f6; --tint: #3b82f618; }
 .tab:disabled { opacity: .45; cursor: default; }
-.tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: .45rem .9rem; font-size: .9rem; }
-.tab.on { border-bottom-color: #3b82f6; font-weight: 600; }
+.tab[hidden] { display: none; }
+.tab { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: none; padding: .45rem .85rem; font-size: .88rem; color: var(--dim); }
+.tab:hover:not(:disabled):not(.on) { color: CanvasText; background: #8881; }
+.tab.on { border-bottom-color: var(--accent, #3b82f6); background: var(--tint, #3b82f618); color: CanvasText; font-weight: 600; }
 .tab.news::after { content: ' •'; color: #3b82f6; }
 #tab-explorer.peeking::after { content: ' ●'; color: #f59e0b; }
+#tab-terminal.running::after { content: ' ●'; color: #22c55e; }
+#side-open { margin-left: auto; margin-right: .35rem; }
+#side-controls { margin-left: auto; display: flex; align-items: center; gap: .15rem; padding-right: .3rem; }
+.pane-ctrl { border: 0; background: none; padding: .2rem .45rem; font-size: .82rem; color: var(--dim); border-radius: 4px; }
+.pane-ctrl:hover { background: #8882; color: CanvasText; }
+.pane-ctrl[hidden] { display: none; }
 .view { flex: 1; display: flex; flex-direction: column; min-height: 0; } .view[hidden] { display: none; }
-#split { cursor: col-resize; background: var(--line); background-clip: content-box; padding: 0 3px; touch-action: none; }
-#split:hover, #split:focus-visible, body.resizing #split { background-color: #3b82f6; outline: none; }
-body.resizing { cursor: col-resize; user-select: none; }
-body.resizing iframe { pointer-events: none; } /* the document would swallow the drag */
+#split, #list-split { cursor: col-resize; background: var(--line); background-clip: content-box; padding: 0 3px; touch-action: none; }
+#main-panel.stacked > #split { cursor: row-resize; padding: 3px 0; }
+#split:hover, #split:focus-visible, #list-split:hover, #list-split:focus-visible, body.resizing #split, body.resizing-v #split, body.resizing-list #list-split { background-color: #3b82f6; outline: none; }
+body.resizing, body.resizing-list { cursor: col-resize; user-select: none; }
+body.resizing-v { cursor: row-resize; user-select: none; }
+body.resizing iframe, body.resizing-v iframe, body.resizing-list iframe { pointer-events: none; } /* the document would swallow the drag */
 .chat-wrap { position: relative; display: flex; flex: 1; min-height: 0; }
-.chat-wrap::before, #discussions::before, #explorer::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .07; background: 0 0 / 240px repeat; }
-.chat-wrap::before { background-image: ${DOODLE}; } #discussions::before, #explorer::before { background-image: ${DOODLE_EXPLORER}; }
-@media (prefers-color-scheme: dark) { .chat-wrap::before, #discussions::before, #explorer::before { opacity: .09; filter: invert(1); } }
-#discussions, #explorer { position: relative; } #discussions > *, #explorer > * { position: relative; } /* its content above the wallpaper */
+.chat-wrap::before, #explorer::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .07; background: 0 0 / 240px repeat; }
+.chat-wrap::before { background-image: ${DOODLE}; } #explorer::before { background-image: ${DOODLE_EXPLORER}; }
+@media (prefers-color-scheme: dark) { .chat-wrap::before, #explorer::before { opacity: .09; filter: invert(1); } }
+#explorer { position: relative; } #explorer > * { position: relative; } /* its content above the wallpaper */
 .chat { position: relative; flex: 1; min-width: 0; overflow-y: auto; padding: 1rem; }
 .scroll-end { position: absolute; right: 1rem; bottom: .6rem; width: 2rem; height: 2rem; padding: 0; border-radius: 50%; background: Canvas; color: CanvasText; box-shadow: 0 2px 8px #0004; }
 .msg { margin: 0 0 .9rem; padding: .5rem .75rem; border-radius: 8px; background: linear-gradient(#8881, #8881), Canvas; }
@@ -700,7 +737,7 @@ a.mention { text-decoration: underline dotted; cursor: pointer; }
 #follow-label { margin-left: auto; display: flex; align-items: center; gap: .3rem; white-space: nowrap; opacity: .8; }
 #attach-row { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-top: .35rem; font-size: .8rem; }
 #attach { font-size: .8rem; padding: .1rem .5rem; }
-.ref { font-family: ui-monospace, Menlo, monospace; font-size: .9em; background: #e07a1026; border: 1px solid transparent; border-radius: 4px; padding: 0 .25em; cursor: default; } .ref:hover { border-color: #e07a10; }
+.ref { font-family: ui-monospace, Menlo, monospace; font-size: .9em; background: #e07a1026; border: 1px solid transparent; border-radius: 4px; padding: 0 .25em; cursor: pointer; } .ref:hover { border-color: #e07a10; }
 #attachments .chip, #pointed .chip { display: inline-flex; align-items: center; gap: .25rem; padding: .05rem .2rem .05rem .5rem; border: 1px solid var(--line); border-radius: 9px; margin-right: .3rem; }
 #attachments .chip button, #pointed .chip button { border: 0; background: none; padding: 0 .25rem; font-size: .8rem; cursor: pointer; }
 .box { width: 100%; min-height: 3.2rem; resize: vertical; font: inherit; padding: .4rem .5rem; border-radius: 6px; border: 1px solid var(--line); }
@@ -711,15 +748,16 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #bar { display: flex; gap: .6rem; align-items: center; padding: .4rem .6rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
 #current { color: var(--dim); } #feed { margin-left: auto; }
 #siblings { max-height: 60vh; overflow-y: auto; } #siblings .shown { font-weight: 600; }
-#discussions-pane, #pane, #docpane { flex: 1; min-height: 0; }
-/* The terminal pane (host-shell.mjs): a shell on this computer, shown only in pages opened on this computer. */
-#hostshell { border-top: 1px solid var(--line); } #hostshell[hidden], #hostshell-term[hidden] { display: none; }
-#hostshell-toggle { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: .3rem .6rem; font-size: .8rem; }
-#hostshell-term { height: 16rem; padding: .3rem; background: #1e1e1e; overflow: hidden; }
-/* The Notes pane (notes.mjs): the User's own notes, in the same place and only one of the two open. */
-#notes { border-top: 1px solid var(--line); } #notes[hidden], #notes-body[hidden], #notes-ask[hidden] { display: none; }
-#notes-toggle { width: 100%; text-align: left; border: 0; border-radius: 0; background: none; padding: .3rem .6rem; font-size: .8rem; }
-#notes-body { height: 16rem; display: grid; grid-template-columns: minmax(8rem, 30%) 1fr; }
+#pane, #docpane { flex: 1; min-height: 0; }
+/* The Terminal tab (host-shell.mjs): a shell on this computer, shown only in pages opened on this computer. */
+#terminal-bar { display: flex; align-items: center; gap: .5rem; padding: .3rem .6rem; border-bottom: 1px solid var(--line); font-size: .8rem; }
+#terminal-status { color: var(--dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#terminal-bar button { font-size: .78rem; padding: .12rem .5rem; }
+#terminal-bar button[hidden] { display: none; }
+#hostshell-term { flex: 1; min-height: 0; padding: .3rem; background: #1e1e1e; overflow: hidden; }
+/* The My notes tab (notes.mjs): the User's own notes for this room's folder, on this computer only. */
+#notes[hidden], #notes-ask[hidden] { display: none; }
+#notes-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(8rem, 32%) 1fr; }
 #notes-side { display: flex; flex-direction: column; gap: .3rem; min-height: 0; padding: .3rem; border-right: 1px solid var(--line); }
 #notes-new { align-self: flex-start; font-size: .8rem; } #notes-list { overflow-y: auto; min-height: 0; }
 #notes-list .note { display: block; width: 100%; text-align: left; border: 0; border-radius: 4px; background: none; padding: .2rem .4rem; font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -731,43 +769,52 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #notes-status { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } #notes-status.error { color: #ef4444; }
 #notes-ask { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; padding: .3rem .5rem; border: 1px solid #b08900; border-radius: 6px; background: #b0890018; font-size: .8rem; }
 #notes-ask button { font-size: .8rem; }
-#discussions-pane, #pane { overflow-y: auto; }
+#pane { overflow-y: auto; }
 #doc { border: 0; width: 100%; height: 100%; }
 .empty { display: grid; place-items: center; color: var(--dim); height: 100%; padding: 1rem; text-align: center; }
-#files, :is(#disc-list, #brain-list) { padding: 1rem; }
-#files .entry, :is(#disc-list, #brain-list) .entry { display: block; width: 100%; text-align: left; margin: 0; padding: .3rem .5rem; border: 0; border-radius: 4px; background: none; font-size: .9rem; break-inside: avoid; }
-#files .entry:hover, :is(#disc-list, #brain-list) .entry:hover { background: #8882; }
+#files { padding: 1rem; }
+#board-list { padding: .4rem .45rem; }
+#files .entry, #board-list .entry { display: block; width: 100%; text-align: left; margin: 0; padding: .28rem .4rem; border: 0; border-radius: 4px; background: none; font-size: .86rem; break-inside: avoid; overflow-wrap: anywhere; }
+#files .entry:hover, #board-list .entry:hover { background: #8882; }
 #files .entry.file.shown, #files .entry.file.shown:hover { background: #3b82f633; box-shadow: inset 3px 0 #60a5fa; }
 #files .entry.unviewable { opacity: .5; cursor: default; }
 #files .entry.unviewable:hover { background: none; }
-#files .entry::before, :is(#disc-list, #brain-list) .entry::before { display: inline-block; width: 1.5em; }
-#files .entry.folder::before, :is(#disc-list, #brain-list) .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.discussion::before, :is(#disc-list, #brain-list) .entry.discussion::before { content: '💬'; } #brain-list .entry.brainstorm::before { content: '💡'; }
-#files .entry .tag, :is(#disc-list, #brain-list) .entry .tag { color: var(--dim); font-size: .8rem; margin-left: .5rem; }
-#files .back, :is(#disc-list, #brain-list) .back { border: 0; background: none; padding: 0; color: var(--dim); font-size: .85rem; margin: 0 0 .4rem; }
-#files .back:hover, :is(#disc-list, #brain-list) .back:hover { color: CanvasText; text-decoration: underline; }
-#files .title, :is(#disc-list, #brain-list) .title { font-size: 1.05rem; font-weight: 600; margin: 0 0 .5rem; }
-#files .status, :is(#disc-list, #brain-list) .status { font-size: .75rem; font-weight: 400; padding: .05rem .45rem; border-radius: 9px; background: #8883; margin-left: .5rem; vertical-align: middle; }
-#files .status.archive, :is(#disc-list, #brain-list) .status.archive { background: #8882; } #files .status.deferred, :is(#disc-list, #brain-list) .status.deferred { background: #eab30833; } #files .status.inuse, :is(#disc-list, #brain-list) .status.inuse { background: #3b82f633; }
-#files .actions, :is(#disc-list, #brain-list) .actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; padding: 0 0 .8rem; border-bottom: 1px solid var(--line); }
-#files .actions .primary, :is(#disc-list, #brain-list) .actions .primary { background: #3b82f6; border-color: #3b82f6; color: white; }
-#files .row, :is(#disc-list, #brain-list) .row { display: flex; align-items: center; gap: .3rem; }
-#files .row .entry, :is(#disc-list, #brain-list) .row .entry { flex: 1; min-width: 0; }
-#files button.archiving::before, :is(#disc-list, #brain-list) button.archiving::before { content: ""; display: inline-block; width: .65em; height: .65em; margin-right: .35em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: archive-spin .7s linear infinite; }
+#files .entry::before, #board-list .entry::before { display: inline-block; width: 1.4em; }
+#files .entry.folder::before, #board-list .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.discussion::before, #board-list .entry.discussion::before { content: '💬'; } #board-list .entry.brainstorm::before { content: '💡'; }
+#files .entry .tag, #board-list .entry .tag { color: var(--dim); font-size: .8rem; margin-left: .5rem; }
+#files .back, #board-list .back { border: 0; background: none; padding: 0; color: var(--dim); font-size: .85rem; margin: 0 0 .4rem; }
+#files .back:hover, #board-list .back:hover { color: CanvasText; text-decoration: underline; }
+#files .title, #board-list .title { font-size: .9rem; font-weight: 600; margin: 0 0 .15rem; }
+#files .status, #board-list .status { font-size: .75rem; font-weight: 400; padding: .05rem .45rem; border-radius: 9px; background: #8883; margin-left: .5rem; vertical-align: middle; }
+#files .status.archive, #board-list .status.archive { background: #8882; } #files .status.deferred, #board-list .status.deferred { background: #eab30833; } #files .status.inuse, #board-list .status.inuse { background: #3b82f633; }
+#files .actions, #board-list .actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; padding: 0 0 .8rem; border-bottom: 1px solid var(--line); }
+#files .actions .primary, #board-list .actions .primary { background: #3b82f6; border-color: #3b82f6; color: white; }
+#files .row, #board-list .row { display: flex; align-items: flex-start; gap: .2rem; }
+#files .row .entry, #board-list .row .entry { flex: 1; min-width: 0; }
+#files button.archiving::before, #board-list button.archiving::before { content: ""; display: inline-block; width: .65em; height: .65em; margin-right: .35em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: archive-spin .7s linear infinite; }
 @keyframes archive-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { #files button.archiving::before, :is(#disc-list, #brain-list) button.archiving::before { animation: none; } }
-#files .row .reopen, :is(#disc-list, #brain-list) .row .reopen { font-size: .75rem; padding: .1rem .5rem; }
-#files .row-menu > summary, :is(#disc-list, #brain-list) .row-menu > summary { font-size: .75rem; margin-left: 0; }
-#files .row-menu .menu-items, :is(#disc-list, #brain-list) .row-menu .menu-items { left: auto; right: 0; }
-#files .row-menu .menu-items button, :is(#disc-list, #brain-list) .row-menu .menu-items button { font-size: .85rem; padding: .3rem .6rem; }
+@media (prefers-reduced-motion: reduce) { #files button.archiving::before, #board-list button.archiving::before { animation: none; } }
+#files .row .reopen, #board-list .row .reopen { font-size: .72rem; padding: .1rem .4rem; }
+#files .row-menu > summary, #board-list .row-menu > summary { font-size: .85rem; margin-left: 0; padding: .1rem .35rem; color: var(--dim); }
+#board-list .row-menu > summary::after { content: ''; }
+#files .row-menu .menu-items, #board-list .row-menu .menu-items { left: auto; right: 0; }
+#files .row-menu .menu-items button, #board-list .row-menu .menu-items button { font-size: .82rem; padding: .3rem .6rem; }
 .menu-items button:disabled { color: var(--dim); cursor: default; background: none; }
-#files .discussion-row, :is(#disc-list, #brain-list) .discussion-row { align-items: baseline; flex-wrap: wrap; }
-#files .discussion-row > .discussion-lines, :is(#disc-list, #brain-list) .discussion-row > .discussion-lines, :is(#disc-list, #brain-list) .discussion-row > .discussion-block { flex-basis: 14rem; flex: 1; min-width: 0; }
-#files .discussion-row.in-use, :is(#disc-list, #brain-list) .discussion-row.in-use { background: linear-gradient(#3b82f614, #3b82f614), Canvas; box-shadow: inset 3px 0 #60a5fa; border-radius: 4px; padding-left: .5rem; }
-:is(#disc-list, #brain-list) .drag-handle { cursor: grab; color: var(--dim); padding: 0 .2rem; user-select: none; }
-:is(#disc-list, #brain-list) .discussion-row.dragging { opacity: .5; }
-:is(#disc-list, #brain-list) .discussion-row.drop-before { box-shadow: inset 0 2px #60a5fa; }
-:is(#disc-list, #brain-list) .discussion-row.drop-after { box-shadow: inset 0 -2px #60a5fa; }
-:is(#disc-list, #brain-list) .discussion-row.peeking { background: linear-gradient(#f59e0b18, #f59e0b18), Canvas; box-shadow: inset 3px 0 #f59e0b; border-radius: 4px; padding-left: .5rem; }
+#files .discussion-row, #board-list .discussion-row { align-items: flex-start; flex-wrap: nowrap; padding: .2rem .2rem .25rem; margin: .15rem 0; border-radius: 5px; }
+#files .discussion-row > .discussion-lines, #board-list .discussion-row > .discussion-block { flex: 1; min-width: 0; }
+#files .discussion-row.in-use, #board-list .discussion-row.in-use { background: linear-gradient(#3b82f614, #3b82f614), Canvas; box-shadow: inset 3px 0 #60a5fa; border-radius: 4px; padding-left: .45rem; }
+#board-list .drag-handle { cursor: grab; color: var(--dim); padding: .25rem .1rem 0; user-select: none; font-size: .8rem; }
+#board-list .discussion-row.dragging { opacity: .5; }
+#board-list .discussion-row.drop-before { box-shadow: inset 0 2px #60a5fa; }
+#board-list .discussion-row.drop-after { box-shadow: inset 0 -2px #60a5fa; }
+#board-list .discussion-row.peeking { background: linear-gradient(#f59e0b18, #f59e0b18), Canvas; box-shadow: inset 3px 0 #f59e0b; border-radius: 4px; padding-left: .45rem; }
+.list-section { margin: .25rem 0 .45rem; }
+.list-section > summary { cursor: pointer; padding: .25rem .35rem; border-radius: 4px; font-size: .74rem; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; user-select: none; }
+.list-section > summary:hover { background: #8882; color: CanvasText; }
+#board-list .local-label { color: var(--dim); font-size: .74rem; margin: .05rem 0 .1rem .4rem; overflow-wrap: anywhere; }
+#board-list .worker-pending { color: light-dark(#b45309, #f59e0b); font-size: .74rem; margin: .1rem 0 .1rem .4rem; overflow-wrap: anywhere; }
+#board-list > .worker-pending, .list-section > .worker-pending { margin: .2rem .35rem; }
+#board-list .hint { display: block; font-size: .78rem; margin: .25rem .35rem .45rem; }
 .peek-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem; margin: 0 0 .6rem; padding: .35rem .6rem; border: 1px solid #f59e0b; border-radius: 6px; background: #f59e0b1f; color: light-dark(#92400e, #fcd34d); font-size: .82rem; }
 .peek-banner button { font-size: .78rem; padding: .1rem .5rem; border-color: #f59e0b88; color: inherit; background: #f59e0b22; }
 .explorer-bar { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 0 0 .35rem; }
@@ -793,9 +840,8 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .discussion-info > button { border: 0; background: none; color: #8fa8ee; padding: .15rem; }
 .info-detail { display: none; position: absolute; right: 0; top: 100%; z-index: 5; width: 15rem; padding: .5rem; background: Canvas; color: CanvasText; border: 1px solid var(--line); border-radius: 4px; font-size: .8rem; }
 .discussion-info:hover .info-detail, .discussion-info:focus-within .info-detail { display: block; }
-#files .actions .sep, :is(#disc-list, #brain-list) .actions .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 .3rem; }
-#files h3, :is(#disc-list, #brain-list) h3 { color: var(--dim); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; margin: .9rem 0 .3rem; }
-:is(#disc-list, #brain-list) .hint { display: block; margin: 0 0 .8rem; }
+#files .actions .sep, #board-list .actions .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 .3rem; }
+#files h3, #board-list h3 { color: var(--dim); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; margin: .9rem 0 .3rem; }
 #talk, #tab-talk { --accent: #3b82f6; --tint: #3b82f612; }
 #work, #tab-work { --accent: #a855f7; --tint: #a855f712; }
 .tab.on { border-bottom-color: var(--accent); background: var(--tint); }
@@ -851,8 +897,37 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 <div id="busy" aria-hidden="true"></div>
 </header>
+<nav id="control-bar" aria-label="Primary navigation">
+  <button type="button" class="ctrl-btn on" id="ctrl-boards" aria-pressed="true" title="Boards and conversation"><span class="ctrl-ico">💬</span><span class="ctrl-lbl">Boards</span></button>
+  <button type="button" class="ctrl-btn" id="ctrl-providers" aria-pressed="false" title="Default providers and models for new discussions, and provider health"><span class="ctrl-ico">⚙</span><span class="ctrl-lbl">Providers</span></button>
+  <button type="button" class="ctrl-btn" id="ctrl-instructions" aria-pressed="false" title="The prompts and rulebooks sent to each agent, and when"><span class="ctrl-ico">📜</span><span class="ctrl-lbl">Instructions</span></button>
+</nav>
+<aside id="list-panel" aria-label="Boards">
+  <div id="list-head"><span id="list-title">Boards</span><button type="button" id="list-toggle" aria-expanded="true" aria-label="Collapse boards list" title="Collapse boards list">«</button></div>
+  <div id="list-pane"></div>
+</aside>
+<div id="list-split" role="separator" aria-orientation="vertical" aria-label="Resize the boards list" tabindex="0" title="Drag to resize"></div>
+<div id="main-panel">
+<div id="main-page" hidden>
+  <div id="main-page-bar"><button type="button" id="main-page-back">← Back</button><span id="main-page-title"></span></div>
+  <div class="view" id="providers" hidden>
+    <form class="providers-panel" id="providers-form">
+      <p class="settings-hint" id="providers-hint"></p>
+      <h3 class="providers-heading">Discussion members</h3>
+      <div id="providers-agent-rows"></div>
+      <p class="settings-hint member-note" id="providers-member-note" hidden></p>
+      <h3 class="providers-heading">Worker</h3>
+      <div id="providers-worker-row"></div>
+      <p class="settings-hint">CLI default uses the provider’s settings. Custom model IDs require account access. Changes save automatically.</p>
+      <p class="settings-status" id="providers-status" role="status"></p>
+      <button type="button" id="providers-done">Go to the discussion</button>
+    </form>
+    <details class="providers-panel" id="health-details"><summary>Provider health · all rooms on this server <span id="health-warning" hidden>⚠</span></summary><button type="button" id="health-check">Check now</button><div id="provider-health" role="status"></div></details>
+  </div>
+  <div class="view" id="instructions" hidden><div id="instructions-pane"></div></div>
+</div>
 <div id="left">
-  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button class="tab" id="tab-providers" role="tab" title="Default providers and models for new discussions: members and worker together">Providers</button><button class="tab" id="tab-instructions" role="tab" title="The prompts and rulebooks sent to each agent, and when">Instructions</button></div>
+  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></div>
   <div class="view" id="talk">
     <details class="agent-settings" id="talk-settings">
       <summary>Discussion members · <span id="talk-models">provider & model</span></summary>
@@ -870,25 +945,10 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <div class="composer" id="composer"><div class="mention-offer" hidden></div>
       <div id="remote-view" hidden></div>
       <div id="autodev" role="status" hidden></div>
-      <textarea class="box" id="box" placeholder="Message the agents (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"></textarea>
+      <textarea class="box" id="box" placeholder="Message to the agents… (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"></textarea>
       <div id="attach-row"><button type="button" id="attach" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)">📎 Attach</button><input type="file" id="attach-input" multiple hidden><span id="attachments"></span><span id="pointed"></span></div>
     </div>
   </div>
-  <div class="view" id="providers" hidden>
-    <form class="providers-panel" id="providers-form">
-      <p class="settings-hint" id="providers-hint"></p>
-      <h3 class="providers-heading">Discussion members</h3>
-      <div id="providers-agent-rows"></div>
-      <p class="settings-hint member-note" id="providers-member-note" hidden></p>
-      <h3 class="providers-heading">Worker</h3>
-      <div id="providers-worker-row"></div>
-      <p class="settings-hint">CLI default uses the provider’s settings. Custom model IDs require account access. Changes save automatically.</p>
-      <p class="settings-status" id="providers-status" role="status"></p>
-      <button type="button" id="providers-done">Go to the discussion</button>
-    </form>
-    <details class="providers-panel" id="health-details"><summary>Provider health · all rooms on this server <span id="health-warning" hidden>⚠</span></summary><button type="button" id="health-check">Check now</button><div id="provider-health" role="status"></div></details>
-  </div>
-  <div class="view" id="instructions" hidden><div id="instructions-pane"></div></div>
   <div class="view" id="work" hidden>
     <details class="agent-settings" id="work-settings">
       <summary>Worker · <span id="work-models">provider & model</span></summary>
@@ -903,7 +963,8 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
     <div id="winfo" aria-live="polite"></div>
     <div class="chat-wrap"><div class="chat" id="wchat"></div><button class="scroll-end" id="work-end" aria-label="Scroll to latest worker messages" title="Scroll to latest messages" hidden>↓</button></div>
     <div class="composer" id="wcomposer"><div class="mention-offer" hidden></div>
-      <textarea class="box" id="wbox" placeholder="Instructions for the worker (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands."></textarea>
+      <div id="work-remote-view" hidden></div>
+      <textarea class="box" id="wbox" placeholder="Instruction to the worker… (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands."></textarea>
       <div class="tools"><span class="hint" id="whint"></span><span id="wstop" hidden><button id="wstop-after" title="The running instruction finishes and is reported as usual; this discussion's queued instructions are cancelled, and auto dev pauses">Stop after this task</button> <button id="wstop-now" title="The running instruction's programs are stopped at once; this discussion's queued instructions are cancelled, auto dev pauses, and what it left in the worktree is reported">Stop now</button></span></div>
     </div>
   </div>
@@ -911,20 +972,22 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </div>
 <div id="split" role="separator" aria-orientation="vertical" aria-label="Resize the chat and the document" tabindex="0" title="Drag to resize"></div>
 <div id="right">
-  <div id="subtabs" role="tablist"><button class="tab" id="tab-discussions" role="tab">Discussions</button><button class="tab" id="tab-brainstorms" role="tab">Brainstorms</button><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button></div>
-  <div class="view" id="discussions" hidden><div id="discussions-pane"></div></div>
-  <div class="view" id="brainstorms" hidden><div id="brainstorms-pane"></div></div>
+  <div id="subtabs" role="tablist"><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button><button class="tab" id="tab-notes" role="tab" hidden title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder.">My notes</button><button class="tab" id="tab-terminal" role="tab" hidden title="A shell on this computer, in the room's folder. Only from this computer, not from other devices.">Terminal</button><span id="side-controls"><button type="button" id="split-orient" class="pane-ctrl" title="Stack conversation above side pane" aria-label="Stack conversation above side pane">⇅</button><button type="button" id="side-close" class="pane-ctrl" title="Close side pane" aria-label="Close side pane">✕</button></span></div>
   <div class="view" id="explorer"><div id="pane"></div></div>
   <div class="view" id="document" hidden>
     <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button><label id="follow-label" title="When an agent or the worker names a file in a new message, show it here at once (this browser only)"><input type="checkbox" id="follow"> Follow mentions</label></div>
     <div id="docpane"></div>
   </div>
-  <div id="notes" hidden><button id="notes-toggle" aria-expanded="false" title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder.">▸ Notes (this computer only)</button><div id="notes-body" hidden>
+  <div class="view" id="notes" hidden><div id="notes-body">
     <div id="notes-side"><button id="notes-new" title="Start a new note: the first line is its title">New</button><div id="notes-list"></div></div>
     <div id="notes-main"><div id="notes-ask" role="alertdialog" aria-labelledby="notes-ask-text" hidden><span id="notes-ask-text"></span><span id="notes-ask-buttons"></span></div><textarea class="box" id="notes-text" aria-label="Note" placeholder="Choose a note, or New. The first line is the note's title." disabled></textarea>
       <div id="notes-bar"><button id="notes-save" disabled title="Save this note (nothing is saved until you press Save)">Save</button><button id="notes-remove" disabled>Remove</button><span id="notes-status" role="status"></span></div></div>
   </div></div>
-  <div id="hostshell" hidden><button id="hostshell-toggle" aria-expanded="false" title="A shell on this computer, in the room's folder. Only from this computer, not from other devices.">▸ Terminal (this computer only)</button><div id="hostshell-term" hidden></div></div>
+  <div class="view" id="terminal" hidden>
+    <div id="terminal-bar"><span id="terminal-status">Shell in this room’s folder (this computer only)</span><button type="button" id="terminal-start" hidden title="Start a fresh shell">Start shell</button><button type="button" id="terminal-end" hidden title="Stop the running shell">End shell</button></div>
+    <div id="hostshell-term"></div>
+  </div>
+</div>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -1038,22 +1101,84 @@ function mention(el, m, live) {
 }
 function statusEl(text, error) { const el = document.createElement('div'); el.className = 'status' + (error ? ' error' : ''); el.textContent = text; return el; }
 
-// The two tabs. A worker reply while the Discussion tab is shown marks the Worker tab.
+// Control bar & Main panel pages (Providers / Instructions): open across the full Main panel,
+// collapsing the List panel while shown and restoring its prior open/collapsed state on return.
+// Conversation rounds, worker tasks, running Terminal shells and unsaved My notes stay untouched.
+let mainPage = null, listCollapsedBeforePage = null;
+function updateBackLabel() {
+  const back = $('main-page-back'), title = $('main-page-title');
+  if (back) {
+    const t = typeof currentTitle === 'function' ? currentTitle() : '';
+    back.textContent = '← Back to ' + (t || 'the discussion');
+  }
+  if (title) title.textContent = mainPage === 'providers' ? 'Providers' : mainPage === 'instructions' ? 'Instructions' : '';
+}
+function openMainPage(name) {
+  const next = name === 'providers' || name === 'instructions' ? name : null;
+  if (next) {
+    if (mainPage === null) {
+      listCollapsedBeforePage = document.body.classList.contains('list-collapsed');
+      if (typeof setListCollapsed === 'function') setListCollapsed(true, false);
+    }
+    mainPage = next;
+    $('main-panel').classList.add('showing-page');
+    $('main-page').hidden = false;
+    $('providers').hidden = next !== 'providers';
+    $('instructions').hidden = next !== 'instructions';
+    updateBackLabel();
+    if (next === 'providers' && typeof renderProviders === 'function') renderProviders();
+    if (next === 'instructions' && typeof renderInstructions === 'function') renderInstructions();
+  } else {
+    if (mainPage === null) return;
+    mainPage = null;
+    $('main-panel').classList.remove('showing-page');
+    $('main-page').hidden = true;
+    $('providers').hidden = true;
+    $('instructions').hidden = true;
+    if (listCollapsedBeforePage !== null && typeof setListCollapsed === 'function') {
+      const restore = listCollapsedBeforePage;
+      listCollapsedBeforePage = null;
+      setListCollapsed(restore, false);
+    }
+    if (typeof sideClosed !== 'undefined' && !sideClosed && typeof subtab !== 'undefined' && subtab === 'terminal' && typeof hostShell !== 'undefined' && hostShell?.fit) {
+      requestAnimationFrame(() => { try { hostShell.fit.fit(); } catch {} });
+    }
+  }
+  const active = mainPage ?? 'boards';
+  for (const [id, key] of [['ctrl-boards', 'boards'], ['ctrl-providers', 'providers'], ['ctrl-instructions', 'instructions']]) {
+    const b = $(id);
+    if (!b) continue;
+    b.classList.toggle('on', active === key);
+    b.setAttribute('aria-pressed', active === key ? 'true' : 'false');
+  }
+  if (typeof updateReplicaView === 'function') updateReplicaView();
+}
+
+// The two conversation tabs (Discussion and Worker). A worker reply while Discussion is shown marks Worker.
 function showTab(name) {
+  if (name === 'providers' || name === 'instructions') { openMainPage(name); return; }
+  if (mainPage !== null) openMainPage(null);
   tab = name;
-  $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work'; $('providers').hidden = name !== 'providers'; $('instructions').hidden = name !== 'instructions';
-  $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work'); $('tab-providers').classList.toggle('on', name === 'providers'); $('tab-instructions').classList.toggle('on', name === 'instructions');
-  if (name === 'providers') { renderProviders(); updateReplicaView(); return; }
-  if (name === 'instructions') { renderInstructions(); updateReplicaView(); return; }
+  $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work';
+  $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work');
   if (name === 'work') { $('tab-work').classList.remove('news'); post('__workerinfo', {}).catch(() => {}); } // its branches' checks, again
   updateReplicaView();
-  (name === 'work' ? wbox : box).focus();
+  const target = name === 'work' ? wbox : box;
+  if (!target.disabled) target.focus();
 }
 $('tab-talk').onclick = () => showTab('talk');
 $('tab-work').onclick = () => showTab('work');
-$('tab-providers').onclick = () => showTab('providers');
-$('tab-instructions').onclick = () => showTab('instructions');
-$('providers-done').onclick = () => showTab('talk');
+if ($('ctrl-boards')) $('ctrl-boards').onclick = () => {
+  if (mainPage !== null) return openMainPage(null);
+  if (document.body.classList.contains('list-collapsed') && typeof setListCollapsed === 'function') {
+    setListCollapsed(false);
+    post('__workerinfo', {}).catch(() => {});
+  }
+};
+if ($('ctrl-providers')) $('ctrl-providers').onclick = () => openMainPage(mainPage === 'providers' ? null : 'providers');
+if ($('ctrl-instructions')) $('ctrl-instructions').onclick = () => openMainPage(mainPage === 'instructions' ? null : 'instructions');
+if ($('main-page-back')) $('main-page-back').onclick = () => openMainPage(null);
+if ($('providers-done')) $('providers-done').onclick = () => openMainPage(null);
 // The Instructions tab: the prompt catalog, fetched once and rendered as expandable pieces.
 let instructionsLoaded = false;
 async function renderInstructions() {
@@ -1170,7 +1295,12 @@ function showWorkerInfo(info) {
     renderDiscussions();
   } // its rows and Close/Merge/Discard actions follow pending work and existing worker lanes
   workPlaceholder ??= wbox.placeholder;
-  if (room?.brainstorm) setWorkerInfo({ lines: [BRAINSTORM_NO_WORK], disabled: true });
+  const readOnly = (typeof peeking !== 'undefined' && !!peeking) || (typeof viewing !== 'undefined' && !!viewing);
+  if (readOnly) {
+    setWorkerInfo(info);
+    wbox.disabled = true;
+    wbox.placeholder = (typeof peeking !== 'undefined' && peeking) ? 'Peeking read-only — click Back to return to the active discussion.' : 'Read-only: viewing a peer’s discussion.';
+  } else if (room?.brainstorm) setWorkerInfo({ lines: [BRAINSTORM_NO_WORK], disabled: true });
   else {
     setWorkerInfo(info);
     if (!info?.disabled) { wbox.disabled = false; wbox.placeholder = workPlaceholder; }
@@ -1271,41 +1401,156 @@ function setWorking(name) {
   tabTitles();
 }
 
-// The divider between the chat and the document: drag it, or use ←/→ when it has focus. Neither
-// side gets narrower than MIN. The width is kept in this browser, per address: rooms on the usual
-// port (5566) share it.
-const split = $('split'), MIN = 260, KEY = 'agent-room:left';
+// The dividers: #list-split resizes the Boards list panel, and #split resizes the conversation vs
+// the side pane (horizontally when side by side, vertically when stacked). Widths, heights,
+// orientation, list collapse and side-pane close state are kept in this browser, per address.
+const mainPanel = $('main-panel'), split = $('split'), listSplit = $('list-split'), listToggle = $('list-toggle');
+const splitOrient = $('split-orient'), sideCloseBtn = $('side-close'), sideOpenBtn = $('side-open');
+const MIN = 260, MIN_H = 140, LIST_MIN = 160, LIST_MAX = 420;
+const KEY = 'agent-room:left', TOP_KEY = 'agent-room:top', LIST_KEY = 'agent-room:list';
+const LIST_COLLAPSED_KEY = 'agent-room:list-collapsed', ORIENT_KEY = 'agent-room:split-orient', SIDE_CLOSED_KEY = 'agent-room:side-closed';
+let stacked = false, sideClosed = false;
 function setLeft(px) {
-  const room = document.documentElement.clientWidth - split.offsetWidth; // no scrollbar, no divider
-  const w = Math.round(Math.max(MIN, Math.min(room - MIN, px)));
-  document.body.style.setProperty('--left', w + 'px');
+  const avail = mainPanel.getBoundingClientRect().width - split.offsetWidth;
+  const w = Math.round(Math.max(MIN, Math.min(Math.max(MIN, avail - MIN), px)));
+  mainPanel.style.setProperty('--left', w + 'px');
   return w;
 }
+function setTop(px) {
+  const avail = mainPanel.getBoundingClientRect().height - split.offsetHeight;
+  const h = Math.round(Math.max(MIN_H, Math.min(Math.max(MIN_H, avail - MIN_H), px)));
+  mainPanel.style.setProperty('--top', h + 'px');
+  return h;
+}
+function setList(px) {
+  const ctrlW = $('control-bar')?.getBoundingClientRect().width || 62;
+  const max = Math.max(LIST_MIN, Math.min(LIST_MAX, document.documentElement.clientWidth - ctrlW - MIN * 2 - 14));
+  const w = Math.round(Math.max(LIST_MIN, Math.min(max, px)));
+  document.body.style.setProperty('--list', w + 'px');
+  if (!stacked && !sideClosed && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
+  return w;
+}
+function setListCollapsed(collapsed, save = true) {
+  document.body.classList.toggle('list-collapsed', collapsed);
+  listToggle.textContent = collapsed ? '»' : '«';
+  listToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  listToggle.setAttribute('aria-label', collapsed ? 'Expand boards list' : 'Collapse boards list');
+  listToggle.title = collapsed ? 'Expand boards list' : 'Collapse boards list';
+  if (save) { try { localStorage.setItem(LIST_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch {} }
+  if (!stacked && !sideClosed && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
+}
+function setStacked(on, save = true) {
+  stacked = !!on;
+  mainPanel.classList.toggle('stacked', stacked);
+  split.setAttribute('aria-orientation', stacked ? 'horizontal' : 'vertical');
+  splitOrient.textContent = stacked ? '⇆' : '⇅';
+  splitOrient.title = stacked ? 'Place conversation and side pane side by side' : 'Stack conversation above side pane';
+  splitOrient.setAttribute('aria-label', splitOrient.title);
+  if (save) { try { localStorage.setItem(ORIENT_KEY, stacked ? 'stacked' : 'side'); } catch {} }
+  if (stacked) {
+    try { const t = Number(localStorage.getItem(TOP_KEY)); if (t) setTop(t); } catch {}
+  } else {
+    try { const l = Number(localStorage.getItem(KEY)); if (l) setLeft(l); } catch {}
+  }
+  if (typeof hostShell !== 'undefined' && hostShell?.fit) requestAnimationFrame(() => { try { hostShell.fit.fit(); } catch {} });
+}
+function setSideClosed(closed, save = true) {
+  sideClosed = !!closed;
+  mainPanel.classList.toggle('side-closed', sideClosed);
+  if (sideOpenBtn) sideOpenBtn.hidden = !sideClosed;
+  if (save) { try { localStorage.setItem(SIDE_CLOSED_KEY, sideClosed ? '1' : '0'); } catch {} }
+  if (!sideClosed) {
+    if (typeof subtab !== 'undefined' && subtab === 'terminal' && typeof hostShell !== 'undefined' && hostShell?.fit) {
+      requestAnimationFrame(() => { try { hostShell.fit.fit(); hostShell.term?.focus(); } catch {} });
+    }
+    if (!stacked && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
+    if (stacked && mainPanel.style.getPropertyValue('--top')) setTop($('left').getBoundingClientRect().height);
+  }
+}
 const keep = (w) => { try { localStorage.setItem(KEY, String(w)); } catch {} };
-try { const saved = Number(localStorage.getItem(KEY)); if (saved) setLeft(saved); } catch {}
+const keepTop = (h) => { try { localStorage.setItem(TOP_KEY, String(h)); } catch {} };
+const keepList = (w) => { try { localStorage.setItem(LIST_KEY, String(w)); } catch {} };
+try {
+  const savedList = Number(localStorage.getItem(LIST_KEY)); if (savedList) setList(savedList);
+  if (localStorage.getItem(LIST_COLLAPSED_KEY) === '1') setListCollapsed(true, false);
+  if (localStorage.getItem(ORIENT_KEY) === 'stacked') setStacked(true, false);
+  if (localStorage.getItem(SIDE_CLOSED_KEY) === '1') setSideClosed(true, false);
+  const saved = Number(localStorage.getItem(KEY)); if (saved) setLeft(saved);
+  const savedTop = Number(localStorage.getItem(TOP_KEY)); if (savedTop) setTop(savedTop);
+} catch {}
+listToggle.onclick = () => {
+  const next = !document.body.classList.contains('list-collapsed');
+  setListCollapsed(next);
+  if (!next) post('__workerinfo', {}).catch(() => {});
+};
+splitOrient.onclick = () => setStacked(!stacked);
+sideCloseBtn.onclick = () => {
+  if (subtab === 'notes' && typeof notesDirty === 'function' && notesDirty()) return notesGuard(() => setSideClosed(true));
+  setSideClosed(true);
+};
+sideOpenBtn.onclick = () => setSideClosed(false);
+listSplit.addEventListener('pointerdown', (e) => {
+  if (document.body.classList.contains('list-collapsed')) return;
+  e.preventDefault();
+  listSplit.setPointerCapture(e.pointerId);
+  document.body.classList.add('resizing-list');
+  const listStart = () => $('list-panel').getBoundingClientRect().left;
+  const move = (ev) => setList(ev.clientX - listStart() - 3);
+  const stop = (ev) => {
+    listSplit.removeEventListener('pointermove', move);
+    listSplit.removeEventListener('pointerup', stop);
+    listSplit.removeEventListener('pointercancel', stop);
+    document.body.classList.remove('resizing-list');
+    keepList(setList(ev.clientX - listStart() - 3));
+  };
+  listSplit.addEventListener('pointermove', move);
+  listSplit.addEventListener('pointerup', stop);
+  listSplit.addEventListener('pointercancel', stop);
+});
+listSplit.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  if (document.body.classList.contains('list-collapsed')) return;
+  e.preventDefault();
+  keepList(setList($('list-panel').getBoundingClientRect().width + (e.key === 'ArrowLeft' ? -24 : 24)));
+});
 split.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   split.setPointerCapture(e.pointerId);
-  document.body.classList.add('resizing');
-  const move = (ev) => setLeft(ev.clientX - 3);
+  const vert = stacked;
+  document.body.classList.add(vert ? 'resizing-v' : 'resizing');
+  const rect = () => mainPanel.getBoundingClientRect();
+  const move = (ev) => (vert ? setTop(ev.clientY - rect().top - 3) : setLeft(ev.clientX - rect().left - 3));
   const stop = (ev) => {
     split.removeEventListener('pointermove', move);
     split.removeEventListener('pointerup', stop);
     split.removeEventListener('pointercancel', stop);
-    document.body.classList.remove('resizing');
-    keep(setLeft(ev.clientX - 3));
+    document.body.classList.remove('resizing', 'resizing-v');
+    if (vert) keepTop(setTop(ev.clientY - rect().top - 3));
+    else keep(setLeft(ev.clientX - rect().left - 3));
   };
   split.addEventListener('pointermove', move);
   split.addEventListener('pointerup', stop);
   split.addEventListener('pointercancel', stop);
 });
 split.addEventListener('keydown', (e) => {
-  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-  e.preventDefault();
-  keep(setLeft($('left').getBoundingClientRect().width + (e.key === 'ArrowLeft' ? -24 : 24)));
+  if (stacked) {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    keepTop(setTop($('left').getBoundingClientRect().height + (e.key === 'ArrowUp' ? -24 : 24)));
+  } else {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    keep(setLeft($('left').getBoundingClientRect().width + (e.key === 'ArrowLeft' ? -24 : 24)));
+  }
 });
-// A narrower window must not squeeze one side below MIN.
-window.addEventListener('resize', () => { if (document.body.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width); });
+// A narrower/shorter window must not squeeze one side below MIN/MIN_H.
+window.addEventListener('resize', () => {
+  if (!document.body.classList.contains('list-collapsed') && document.body.style.getPropertyValue('--list')) setList($('list-panel').getBoundingClientRect().width);
+  if (!sideClosed) {
+    if (stacked && mainPanel.style.getPropertyValue('--top')) setTop($('left').getBoundingClientRect().height);
+    else if (!stacked && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
+  }
+});
 function message(m, live = false) {
   localMessages.push(m);
   if (viewing || peeking) return;
@@ -1424,16 +1669,34 @@ const effectiveExplorerMode = () => (hasDiscussionTree() ? explorerMode : 'root'
 function showSub(name) {
   if (name === 'document' && !doc) return;
   subtab = name;
-  if ($('discussions')) $('discussions').hidden = name !== 'discussions';
-  if ($('brainstorms')) $('brainstorms').hidden = name !== 'brainstorms';
-  $('explorer').hidden = name !== 'explorer'; $('document').hidden = name !== 'document';
-  if ($('tab-discussions')) $('tab-discussions').classList.toggle('on', name === 'discussions');
-  if ($('tab-brainstorms')) $('tab-brainstorms').classList.toggle('on', name === 'brainstorms');
-  $('tab-explorer').classList.toggle('on', name === 'explorer'); $('tab-document').classList.toggle('on', name === 'document');
+  $('explorer').hidden = name !== 'explorer';
+  $('document').hidden = name !== 'document';
+  if ($('notes')) $('notes').hidden = name !== 'notes';
+  if ($('terminal')) $('terminal').hidden = name !== 'terminal';
+  $('tab-explorer').classList.toggle('on', name === 'explorer');
+  $('tab-document').classList.toggle('on', name === 'document');
+  if ($('tab-notes')) $('tab-notes').classList.toggle('on', name === 'notes');
+  if ($('tab-terminal')) $('tab-terminal').classList.toggle('on', name === 'terminal');
+  if (typeof notes !== 'undefined' && notes) notes.open = name === 'notes';
+  if (name === 'notes' && typeof openNotes === 'function') openNotes();
+  if (name === 'terminal' && typeof openHostShell === 'function') {
+    if (typeof hostShell === 'undefined' || !hostShell) openHostShell();
+    else requestAnimationFrame(() => { try { hostShell.fit?.fit(); hostShell.term?.focus(); } catch {} });
+  }
 }
-if ($('tab-discussions')) $('tab-discussions').onclick = () => { showSub('discussions'); post('__workerinfo', {}).catch(() => {}); }; // its rows' worker work, checked again
-if ($('tab-brainstorms')) $('tab-brainstorms').onclick = () => showSub('brainstorms');
-$('tab-explorer').onclick = () => { showSub('explorer'); revealDoc(); };
+function selectSub(name) {
+  if (name === 'document' && !doc) return;
+  const run = () => {
+    if (typeof sideClosed !== 'undefined' && sideClosed && typeof setSideClosed === 'function') setSideClosed(false);
+    showSub(name);
+    if (name === 'explorer') revealDoc();
+  };
+  if (subtab === 'notes' && name !== 'notes' && typeof notesDirty === 'function' && notesDirty()) return notesGuard(run);
+  run();
+}
+$('tab-explorer').onclick = () => selectSub('explorer');
+if ($('tab-notes')) $('tab-notes').onclick = () => selectSub('notes');
+if ($('tab-terminal')) $('tab-terminal').onclick = () => selectSub('terminal');
 // Back to Explorer with a local file shown: if that file is inside the tree Explorer is showing now,
 // unfold its parent folders and scroll it into view. Never re-enters a peek that was ended.
 async function revealDoc() {
@@ -1454,7 +1717,7 @@ async function revealDoc() {
   await openFiles();
   requestAnimationFrame(() => [...pane.querySelectorAll('.entry.file')].find((b) => b.classList.contains('shown'))?.scrollIntoView({ block: 'center' }));
 }
-$('tab-document').onclick = () => showSub('document');
+$('tab-document').onclick = () => selectSub('document');
 // Document's path line: names the discussion (current, peeked or received) or "Room checkout", plus the file's path inside it.
 function docLabel(file) {
   if (!file) return 'No document shown.';
@@ -1502,6 +1765,7 @@ function showDoc(file) {
   $('current').title = doc || ''; // the full path, on hover
   $('tab-document').disabled = !doc;
   if (!doc) { docpane.replaceChildren(); updateTabTitle(); if (subtab === 'document') showSub('explorer'); return; }
+  if (typeof sideClosed !== 'undefined' && sideClosed && typeof setSideClosed === 'function') setSideClosed(false);
   if (!same) { docpane.innerHTML = '<iframe id="doc"></iframe>'; docpane.firstChild.src = urlFor(doc); }
   updateTabTitle();
   showSub('document');
@@ -1636,9 +1900,17 @@ function renderWorkerStop() {
   $('wstop').hidden = !w || w.now || !!viewing || !!peeking || !localInput;
   $('wstop-after').disabled = !!w?.after;
 }
-// Entering or leaving a peek (the reset event): the stop buttons follow at once.
+// Entering or leaving a peek (the reset event): the stop buttons and Explorer file peek follow at once.
 function setPeeking(p) {
   peeking = p;
+  if (p?.path) {
+    peek = { kind: 'local', path: p.path, name: p.name, title: p.title, readonly: true };
+    explorerMode = 'discussion';
+    updateTabs();
+  } else if (!p && peek?.readonly) {
+    peek = null;
+    updateTabs();
+  }
   renderWorkerStop();
 }
 function closeActionLabel(lane) {
@@ -1839,11 +2111,26 @@ function updateReplicaView() {
   const readOnly = !!(viewing || peeking);
   if (room) { $('disc').textContent = currentTitle(); $('disc').dataset.active = !readOnly && room.active ? 'true' : 'false'; }
   updateTabTitle();
+  if (typeof updateBackLabel === 'function') updateBackLabel();
   // Under the title, show the activity of the selected tab.
   $('disc-status').textContent = talkStatus();
   const panel = $('remote-view'); panel.hidden = !readOnly; panel.replaceChildren();
+  const wpanel = $('work-remote-view');
+  if (wpanel) { wpanel.hidden = !readOnly; wpanel.replaceChildren(); }
   $('composer').hidden = !readOnly && !localInput;
-  box.hidden = readOnly;
+  if (!updateReplicaView.talkPlaceholder && box.placeholder) updateReplicaView.talkPlaceholder = box.placeholder;
+  box.hidden = !!viewing;
+  box.disabled = readOnly || (typeof ended !== 'undefined' && ended) || (typeof restarting !== 'undefined' && restarting);
+  if (peeking && !viewing) box.placeholder = 'Peeking read-only — click Back to return to the active discussion.';
+  else if (updateReplicaView.talkPlaceholder) box.placeholder = updateReplicaView.talkPlaceholder;
+  if (typeof wbox !== 'undefined' && wbox) {
+    if (readOnly) {
+      wbox.disabled = true;
+      wbox.placeholder = peeking ? 'Peeking read-only — click Back to return to the active discussion.' : 'Read-only: viewing a peer’s discussion.';
+    } else if (typeof showWorkerInfo === 'function' && typeof workerInfoShown !== 'undefined') {
+      showWorkerInfo(workerInfoShown);
+    }
+  }
   // Attach and pointing chips: shown in discussions and brainstorms (Attach is disabled until the first message creates the folder).
   $('attach-row').hidden = readOnly || !room;
   if ($('attach-row').hidden && !attaching) pending = [];
@@ -1864,15 +2151,24 @@ function updateReplicaView() {
   $('closedisc').hidden = !room?.multi || !(room.active || room.brainstorm || room.open?.length > 1);
   updateCloseButton();
   if (room?.multi) {
-    $('newdisc').title = 'Open a new discussion beside this one, which stays open (Discussions: Continue, or Brainstorms: Go to, shows it again).';
+    $('newdisc').title = 'Open a new discussion beside this one, which stays open (click it in Boards to show it again).';
     $('newbrainstorm').title = 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.';
   }
   $('actions-menu').hidden = ['summary', 'new-discussion'].every((id) => $(id).hidden);
   if (peeking && !viewing) {
-    const label = document.createElement('p');
-    label.textContent = 'Peeking at ' + displayTitle(peeking.name, peeking.title) + '. Read-only.' + (peeking.doc ? '' : ' No notes to show.');
-    panel.append(label);
-    const back = document.createElement('button'); back.textContent = 'Back to the discussion in use'; back.onclick = () => send('/peek'); panel.append(back);
+    const noticeText = 'Peeking at ' + displayTitle(peeking.name, peeking.title) + '. Read-only — click Back to return to the active discussion.' + (peeking.doc ? '' : ' No notes to show.');
+    const fillPeekBanner = (target) => {
+      if (!target) return;
+      const label = document.createElement('p');
+      label.textContent = noticeText;
+      target.append(label);
+      const back = document.createElement('button'); back.textContent = 'Back'; back.title = 'Return to the active discussion'; back.onclick = () => send('/peek'); target.append(back);
+      if (peeking.ref) {
+        const res = document.createElement('button'); res.textContent = 'Resume'; res.title = 'Resume this closed board'; res.onclick = () => send('/resume ' + peeking.ref); target.append(res);
+      }
+    };
+    fillPeekBanner(panel);
+    fillPeekBanner(wpanel);
     return;
   }
   if (!viewing) return;
@@ -1889,6 +2185,10 @@ function updateReplicaView() {
   const latest = replica.received.find((l) => l.discussion === viewing.discussion && l.node === viewing.node);
   if (latest && latest.commit !== viewing.commit) {
     const newer = document.createElement('button'); newer.textContent = 'View newer received round ' + latest.round; newer.onclick = () => viewRemote(latest); panel.append(newer);
+  }
+  if (wpanel) {
+    const wl = document.createElement('p'); wl.textContent = 'Read-only: viewing ' + viewing.node + "'s line."; wpanel.append(wl);
+    if (own) { const wb = document.createElement('button'); wb.textContent = 'Back to ' + replica.node + "'s line"; wb.onclick = () => viewRemote(null); wpanel.append(wb); }
   }
 }
 async function remoteFiles() {
@@ -2038,8 +2338,8 @@ function archiveButton(b, ref) {
   };
 }
 const expandedLines = new Set();
-const expandedDiscussions = new Set();
-let openRowMenu = null; // the discussion path whose ▾ Actions menu is open
+const expandedSections = new Set(['discussions', 'brainstorms']);
+let openRowMenu = null; // the board path whose ⋯ menu is open
 let cachedDetail = { files: null, unviewable: new Set(), branch: null }; // files: null until the list loads
 
 // The User's order of active discussions (and, in the Brainstorms tab, of brainstorms), kept in this
@@ -2057,7 +2357,7 @@ function readOrder(folder, kind = 'discussions') {
 function saveOrder(folder, order, kind = 'discussions') {
   try { localStorage.setItem(ORDER_KEYS[kind] + folder, JSON.stringify(order)); } catch {}
 }
-const renderOrdered = (kind) => (kind === 'brainstorms' ? renderBrainstorms() : renderDiscussions());
+const renderOrdered = () => renderBoards();
 // The names found in the files list, in the User's order (saved back when it changed), or as found
 // while the list hasn't loaded (null: no ordering then).
 function ordered(found, kind) {
@@ -2107,7 +2407,7 @@ function dragRow(row, name, names, kind) {
   handle.addEventListener('dragend', () => {
     dragging = false;
     row.classList.remove('dragging');
-    if (renderAfterDrag) { renderAfterDrag = false; renderDiscussions(); renderBrainstorms(); }
+    if (renderAfterDrag) { renderAfterDrag = false; renderBoards(); }
   });
   row.append(handle);
   const after = (e) => { const r = row.getBoundingClientRect(); return e.clientY > r.top + r.height / 2; };
@@ -2154,44 +2454,86 @@ function discussionsIn(prefix) {
     .filter(isDiscussion).sort((a, b) => b.localeCompare(a));
 }
 
-// Worker work not yet in main, from the Worker tab's checks (showWorkerInfo): each lane's
-// { lane: its discussion or null for worker/main, branch, ahead: commits not in main, dirty }.
-// null: not known (no checks yet, or no worker here), so rows say nothing about it.
+// Boards list panel (left of Discussion/Worker): collapsible sections for active Discussions,
+// Brainstorms, Archived · Deferred, and Received from peers (the latter two folded by default with
+// counts). Clicking an active row switches to it; clicking a closed row peeks chat + files read-only
+// without starting any session; secondary actions live in each row's ⋯ menu.
 let workerPending = null, workerDiscardable = new Set(), workerMergeable = {}, workerMerged = new Set();
-function renderDiscussions() {
-  const container = $('discussions-pane');
+function renderBoards() {
+  const container = $('list-pane');
   if (!container) return;
   if (dragging) { renderAfterDrag = true; return; }
   const scroll = container.scrollTop;
-  container.innerHTML = '<div id="disc-list"></div>';
+  container.innerHTML = '<div id="board-list"></div>';
   const list = container.firstChild;
   requestAnimationFrame(() => { container.scrollTop = scroll; });
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
-  const heading = (text) => list.append(el('h3', '', text));
   const canAct = room && localInput && !viewing;
+  const makeSection = (key, title, count) => {
+    const details = el('details', 'list-section');
+    details.dataset.section = key;
+    details.open = expandedSections.has(key);
+    details.ontoggle = () => { if (details.open) expandedSections.add(key); else expandedSections.delete(key); };
+    details.append(el('summary', '', title + ' (' + count + ')'));
+    list.append(details);
+    return details;
+  };
+  const makeRowMenu = (path) => {
+    const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
+    const sum = el('summary', '', '⋯');
+    sum.setAttribute('aria-label', 'Board actions');
+    sum.title = 'Actions';
+    menu.append(sum, items);
+    menu.open = openRowMenu === path;
+    menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
+    return { menu, items };
+  };
+  const leaveMainPage = () => { if (typeof mainPage !== 'undefined' && mainPage !== null && typeof openMainPage === 'function') openMainPage(null); };
+  const peekFiles = (info) => {
+    leaveMainPage();
+    peek = info;
+    explorerMode = 'discussion';
+    showSub('explorer');
+    updateTabs();
+    renderExplorer();
+    renderBoards();
+  };
+  const enterClosedPeek = (ref, path, name, title) => {
+    leaveMainPage();
+    peek = { kind: 'local', path, name, title, readonly: true };
+    explorerMode = 'discussion';
+    showSub('explorer');
+    updateTabs();
+    renderExplorer();
+    renderBoards();
+    send('/peek ' + ref);
+  };
 
+  // --- 1. Discussions (active) ---
   const inOrder = ordered(discussionsIn('discussions'), 'discussions');
   const discussions = inOrder ?? discussionsIn('discussions');
+  const unstartedOpen = (room?.open ?? []).filter((x) => !x.current && !x.active);
+  const discSection = makeSection('discussions', 'Discussions', discussions.length + unstartedOpen.length);
 
-  for (const o of (room?.open ?? []).filter((x) => !x.current && !x.active)) {
+  for (const o of unstartedOpen) {
     const r = el('div', 'row discussion-row');
     const block = el('div', 'discussion-block');
-    block.append(el('div', 'title', o.title));
+    const btn = el('button', 'entry discussion', o.title);
+    btn.title = 'Show this open discussion: it has not started yet';
+    btn.onclick = () => notesGuard(() => { location.href = o.url; });
+    block.append(btn);
     block.append(el('div', 'local-label', 'open' + (o.working ? ' · worker working' : '')));
     r.append(block);
-    const b = el('button', 'reopen', 'Go to');
-    b.onclick = () => { location.href = o.url; };
-    r.append(b);
-    list.append(r);
+    discSection.append(r);
   }
 
   const currentWorker = room?.open?.find((o) => o.current)?.working ? ' · worker working' : '';
   if (room?.brainstorm && canAct) {
-    list.append(el('span', 'hint', 'A brainstorm is shown: it is listed in Brainstorms. Turn it into a discussion (Actions ▾) to have it here.'));
-  } else if (!discussions.length && !replica?.received?.some((l) => !l.local)) {
-    list.append(el('span', 'hint', (room?.started ? '' : 'No active discussions: your first message starts one.') + currentWorker));
+    discSection.append(el('span', 'hint', 'A brainstorm is shown: it is listed in Brainstorms. Turn it into a discussion (Actions ▾) to have it here.'));
+  } else if (!discussions.length && !unstartedOpen.length && !replica?.received?.some((l) => !l.local)) {
+    discSection.append(el('span', 'hint', (room?.started ? '' : 'No active discussions: your first message starts one.') + currentWorker));
   } else if (room && !room.started && canAct) {
-    list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Continue (or Resume, if closed) on its row.' + currentWorker));
+    discSection.append(el('span', 'hint', 'Your first message starts a new discussion, or click a board to switch or peek.' + currentWorker));
   }
 
   // Worker work not yet in main: on its discussion's row, or here when its branch is worker/main
@@ -2199,44 +2541,45 @@ function renderDiscussions() {
   const pendingWork = workerPending ?? [];
   const pendingText = (p) => [p.ahead && p.ahead + (p.ahead === 1 ? ' commit' : ' commits') + ' not merged into main', p.dirty && 'uncommitted changes'].filter(Boolean).join(' · ');
   for (const p of pendingWork.filter((p) => !discussions.includes(p.lane)))
-    list.append(el('div', 'worker-pending', '⚠ ' + p.branch + ': ' + pendingText(p)));
+    discSection.append(el('div', 'worker-pending', '⚠ ' + p.branch + ': ' + pendingText(p)));
 
-  heading('Discussions');
-  const canOrder = canAct && !!inOrder && discussions.length > 1;
+  const canOrderDisc = canAct && !!inOrder && discussions.length > 1;
   for (const [i, d] of discussions.entries()) {
     const path = 'discussions/' + d;
     const isCurrent = path === room?.active;
-    const isPeeking = peek?.kind === 'local' && peek.path === path;
+    const isPeeking = (peek?.kind === 'local' && peek.path === path) || (peeking?.path === path);
+    const openEntry = room?.open?.find((o) => o.active === path);
+    const openHere = openEntry?.current ? null : openEntry;
+    const closed = !!room?.closedDiscussions?.includes(d);
     const row = el('div', 'row discussion-row' + (isCurrent ? ' in-use' : '') + (isPeeking ? ' peeking' : ''));
     const block = el('div', 'discussion-block');
-    if (canOrder) dragRow(row, d, discussions, 'discussions');
+    if (canOrderDisc) dragRow(row, d, discussions, 'discussions');
 
     const label = discussionTitle(d, path);
     const nameBtn = el('button', 'entry discussion', label);
     nameBtn.title = path;
     nameBtn.onclick = () => {
       if (isCurrent) {
-        peek = null;
-        explorerMode = 'discussion';
-        showSub('explorer');
-        renderExplorer();
-        renderDiscussions();
+        leaveMainPage();
+        if (peeking) { peek = null; send('/peek'); }
+        else peekFiles(null);
+      } else if (openHere) {
+        notesGuard(() => { location.href = openHere.url; });
+      } else if (closed) {
+        enterClosedPeek(d, path, d, label);
+      } else if (canAct) {
+        leaveMainPage();
+        send('/resume ' + d);
       } else {
-        peek = { kind: 'local', path, name: d, title: label, readonly: false };
-        explorerMode = 'discussion';
-        showSub('explorer');
-        renderExplorer();
-        renderDiscussions();
+        peekFiles({ kind: 'local', path, name: d, title: label, readonly: false });
       }
     };
     block.append(nameBtn);
 
-    const openEntry = room?.open?.find((o) => o.active === path);
-    const openHere = openEntry?.current ? null : openEntry;
     let statusText = '';
     if (isCurrent) statusText = 'current' + (room?.started ? ' · started' : '');
     else if (openHere) statusText = openHere.started ? 'open, paused' : 'not started';
-    else statusText = room?.closedDiscussions?.includes(d) ? 'closed' : 'paused';
+    else statusText = closed ? 'closed' : 'paused';
     if (openEntry?.working) statusText += ' · worker working';
     const closing = closingPhase(d);
     if (closing) statusText += ' · ' + closingLabel(closing);
@@ -2254,35 +2597,34 @@ function renderDiscussions() {
         cancel.onclick = () => post('__cancelclose', { name: d }).catch((err) => status(err.message, true));
         row.append(cancel);
       }
-      if (openHere && !openHere.started) {
-        const b = el('button', 'reopen', 'Go to');
-        b.title = 'Show this open discussion: it has not started yet';
-        b.onclick = () => { location.href = openHere.url; };
-        row.append(b);
-      } else if (!isCurrent) {
-        const closed = !!room?.closedDiscussions?.includes(d);
-        const b = el('button', 'reopen primary', closed ? 'Resume' : 'Continue');
-        b.title = resumeTip(d, openHere, null, closed);
-        b.onclick = (e) => { e.stopPropagation(); if (openHere) notesGuard(() => { location.href = openHere.url; }); else send('/resume ' + d); };
-        row.append(b);
-        if (closed) {
-          const p = el('button', 'reopen', 'Peek');
-          p.title = 'Look at this closed discussion read-only: its conversation and notes, without reopening it.';
-          p.onclick = (e) => { e.stopPropagation(); send('/peek ' + d); };
-          row.append(p);
-        }
-      } else if (peeking) {
-        // While peeking another discussion, the one in use offers the way back.
-        const back = el('button', 'reopen primary', 'Unpeek');
+      const { menu, items } = makeRowMenu(path);
+      if (isCurrent && peeking) {
+        const back = el('button', '', 'Back to this discussion');
         back.title = 'Return to this discussion: leave the peek.';
-        back.onclick = (e) => { e.stopPropagation(); send('/peek'); };
-        row.append(back);
+        back.onclick = () => { closeMenus(); send('/peek'); };
+        items.append(back);
+      } else if (openHere && !openHere.started) {
+        const b = el('button', '', 'Go to');
+        b.title = 'Show this open discussion: it has not started yet';
+        b.onclick = () => { closeMenus(); notesGuard(() => { location.href = openHere.url; }); };
+        items.append(b);
+      } else if (!isCurrent) {
+        const b = el('button', '', closed ? 'Resume' : 'Continue');
+        b.title = resumeTip(d, openHere, null, closed);
+        b.onclick = () => { closeMenus(); if (openHere) notesGuard(() => { location.href = openHere.url; }); else send('/resume ' + d); };
+        items.append(b);
+        const pf = el('button', '', 'Peek files');
+        pf.title = 'Show this discussion’s files in Explorer without switching';
+        pf.onclick = () => { closeMenus(); peekFiles({ kind: 'local', path, name: d, title: label, readonly: closed }); };
+        items.append(pf);
+        if (closed) {
+          const p = el('button', '', 'Peek chat & files');
+          p.title = 'Look at this closed discussion read-only: its conversation and files, without reopening it.';
+          p.onclick = () => { closeMenus(); enterClosedPeek(d, path, d, label); };
+          items.append(p);
+        }
       }
-      const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
-      menu.append(el('summary', '', 'Actions'), items);
-      menu.open = openRowMenu === path;
-      menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
-      if (!room?.closedDiscussions?.includes(d)) {
+      if (!closed) {
         const close = el('button', '', closeActionLabel(d));
         close.onclick = () => { closeMenus(); send('/close ' + d); };
         items.append(close);
@@ -2298,10 +2640,10 @@ function renderDiscussions() {
           items.append(discard);
         }
       }
-      for (const [label, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
-        const b = el('button', '', label);
-        b.disabled = isCurrent || !room?.closedDiscussions?.includes(d);
-        b.title = !room?.closedDiscussions?.includes(d) ? 'Close the discussion before moving it into ' + target + '/.' : isCurrent ? 'The discussion in use cannot be moved' : 'Move the whole discussion into ' + target + '/';
+      for (const [mLabel, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
+        const b = el('button', '', mLabel);
+        b.disabled = isCurrent || !closed;
+        b.title = !closed ? 'Close the discussion before moving it into ' + target + '/.' : isCurrent ? 'The discussion in use cannot be moved' : 'Move the whole discussion into ' + target + '/';
         b.onclick = () => { closeMenus(); send('/move ' + d + ' ' + target); };
         if (target === 'archive') archiveButton(b, d);
         items.append(b);
@@ -2317,199 +2659,69 @@ function renderDiscussions() {
       rollbackButtons(items, block, d, d, isCurrent);
       row.append(menu);
     }
-    list.append(row);
+    discSection.append(row);
   }
 
-  if (replica) {
-    const remoteOnly = replica.received.filter((l) => !l.local && !discussions.some((d) => replica.own[d]?.discussion === l.discussion));
-    if (remoteOnly.length) {
-      heading('Received from peers · read-only');
-      for (const line of remoteOnly) {
-        const isPeeking = peek?.kind === 'received' && peek.discussion === line.discussion;
-        const row = el('div', 'row discussion-row' + (isPeeking ? ' peeking' : ''));
-        const block = el('div', 'discussion-block');
-        const folderName = line.name || line.local || line.discussion;
-        const label = displayTitle(folderName, line.title);
-        const nameBtn = el('button', 'entry discussion', label);
-        nameBtn.title = line.local ? 'discussions/' + line.local : isDiscussion(folderName) ? 'discussions/' + folderName : folderName;
-        nameBtn.onclick = () => {
-          peek = { kind: 'received', discussion: line.discussion, node: line.node, commit: line.commit, round: line.round, name: folderName, title: line.title };
-          explorerMode = 'discussion';
-          showSub('explorer');
-          renderExplorer();
-          renderDiscussions();
-        };
-        block.append(nameBtn);
-        block.append(el('div', 'local-label', line.node + ' · round ' + line.round));
-        row.append(block);
-
-        const peekBtn = el('button', 'reopen', 'Peek files');
-        peekBtn.title = 'Peek at this received discussion’s files in Explorer';
-        peekBtn.onclick = () => {
-          peek = { kind: 'received', discussion: line.discussion, node: line.node, commit: line.commit, round: line.round, name: folderName, title: line.title };
-          explorerMode = 'discussion';
-          showSub('explorer');
-          renderExplorer();
-          renderDiscussions();
-        };
-        row.append(peekBtn);
-
-        const viewBtn = el('button', 'reopen primary', 'View chat');
-        viewBtn.title = 'View this peer’s discussion in full, read-only';
-        viewBtn.onclick = () => viewRemote(line);
-        row.append(viewBtn);
-
-        list.append(row);
-      }
-    }
-  }
-
-  heading('Archive and deferred');
-  for (const s of ['archive', 'deferred']) {
-    const sList = discussionsIn('discussions/' + s);
-    const details = el('details', 'section-group');
-    details.open = expandedDiscussions.has(s);
-    details.ontoggle = () => { if (details.open) expandedDiscussions.add(s); else expandedDiscussions.delete(s); };
-    const summary = el('summary', '', (s === 'archive' ? 'Archived' : 'Deferred') + ' (' + sList.length + ')');
-    details.append(summary);
-    if (!sList.length) {
-      details.append(el('span', 'hint', s === 'archive' ? 'No archived discussions.' : 'No deferred discussions.'));
-    }
-    for (const d of sList) {
-      const path = 'discussions/' + s + '/' + d;
-      const isPeeking = peek?.kind === 'local' && peek.path === path;
-      const row = el('div', 'row discussion-row' + (isPeeking ? ' peeking' : ''));
-      const block = el('div', 'discussion-block');
-      const label = discussionTitle(d, path);
-      const nameBtn = el('button', 'entry discussion', label);
-      nameBtn.title = path;
-      nameBtn.onclick = () => {
-        peek = { kind: 'local', path, name: d, title: label, readonly: true };
-        explorerMode = 'discussion';
-        showSub('explorer');
-        renderExplorer();
-        renderDiscussions();
-      };
-      block.append(nameBtn);
-      const closed = !!room?.closedDiscussions?.includes(d);
-      const closing = closingPhase(d);
-      const merged = workerMerged.has(d);
-      block.append(el('div', 'local-label', (s === 'archive' ? 'archived' : 'deferred') + (closed ? ' · closed' : '') + (closing ? ' · ' + closingLabel(closing) : '') + (merged ? ' · merged' : '')));
-      row.append(block);
-
-      if (canAct) {
-        if (closing === 'waiting') {
-          const cancel = el('button', 'reopen', 'Cancel close');
-          cancel.onclick = () => post('__cancelclose', { name: d }).catch((err) => status(err.message, true));
-          row.append(cancel);
-        }
-        const b = el('button', 'reopen primary', closed ? 'Resume' : 'Continue');
-        b.title = (closed ? 'Resume' : 'Continue') + ': makes it active first';
-        b.onclick = (e) => { e.stopPropagation(); send('/resume ' + s + '/' + d); };
-        row.append(b);
-        if (closed) {
-          const p = el('button', 'reopen', 'Peek');
-          p.title = 'Look at this closed discussion read-only: its conversation and notes, without reopening it.';
-          p.onclick = (e) => { e.stopPropagation(); send('/peek ' + s + '/' + d); };
-          row.append(p);
-        }
-
-        const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
-        menu.append(el('summary', '', 'Actions'), items);
-        menu.open = openRowMenu === path;
-        menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
-
-        if (!room?.closedDiscussions?.includes(d)) {
-          const close = el('button', '', 'Close');
-          close.onclick = () => { closeMenus(); send('/close ' + s + '/' + d); };
-          items.append(close);
-        }
-
-        const makeActive = el('button', '', 'Make active');
-        makeActive.onclick = () => { closeMenus(); send('/move ' + s + '/' + d + ' active'); };
-        items.append(makeActive);
-
-        const otherSection = s === 'archive' ? 'deferred' : 'archive';
-        const moveOther = el('button', '', otherSection === 'archive' ? 'Archive' : 'Defer');
-        moveOther.disabled = !room?.closedDiscussions?.includes(d);
-        if (moveOther.disabled) moveOther.title = 'Close the discussion before moving it into ' + otherSection + '/.';
-        moveOther.onclick = () => { closeMenus(); send('/move ' + s + '/' + d + ' ' + otherSection); };
-        if (otherSection === 'archive') archiveButton(moveOther, s + '/' + d);
-        items.append(moveOther);
-
-        const fresh = el('button', '', 'Start fresh');
-        freshButton(fresh, s + '/' + d);
-        items.append(fresh);
-
-        items.append(el('hr'));
-        rollbackButtons(items, block, d, s + '/' + d, false);
-        row.append(menu);
-      }
-      details.append(row);
-    }
-    list.append(details);
-  }
-}
-
-// Brainstorms: the room's brainstorms (brainstorms/<date>-<title>/), in the User's order (as the
-// active discussions, with its own key), each by its title. Resume (Go to when open elsewhere),
-// Close, Turn into a discussion, Start fresh, Delete, Move up / Move down. No Archive or Defer.
-function renderBrainstorms() {
-  const container = $('brainstorms-pane');
-  if (!container) return;
-  if (dragging) { renderAfterDrag = true; return; }
-  const scroll = container.scrollTop;
-  container.innerHTML = '<div id="brain-list"></div>';
-  const list = container.firstChild;
-  requestAnimationFrame(() => { container.scrollTop = scroll; });
-  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
-  const canAct = room && localInput && !viewing;
-  const inOrder = ordered(discussionsIn('brainstorms'), 'brainstorms');
-  const names = inOrder ?? discussionsIn('brainstorms');
-  if (room?.brainstorm && !room.active && canAct) list.append(el('span', 'hint', 'Your first message names this brainstorm and saves it here.'));
-  else if (!names.length) list.append(el('span', 'hint', "No brainstorms yet: New brainstorm (in the header's Actions ▾) starts one."));
-  list.append(el('h3', '', 'Brainstorms'));
-  const canOrder = canAct && !!inOrder && names.length > 1;
-  for (const [i, b] of names.entries()) {
+  // --- 2. Brainstorms ---
+  const brainOrder = ordered(discussionsIn('brainstorms'), 'brainstorms');
+  const brainNames = brainOrder ?? discussionsIn('brainstorms');
+  const brainSection = makeSection('brainstorms', 'Brainstorms', brainNames.length);
+  if (room?.brainstorm && !room.active && canAct) brainSection.append(el('span', 'hint', 'Your first message names this brainstorm and saves it here.'));
+  else if (!brainNames.length) brainSection.append(el('span', 'hint', "No brainstorms yet: New brainstorm (in the header's Actions ▾) starts one."));
+  const canOrderBrain = canAct && !!brainOrder && brainNames.length > 1;
+  for (const [i, b] of brainNames.entries()) {
     const path = 'brainstorms/' + b;
     const isCurrent = path === room?.active;
-    const isPeeking = peek?.kind === 'local' && peek.path === path;
+    const isPeeking = (peek?.kind === 'local' && peek.path === path) || (peeking?.path === path);
     const openEntry = room?.open?.find((o) => o.active === path);
     const openHere = openEntry?.current ? null : openEntry;
+    const closed = !isCurrent && !openHere;
     const row = el('div', 'row discussion-row' + (isCurrent ? ' in-use' : '') + (isPeeking ? ' peeking' : ''));
     const block = el('div', 'discussion-block');
-    if (canOrder) dragRow(row, b, names, 'brainstorms');
+    if (canOrderBrain) dragRow(row, b, brainNames, 'brainstorms');
     const label = brainstormTitle(b);
     const nameBtn = el('button', 'entry brainstorm', label);
     nameBtn.title = path;
     nameBtn.onclick = () => {
-      peek = isCurrent ? null : { kind: 'local', path, name: b, title: label, readonly: false };
-      explorerMode = 'discussion';
-      showSub('explorer');
-      renderExplorer();
-      renderBrainstorms();
+      if (isCurrent) {
+        leaveMainPage();
+        if (peeking) { peek = null; send('/peek'); }
+        else peekFiles(null);
+      } else if (openHere) {
+        notesGuard(() => { location.href = openHere.url; });
+      } else {
+        enterClosedPeek(path, path, b, label);
+      }
     };
     block.append(nameBtn);
     block.append(el('div', 'local-label', isCurrent ? 'current' : openHere ? 'open' : 'closed'));
     row.append(block);
     if (canAct) {
-      if (openHere) {
-        const g = el('button', 'reopen', 'Go to');
+      const { menu, items } = makeRowMenu(path);
+      if (isCurrent && peeking) {
+        const back = el('button', '', 'Back to this brainstorm');
+        back.title = 'Return to this brainstorm: leave the peek.';
+        back.onclick = () => { closeMenus(); send('/peek'); };
+        items.append(back);
+      } else if (openHere) {
+        const g = el('button', '', 'Go to');
         g.title = 'Show this open brainstorm: its agents carry on';
-        g.onclick = (e) => { e.stopPropagation(); notesGuard(() => { location.href = openHere.url; }); };
-        row.append(g);
-      } else if (!isCurrent) {
-        const r = el('button', 'reopen primary', 'Resume');
+        g.onclick = () => { closeMenus(); notesGuard(() => { location.href = openHere.url; }); };
+        items.append(g);
+      } else if (closed) {
+        const r = el('button', '', 'Resume');
         const saved = room?.checkpoints?.find((c) => c.name === path);
         r.title = saved?.kind === 'full' ? 'Continue where it stopped: the same agent sessions, and its chat.'
           : 'No saved session: a fresh one starts, from its latest summary or its transcripts.';
-        r.onclick = (e) => { e.stopPropagation(); send('/resume ' + path); };
-        row.append(r);
+        r.onclick = () => { closeMenus(); send('/resume ' + path); };
+        items.append(r);
       }
-      const menu = el('details', 'menu row-menu'), items = el('div', 'menu-items');
-      menu.append(el('summary', '', 'Actions'), items);
-      menu.open = openRowMenu === path;
-      menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
+      if (!isCurrent) {
+        const pf = el('button', '', 'Peek files');
+        pf.title = 'Show this brainstorm’s files in Explorer without switching';
+        pf.onclick = () => { closeMenus(); peekFiles({ kind: 'local', path, name: b, title: label, readonly: closed }); };
+        items.append(pf);
+      }
       const close = el('button', '', 'Close');
       close.disabled = !(isCurrent || openHere);
       close.title = close.disabled ? 'It is not open' : 'Close it: its agents stop; its checkpoint is kept';
@@ -2528,15 +2740,126 @@ function renderBrainstorms() {
       del.title = del.disabled ? 'Close this brainstorm before deleting it' : 'Delete its folder (transcripts, drawings) and its checkpoint';
       confirmed(del, () => { closeMenus(); send('/delete ' + path); }, 'Click again: its folder (transcripts, drawings) and checkpoint are removed; uncommitted files are lost for good', () => true);
       items.append(del);
-      if (inOrder) {
+      if (brainOrder) {
         items.append(el('hr'));
-        orderButtons(items, b, i, names, 'brainstorms');
+        orderButtons(items, b, i, brainNames, 'brainstorms');
       }
       row.append(menu);
     }
-    list.append(row);
+    brainSection.append(row);
+  }
+
+  // --- 3. Archived · Deferred (folded by default) ---
+  const archivedItems = discussionsIn('discussions/archive').map((d) => ({ s: 'archive', d }));
+  const deferredItems = discussionsIn('discussions/deferred').map((d) => ({ s: 'deferred', d }));
+  const inactiveItems = [...archivedItems, ...deferredItems];
+  const inactiveSection = makeSection('archived-deferred', 'Archived · Deferred', inactiveItems.length);
+  if (!inactiveItems.length) {
+    inactiveSection.append(el('span', 'hint', 'No archived or deferred discussions.'));
+  }
+  for (const { s, d } of inactiveItems) {
+    const path = 'discussions/' + s + '/' + d;
+    const isPeeking = (peek?.kind === 'local' && peek.path === path) || (peeking?.path === path);
+    const row = el('div', 'row discussion-row' + (isPeeking ? ' peeking' : ''));
+    const block = el('div', 'discussion-block');
+    const label = discussionTitle(d, path);
+    const closed = !!room?.closedDiscussions?.includes(d);
+    const nameBtn = el('button', 'entry discussion', label);
+    nameBtn.title = path;
+    nameBtn.onclick = () => {
+      if (closed) enterClosedPeek(s + '/' + d, path, d, label);
+      else peekFiles({ kind: 'local', path, name: d, title: label, readonly: true });
+    };
+    block.append(nameBtn);
+    const closing = closingPhase(d);
+    const merged = workerMerged.has(d);
+    block.append(el('div', 'local-label', (s === 'archive' ? 'archived' : 'deferred') + (closed ? ' · closed' : '') + (closing ? ' · ' + closingLabel(closing) : '') + (merged ? ' · merged' : '')));
+    row.append(block);
+
+    if (canAct) {
+      if (closing === 'waiting') {
+        const cancel = el('button', 'reopen', 'Cancel close');
+        cancel.onclick = () => post('__cancelclose', { name: d }).catch((err) => status(err.message, true));
+        row.append(cancel);
+      }
+      const { menu, items } = makeRowMenu(path);
+      const b = el('button', '', closed ? 'Resume' : 'Continue');
+      b.title = (closed ? 'Resume' : 'Continue') + ': makes it active first';
+      b.onclick = () => { closeMenus(); send('/resume ' + s + '/' + d); };
+      items.append(b);
+      const pf = el('button', '', 'Peek files');
+      pf.title = 'Show this discussion’s files in Explorer without moving it';
+      pf.onclick = () => { closeMenus(); peekFiles({ kind: 'local', path, name: d, title: label, readonly: true }); };
+      items.append(pf);
+      if (closed) {
+        const p = el('button', '', 'Peek chat & files');
+        p.title = 'Look at this closed discussion read-only: its conversation and files, without reopening it.';
+        p.onclick = () => { closeMenus(); enterClosedPeek(s + '/' + d, path, d, label); };
+        items.append(p);
+      }
+      if (!closed) {
+        const close = el('button', '', 'Close');
+        close.onclick = () => { closeMenus(); send('/close ' + s + '/' + d); };
+        items.append(close);
+      }
+      const makeActive = el('button', '', 'Make active');
+      makeActive.onclick = () => { closeMenus(); send('/move ' + s + '/' + d + ' active'); };
+      items.append(makeActive);
+
+      const otherSection = s === 'archive' ? 'deferred' : 'archive';
+      const moveOther = el('button', '', otherSection === 'archive' ? 'Archive' : 'Defer');
+      moveOther.disabled = !closed;
+      if (moveOther.disabled) moveOther.title = 'Close the discussion before moving it into ' + otherSection + '/.';
+      moveOther.onclick = () => { closeMenus(); send('/move ' + s + '/' + d + ' ' + otherSection); };
+      if (otherSection === 'archive') archiveButton(moveOther, s + '/' + d);
+      items.append(moveOther);
+
+      const fresh = el('button', '', 'Start fresh');
+      freshButton(fresh, s + '/' + d);
+      items.append(fresh);
+
+      items.append(el('hr'));
+      rollbackButtons(items, block, d, s + '/' + d, false);
+      row.append(menu);
+    }
+    inactiveSection.append(row);
+  }
+
+  // --- 4. Received from peers (folded by default) ---
+  if (replica) {
+    const remoteOnly = replica.received.filter((l) => !l.local && !discussions.some((d) => replica.own[d]?.discussion === l.discussion));
+    if (remoteOnly.length) {
+      const peerSection = makeSection('peers', 'Received from peers', remoteOnly.length);
+      for (const line of remoteOnly) {
+        const isPeeking = peek?.kind === 'received' && peek.discussion === line.discussion;
+        const row = el('div', 'row discussion-row' + (isPeeking ? ' peeking' : ''));
+        const block = el('div', 'discussion-block');
+        const folderName = line.name || line.local || line.discussion;
+        const label = displayTitle(folderName, line.title);
+        const nameBtn = el('button', 'entry discussion', label);
+        nameBtn.title = line.local ? 'discussions/' + line.local : isDiscussion(folderName) ? 'discussions/' + folderName : folderName;
+        const peerPeek = { kind: 'received', discussion: line.discussion, node: line.node, commit: line.commit, round: line.round, name: folderName, title: line.title };
+        nameBtn.onclick = () => peekFiles(peerPeek);
+        block.append(nameBtn);
+        block.append(el('div', 'local-label', line.node + ' · round ' + line.round));
+        row.append(block);
+
+        const { menu, items } = makeRowMenu('peer:' + line.discussion + ':' + line.node);
+        const viewBtn = el('button', '', 'View chat');
+        viewBtn.title = 'View this peer’s discussion in full, read-only';
+        viewBtn.onclick = () => { closeMenus(); viewRemote(line); };
+        items.append(viewBtn);
+        const peekBtn = el('button', '', 'Peek files');
+        peekBtn.title = 'Peek at this received discussion’s files in Explorer';
+        peekBtn.onclick = () => { closeMenus(); peekFiles(peerPeek); };
+        items.append(peekBtn);
+        row.append(menu);
+        peerSection.append(row);
+      }
+    }
   }
 }
+const renderDiscussions = renderBoards, renderBrainstorms = renderBoards;
 
 async function renderExplorer() {
   const container = $('pane');
@@ -2558,8 +2881,8 @@ async function renderExplorer() {
       peek = null;
       updateTabs();
       renderExplorer();
-      renderDiscussions();
-      renderBrainstorms();
+      renderBoards();
+      if (peeking) send('/peek');
     };
     banner.append(backBtn);
     list.append(banner);
@@ -2702,8 +3025,7 @@ async function openFiles() {
     else if (Array.isArray(raw?.files)) cachedDetail = { files: raw.files, unviewable: new Set(raw.unviewable || []), branch: raw.branch || null };
   } catch {}
   updateTabs();
-  renderDiscussions();
-  renderBrainstorms();
+  renderBoards();
   await renderExplorer();
 }
 // The header: the room's folder name, its full root path (in the tooltip) and its active discussion.
@@ -3191,6 +3513,7 @@ async function sendWithFiles() {
 async function send(text) {
   text = text.trim();
   if (!text || ended) return;
+  if (peeking && !text.startsWith('/')) return;
   if (text === '/docs') { showSub('explorer'); return openFiles(); }
   const res = await post('__say', { text });
   if (res.status === 409 && ['/restart', '/shutdown'].includes(text)) {
@@ -3221,10 +3544,22 @@ function renderPointed() {
     chip.append(x); return chip;
   }));
 }
-// A [[D4]] in the chat: hovering it highlights that cell in the shown document.
+// A [[D4]] in the chat: hovering highlights that cell/box/mark; clicking reopens the side pane
+// to Document (if closed) and highlights it.
+function highlightRef(refName, on) {
+  const frame = document.getElementById('doc');
+  if (frame?.contentWindow) frame.contentWindow.postMessage({ type: 'agent-room:highlight', ref: refName, on }, location.origin);
+}
 for (const [type, on] of [['mouseover', true], ['mouseout', false]]) document.addEventListener(type, (e) => {
-  const ref = e.target.closest && e.target.closest('.ref[data-ref]'), frame = document.getElementById('doc');
-  if (ref && frame) frame.contentWindow.postMessage({ type: 'agent-room:highlight', ref: ref.dataset.ref, on }, location.origin);
+  const ref = e.target.closest && e.target.closest('.ref[data-ref]');
+  if (ref) highlightRef(ref.dataset.ref, on);
+});
+document.addEventListener('click', (e) => {
+  const ref = e.target.closest && e.target.closest('.ref[data-ref]');
+  if (!ref) return;
+  if (typeof sideClosed !== 'undefined' && sideClosed && typeof setSideClosed === 'function') setSideClosed(false);
+  if (doc) showSub('document');
+  highlightRef(ref.dataset.ref, true);
 });
 // Moves the chips into the message's text as it is sent (not into a command).
 function withPointing() {
@@ -3237,7 +3572,7 @@ box.addEventListener('keydown', (e) => {
 });
 async function sendWork(text) {
   text = text.trim();
-  if (!text || ended) return;
+  if (!text || ended || peeking || viewing) return;
   const res = await post('__work', { text });
   if (!res.ok) status(await res.text(), true, 'Worker');
 }
@@ -3509,52 +3844,75 @@ events.onmessage = (e) => {
   if (ev.type === 'restarting') { restarting = true; commandBusy = true; updateBusy(); status('Restarting the server: this page reloads when the new one answers.'); events.close(); box.disabled = true; wbox.disabled = true; }
 };
 
-// The terminal pane (host-shell.mjs, after ghostty-web's demo): opening it fetches the token and
-// opens a WebSocket, and the server starts a fresh shell; collapsing it or reloading the page
-// closes the socket, and the server ends the shell. Shown only in pages opened on this computer
-// (the server refuses the others anyway).
-const SHELL_LABEL = 'Terminal (this computer only)';
+// The Terminal tab (host-shell.mjs, after ghostty-web's demo): opening it fetches the token and
+// opens a WebSocket, and the server starts a fresh shell. Switching to another tab or closing the
+// side pane hides the terminal while keeping the shell alive (shown by a green dot on the tab).
+// End shell, reloading the page, or stopping the server ends it. Shown only in pages opened on
+// this computer (the server refuses the others anyway).
 let hostShell = null;
-if (['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname)) $('hostshell').hidden = false;
-// Opening the terminal collapses Notes, after asking about unsaved changes there.
-$('hostshell-toggle').onclick = () => (hostShell ? closeHostShell() : notesGuard(() => { closeNotes(); openHostShell(); }));
+const isLocalPage = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
+if (isLocalPage && $('tab-terminal')) $('tab-terminal').hidden = false;
+function updateTerminalUI() {
+  const alive = !!(hostShell && hostShell.alive);
+  if ($('tab-terminal')) $('tab-terminal').classList.toggle('running', alive);
+  if ($('terminal-end')) $('terminal-end').hidden = !alive;
+  if ($('terminal-start')) $('terminal-start').hidden = alive;
+}
 function closeHostShell() {
-  try { hostShell.ws?.close(); } catch {}
-  try { hostShell.term?.dispose(); } catch {}
-  hostShell = null; $('hostshell-term').hidden = true; $('hostshell-term').replaceChildren();
-  $('hostshell-toggle').textContent = '▸ ' + SHELL_LABEL; $('hostshell-toggle').setAttribute('aria-expanded', 'false');
+  if (hostShell) {
+    try { hostShell.ws?.close(); } catch {}
+    try { hostShell.term?.dispose(); } catch {}
+  }
+  hostShell = null;
+  $('hostshell-term').replaceChildren();
+  if ($('terminal-status')) $('terminal-status').textContent = 'Shell ended. Click Start shell for a new shell.';
+  updateTerminalUI();
 }
 async function openHostShell() {
-  const box = $('hostshell-term'); box.hidden = false;
-  $('hostshell-toggle').textContent = '▾ ' + SHELL_LABEL; $('hostshell-toggle').setAttribute('aria-expanded', 'true');
-  // Open from the first click: a click while it loads collapses it, and each step below stops then.
-  const shell = hostShell = { term: null, ws: null };
+  const box = $('hostshell-term');
+  box.replaceChildren();
+  if ($('terminal-status')) $('terminal-status').textContent = 'Shell running in this room’s folder (this computer only)';
+  // Start on first open: End shell while loading cancels it, and each step below stops then.
+  const shell = hostShell = { term: null, ws: null, fit: null, alive: true };
+  updateTerminalUI();
   const { init, Terminal, FitAddon } = await import('./__shell/ghostty-web.js');
   await init();
-  if (hostShell !== shell) return; // collapsed meanwhile
+  if (hostShell !== shell) return; // ended meanwhile
   const term = shell.term = new Terminal({ fontSize: 13, fontFamily: 'ui-monospace, Menlo, monospace', cursorBlink: true });
-  const fit = new FitAddon(); term.loadAddon(fit); term.open(box); fit.fit(); fit.observeResize();
+  const fit = shell.fit = new FitAddon(); term.loadAddon(fit); term.open(box); fit.fit(); fit.observeResize();
   let token;
   try {
     const r = await fetch('__shell/token', { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status + ' ' + await r.text());
     token = (await r.json()).token;
-  } catch (err) { term.write('\\r\\nNo terminal: ' + err.message + '\\r\\n'); return; }
-  if (hostShell !== shell) return; // collapsed meanwhile
+  } catch (err) {
+    if (hostShell === shell) { shell.alive = false; updateTerminalUI(); }
+    term.write('\\r\\nNo terminal: ' + err.message + '\\r\\n');
+    return;
+  }
+  if (hostShell !== shell) return; // ended meanwhile
   const params = new URLSearchParams({ token, cols: term.cols, rows: term.rows });
   const ws = shell.ws = new WebSocket((location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + location.pathname.replace(/[^/]*$/, '') + '__shell/ws?' + params);
   ws.onmessage = (e) => term.write(e.data);
-  ws.onclose = () => { if (hostShell === shell) term.write('\\r\\n\\x1b[31mConnection closed. Collapse and open the pane for a new shell.\\x1b[0m\\r\\n'); };
+  ws.onclose = () => {
+    if (hostShell === shell) {
+      shell.alive = false;
+      updateTerminalUI();
+      if ($('terminal-status')) $('terminal-status').textContent = 'Shell exited. Click Start shell for a new shell.';
+      term.write('\\r\\n\\x1b[31mConnection closed. Click Start shell for a new shell.\\x1b[0m\\r\\n');
+    }
+  };
   term.onData((data) => { if (ws.readyState === WebSocket.OPEN) ws.send(data); });
   term.onResize(({ cols, rows }) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
   term.focus();
 }
+if ($('terminal-end')) $('terminal-end').onclick = () => closeHostShell();
+if ($('terminal-start')) $('terminal-start').onclick = () => openHostShell();
 
-// The Notes pane (notes.mjs): the User's notes for this room's folder, on this computer only. A note
-// is saved only by Save. Unsaved changes are never dropped without asking: inside the pane before
-// another note, New, collapsing, the terminal or another room; the browser's leave-page warning
-// otherwise; a refresh after a code change keeps them (refreshPage).
-const NOTES_LABEL = 'Notes (this computer only)';
+// The My notes tab (notes.mjs): the User's notes for this room's folder, on this computer only. A note
+// is saved only by Save. Unsaved changes are never dropped without asking: inside the tab before
+// another note, New, switching tabs, closing the side pane, or another room; the browser's leave-page
+// warning otherwise; a refresh after a code change keeps them (refreshPage).
 const notes = { open: false, list: [], id: null, base: '', editing: false, session: 0 }; // id null: a new note; base: its saved text
 // session: changed whenever the editor starts something else (setEditor, clearEditor, a read). A
 // save or read response is applied to the editor only if the session it started in is still current;
@@ -3562,9 +3920,9 @@ const notes = { open: false, list: [], id: null, base: '', editing: false, sessi
 const noteText = $('notes-text');
 const notesDirty = () => notes.editing && noteText.value !== notes.base;
 function noteDraft() { return notesDirty() ? { id: notes.id, base: notes.base, text: noteText.value } : null; }
-if (['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname)) {
-  $('notes').hidden = false;
-  if (noteDraftKept) openNotes(noteDraftKept);
+if (isLocalPage) {
+  if ($('tab-notes')) $('tab-notes').hidden = false;
+  if (noteDraftKept) { setSideClosed(false, false); showSub('notes'); openNotes(noteDraftKept); }
 }
 addEventListener('beforeunload', (e) => { if (notesDirty() && !refreshing) { e.preventDefault(); e.returnValue = ''; } });
 function notesStatus(text, error) { $('notes-status').textContent = text; $('notes-status').className = error ? 'error' : ''; }
@@ -3583,7 +3941,8 @@ const noteTitle = () => noteText.value.split('\\n')[0].replace(/^\\s*#+\\s*/, ''
 // Runs act now, or once the User agrees to discard the unsaved changes (cancel: if they don't).
 function notesGuard(act, cancel) {
   if (!notesDirty()) return act();
-  if (!notes.open) openNotes();
+  if (typeof sideClosed !== 'undefined' && sideClosed && typeof setSideClosed === 'function') setSideClosed(false);
+  if (!notes.open) { if (typeof showSub === 'function') showSub('notes'); else openNotes(); }
   notesAsk('"' + noteTitle() + '" has unsaved changes.', [
     ['Discard changes', () => { noteText.value = notes.base; act(); }],
     ['Keep editing', () => { cancel?.(); noteText.focus(); }],
@@ -3630,9 +3989,7 @@ async function readNote(id) {
   } catch (err) { if (notes.session === session) notesStatus('✗ ' + err.message, true); loadNotes().catch(() => {}); }
 }
 async function openNotes(draft) {
-  if (hostShell) closeHostShell();
-  notes.open = true; $('notes-body').hidden = false;
-  $('notes-toggle').textContent = '▾ ' + NOTES_LABEL; $('notes-toggle').setAttribute('aria-expanded', 'true');
+  notes.open = true;
   if (draft) setEditor(draft.id, draft.text, draft.base);
   try { await loadNotes(); } catch (err) { return notesStatus('✗ Notes: ' + err.message, true); }
   if (!draft) return;
@@ -3641,10 +3998,8 @@ async function openNotes(draft) {
 }
 function closeNotes() {
   if (!notes.open) return;
-  clearEditor(); notes.open = false; $('notes-body').hidden = true;
-  $('notes-toggle').textContent = '▸ ' + NOTES_LABEL; $('notes-toggle').setAttribute('aria-expanded', 'false');
+  clearEditor(); notes.open = false;
 }
-$('notes-toggle').onclick = () => (notes.open ? notesGuard(closeNotes) : openNotes());
 $('notes-new').onclick = () => notesGuard(() => { setEditor(null, ''); notesStatus('A new note: the first line is its title. Nothing is saved until Save.'); noteText.focus(); });
 $('notes-save').onclick = async () => {
   const text = noteText.value, id = notes.id, session = notes.session, title = noteTitle();
@@ -3900,6 +4255,7 @@ function handleScreen(req, res, url, dir, screen) {
         return send(204, 'text/plain', '');
       }
       if (url.pathname === '/__work') {
+        if (screen.peek) return send(409, 'text/plain; charset=utf-8', 'Read-only: you are peeking at a closed board. Click Back to return to the active discussion first.');
         if (!screen.work) return send(409, 'text/plain; charset=utf-8', 'This room has no worker input; the page only watches.');
         if (typeof body?.text !== 'string' || !body.text.trim()) return send(400, 'text/plain; charset=utf-8', 'Nothing to send.');
         screen.work(body.text.trim());
@@ -3908,6 +4264,8 @@ function handleScreen(req, res, url, dir, screen) {
       if (!screen.say) return send(409, 'text/plain; charset=utf-8', 'This room is typed in the terminal; the page only watches.');
       const files = Array.isArray(body?.files) && body.files.length ? body.files : null;
       if (typeof body?.text !== 'string' || (!body.text.trim() && !files)) return send(400, 'text/plain; charset=utf-8', 'Nothing to send.');
+      // While peeking at a closed board, non-command messages and attachments are refused so nothing can go to the wrong board.
+      if (screen.peek && (files || !body.text.trim().startsWith('/'))) return send(409, 'text/plain; charset=utf-8', 'Read-only: you are peeking at a closed board. Click Back to return to the active discussion first.');
       // While another node's line is open in View, it is read-only: only these commands pass.
       if (screen.isViewing?.(req.headers['x-view-client']) && !VIEW_COMMANDS.includes(body.text.trim())) return send(409, 'text/plain; charset=utf-8', `Read-only: you are viewing a received line. Go back to this node's line first.`);
       if (files) return sayWithFiles(body.text.trim(), files, body.confirmed === true);
