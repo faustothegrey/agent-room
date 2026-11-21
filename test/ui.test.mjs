@@ -740,6 +740,31 @@ test('without a Git repository, or without a commit, the worker is disabled with
   assert.match(empty.screen.workerInfo.lines[0], /no commit yet/);
 });
 
+test('workerInfo.merged lists discussions with labelled commits in HEAD without needing worker branches', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { refreshWorker } = await import('../src/ui.mjs');
+  const { ctx } = await workerRoom();
+  const git = await gitRoom(ctx.cwd);
+  // Direct labelled commit on main (no worker/<name> branch exists).
+  writeFileSync(`${ctx.cwd}/a.txt`, 'a\n'); git('add', 'a.txt');
+  git('commit', '-q', '-m', '[2026-11-20-merged-one] add feature');
+  // Branch merged into main and then deleted.
+  git('checkout', '-q', '-b', 'worker/2026-11-20-merged-two');
+  writeFileSync(`${ctx.cwd}/b.txt`, 'b\n'); git('add', 'b.txt');
+  git('commit', '-q', '-m', '[2026-11-20-merged-two] branch work');
+  git('checkout', '-q', 'main');
+  git('merge', '-q', '--no-ff', 'worker/2026-11-20-merged-two', '-m', 'Merge worker/2026-11-20-merged-two');
+  git('branch', '-d', '-q', 'worker/2026-11-20-merged-two');
+  // Unlabelled commit and non-discussion bracket prefix are ignored.
+  writeFileSync(`${ctx.cwd}/c.txt`, 'c\n'); git('add', 'c.txt');
+  git('commit', '-q', '-m', 'plain commit');
+  writeFileSync(`${ctx.cwd}/d.txt`, 'd\n'); git('add', 'd.txt');
+  git('commit', '-q', '-m', '[brainstorm] note');
+
+  await refreshWorker(ctx);
+  assert.deepEqual(ctx.screen.workerInfo.merged, ['2026-11-20-merged-one', '2026-11-20-merged-two']);
+});
+
 test('the first instruction creates the worktree beside the repository, on worker/main from HEAD; the worker runs there', async () => {
   const { existsSync, realpathSync } = await import('node:fs');
   const { refreshWorker } = await import('../src/ui.mjs');

@@ -3885,6 +3885,17 @@ async function workerInfo(ctx, seen = new Map(), own = null) {
         return out;
       })());
     }
+    if (!seen.has('merged')) {
+      seen.set('merged', (async () => {
+        const out = await git(own.top, 'log', '--format=%s', 'HEAD').catch(() => '');
+        const names = new Set();
+        for (const line of out.split('\n')) {
+          const m = /^\[([0-9]{4}-[0-9]{2}-[0-9]{2}-[^\]]+)\]/.exec(line.trim());
+          if (m) names.add(m[1]);
+        }
+        return [...names].sort();
+      })());
+    }
     const mergeable = {};
     for (const l of lanes) {
       if (l.pending?.lane && l.merge?.show) {
@@ -3900,7 +3911,8 @@ async function workerInfo(ctx, seen = new Map(), own = null) {
     return { lines, lanes: lanes.map(({ lines, summary, own, diagram }) => ({ lines, summary, own: !!own, ...(diagram && { diagram }) })),
       pending: lanes.filter((l) => l.review).map((l) => l.pending),
       discardable: await seen.get('discardable'),
-      mergeable };
+      mergeable,
+      merged: await seen.get('merged') };
   } catch (err) { return { lines: [`✗ ${err.message}`], error: true }; }
 }
 

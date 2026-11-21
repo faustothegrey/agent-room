@@ -235,3 +235,4 @@ closingStatement format check: fixed on retry and still wrong after one retry
 checkSummary: inline-form rule, Outcome and Steps left rules while running and while paused, and auto dev blocks invalid instructions
 displayTitle helper and UI titles hide YYYY-MM-DD- across rows, header, tab title, and peek/view
 Close reports waiting then writing phases in room.closingDiscussions, and cancelClose works only while waiting
+workerInfo.merged lists discussions with labelled commits in HEAD without needing worker branches

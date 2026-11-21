@@ -1158,11 +1158,14 @@ function showWorkerInfo(info) {
   const discardableChanged = JSON.stringify(nextDiscardable) !== JSON.stringify([...workerDiscardable]);
   const nextMergeable = info?.mergeable ?? {};
   const mergeableChanged = JSON.stringify(nextMergeable) !== JSON.stringify(workerMergeable);
+  const nextMerged = info?.merged ?? [];
+  const mergedChanged = JSON.stringify(nextMerged) !== JSON.stringify([...workerMerged]);
   workerInfoShown = info;
-  if (pendingChanged || discardableChanged || mergeableChanged) {
+  if (pendingChanged || discardableChanged || mergeableChanged || mergedChanged) {
     workerPending = info?.pending ?? null;
     workerDiscardable = new Set(nextDiscardable);
     workerMergeable = nextMergeable;
+    workerMerged = new Set(nextMerged);
     updateCloseButton();
     renderDiscussions();
   } // its rows and Close/Merge/Discard actions follow pending work and existing worker lanes
@@ -2154,7 +2157,7 @@ function discussionsIn(prefix) {
 // Worker work not yet in main, from the Worker tab's checks (showWorkerInfo): each lane's
 // { lane: its discussion or null for worker/main, branch, ahead: commits not in main, dirty }.
 // null: not known (no checks yet, or no worker here), so rows say nothing about it.
-let workerPending = null, workerDiscardable = new Set(), workerMergeable = {};
+let workerPending = null, workerDiscardable = new Set(), workerMergeable = {}, workerMerged = new Set();
 function renderDiscussions() {
   const container = $('discussions-pane');
   if (!container) return;
@@ -2238,7 +2241,9 @@ function renderDiscussions() {
     const closing = closingPhase(d);
     if (closing) statusText += ' · ' + closingLabel(closing);
     const work = pendingWork.find((p) => p.lane === d);
-    if (workerPending && !work) statusText += ' · no changes';
+    const merged = workerMerged.has(d);
+    if (merged) statusText += ' · merged';
+    else if (workerPending && !work) statusText += ' · no changes';
     block.append(el('div', 'local-label', statusText));
     if (work) block.append(el('div', 'worker-pending', '⚠ Worker: ' + pendingText(work)));
     row.append(block);
@@ -2388,7 +2393,8 @@ function renderDiscussions() {
       block.append(nameBtn);
       const closed = !!room?.closedDiscussions?.includes(d);
       const closing = closingPhase(d);
-      block.append(el('div', 'local-label', (s === 'archive' ? 'archived' : 'deferred') + (closed ? ' · closed' : '') + (closing ? ' · ' + closingLabel(closing) : '')));
+      const merged = workerMerged.has(d);
+      block.append(el('div', 'local-label', (s === 'archive' ? 'archived' : 'deferred') + (closed ? ' · closed' : '') + (closing ? ' · ' + closingLabel(closing) : '') + (merged ? ' · merged' : '')));
       row.append(block);
 
       if (canAct) {
