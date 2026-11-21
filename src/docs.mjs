@@ -519,7 +519,7 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 :root { color-scheme: light dark; --line: #8884; --dim: #888; }
 * { box-sizing: border-box; }
 body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: 62px var(--list, 240px) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
-body.list-collapsed { grid-template-columns: 62px 32px 0 1fr; }
+body.list-collapsed { grid-template-columns: 62px 32px 1fr; }
 #control-bar { display: flex; flex-direction: column; align-items: center; gap: .35rem; padding: .45rem .25rem; border-right: 1px solid var(--line); background: linear-gradient(#88812, #88812), Canvas; min-height: 0; }
 .ctrl-btn { width: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .12rem; padding: .42rem .15rem; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--dim); cursor: pointer; }
 .ctrl-btn:hover { background: #8882; color: CanvasText; }
