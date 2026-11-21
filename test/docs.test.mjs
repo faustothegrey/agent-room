@@ -465,7 +465,7 @@ test('the Close action switches between Close and Close with pending work in Act
   const closedisc = node('button'), closemerge = node('button'), closediscard = node('button'), winfo = node('div'), wbox = node('textarea');
   let renders = 0;
   const harness = new Function('$', 'document', 'window', 'matchMedia', 'wbox', 'renderDiscussions',
-    'let room = { active: "discussions/2026-11-19-a", brainstorm: false }, workerPending = null, workerDiscardable = new Set(), workerMergeable = {}, ended = false, restarting = false;\n' +
+    'let room = { active: "discussions/2026-11-19-a", brainstorm: false }, workerPending = null, workerDiscardable = new Set(), workerMergeable = {}, workerMerged = new Set(), ended = false, restarting = false;\n' +
     closeCode + '\n' + winfoCode + '\nreturn { showWorkerInfo, closeActionLabel, updateCloseButton, setRoom: (r) => { room = r; updateCloseButton(); } };'
   )((id) => (id === 'closedisc' ? closedisc : id === 'closemerge' ? closemerge : id === 'closediscard' ? closediscard : id === 'winfo' ? winfo : node(id)),
     { createElement: node, getElementById: () => null, head: node('head') }, {}, () => ({ matches: false }), wbox, () => { renders++; });
@@ -521,6 +521,11 @@ test('the Close action switches between Close and Close with pending work in Act
   assert.equal(closemerge.hidden, true);
   assert.equal(closediscard.hidden, true);
   assert.equal(harness.closeActionLabel('2026-11-19-a'), 'Close');
+
+  // Merged list change re-renders Discussions even when pending/discardable/mergeable are unchanged.
+  const beforeMerged = renders;
+  harness.showWorkerInfo({ lines: [], pending: [], discardable: [], mergeable: {}, merged: ['2026-11-19-a'] });
+  assert.equal(renders, beforeMerged + 1);
 
   // Brainstorm stays Close brainstorm and hides Merge and Discard.
   harness.setRoom({ active: 'brainstorms/2026-11-19-idea', brainstorm: true });
@@ -1737,7 +1742,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
     'const notesDirty = () => notes.editing && noteText.value !== notes.base;\n' +
     code + '\n' +
     notesCode + '\n' +
-    'return { setRoom, renderDiscussions, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; }, setPeeking: (p) => { peeking = p; } };'
+    'return { setRoom, renderDiscussions, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; }, setPeeking: (p) => { peeking = p; }, setWorker: ({ pending = null, merged = [] } = {}) => { workerPending = pending; workerMerged = new Set(merged); } };'
   )($, document, location, null, null, () => {}, (cb) => cb(), () => {}, (cmd) => sent.push(cmd), notes, noteText, () => { notes.open = true; openedNotes++; });
 
   harness.setFiles([
@@ -1768,6 +1773,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   const list = els['discussions-pane'].firstChild;
   const rows = list.children.filter((c) => c.tag === 'div' && c.className.includes('discussion-row'));
   const rowFor = (name) => rows.find((r) => r.children.find((c) => c.className !== 'drag-handle')?.children?.[0]?.title === 'discussions/' + name); // active rows start with the drag handle
+  const continueBtn = (name) => rowFor(name).children.find((c) => c.tag === 'button' && c.textContent === 'Continue');
   const resumeBtn = (name) => rowFor(name).children.find((c) => c.tag === 'button' && c.textContent === 'Resume');
   const label = (name) => rowFor(name).children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent;
   assert.equal(label('2026-11-15-current'), 'current · started');
@@ -1775,23 +1781,35 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   assert.equal(label('2026-11-15-unstarted'), 'not started');
   assert.equal(label('2026-11-14-closed'), 'closed');
   assert.equal(label('2026-11-13-paused'), 'paused');
+  assert.ok(continueBtn('2026-11-15-open'));
+  assert.ok(!resumeBtn('2026-11-15-open'));
+  assert.ok(continueBtn('2026-11-13-paused'));
+  assert.ok(!resumeBtn('2026-11-13-paused'));
+  assert.ok(resumeBtn('2026-11-14-closed'));
+  assert.ok(!continueBtn('2026-11-14-closed'));
   const moveButton = (name, label) => rowFor(name).children.find((c) => c.tag === 'details').children[1].children.find((c) => c.textContent === label);
   for (const action of ['Archive', 'Defer']) {
     assert.equal(moveButton('2026-11-13-paused', action).disabled, true);
     assert.match(moveButton('2026-11-13-paused', action).title, /Close the discussion/);
     assert.equal(moveButton('2026-11-14-closed', action).disabled, false);
   }
-  const sectionLabel = (name) => list.children.filter((c) => c.tag === 'details').flatMap((c) => c.children)
-    .find((r) => r.className?.includes('discussion-row') && r.children[0].children[0].title.endsWith('/' + name))
-    .children[0].children.find((c) => c.className === 'local-label').textContent;
+  const sectionRow = (name) => els['discussions-pane'].firstChild.children.filter((c) => c.tag === 'details').flatMap((c) => c.children)
+    .find((r) => r.className?.includes('discussion-row') && r.children[0].children[0].title.endsWith('/' + name));
+  const sectionLabel = (name) => sectionRow(name).children[0].children.find((c) => c.className === 'local-label').textContent;
   assert.equal(sectionLabel('2026-11-12-archived'), 'archived');
   assert.equal(sectionLabel('2026-11-11-archived-closed'), 'archived · closed');
   assert.equal(sectionLabel('2026-11-10-deferred'), 'deferred');
   assert.equal(sectionLabel('2026-11-09-deferred-closed'), 'deferred · closed');
+  assert.equal(sectionRow('2026-11-12-archived').children.find((c) => c.tag === 'button')?.textContent, 'Continue');
+  assert.equal(sectionRow('2026-11-12-archived').children.find((c) => c.tag === 'button')?.title, 'Continue: makes it active first');
+  assert.equal(sectionRow('2026-11-11-archived-closed').children.find((c) => c.tag === 'button')?.textContent, 'Resume');
+  assert.equal(sectionRow('2026-11-11-archived-closed').children.find((c) => c.tag === 'button')?.title, 'Resume: makes it active first');
+  assert.equal(sectionRow('2026-11-10-deferred').children.find((c) => c.tag === 'button')?.textContent, 'Continue');
+  assert.equal(sectionRow('2026-11-09-deferred-closed').children.find((c) => c.tag === 'button')?.textContent, 'Resume');
 
-  // 1. Open discussion, clean notes: navigates straight to openHere.url during a round without sending /resume.
+  // 1. Open discussion, clean notes: Continue navigates straight to openHere.url during a round without sending /resume.
   let stopped = 0;
-  resumeBtn('2026-11-15-open').onclick({ stopPropagation() { stopped++; } });
+  continueBtn('2026-11-15-open').onclick({ stopPropagation() { stopped++; } });
   assert.equal(stopped, 1);
   assert.equal(location.href, '/r/open-id/__room');
   assert.deepEqual(sent, []);
@@ -1801,7 +1819,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   notes.editing = true;
   notes.base = 'saved body';
   noteText.value = 'My draft';
-  resumeBtn('2026-11-15-open').onclick({ stopPropagation() {} });
+  continueBtn('2026-11-15-open').onclick({ stopPropagation() {} });
   assert.equal(location.href, '/r/current-id/__room');
   assert.equal(openedNotes, 1);
   assert.equal(els['notes-ask'].hidden, false);
@@ -1815,7 +1833,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   assert.equal(noteText.value, 'My draft');
 
   // Discard changes resets the note and completes the navigation to openHere.url.
-  resumeBtn('2026-11-15-open').onclick({ stopPropagation() {} });
+  continueBtn('2026-11-15-open').onclick({ stopPropagation() {} });
   const discardBtn = els['notes-ask-buttons'].children.find((b) => b.textContent === 'Discard changes');
   discardBtn.onclick();
   assert.equal(els['notes-ask'].hidden, true);
@@ -1823,7 +1841,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   assert.equal(location.href, '/r/open-id/__room');
   assert.deepEqual(sent, []);
 
-  // 3. Discussion that is not open: Resume still sends /resume <name>.
+  // 3. Closed discussion: Resume still sends /resume <name>.
   location.href = '/r/current-id/__room';
   resumeBtn('2026-11-14-closed').onclick({ stopPropagation() {} });
   assert.equal(location.href, '/r/current-id/__room');
@@ -1843,6 +1861,73 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   harness.renderDiscussions();
   assert.ok(!freshRow('2026-11-15-current').children.some((c) => c.tag === 'button' && c.textContent === 'Unpeek'));
 
+  // 5. Closing phases: waiting shows Cancel close; writing hides Cancel close; header status follows active discussion.
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-15-current',
+    discussion: 'Current',
+    started: true,
+    closingDiscussions: {
+      '2026-11-15-current': 'waiting',
+      '2026-11-12-archived': 'waiting',
+      '2026-11-10-deferred': 'writing',
+    },
+    open: [{ active: 'discussions/2026-11-15-current', title: 'Current', started: true, current: true, url: '/r/current-id/__room' }],
+  });
+  harness.renderDiscussions();
+  assert.equal(els['disc-status'].textContent, 'closing · waiting for worker');
+  assert.equal(freshRow('2026-11-15-current').children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent, 'current · started · closing · waiting for worker');
+  assert.ok(freshRow('2026-11-15-current').children.some((c) => c.tag === 'button' && c.textContent === 'Cancel close'));
+  assert.equal(sectionLabel('2026-11-12-archived'), 'archived · closing · waiting for worker');
+  assert.ok(sectionRow('2026-11-12-archived').children.some((c) => c.tag === 'button' && c.textContent === 'Cancel close'));
+  assert.equal(sectionLabel('2026-11-10-deferred'), 'deferred · closing · writing statement');
+  assert.ok(!sectionRow('2026-11-10-deferred').children.some((c) => c.tag === 'button' && c.textContent === 'Cancel close'));
+
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-15-current',
+    discussion: 'Current',
+    started: true,
+    closingDiscussions: { '2026-11-15-current': 'writing' },
+    open: [{ active: 'discussions/2026-11-15-current', title: 'Current', started: true, current: true, url: '/r/current-id/__room' }],
+  });
+  harness.renderDiscussions();
+  assert.equal(els['disc-status'].textContent, 'closing · writing statement');
+  assert.equal(freshRow('2026-11-15-current').children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent, 'current · started · closing · writing statement');
+  assert.ok(!freshRow('2026-11-15-current').children.some((c) => c.tag === 'button' && c.textContent === 'Cancel close'));
+
+  // 6. Merged state across open, closed, archive and deferred rows: replaces "no changes", coexists with pending warning.
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-15-current',
+    discussion: 'Current',
+    started: true,
+    closedDiscussions: ['2026-11-14-closed', '2026-11-11-archived-closed', '2026-11-09-deferred-closed'],
+    open: [
+      { active: 'discussions/2026-11-15-current', title: 'Current', started: true, current: true, url: '/r/current-id/__room' },
+      { active: 'discussions/2026-11-15-open', title: 'Open', started: true, current: false, url: '/r/open-id/__room' },
+    ],
+  });
+  harness.setWorker({
+    pending: [{ lane: '2026-11-15-open', branch: 'worker/2026-11-15-open', ahead: 1, dirty: true }],
+    merged: ['2026-11-15-current', '2026-11-15-open', '2026-11-14-closed', '2026-11-12-archived', '2026-11-11-archived-closed', '2026-11-09-deferred-closed'],
+  });
+  harness.renderDiscussions();
+  const blockOf = (name) => freshRow(name).children.find((c) => c.className === 'discussion-block');
+  const labelOf = (name) => blockOf(name).children.find((c) => c.className === 'local-label').textContent;
+  const warningOf = (name) => blockOf(name).children.find((c) => c.className === 'worker-pending')?.textContent ?? null;
+  assert.equal(labelOf('2026-11-15-current'), 'current · started · merged');
+  assert.equal(warningOf('2026-11-15-current'), null);
+  assert.equal(labelOf('2026-11-15-open'), 'open, paused · merged');
+  assert.equal(warningOf('2026-11-15-open'), '⚠ Worker: 1 commit not merged into main · uncommitted changes');
+  assert.equal(labelOf('2026-11-14-closed'), 'closed · merged');
+  assert.equal(labelOf('2026-11-13-paused'), 'paused · no changes');
+  assert.equal(sectionLabel('2026-11-12-archived'), 'archived · merged');
+  assert.equal(sectionLabel('2026-11-11-archived-closed'), 'archived · closed · merged');
+  assert.equal(sectionLabel('2026-11-10-deferred'), 'deferred');
+  assert.equal(sectionLabel('2026-11-09-deferred-closed'), 'deferred · closed · merged');
+
+  harness.setWorker({ pending: null, merged: [] });
   harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-15-current', started: false, open: [] });
   harness.renderDiscussions();
   const current = els['discussions-pane'].firstChild.children.find((r) => r.className?.includes('discussion-row') && r.children.find((c) => c.className === 'discussion-block')?.children[0].title === 'discussions/2026-11-15-current');

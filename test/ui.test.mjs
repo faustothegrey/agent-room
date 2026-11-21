@@ -740,6 +740,31 @@ test('without a Git repository, or without a commit, the worker is disabled with
   assert.match(empty.screen.workerInfo.lines[0], /no commit yet/);
 });
 
+test('workerInfo.merged lists discussions with labelled commits in HEAD without needing worker branches', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { refreshWorker } = await import('../src/ui.mjs');
+  const { ctx } = await workerRoom();
+  const git = await gitRoom(ctx.cwd);
+  // Direct labelled commit on main (no worker/<name> branch exists).
+  writeFileSync(`${ctx.cwd}/a.txt`, 'a\n'); git('add', 'a.txt');
+  git('commit', '-q', '-m', '[2026-11-20-merged-one] add feature');
+  // Branch merged into main and then deleted.
+  git('checkout', '-q', '-b', 'worker/2026-11-20-merged-two');
+  writeFileSync(`${ctx.cwd}/b.txt`, 'b\n'); git('add', 'b.txt');
+  git('commit', '-q', '-m', '[2026-11-20-merged-two] branch work');
+  git('checkout', '-q', 'main');
+  git('merge', '-q', '--no-ff', 'worker/2026-11-20-merged-two', '-m', 'Merge worker/2026-11-20-merged-two');
+  git('branch', '-d', '-q', 'worker/2026-11-20-merged-two');
+  // Unlabelled commit and non-discussion bracket prefix are ignored.
+  writeFileSync(`${ctx.cwd}/c.txt`, 'c\n'); git('add', 'c.txt');
+  git('commit', '-q', '-m', 'plain commit');
+  writeFileSync(`${ctx.cwd}/d.txt`, 'd\n'); git('add', 'd.txt');
+  git('commit', '-q', '-m', '[brainstorm] note');
+
+  await refreshWorker(ctx);
+  assert.deepEqual(ctx.screen.workerInfo.merged, ['2026-11-20-merged-one', '2026-11-20-merged-two']);
+});
+
 test('the first instruction creates the worktree beside the repository, on worker/main from HEAD; the worker runs there', async () => {
   const { existsSync, realpathSync } = await import('node:fs');
   const { refreshWorker } = await import('../src/ui.mjs');
@@ -1594,14 +1619,47 @@ test('Close waits for queued work, refuses instructions and can be cancelled', a
   const queued = { owner: name, origin: ctx };
   lane.tasks.push(queued);
   const closing = handleLine('/close', ctx);
-  assert.deepEqual(ctx.screen.room.closingDiscussions, [name]);
+  assert.deepEqual(ctx.screen.room.closingDiscussions, { [name]: 'waiting' });
   queueWork(ctx, 'not accepted');
   assert.deepEqual(lane.tasks, [queued]);
   assert.equal(cancelClose(ctx, name), true);
   await closing;
+  assert.deepEqual(ctx.screen.room.closingDiscussions, {});
   assert.equal(ctx.discussion.name, name);
   assert.deepEqual(ctx.screen.room.closedDiscussions, []);
   lane.tasks.length = 0;
+});
+
+test('Close reports waiting then writing phases in room.closingDiscussions, and cancelClose works only while waiting', async () => {
+  const { cancelClose } = await import('../src/ui.mjs');
+  const ctx = await savedRoom(await tmp('close-phases-'), 'close-phases');
+  await handleLine('decide', ctx);
+  const name = ctx.discussion.name, lane = workerLane(ctx, name);
+  let finishTask, startWriting, finishWriting;
+  const writingStarted = new Promise((r) => { startWriting = r; });
+  const writingDone = new Promise((r) => { finishWriting = r; });
+  const taskDone = new Promise((r) => { finishTask = r; });
+  const queued = { owner: name, origin: ctx, finished: taskDone };
+  lane.tasks.push(queued);
+  ctx.closingAgent = () => ({
+    name: 'W',
+    turn: async () => {
+      startWriting();
+      await writingDone;
+      return 'Statement: pending-instructions.md';
+    },
+  });
+  const closing = handleLine('/close', ctx);
+  assert.deepEqual(ctx.screen.room.closingDiscussions, { [name]: 'waiting' });
+  lane.tasks.length = 0;
+  finishTask();
+  await writingStarted;
+  assert.deepEqual(ctx.screen.room.closingDiscussions, { [name]: 'writing' });
+  assert.equal(cancelClose(ctx, name), false);
+  finishWriting();
+  await closing;
+  assert.deepEqual(ctx.screen.room.closingDiscussions, {});
+  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
 });
 
 test('a reopened discussion retains its statement briefing across restart before its first message', async () => {

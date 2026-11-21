@@ -1158,11 +1158,14 @@ function showWorkerInfo(info) {
   const discardableChanged = JSON.stringify(nextDiscardable) !== JSON.stringify([...workerDiscardable]);
   const nextMergeable = info?.mergeable ?? {};
   const mergeableChanged = JSON.stringify(nextMergeable) !== JSON.stringify(workerMergeable);
+  const nextMerged = info?.merged ?? [];
+  const mergedChanged = JSON.stringify(nextMerged) !== JSON.stringify([...workerMerged]);
   workerInfoShown = info;
-  if (pendingChanged || discardableChanged || mergeableChanged) {
+  if (pendingChanged || discardableChanged || mergeableChanged || mergedChanged) {
     workerPending = info?.pending ?? null;
     workerDiscardable = new Set(nextDiscardable);
     workerMergeable = nextMergeable;
+    workerMerged = new Set(nextMerged);
     updateCloseButton();
     renderDiscussions();
   } // its rows and Close/Merge/Discard actions follow pending work and existing worker lanes
@@ -1599,6 +1602,9 @@ function updateReplicaHeader() {
 }
 // The status under the title, for the selected tab. While auto dev runs, the turn is not the User's.
 function talkStatus() {
+  const activeName = !room?.brainstorm && room?.active?.startsWith('discussions/') ? room.active.split('/').at(-1) : null;
+  const closing = !peeking && !viewing ? closingPhase(activeName) : null;
+  if (closing) return closingLabel(closing);
   if (tab === 'work') return localWorking ? localWorking + ' is working' : 'idle';
   if (!room) return '';
   if (peeking) return 'peeking at ' + displayTitle(peeking.name, peeking.title) + ' · read-only';
@@ -1607,6 +1613,8 @@ function talkStatus() {
   if (room.autoDev?.status === 'running') return 'Auto dev running';
   return room.started && yourTurn ? 'your turn' : '';
 }
+function closingPhase(name) { return (name && room?.closingDiscussions?.[name]) || null; }
+function closingLabel(phase) { return phase === 'waiting' ? 'closing · waiting for worker' : phase === 'writing' ? 'closing · writing statement' : ''; }
 function updateDiscWorkers() {
   const el = $('disc-workers');
   if (!el) return;
@@ -1856,7 +1864,7 @@ function updateReplicaView() {
   $('closedisc').hidden = !room?.multi || !(room.active || room.brainstorm || room.open?.length > 1);
   updateCloseButton();
   if (room?.multi) {
-    $('newdisc').title = 'Open a new discussion beside this one, which stays open (Discussions or Brainstorms: Resume shows it again).';
+    $('newdisc').title = 'Open a new discussion beside this one, which stays open (Discussions: Continue, or Brainstorms: Go to, shows it again).';
     $('newbrainstorm').title = 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.';
   }
   $('actions-menu').hidden = ['summary', 'new-discussion'].every((id) => $(id).hidden);
@@ -1958,11 +1966,12 @@ function discussionOf(parts) {
   if (parts.length === 3 && SECTIONS[parts[1]] && isDiscussion(parts[2])) return { ref: parts[1] + '/' + parts[2], section: parts[1] };
   return null;
 }
-// Resume (one button for a discussion not on screen): what it does, by the discussion's state.
-// open: its entry in room.open when it is open in another context (started: Resume only shows it).
-function resumeTip(name, open, section) {
+// Continue / Resume (one button for a discussion not on screen): what it does, by the discussion's state.
+// open: its entry in room.open when it is open in another context (started: Continue only shows it).
+function resumeTip(name, open, section, closed) {
   const saved = room?.checkpoints?.find((c) => c.name === name);
   const what = open ? 'Show it: its agents carry on, nothing is restarted.'
+    : closed ? 'Reopen from its closing statement (or pending handoff) with new agent and worker sessions.'
     : saved?.kind === 'full' ? 'Continue where it stopped: the same agent and worker sessions, and its chat.'
     : saved?.kind === 'fresh' && saved.summary !== false ? 'Start from its handoff and notes, with the summary chosen at Start fresh.'
     : 'No saved session: start from its handoff and notes.';
@@ -2148,7 +2157,7 @@ function discussionsIn(prefix) {
 // Worker work not yet in main, from the Worker tab's checks (showWorkerInfo): each lane's
 // { lane: its discussion or null for worker/main, branch, ahead: commits not in main, dirty }.
 // null: not known (no checks yet, or no worker here), so rows say nothing about it.
-let workerPending = null, workerDiscardable = new Set(), workerMergeable = {};
+let workerPending = null, workerDiscardable = new Set(), workerMergeable = {}, workerMerged = new Set();
 function renderDiscussions() {
   const container = $('discussions-pane');
   if (!container) return;
@@ -2182,7 +2191,7 @@ function renderDiscussions() {
   } else if (!discussions.length && !replica?.received?.some((l) => !l.local)) {
     list.append(el('span', 'hint', (room?.started ? '' : 'No active discussions: your first message starts one.') + currentWorker));
   } else if (room && !room.started && canAct) {
-    list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Resume on its row.' + currentWorker));
+    list.append(el('span', 'hint', 'Your first message starts a new discussion. To go back to one instead, choose Continue (or Resume, if closed) on its row.' + currentWorker));
   }
 
   // Worker work not yet in main: on its discussion's row, or here when its branch is worker/main
@@ -2229,15 +2238,18 @@ function renderDiscussions() {
     else if (openHere) statusText = openHere.started ? 'open, paused' : 'not started';
     else statusText = room?.closedDiscussions?.includes(d) ? 'closed' : 'paused';
     if (openEntry?.working) statusText += ' · worker working';
-    if (room?.closingDiscussions?.includes(d)) statusText += ' · closing, waiting for worker';
+    const closing = closingPhase(d);
+    if (closing) statusText += ' · ' + closingLabel(closing);
     const work = pendingWork.find((p) => p.lane === d);
-    if (workerPending && !work) statusText += ' · no changes';
+    const merged = workerMerged.has(d);
+    if (merged) statusText += ' · merged';
+    else if (workerPending && !work) statusText += ' · no changes';
     block.append(el('div', 'local-label', statusText));
     if (work) block.append(el('div', 'worker-pending', '⚠ Worker: ' + pendingText(work)));
     row.append(block);
 
     if (canAct) {
-      if (room?.closingDiscussions?.includes(d)) {
+      if (closing === 'waiting') {
         const cancel = el('button', 'reopen', 'Cancel close');
         cancel.onclick = () => post('__cancelclose', { name: d }).catch((err) => status(err.message, true));
         row.append(cancel);
@@ -2248,11 +2260,12 @@ function renderDiscussions() {
         b.onclick = () => { location.href = openHere.url; };
         row.append(b);
       } else if (!isCurrent) {
-        const b = el('button', 'reopen primary', 'Resume');
-        b.title = resumeTip(d, openHere, null);
+        const closed = !!room?.closedDiscussions?.includes(d);
+        const b = el('button', 'reopen primary', closed ? 'Resume' : 'Continue');
+        b.title = resumeTip(d, openHere, null, closed);
         b.onclick = (e) => { e.stopPropagation(); if (openHere) notesGuard(() => { location.href = openHere.url; }); else send('/resume ' + d); };
         row.append(b);
-        if (room?.closedDiscussions?.includes(d)) {
+        if (closed) {
           const p = el('button', 'reopen', 'Peek');
           p.title = 'Look at this closed discussion read-only: its conversation and notes, without reopening it.';
           p.onclick = (e) => { e.stopPropagation(); send('/peek ' + d); };
@@ -2378,20 +2391,23 @@ function renderDiscussions() {
         renderDiscussions();
       };
       block.append(nameBtn);
-      block.append(el('div', 'local-label', (s === 'archive' ? 'archived' : 'deferred') + (room?.closedDiscussions?.includes(d) ? ' · closed' : '') + (room?.closingDiscussions?.includes(d) ? ' · closing, waiting for worker' : '')));
+      const closed = !!room?.closedDiscussions?.includes(d);
+      const closing = closingPhase(d);
+      const merged = workerMerged.has(d);
+      block.append(el('div', 'local-label', (s === 'archive' ? 'archived' : 'deferred') + (closed ? ' · closed' : '') + (closing ? ' · ' + closingLabel(closing) : '') + (merged ? ' · merged' : '')));
       row.append(block);
 
       if (canAct) {
-        if (room?.closingDiscussions?.includes(d)) {
+        if (closing === 'waiting') {
           const cancel = el('button', 'reopen', 'Cancel close');
           cancel.onclick = () => post('__cancelclose', { name: d }).catch((err) => status(err.message, true));
           row.append(cancel);
         }
-        const b = el('button', 'reopen primary', 'Resume');
-        b.title = 'Resume: makes it active first';
+        const b = el('button', 'reopen primary', closed ? 'Resume' : 'Continue');
+        b.title = (closed ? 'Resume' : 'Continue') + ': makes it active first';
         b.onclick = (e) => { e.stopPropagation(); send('/resume ' + s + '/' + d); };
         row.append(b);
-        if (room?.closedDiscussions?.includes(d)) {
+        if (closed) {
           const p = el('button', 'reopen', 'Peek');
           p.title = 'Look at this closed discussion read-only: its conversation and notes, without reopening it.';
           p.onclick = (e) => { e.stopPropagation(); send('/peek ' + s + '/' + d); };

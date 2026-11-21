@@ -164,7 +164,7 @@ worker's, as their panels list them ("<provider> default" for CLI default).
     the folder, transcripts and drawings included, and the checkpoint: uncommitted files are lost for
     good; disabled while the brainstorm is open). No Archive or Defer. Clicking a title shows its
     files in Explorer, as for a discussion.
-  - In **Discussions**, browse discussions by their display title (saved title, or the folder name without its leading date and with spaces; hover for the folder path), with the active ones first, check their state, and manage them (Resume, Go to, Archive, Defer, and actions menu). Archived and deferred discussions are kept in their own sections; received discussions from peers show **Peek files** and **View chat** buttons. Rows show state and actions only, no inline files. A row whose worker branch has work not yet in main says so in amber under its state, such as **⚠ Worker: 2 commits not merged into main · uncommitted changes**; `worker/main`, or a branch whose discussion isn't in the active list, gets such a line above the list. A row with nothing pending says **no changes** in its state. These come from the Worker tab's checks, made again after each worker task and whenever the Discussions or Worker tab is clicked.
+  - In **Discussions**, browse discussions by their display title (saved title, or the folder name without its leading date and with spaces; hover for the folder path), with the active ones first, check their state, and manage them (Continue, Resume, Go to, Archive, Defer, and actions menu). Archived and deferred discussions are kept in their own sections; received discussions from peers show **Peek files** and **View chat** buttons. Rows show state and actions only, no inline files. A row whose worker branch has work not yet in main says so in amber under its state, such as **⚠ Worker: 2 commits not merged into main · uncommitted changes**; `worker/main`, or a branch whose discussion isn't in the active list, gets such a line above the list. A discussion whose work is in the room's current branch (commits labelled `[<name>]`, open or closed, in any list) shows **merged** in its state — replacing **no changes** when nothing is pending, and alongside the **⚠ Worker: …** warning if new unmerged commits or uncommitted edits exist (a rolled-back discussion may still show **merged**). Otherwise, an active row with nothing pending says **no changes** in its state. These come from the Worker tab's checks, made again after each worker task and whenever the Discussions or Worker tab is clicked.
   - In **Explorer**, view one tree at a time, chosen with the bar `[ Discussion | Room checkout | Worker copy ]` (Worker copy is coming soon). Under the bar, a line shows the folder and branch. **Discussion** shows the active (or peeked) discussion's files. **Room checkout** shows the room's root checkout, excluding hidden and gitignored files (non-discussion files in `discussions/`, such as `discussions/README.md`, remain reachable). Code, config, and other text files open as plain text in Document; supported images and PDFs stay viewable; files that cannot be displayed are greyed out ("can't be shown here").
   - **Peek**: clicking another discussion's name in Discussions shows its files in Explorer without switching discussions. An orange banner ("Looking at <name> · Back to current") and an orange dot on the Explorer tab indicate the peek; Document's path line names the peeked discussion.
   - In **Document**, view the chosen file with its path. Each tab keeps its place when you switch; Document is disabled until a file is chosen. The chosen document stays selected when agents edit other files, and open documents check for changes every two seconds. Drag the divider to resize the panes. Browsing is available during agent turns and does not notify the agents.
@@ -245,7 +245,7 @@ worker's, as their panels list them ("<provider> default" for CLI default).
 
 Files directly in `discussions/` that aren't dated folders (in this project, its index
 [`discussions/README.md`](discussions/README.md)) are listed under "This room's own documents",
-with no Resume button.
+with no Continue or Resume button.
 
 ## Discussions and saved files
 
@@ -287,7 +287,7 @@ taken in `archive/` and `deferred/`.
 conversation with an agent's or the worker's CLI (Claude Code, Codex): what was said, read and
 replied in it, as the provider keeps it (it may compact older turns). The provider stores it on
 this machine (Claude Code under `~/.claude/projects/`, Codex in its own folder); agent-room keeps
-only its ID, in the discussion's checkpoint (below). Resume of a paused discussion hands the same
+only its ID, in the discussion's checkpoint (below). Continue on a paused discussion hands the same
 IDs back, so the conversation continues with its memory. Close drops the IDs; Resume then starts
 new sessions from the closing statement. Start fresh also starts new sessions. Each discussion has its own agent sessions
 and its own worker session, which works in that discussion's own worktree (see
@@ -301,14 +301,14 @@ message, Start fresh, or Resume without a checkpoint) begins a new one.
 several discussions open at once, each with its own agents' sessions, chat and auto dev, and its
 own worker session, worktree and queue (below): their worker tasks run at the same time, at most
 two at once. You can switch discussion while one waits for its worker task: the window shows one
-discussion, the one what you type goes to, and the task's report still goes back to its own. One window shows one of them; Discussions marks the others "open". **Resume** shows an open one as
+discussion, the one what you type goes to, and the task's report still goes back to its own. One window shows one of them; Discussions marks the others "open". **Continue** shows an open one as
 it is, during a round too: its agents carry on, nothing is restarted. An open discussion that hasn't started (no message
 yet) has **Go to** instead, which only shows it. **New discussion** and **New brainstorm** open the new
-one beside the one in use, which stays open (in place, when the one in use hasn't started). Resume
+one beside the one in use, which stays open (in place, when the one in use hasn't started). Continue, Resume
 and Start fresh open any other discussion or brainstorm beside the open ones; several brainstorms
 can be open at once. **Close** (in **Actions ▾** and each row's menu in **Discussions**, or `/close`) is labelled **Close with pending work** when the discussion's worker branch has commits not in main or uncommitted edits, and also works on a paused
 discussion's row. When the discussion has a worker worktree or branch that is already merged (no commits outside the room's current branch) and clean (no tracked edits, no untracked files and no Git operation in progress), plain **Close** cleans up the worktree and branch automatically under the room-wide lock (`git worktree remove --force`, `git branch -d`, clearing the lane's hold and saved worker session) and appends `Worker worktree and branch removed (already merged).` to `closing-statement.md`. This cleanup treats every gitignored file in a merged worker worktree (including `.worker-notes/` and `node_modules/`) as transient and removes it with the worktree. If cleanup fails partway or another merge/discard holds the lock, the discussion still closes and reports what was and wasn't removed in the room and in the closing statement. Otherwise, **Close with pending work** keeps the worker branch and worktree exactly as they are (branch, commits, uncommitted, untracked and ignored files) for rework later. It refuses new worker instructions and waits for its queued and running tasks;
-while waiting the row says **closing, waiting for worker** and offers **Cancel close**. Tasks queued behind an unresolved-edits hold can never start, so Close refuses at once and names them instead of waiting. A one-off
+while Close runs, its Discussions row (in the open, archive or deferred list) and, when it is on screen, its header status show **closing · waiting for worker** while waiting for worker tasks (with **Cancel close** offered only during this waiting phase), then **closing · writing statement** until Close ends. Tasks queued behind an unresolved-edits hold can never start, so Close refuses at once and names them instead of waiting. A one-off
 agent with the provider and model set in that discussion's **Worker · provider & model** panel
 (not the discussion agents, nor the worker's own session) then reads the discussion's notes and
 transcripts and writes a closing statement pointing to `pending-instructions.md` (the system messages name its provider and model, when it starts and when the discussion is closed; its format — non-empty, not `PASS`, and naming `pending-instructions.md` — is checked and retried once in the same session if needed, logging `Format check: …`, and Close fails if the retry is still wrong, keeping the previous statement); when the branch has pending work, agent-room appends `Worker work pending on <node or host>: \`worker/<name>\`, N commits not in main, uncommitted edits: yes/no, worktree \`<path>\`.` to `closing-statement.md`. agent-room writes the one
@@ -373,8 +373,8 @@ the closed flag is persisted separately. Discussions from before this flag, and 
 left behind by a restart, are paused. Discussions rows show current, open/paused, not started,
 paused or closed, as appropriate; archived and deferred rows also show closed when applicable.
 
-**Resume** (on a discussion's row in **Discussions** or on its page, or `/resume <folder-name>`), for
-any discussion not on screen, works between rounds:
+**Continue** / **Resume** (on a discussion's row in **Discussions**, or `/resume <folder-name>`), for
+any discussion not on screen, works between rounds. The button reads **Continue** for open or paused discussions and **Resume** for closed discussions (and closed brainstorms; open brainstorms show **Go to**):
 - open in another discussion of this folder: it is only shown, as it is (during a round too, from its row);
 - paused with a checkpoint: it continues there, with the same agent and worker sessions and its chat;
 - closed: it clears the closed flag and starts new agent and worker sessions, with the closing
@@ -425,7 +425,7 @@ summary, so a Restart or Resume in between still briefs with it. Old conversatio
 `/pause`, `/reopen`, `/continue` and `/autosummary` are no longer commands: they answer with a
 hint instead of reaching the agents.
 
-Looking at another discussion does not switch the one in use (marked "in use" in the list); only Resume and Start fresh do. Display-title
+Looking at another discussion does not switch the one in use (marked "in use" in the list); only Continue, Resume and Start fresh do. Display-title
 editing is not available yet; see [remaining decisions](discussions/2026-11-02-discussions-and-folders/discussions.md).
 
 Worker turns and other log entries before the first discussion message remain in memory until
