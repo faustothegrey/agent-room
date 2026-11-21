@@ -64,6 +64,10 @@ discussion, with a 30-minute timeout per instruction.
   test`, if it has them), report their real output, and end your reply with the line
   `Tested: <full commit ID of your branch> with main <full commit ID of main>: tests passed` (or
   `tests failed`), naming exactly the commits you tested. The Worker tab shows it to the User.
+  After you commit, if your branch contains main (`git merge-base --is-ancestor main HEAD`),
+  do the same: run the project's tests, report their real output, and end your reply with that
+  `Tested:` line. Note `git rev-parse HEAD` and `git rev-parse main` before the tests and check
+  them again afterwards; if either changed, say so and give no `Tested:` line.
   For rollback, inspect the intended set before any file
   changes; distinguish prior rollbacks from implementation and never undo a rollback to restore
   removed work. If the set or its dependencies are unclear, report before editing.

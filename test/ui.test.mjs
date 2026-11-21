@@ -1446,7 +1446,7 @@ test('terminal: a task that leaves edits after the room switched holds its own d
   // Back in A: its own instruction resolves the edits, told of A's task.
   await handleLine(`/resume ${a}`, ctx);
   assert.deepEqual([ctx.totals.W?.input, ctx.totals.W?.output], [100, 7]);
-  ctx.worker.turn = async (p) => { prompts.push(['A again', p]); git('-C', tree, 'add', 'wip.txt'); git('-C', tree, 'commit', '-q', '-m', `[${a}] finished`); return 'resolved\nDocs: none needed, because test.'; };
+  ctx.worker.turn = async (p) => { prompts.push(['A again', p]); git('-C', tree, 'add', 'wip.txt'); git('-C', tree, 'commit', '-q', '-m', `[${a}] finished`); return `resolved\nDocs: none needed, because test.\nTested: ${git('-C', tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`; };
   queueWork(ctx, 'finish it'); await ctx.workQueue;
   assert.match(prompts.at(-1)[1], new RegExp(`Uncommitted edits are left in your worktree from the earlier task from \\[${a}\\] "edit things in A"`));
   assert.equal(workerLane(ctx, a).blockedBy, null);
@@ -2707,7 +2707,7 @@ test('Stage 2: completed work is reported once before a round, including Worker 
     const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
     writeFileSync(`${tree}/changed.txt`, String(commits.length));
     g('add', 'changed.txt'); g('commit', '-qm', `[${c.discussion.name}] completed`);
-    commits.push(g('rev-parse', 'HEAD')); return 'done\nDocs: none needed, because test.';
+    const head = g('rev-parse', 'HEAD'); commits.push(head); return `done\nDocs: none needed, because test.\nTested: ${head} with main ${g('rev-parse', 'main')}: tests passed`;
   } });
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
@@ -3600,7 +3600,7 @@ test('retry runs before later queued instructions and reports commits made since
   queueWork(ctx, 'later');
   git('-C', ctx.workerDir.path, 'commit', '-q', '--allow-empty', '-m', `[${ctx.discussion.name}] later work`);
   await retryWork(ctx, failure.id);
-  release('done\nDocs: none needed, because test.');
+  release(`done\nDocs: none needed, because test.\nTested: ${git('-C', ctx.workerDir.path, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`);
   await ctx.workQueue;
   assert.deepEqual(prompts.map((p) => p.split('\n').at(-1)), ['original', 'in progress', 'original', 'later']);
   assert.match(prompts[2], /failed once/);
@@ -5199,7 +5199,27 @@ test('checkWorkerReport and formattedTurn: good reports, Tested/Docs rules, conf
     askedCatchUp: true, mergePending: false, mainInHead: true, ownCommits: 0,
   }).join('\n'), /has no Tested: line/);
 
-  // 6. formattedTurn generic helper: asks the same session at most once.
+  // 6. Own commit without catch-up: owes Tested: when main is in HEAD and main did not move; not owed when main is not in HEAD, no commit was made, or main moved.
+  assert.match(checkWorkerReport('Committed.\nDocs: none needed, because internal.', {
+    askedCatchUp: false, mergePending: false, mainInHead: true, mainMoved: false, ownCommits: 1,
+  }).join('\n'), /has no Tested: line/);
+  assert.deepEqual(checkWorkerReport(`Committed.\nDocs: none needed, because internal.\n${testedLine}`, {
+    askedCatchUp: false, mergePending: false, mainInHead: true, mainMoved: false, ownCommits: 1,
+  }), []);
+  assert.deepEqual(checkWorkerReport('Committed on behind branch.\nDocs: none needed, because internal.', {
+    askedCatchUp: false, mergePending: false, mainInHead: false, mainMoved: false, ownCommits: 1,
+  }), []);
+  assert.deepEqual(checkWorkerReport('Checked files, no commit made.', {
+    askedCatchUp: false, mergePending: false, mainInHead: true, mainMoved: false, ownCommits: 0,
+  }), []);
+  assert.deepEqual(checkWorkerReport('Committed, but main moved during tests so no Tested line.\nDocs: none needed, because internal.', {
+    askedCatchUp: false, mergePending: false, mainInHead: true, mainMoved: true, ownCommits: 1,
+  }), []);
+  assert.deepEqual(checkWorkerReport('Caught up, but main moved during tests.', {
+    askedCatchUp: true, mergePending: false, mainInHead: true, mainMoved: true, ownCommits: 0,
+  }), []);
+
+  // 7. formattedTurn generic helper: asks the same session at most once.
   const calls = [];
   const fakeAgent = { turn: async (p) => { calls.push(p); return calls.length === 1 ? 'bad' : 'good'; } };
   const ok = await formattedTurn(fakeAgent, 'initial', {
@@ -5278,6 +5298,19 @@ test('worker report format retry flow: fixed on retry and still wrong after one 
   // The report queued for the discussion agents uses the final reply and lists the remaining format problems.
   assert.equal(ctx.workerReports?.length, 1);
   assert.match(ctx.workerReports[0].text, /Still missing docs[\s\S]*Format check still wrong:.*has no Docs: line.*short commit IDs/);
+
+  // Case 3: When main moves during a task that makes a commit on a branch containing mainAtStart, Tested: is not owed (decided from Git).
+  let step3 = 0;
+  ctx.worker.turn = async () => {
+    step3++;
+    writeFileSync(`${ctx.workerDir.path}/a.txt`, 'v3\n');
+    inTree('commit', '-q', '-am', `[${name}] step 3`);
+    writeFileSync(`${ctx.cwd}/m.txt`, 'main3\n'); git('commit', '-q', '-am', 'main advances during turn');
+    return 'Committed while main moved.\nDocs: none needed, because internal.';
+  };
+  queueWork(ctx, 'do step 3');
+  await ctx.workQueue;
+  assert.equal(step3, 1, 'no retry when main moved during the task');
 });
 
 test('worker report format retry flow: retry that changes HEAD keeps changes, logs it, re-runs checks and recordTested, and pauses auto dev', async () => {

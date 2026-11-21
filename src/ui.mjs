@@ -4124,8 +4124,8 @@ const TESTED_SHORT = /^Tested: ([0-9a-f]{7,64}) with (?:main|\S+) ([0-9a-f]{7,64
 const TESTED_ANY = /^\s*[*_`]*Tested\b/i;
 const DOCS_LINE = /^\s*(?:[-*]\s+)?(?:\*\*)?Docs:(?:\*\*)?\s+\S/i;
 // Checks a worker report's formal structure against the task's Git state. Returns a list of problems.
-export function checkWorkerReport(reply, { askedCatchUp = false, mergePending = false, mainInHead = false, ownCommits = 0 } = {}) {
-  const oweTested = Boolean(askedCatchUp && !mergePending && mainInHead);
+export function checkWorkerReport(reply, { askedCatchUp = false, mergePending = false, mainInHead = false, mainMoved = false, ownCommits = 0 } = {}) {
+  const oweTested = Boolean((askedCatchUp || ownCommits > 0) && !mergePending && mainInHead && !mainMoved);
   const oweDocs = ownCommits > 0;
   const lines = String(reply ?? '').split('\n');
   let lastIdx = lines.length - 1;
@@ -4169,17 +4169,19 @@ export function checkWorkerReport(reply, { askedCatchUp = false, mergePending = 
   return problems;
 }
 async function workerGitFacts(place, { before, mainAtStart, askedCatchUp = false } = {}) {
-  const [head, gitDir, unmerged] = await Promise.all([
+  const [head, mainNow, gitDir, unmerged] = await Promise.all([
     git(place.path, 'rev-parse', 'HEAD'),
+    git(place.path, 'rev-parse', 'main').catch(() => null),
     git(place.path, 'rev-parse', '--absolute-git-dir'),
     git(place.path, 'ls-files', '-u').catch(() => ''),
   ]);
   const mergePending = existsSync(join(gitDir, 'MERGE_HEAD')) || unmerged.trim() !== '';
   const mainInHead = Boolean(mainAtStart && await gitOk(place.path, 'merge-base', '--is-ancestor', mainAtStart, head));
+  const mainMoved = Boolean(mainAtStart && mainNow && mainNow !== mainAtStart);
   const ownCommits = before
     ? Number(await git(place.path, 'rev-list', '--no-merges', '--count', `${before}..${head}`, ...(mainAtStart ? ['--not', mainAtStart] : [])).catch(() => '0'))
     : 0;
-  return { before, mainAtStart, head, askedCatchUp, mergePending, mainInHead, ownCommits };
+  return { before, mainAtStart, mainNow, head, askedCatchUp, mergePending, mainInHead, mainMoved, ownCommits };
 }
 async function worktreeFingerprint(place) {
   const head = await git(place.path, 'rev-parse', 'HEAD');

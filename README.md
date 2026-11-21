@@ -733,7 +733,14 @@ worker/<folder-name>` in the room); nothing is merged automatically.
     with full 40-to-64-character hex commit IDs, as the reply's last non-empty line; recorded
     only when it passes the report format check and Git agrees: the branch commit is on the
     branch, it contains the main commit, which is main's), and whether either branch has moved
-    since. This is the worker's report: agent-room doesn't run the tests itself;
+    since. The worker gives this line after a catch-up merge and after committing on a branch that
+    already contains `main` (skipping it if `HEAD` or `main` changed while tests ran). If a branch
+    has no recorded result (for example when its `Tested:` line was rejected or skipped), send the
+    worker: "Make no changes. First run `git rev-parse HEAD` and `git rev-parse main` and note
+    both IDs. Run `npm test` and report its real output. Then run both commands again: if either
+    ID changed, say so and give no `Tested:` line. Otherwise end your reply with
+    `Tested: <full HEAD commit ID> with main <full main commit ID>: tests passed`, or
+    `tests failed` if any test failed." This is the worker's report: agent-room doesn't run the tests itself;
   - with Git 2.38 or newer, a merge preview: "clean", or the files that would conflict
     (`git merge-tree --write-tree`). It is advice only: it can go stale as soon as either branch
     moves, and a clean merge doesn't prove the combined code works. It changes no branch,
@@ -800,9 +807,10 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   in brackets (`[<discussion folder name>]`) and the commit ID in its reply.
   agent-room reports commits without that label. After each turn, agent-room also checks the
   report's format against the task's Git state: `Tested:` (plain, full commit IDs, last non-empty
-  line) is required when the task asked to catch up, no merge is pending and `main`'s starting
-  commit is in `HEAD`; `Docs:` (before any `Tested:` line) is required when the worker made a
-  non-merge commit of its own. When a check fails, agent-room logs `Format check: …`, records a
+  line) is required when the task asked to catch up or the worker made a non-merge commit of its
+  own, with no merge pending, `main`'s starting commit in `HEAD`, and `main` unchanged during the
+  task (rollback tasks stay unchecked); `Docs:` (before any `Tested:` line) is required when the
+  worker made a non-merge commit of its own. When a check fails, agent-room logs `Format check: …`, records a
   fingerprint of `HEAD`, the index, tracked working-tree files and untracked files, and asks the
   same worker session once for a complete corrected report with no new work (both replies and
   their usage stay visible in the Worker tab and transcript; if the retry changed files or `HEAD`,
