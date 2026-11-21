@@ -446,3 +446,25 @@ test('closingStatement format check: fixed on retry and still wrong after one re
     ['Format check: still wrong: it must point to pending-instructions.md.', true],
   ]);
 });
+
+test('round beforeLap hook checks before each subsequent lap and stops early with notice', async () => {
+  const a = fakeAgent('A', ['a1', 'a2', 'PASS']);
+  const b = fakeAgent('B', ['b1', 'b2', 'PASS']);
+  const room = createRoom([a, b]);
+  const lapsSeen = [];
+  const notices = [];
+  const res = await room.round('check code', {
+    speaker: 'Scheduler',
+    onNotice: (n) => notices.push(n),
+    beforeLap: async (lap) => {
+      lapsSeen.push(lap);
+      return lap === 1 ? 'Stopped by quota guard before lap 2' : null;
+    },
+  });
+  assert.deepEqual(lapsSeen, [1]);
+  assert.deepEqual(res, { stopped: true, reason: 'Stopped by quota guard before lap 2' });
+  assert.deepEqual(notices, ['Stopped by quota guard before lap 2']);
+  assert.equal(a.prompts.length, 1);
+  assert.equal(b.prompts.length, 1);
+  assert.match(a.prompts[0], /\[Scheduler\]: check code/);
+});

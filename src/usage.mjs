@@ -6,6 +6,53 @@
 import { execFile } from 'node:child_process';
 
 export const METER_URL = process.env.AGENT_ROOM_METER ?? 'http://127.0.0.1:9899';
+export const QUOTA_STALE_MS = 15 * 60_000;
+
+// Parse the meter's `last_update` timestamp ("YYYY-MM-DD HH:MM:SS" in local time, or ISO with zone).
+export function parseMeterTime(text) {
+  if (!text) return null;
+  const s = String(text).trim();
+  const local = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s);
+  if (local) {
+    const [, y, mo, d, h, mi, sec = '0'] = local;
+    const ms = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(sec)).getTime();
+    return Number.isNaN(ms) ? null : ms;
+  }
+  const ms = Date.parse(s);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+// Check that the quota meter reading is present, fresh, and every provider has at least `floor`%
+// remaining in both its 5-hour and weekly windows. Returns { ok: true } or { ok: false, reason }.
+export function checkQuotaFloor(quota, providers, floor = 50, { now = Date.now(), maxAgeMs = QUOTA_STALE_MS } = {}) {
+  const unique = [...new Set(providers)].filter(Boolean);
+  if (!unique.length) return { ok: true };
+  if (!quota || typeof quota !== 'object') return { ok: false, reason: 'quota meter reading is missing' };
+  const measuredMs = parseMeterTime(quota.last_update);
+  if (measuredMs === null) return { ok: false, reason: 'quota meter timestamp is missing or unreadable' };
+  const ageMs = now - measuredMs;
+  if (ageMs > maxAgeMs) {
+    const mins = Math.round(ageMs / 60_000);
+    return { ok: false, reason: `quota meter reading is stale (${mins}m old, updated ${quota.last_update})` };
+  }
+  for (const p of unique) {
+    const gauges = quotaGauges(quota, [p]);
+    const has5h = gauges.some((g) => g.label === '5h');
+    const hasWeek = gauges.some((g) => g.label === 'week');
+    if (!has5h || !hasWeek) {
+      const missing = [!has5h && '5h', !hasWeek && 'weekly'].filter(Boolean).join(' and ');
+      return { ok: false, reason: `${p} ${missing} quota reading is missing` };
+    }
+    for (const g of gauges) {
+      const remaining = 100 - g.used;
+      if (remaining < floor) {
+        const label = g.group ? `${p} (${g.group}) ${g.label}` : `${p} ${g.label}`;
+        return { ok: false, reason: `${label} has ${Math.round(remaining)}% remaining (below ${floor}% floor)` };
+      }
+    }
+  }
+  return { ok: true };
+}
 
 // Adds one turn's usage ({ input, cached, output, cost? }) to a running total.
 export function addUsage(total = { turns: 0, input: 0, cached: 0, output: 0 }, u) {

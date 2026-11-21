@@ -1,7 +1,7 @@
 import { test } from './helpers/test.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { addUsage, agentUsageLine, checkLogin, fetchQuota, parseClaudeAuth, parseCodexLogin, formatUsage, quotaGauges, quotaSummary, usageReport } from '../src/usage.mjs';
+import { addUsage, agentUsageLine, checkLogin, checkQuotaFloor, fetchQuota, parseClaudeAuth, parseCodexLogin, formatUsage, quotaGauges, quotaSummary, usageReport } from '../src/usage.mjs';
 
 // The shape the quota meter returned on 2026-10-20 (trimmed).
 const QUOTA = {
@@ -206,4 +206,40 @@ test('agentUsageLine formats only the agent\'s own totals and provider quota, wi
     agentUsageLine({ total: null, provider: 'agy', gauges: quotaGauges(agyQuota, ['agy']), measured: agyQuota.last_update, now: new Date(2026, 10, 14, 11, 0) }),
     '[your reported usage this session: none yet · agy quota gemini 3% 5h / 10% week, argon 20% week, meter at 10:30]',
   );
+});
+
+test('checkQuotaFloor: passes above floor, fails below floor on 5h or weekly, and rejects missing or stale meter readings', () => {
+  const now = new Date(2026, 9, 20, 13, 50, 0).getTime(); // 5m14s after QUOTA.last_update
+  const freshQuota = {
+    claude: { ok: true, parsed: { current_session: { used_percent: 40 }, current_week_all_models: { used_percent: 20 } } },
+    codex: { ok: true, parsed: { five_hour_limit: { used_percent: 50 }, weekly_limit: { used_percent: 10 } } },
+    antigravity: { ok: true, parsed: { groups: {
+      gemini: { windows: { '5h': { used_percent: 10 }, weekly: { used_percent: 30 } } },
+      argon: { windows: { weekly: { used_percent: 40 } } },
+    } } },
+    last_update: '2026-10-20 13:44:46',
+  };
+  assert.deepEqual(checkQuotaFloor(freshQuota, ['claude', 'codex', 'agy'], 50, { now }), { ok: true });
+  // Below 50% remaining on 5h (used 51% -> 49% remaining)
+  const low5h = { ...freshQuota, claude: { ok: true, parsed: { current_session: { used_percent: 51 }, current_week_all_models: { used_percent: 10 } } } };
+  assert.equal(checkQuotaFloor(low5h, ['claude', 'codex'], 50, { now }).ok, false);
+  assert.match(checkQuotaFloor(low5h, ['claude', 'codex'], 50, { now }).reason, /claude 5h has 49% remaining \(below 50% floor\)/);
+  // Below 50% remaining on weekly (agy argon used 60% -> 40% remaining)
+  const lowWeek = { ...freshQuota, antigravity: { ok: true, parsed: { groups: {
+    gemini: { windows: { '5h': { used_percent: 10 }, weekly: { used_percent: 10 } } },
+    argon: { windows: { weekly: { used_percent: 60 } } },
+  } } } };
+  assert.equal(checkQuotaFloor(lowWeek, ['agy'], 50, { now }).ok, false);
+  assert.match(checkQuotaFloor(lowWeek, ['agy'], 50, { now }).reason, /agy \(argon\) week has 40% remaining/);
+  // Missing meter or missing timestamp
+  assert.match(checkQuotaFloor(null, ['claude'], 50, { now }).reason, /missing/);
+  assert.match(checkQuotaFloor({ ...freshQuota, last_update: '' }, ['claude'], 50, { now }).reason, /timestamp is missing/);
+  // Stale reading (> 15m old)
+  const staleNow = new Date(2026, 9, 20, 14, 5, 0).getTime();
+  assert.equal(checkQuotaFloor(freshQuota, ['claude'], 50, { now: staleNow }).ok, false);
+  assert.match(checkQuotaFloor(freshQuota, ['claude'], 50, { now: staleNow }).reason, /stale/);
+  // Missing provider window
+  const missingWeek = { ...freshQuota, codex: { ok: true, parsed: { five_hour_limit: { used_percent: 10 } } } };
+  assert.equal(checkQuotaFloor(missingWeek, ['codex'], 50, { now }).ok, false);
+  assert.match(checkQuotaFloor(missingWeek, ['codex'], 50, { now }).reason, /codex weekly quota reading is missing/);
 });

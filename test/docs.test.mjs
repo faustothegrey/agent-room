@@ -2672,3 +2672,32 @@ test('list-collapsed grid places #main-panel in the last column with a real widt
     s.close();
   }
 });
+
+test('Schedule Control bar button, page view, and /__schedule GET/POST endpoints', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agent-room-sched-docs-'));
+  const calls = [];
+  const screen = {
+    clients: new Set(), transcript: [], worker: [],
+    getSchedule: () => ({ quotaFloor: 50, tasks: [], discussions: [{ ref: '2026-11-21-review', name: '2026-11-21-review', title: 'Review', section: null }] }),
+    saveSchedule: (body) => { calls.push(body); return { quotaFloor: body.quotaFloor ?? 50, tasks: [], discussions: [] }; },
+  };
+  const s = await serve(dir, screen);
+  try {
+    const html = await (await s.get('/__room')).text();
+    assert.match(html, /id="ctrl-schedule"/);
+    assert.match(html, /id="schedule"/);
+    const getRes = await s.get('/__schedule');
+    assert.equal(getRes.status, 200);
+    assert.equal((await getRes.json()).quotaFloor, 50);
+    // POST from a foreign Origin is refused
+    const badRes = await fetch(`${s.base}/__schedule`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'http://evil.example' }, body: JSON.stringify({ action: 'floor', quotaFloor: 60 }) });
+    assert.equal(badRes.status, 403);
+    // POST from own page succeeds
+    const okRes = await postFrom(s, '/__schedule', { action: 'floor', quotaFloor: 60 });
+    assert.equal(okRes.status, 200);
+    assert.equal((await okRes.json()).quotaFloor, 60);
+    assert.deepEqual(calls, [{ action: 'floor', quotaFloor: 60 }]);
+  } finally {
+    s.close();
+  }
+});
