@@ -518,12 +518,24 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 <title>agent-room</title><style>
 :root { color-scheme: light dark; --line: #8884; --dim: #888; }
 * { box-sizing: border-box; }
-body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: var(--list, 240px) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
-body.list-collapsed { grid-template-columns: 32px 0 1fr; }
+body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: 62px var(--list, 240px) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+body.list-collapsed { grid-template-columns: 62px 32px 0 1fr; }
+#control-bar { display: flex; flex-direction: column; align-items: center; gap: .35rem; padding: .45rem .25rem; border-right: 1px solid var(--line); background: linear-gradient(#88812, #88812), Canvas; min-height: 0; }
+.ctrl-btn { width: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .12rem; padding: .42rem .15rem; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--dim); cursor: pointer; }
+.ctrl-btn:hover { background: #8882; color: CanvasText; }
+.ctrl-btn.on { background: #3b82f624; border-color: #3b82f666; color: CanvasText; font-weight: 600; }
+.ctrl-ico { font-size: 1.05rem; line-height: 1.1; }
+.ctrl-lbl { font-size: .62rem; line-height: 1.1; }
 #main-panel { display: grid; min-width: 0; min-height: 0; grid-template-columns: var(--left, 55%) 7px 1fr; grid-template-rows: 1fr; }
 #main-panel.stacked { grid-template-columns: 1fr; grid-template-rows: var(--top, 55%) 7px 1fr; }
-#main-panel.side-closed { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+#main-panel.side-closed, #main-panel.showing-page { grid-template-columns: 1fr; grid-template-rows: 1fr; }
 #main-panel.side-closed > #split, #main-panel.side-closed > #right { display: none; }
+#main-panel.showing-page > #left, #main-panel.showing-page > #split, #main-panel.showing-page > #right { display: none; }
+#main-page { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#main-page[hidden] { display: none; }
+#main-page-bar { display: flex; align-items: center; gap: .6rem; padding: .4rem .8rem; border-bottom: 1px solid var(--line); background: #88808; flex: none; }
+#main-page-back { font-size: .82rem; padding: .2rem .6rem; }
+#main-page-title { font-size: .9rem; font-weight: 600; color: var(--dim); }
 /* The header: three zones, room (left), current discussion (middle), monitoring (right).
    Rare room and server actions sit in the ▾ menus; the gauges never shrink. */
 #header { position: relative; grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(16rem, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
@@ -885,14 +897,37 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 <div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 <div id="busy" aria-hidden="true"></div>
 </header>
+<nav id="control-bar" aria-label="Primary navigation">
+  <button type="button" class="ctrl-btn on" id="ctrl-boards" aria-pressed="true" title="Boards and conversation"><span class="ctrl-ico">💬</span><span class="ctrl-lbl">Boards</span></button>
+  <button type="button" class="ctrl-btn" id="ctrl-providers" aria-pressed="false" title="Default providers and models for new discussions, and provider health"><span class="ctrl-ico">⚙</span><span class="ctrl-lbl">Providers</span></button>
+  <button type="button" class="ctrl-btn" id="ctrl-instructions" aria-pressed="false" title="The prompts and rulebooks sent to each agent, and when"><span class="ctrl-ico">📜</span><span class="ctrl-lbl">Instructions</span></button>
+</nav>
 <aside id="list-panel" aria-label="Boards">
   <div id="list-head"><span id="list-title">Boards</span><button type="button" id="list-toggle" aria-expanded="true" aria-label="Collapse boards list" title="Collapse boards list">«</button></div>
   <div id="list-pane"></div>
 </aside>
 <div id="list-split" role="separator" aria-orientation="vertical" aria-label="Resize the boards list" tabindex="0" title="Drag to resize"></div>
 <div id="main-panel">
+<div id="main-page" hidden>
+  <div id="main-page-bar"><button type="button" id="main-page-back">← Back</button><span id="main-page-title"></span></div>
+  <div class="view" id="providers" hidden>
+    <form class="providers-panel" id="providers-form">
+      <p class="settings-hint" id="providers-hint"></p>
+      <h3 class="providers-heading">Discussion members</h3>
+      <div id="providers-agent-rows"></div>
+      <p class="settings-hint member-note" id="providers-member-note" hidden></p>
+      <h3 class="providers-heading">Worker</h3>
+      <div id="providers-worker-row"></div>
+      <p class="settings-hint">CLI default uses the provider’s settings. Custom model IDs require account access. Changes save automatically.</p>
+      <p class="settings-status" id="providers-status" role="status"></p>
+      <button type="button" id="providers-done">Go to the discussion</button>
+    </form>
+    <details class="providers-panel" id="health-details"><summary>Provider health · all rooms on this server <span id="health-warning" hidden>⚠</span></summary><button type="button" id="health-check">Check now</button><div id="provider-health" role="status"></div></details>
+  </div>
+  <div class="view" id="instructions" hidden><div id="instructions-pane"></div></div>
+</div>
 <div id="left">
-  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button class="tab" id="tab-providers" role="tab" title="Default providers and models for new discussions: members and worker together">Providers</button><button class="tab" id="tab-instructions" role="tab" title="The prompts and rulebooks sent to each agent, and when">Instructions</button><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></div>
+  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></div>
   <div class="view" id="talk">
     <details class="agent-settings" id="talk-settings">
       <summary>Discussion members · <span id="talk-models">provider & model</span></summary>
@@ -914,21 +949,6 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <div id="attach-row"><button type="button" id="attach" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)">📎 Attach</button><input type="file" id="attach-input" multiple hidden><span id="attachments"></span><span id="pointed"></span></div>
     </div>
   </div>
-  <div class="view" id="providers" hidden>
-    <form class="providers-panel" id="providers-form">
-      <p class="settings-hint" id="providers-hint"></p>
-      <h3 class="providers-heading">Discussion members</h3>
-      <div id="providers-agent-rows"></div>
-      <p class="settings-hint member-note" id="providers-member-note" hidden></p>
-      <h3 class="providers-heading">Worker</h3>
-      <div id="providers-worker-row"></div>
-      <p class="settings-hint">CLI default uses the provider’s settings. Custom model IDs require account access. Changes save automatically.</p>
-      <p class="settings-status" id="providers-status" role="status"></p>
-      <button type="button" id="providers-done">Go to the discussion</button>
-    </form>
-    <details class="providers-panel" id="health-details"><summary>Provider health · all rooms on this server <span id="health-warning" hidden>⚠</span></summary><button type="button" id="health-check">Check now</button><div id="provider-health" role="status"></div></details>
-  </div>
-  <div class="view" id="instructions" hidden><div id="instructions-pane"></div></div>
   <div class="view" id="work" hidden>
     <details class="agent-settings" id="work-settings">
       <summary>Worker · <span id="work-models">provider & model</span></summary>
@@ -1081,22 +1101,84 @@ function mention(el, m, live) {
 }
 function statusEl(text, error) { const el = document.createElement('div'); el.className = 'status' + (error ? ' error' : ''); el.textContent = text; return el; }
 
-// The two tabs. A worker reply while the Discussion tab is shown marks the Worker tab.
+// Control bar & Main panel pages (Providers / Instructions): open across the full Main panel,
+// collapsing the List panel while shown and restoring its prior open/collapsed state on return.
+// Conversation rounds, worker tasks, running Terminal shells and unsaved My notes stay untouched.
+let mainPage = null, listCollapsedBeforePage = null;
+function updateBackLabel() {
+  const back = $('main-page-back'), title = $('main-page-title');
+  if (back) {
+    const t = typeof currentTitle === 'function' ? currentTitle() : '';
+    back.textContent = '← Back to ' + (t || 'the discussion');
+  }
+  if (title) title.textContent = mainPage === 'providers' ? 'Providers' : mainPage === 'instructions' ? 'Instructions' : '';
+}
+function openMainPage(name) {
+  const next = name === 'providers' || name === 'instructions' ? name : null;
+  if (next) {
+    if (mainPage === null) {
+      listCollapsedBeforePage = document.body.classList.contains('list-collapsed');
+      if (typeof setListCollapsed === 'function') setListCollapsed(true, false);
+    }
+    mainPage = next;
+    $('main-panel').classList.add('showing-page');
+    $('main-page').hidden = false;
+    $('providers').hidden = next !== 'providers';
+    $('instructions').hidden = next !== 'instructions';
+    updateBackLabel();
+    if (next === 'providers' && typeof renderProviders === 'function') renderProviders();
+    if (next === 'instructions' && typeof renderInstructions === 'function') renderInstructions();
+  } else {
+    if (mainPage === null) return;
+    mainPage = null;
+    $('main-panel').classList.remove('showing-page');
+    $('main-page').hidden = true;
+    $('providers').hidden = true;
+    $('instructions').hidden = true;
+    if (listCollapsedBeforePage !== null && typeof setListCollapsed === 'function') {
+      const restore = listCollapsedBeforePage;
+      listCollapsedBeforePage = null;
+      setListCollapsed(restore, false);
+    }
+    if (typeof sideClosed !== 'undefined' && !sideClosed && typeof subtab !== 'undefined' && subtab === 'terminal' && typeof hostShell !== 'undefined' && hostShell?.fit) {
+      requestAnimationFrame(() => { try { hostShell.fit.fit(); } catch {} });
+    }
+  }
+  const active = mainPage ?? 'boards';
+  for (const [id, key] of [['ctrl-boards', 'boards'], ['ctrl-providers', 'providers'], ['ctrl-instructions', 'instructions']]) {
+    const b = $(id);
+    if (!b) continue;
+    b.classList.toggle('on', active === key);
+    b.setAttribute('aria-pressed', active === key ? 'true' : 'false');
+  }
+  if (typeof updateReplicaView === 'function') updateReplicaView();
+}
+
+// The two conversation tabs (Discussion and Worker). A worker reply while Discussion is shown marks Worker.
 function showTab(name) {
+  if (name === 'providers' || name === 'instructions') { openMainPage(name); return; }
+  if (mainPage !== null) openMainPage(null);
   tab = name;
-  $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work'; $('providers').hidden = name !== 'providers'; $('instructions').hidden = name !== 'instructions';
-  $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work'); $('tab-providers').classList.toggle('on', name === 'providers'); $('tab-instructions').classList.toggle('on', name === 'instructions');
-  if (name === 'providers') { renderProviders(); updateReplicaView(); return; }
-  if (name === 'instructions') { renderInstructions(); updateReplicaView(); return; }
+  $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work';
+  $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work');
   if (name === 'work') { $('tab-work').classList.remove('news'); post('__workerinfo', {}).catch(() => {}); } // its branches' checks, again
   updateReplicaView();
-  (name === 'work' ? wbox : box).focus();
+  const target = name === 'work' ? wbox : box;
+  if (!target.disabled) target.focus();
 }
 $('tab-talk').onclick = () => showTab('talk');
 $('tab-work').onclick = () => showTab('work');
-$('tab-providers').onclick = () => showTab('providers');
-$('tab-instructions').onclick = () => showTab('instructions');
-$('providers-done').onclick = () => showTab('talk');
+if ($('ctrl-boards')) $('ctrl-boards').onclick = () => {
+  if (mainPage !== null) return openMainPage(null);
+  if (document.body.classList.contains('list-collapsed') && typeof setListCollapsed === 'function') {
+    setListCollapsed(false);
+    post('__workerinfo', {}).catch(() => {});
+  }
+};
+if ($('ctrl-providers')) $('ctrl-providers').onclick = () => openMainPage(mainPage === 'providers' ? null : 'providers');
+if ($('ctrl-instructions')) $('ctrl-instructions').onclick = () => openMainPage(mainPage === 'instructions' ? null : 'instructions');
+if ($('main-page-back')) $('main-page-back').onclick = () => openMainPage(null);
+if ($('providers-done')) $('providers-done').onclick = () => openMainPage(null);
 // The Instructions tab: the prompt catalog, fetched once and rendered as expandable pieces.
 let instructionsLoaded = false;
 async function renderInstructions() {
@@ -1341,7 +1423,8 @@ function setTop(px) {
   return h;
 }
 function setList(px) {
-  const max = Math.max(LIST_MIN, Math.min(LIST_MAX, document.documentElement.clientWidth - MIN * 2 - 14));
+  const ctrlW = $('control-bar')?.getBoundingClientRect().width || 62;
+  const max = Math.max(LIST_MIN, Math.min(LIST_MAX, document.documentElement.clientWidth - ctrlW - MIN * 2 - 14));
   const w = Math.round(Math.max(LIST_MIN, Math.min(max, px)));
   document.body.style.setProperty('--list', w + 'px');
   if (!stacked && !sideClosed && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
@@ -1411,13 +1494,14 @@ listSplit.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   listSplit.setPointerCapture(e.pointerId);
   document.body.classList.add('resizing-list');
-  const move = (ev) => setList(ev.clientX - 3);
+  const listStart = () => $('list-panel').getBoundingClientRect().left;
+  const move = (ev) => setList(ev.clientX - listStart() - 3);
   const stop = (ev) => {
     listSplit.removeEventListener('pointermove', move);
     listSplit.removeEventListener('pointerup', stop);
     listSplit.removeEventListener('pointercancel', stop);
     document.body.classList.remove('resizing-list');
-    keepList(setList(ev.clientX - 3));
+    keepList(setList(ev.clientX - listStart() - 3));
   };
   listSplit.addEventListener('pointermove', move);
   listSplit.addEventListener('pointerup', stop);
@@ -2027,6 +2111,7 @@ function updateReplicaView() {
   const readOnly = !!(viewing || peeking);
   if (room) { $('disc').textContent = currentTitle(); $('disc').dataset.active = !readOnly && room.active ? 'true' : 'false'; }
   updateTabTitle();
+  if (typeof updateBackLabel === 'function') updateBackLabel();
   // Under the title, show the activity of the selected tab.
   $('disc-status').textContent = talkStatus();
   const panel = $('remote-view'); panel.hidden = !readOnly; panel.replaceChildren();
@@ -2403,7 +2488,9 @@ function renderBoards() {
     menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
     return { menu, items };
   };
+  const leaveMainPage = () => { if (typeof mainPage !== 'undefined' && mainPage !== null && typeof openMainPage === 'function') openMainPage(null); };
   const peekFiles = (info) => {
+    leaveMainPage();
     peek = info;
     explorerMode = 'discussion';
     showSub('explorer');
@@ -2412,6 +2499,7 @@ function renderBoards() {
     renderBoards();
   };
   const enterClosedPeek = (ref, path, name, title) => {
+    leaveMainPage();
     peek = { kind: 'local', path, name, title, readonly: true };
     explorerMode = 'discussion';
     showSub('explorer');
@@ -2472,6 +2560,7 @@ function renderBoards() {
     nameBtn.title = path;
     nameBtn.onclick = () => {
       if (isCurrent) {
+        leaveMainPage();
         if (peeking) { peek = null; send('/peek'); }
         else peekFiles(null);
       } else if (openHere) {
@@ -2479,6 +2568,7 @@ function renderBoards() {
       } else if (closed) {
         enterClosedPeek(d, path, d, label);
       } else if (canAct) {
+        leaveMainPage();
         send('/resume ' + d);
       } else {
         peekFiles({ kind: 'local', path, name: d, title: label, readonly: false });
@@ -2594,6 +2684,7 @@ function renderBoards() {
     nameBtn.title = path;
     nameBtn.onclick = () => {
       if (isCurrent) {
+        leaveMainPage();
         if (peeking) { peek = null; send('/peek'); }
         else peekFiles(null);
       } else if (openHere) {

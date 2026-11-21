@@ -2525,3 +2525,111 @@ test('Side pane: four tabs (Explorer/Document/My notes/Terminal), close/reopen, 
     s.close();
   }
 });
+
+test('Control bar: Boards / Providers / Instructions, full Main panel with Back, List panel collapse/restore, Monitor→Providers, and Terminal/My notes preserved', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'control-bar-'));
+  const s = await serve(root, { clients: new Set(), transcript: [] });
+  try {
+    const html = await (await s.get('/__room')).text();
+    assert.match(html, /id="control-bar"/);
+    assert.match(html, /id="ctrl-boards"/);
+    assert.match(html, /id="ctrl-providers"/);
+    assert.match(html, /id="ctrl-instructions"/);
+    assert.match(html, /id="main-page"/);
+    assert.match(html, /id="main-page-back"/);
+    assert.doesNotMatch(html, /id="tab-providers"/);
+    assert.doesNotMatch(html, /id="tab-instructions"/);
+
+    const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+    const ctrlCode = source.slice(source.indexOf('// Control bar & Main panel pages'), source.indexOf('// The Instructions tab:'));
+    const dividerCode = source.slice(source.indexOf('// The dividers:'), source.indexOf('function message('));
+    const monitorCode = source.slice(source.indexOf('function providerName('), source.indexOf('function showMonitor('));
+    const classListFor = () => {
+      const set = new Set();
+      return { toggle(cls, v) { if (v === undefined ? !set.has(cls) : v) set.add(cls); else set.delete(cls); },
+        add(...c) { c.forEach((x) => set.add(x)); }, remove(...c) { c.forEach((x) => set.delete(x)); }, contains(cls) { return set.has(cls); } };
+    };
+    const node = (tag = 'div') => ({
+      tag, className: '', textContent: '', title: '', value: '', hidden: false, disabled: false, open: false, children: [], dataset: {},
+      style: { props: {}, setProperty(k, v) { this.props[k] = v; }, getPropertyValue(k) { return this.props[k] || ''; } },
+      attrs: {}, setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return this.attrs[k] ?? null; },
+      offsetWidth: 7, offsetHeight: 7, getBoundingClientRect: () => ({ width: 800, height: 600, left: 62, top: 0 }),
+      classList: classListFor(),
+      append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+      addEventListener() {}, focus() {}, scrollIntoView() {},
+    });
+    const els = {};
+    const $ = (id) => els[id] || (els[id] = node(id));
+    const document = {
+      body: node('body'),
+      documentElement: { clientWidth: 1200, clientHeight: 800 },
+      createElement: node,
+      getElementById: (id) => els[id] || null,
+      addEventListener() {},
+    };
+    const store = new Map();
+    const localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
+    const window = { addEventListener() {} };
+    const harness = new Function('$', 'document', 'window', 'localStorage', 'requestAnimationFrame', 'post',
+      'let tab = "talk", subtab = "explorer", box = $("box"), wbox = $("wbox"), renderedProviders = 0, renderedInstructions = 0;\n' +
+      'let hostShell = { alive: true, fit: { fit: () => {} } }, noteText = { value: "unsaved draft" };\n' +
+      'const currentTitle = () => "WhatsApp UI", updateReplicaView = () => {}, providerHealth = () => ({ level: "amber", box: document.createElement("span") });\n' +
+      'const renderProviders = () => { renderedProviders++; }, renderInstructions = () => { renderedInstructions++; };\n' +
+      dividerCode + '\n' + ctrlCode + '\n' + monitorCode + '\n' +
+      'return { openMainPage, showTab, setListCollapsed, providerName, getMainPage: () => mainPage, getHostShell: () => hostShell, getNoteText: () => noteText.value, counts: () => ({ renderedProviders, renderedInstructions }) };'
+    )($, document, window, localStorage, (cb) => cb(), async () => {});
+
+    // 1. Open Providers from Control bar: fills Main panel, collapses List panel (was open), shows ← Back to <title>.
+    assert.equal(document.body.classList.contains('list-collapsed'), false);
+    $('ctrl-providers').onclick();
+    assert.equal(harness.getMainPage(), 'providers');
+    assert.equal($('main-panel').classList.contains('showing-page'), true);
+    assert.equal($('providers').hidden, false);
+    assert.equal($('instructions').hidden, true);
+    assert.equal(document.body.classList.contains('list-collapsed'), true);
+    assert.equal(store.get('agent-room:list-collapsed'), undefined); // temporary collapse does not overwrite saved preference
+    assert.equal($('main-page-back').textContent, '← Back to WhatsApp UI');
+    assert.equal($('ctrl-providers').classList.contains('on'), true);
+    assert.equal($('ctrl-boards').classList.contains('on'), false);
+
+    // 2. Switch to Instructions (mutually exclusive): List stays collapsed, prior state still remembered as open.
+    $('ctrl-instructions').onclick();
+    assert.equal(harness.getMainPage(), 'instructions');
+    assert.equal($('providers').hidden, true);
+    assert.equal($('instructions').hidden, false);
+    assert.equal($('ctrl-instructions').classList.contains('on'), true);
+    assert.equal($('ctrl-providers').classList.contains('on'), false);
+
+    // 3. Return via ← Back: restores List panel to open, preserves running Terminal and unsaved My notes.
+    $('main-page-back').onclick();
+    assert.equal(harness.getMainPage(), null);
+    assert.equal($('main-panel').classList.contains('showing-page'), false);
+    assert.equal(document.body.classList.contains('list-collapsed'), false);
+    assert.equal($('ctrl-boards').classList.contains('on'), true);
+    assert.equal(harness.getHostShell().alive, true);
+    assert.equal(harness.getNoteText(), 'unsaved draft');
+
+    // 4. If List panel was already collapsed before opening Providers, returning via Boards keeps it collapsed.
+    harness.setListCollapsed(true, true);
+    $('ctrl-providers').onclick();
+    assert.equal(harness.getMainPage(), 'providers');
+    $('ctrl-boards').onclick();
+    assert.equal(harness.getMainPage(), null);
+    assert.equal(document.body.classList.contains('list-collapsed'), true);
+
+    // 5. Clicking a provider name in Monitor opens Providers in Main panel and expands #health-details.
+    harness.setListCollapsed(false, true);
+    const monitorBadge = harness.providerName('claude', 'Claude', true);
+    monitorBadge.onclick();
+    assert.equal(harness.getMainPage(), 'providers');
+    assert.equal($('health-details').open, true);
+    assert.equal(document.body.classList.contains('list-collapsed'), true);
+
+    // 6. Toggling off active Providers button returns to conversation and restores List panel.
+    $('ctrl-providers').onclick();
+    assert.equal(harness.getMainPage(), null);
+    assert.equal(document.body.classList.contains('list-collapsed'), false);
+  } finally {
+    s.close();
+  }
+});
