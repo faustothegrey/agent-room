@@ -1779,11 +1779,12 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   const continueBtn = (name) => menuItems(rowFor(name)).find((c) => c.tag === 'button' && c.textContent === 'Continue');
   const resumeBtn = (name) => menuItems(rowFor(name)).find((c) => c.tag === 'button' && c.textContent === 'Resume');
   const label = (name) => rowFor(name).children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent;
-  assert.equal(label('2026-11-15-current'), 'current · started');
-  assert.equal(label('2026-11-15-open'), 'open, paused');
+  assert.equal(label('2026-11-15-current'), 'idle');
+  assert.ok(rowFor('2026-11-15-current').className.includes('in-use'));
+  assert.equal(label('2026-11-15-open'), 'idle');
   assert.equal(label('2026-11-15-unstarted'), 'not started');
   assert.equal(label('2026-11-14-closed'), 'closed');
-  assert.equal(label('2026-11-13-paused'), 'paused');
+  assert.equal(label('2026-11-13-paused'), 'idle');
   assert.ok(continueBtn('2026-11-15-open'));
   assert.ok(!resumeBtn('2026-11-15-open'));
   assert.ok(continueBtn('2026-11-13-paused'));
@@ -1877,7 +1878,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   });
   harness.renderDiscussions();
   assert.equal(els['disc-status'].textContent, 'closing · waiting for worker');
-  assert.equal(freshRow('2026-11-15-current').children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent, 'current · started · closing · waiting for worker');
+  assert.equal(freshRow('2026-11-15-current').children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent, 'ongoing · closing · waiting for worker');
   assert.ok(freshRow('2026-11-15-current').children.some((c) => c.tag === 'button' && c.textContent === 'Cancel close'));
   assert.equal(sectionLabel('2026-11-12-archived'), 'archived · closing · waiting for worker');
   assert.ok(sectionRow('2026-11-12-archived').children.some((c) => c.tag === 'button' && c.textContent === 'Cancel close'));
@@ -1894,7 +1895,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   });
   harness.renderDiscussions();
   assert.equal(els['disc-status'].textContent, 'closing · writing statement');
-  assert.equal(freshRow('2026-11-15-current').children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent, 'current · started · closing · writing statement');
+  assert.equal(freshRow('2026-11-15-current').children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent, 'ongoing · closing · writing statement');
   assert.ok(!freshRow('2026-11-15-current').children.some((c) => c.tag === 'button' && c.textContent === 'Cancel close'));
 
   // 6. Merged state across open, closed, archive and deferred rows: replaces "no changes", coexists with pending warning.
@@ -1917,12 +1918,12 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   const blockOf = (name) => freshRow(name).children.find((c) => c.className === 'discussion-block');
   const labelOf = (name) => blockOf(name).children.find((c) => c.className === 'local-label').textContent;
   const warningOf = (name) => blockOf(name).children.find((c) => c.className === 'worker-pending')?.textContent ?? null;
-  assert.equal(labelOf('2026-11-15-current'), 'current · started · merged');
+  assert.equal(labelOf('2026-11-15-current'), 'idle · merged');
   assert.equal(warningOf('2026-11-15-current'), null);
-  assert.equal(labelOf('2026-11-15-open'), 'open, paused · merged');
+  assert.equal(labelOf('2026-11-15-open'), 'idle · merged');
   assert.equal(warningOf('2026-11-15-open'), '⚠ Worker: 1 commit not merged into main · uncommitted changes');
   assert.equal(labelOf('2026-11-14-closed'), 'closed · merged');
-  assert.equal(labelOf('2026-11-13-paused'), 'paused · no changes');
+  assert.equal(labelOf('2026-11-13-paused'), 'idle · no changes');
   assert.equal(sectionLabel('2026-11-12-archived'), 'archived · merged');
   assert.equal(sectionLabel('2026-11-11-archived-closed'), 'archived · closed · merged');
   assert.equal(sectionLabel('2026-11-10-deferred'), 'deferred');
@@ -1932,7 +1933,7 @@ test('Discussions tab Resume: navigates directly to openHere.url via notesGuard 
   harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-15-current', started: false, open: [] });
   harness.renderDiscussions();
   const current = els['list-pane'].firstChild.children.find((c) => c.dataset?.section === 'discussions').children.find((r) => r.className?.includes('discussion-row') && r.children.find((c) => c.className === 'discussion-block')?.children[0].title === 'discussions/2026-11-15-current');
-  assert.equal(current.children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent, 'current');
+  assert.equal(current.children.find((c) => c.className === 'discussion-block').children.find((c) => c.className === 'local-label').textContent, 'not started');
 });
 
 test('a started discussion\'s members panel lists the agents it started with, locked but for On, which enables or disables each', async () => {
@@ -2185,8 +2186,8 @@ test('displayTitle helper and UI titles hide YYYY-MM-DD- across rows, header, ta
       return [block.children[0].textContent, block.children[0].title, block.children[1].textContent];
     });
   assert.deepEqual(brainRows, [
-    ['Current Idea', 'brainstorms/2026-11-20-current-idea', 'open'],
-    ['open idea', 'brainstorms/2026-11-19-open-idea', 'open'],
+    ['Current Idea', 'brainstorms/2026-11-20-current-idea', 'idle'],
+    ['open idea', 'brainstorms/2026-11-19-open-idea', 'idle'],
     ['Closed Idea', 'brainstorms/2026-11-18-closed-idea', 'closed'],
   ]);
 
@@ -2211,7 +2212,7 @@ test('displayTitle helper and UI titles hide YYYY-MM-DD- across rows, header, ta
   assert.equal(document.title, 'peer raw · agent-room');
   harness.setViewing(null);
 
-  // Brainstorm grey status line shows only current / open / closed (no folder name)
+  // Brainstorm grey status line uses the five states (no "current" or "open" word; current row stays highlighted)
   harness.setRoom({
     folder: '/tmp/project',
     active: 'brainstorms/2026-11-20-current-idea',
@@ -2227,15 +2228,16 @@ test('displayTitle helper and UI titles hide YYYY-MM-DD- across rows, header, ta
     ],
   });
   harness.renderBrainstorms();
-  const currentBrainRows = (els['list-pane'].firstChild.children.find((c) => c.dataset?.section === 'brainstorms')?.children ?? [])
-    .filter((c) => c.className?.includes('discussion-row'))
-    .map((r) => {
-      const block = r.children.find((c) => c.className === 'discussion-block');
-      return [block.children[0].textContent, block.children[0].title, block.children[1].textContent];
-    });
+  const currentBrainRowEls = (els['list-pane'].firstChild.children.find((c) => c.dataset?.section === 'brainstorms')?.children ?? [])
+    .filter((c) => c.className?.includes('discussion-row'));
+  assert.ok(currentBrainRowEls[0].className.includes('in-use'));
+  const currentBrainRows = currentBrainRowEls.map((r) => {
+    const block = r.children.find((c) => c.className === 'discussion-block');
+    return [block.children[0].textContent, block.children[0].title, block.children[1].textContent];
+  });
   assert.deepEqual(currentBrainRows, [
-    ['Current Idea', 'brainstorms/2026-11-20-current-idea', 'current'],
-    ['open idea', 'brainstorms/2026-11-19-open-idea', 'open'],
+    ['Current Idea', 'brainstorms/2026-11-20-current-idea', 'idle'],
+    ['open idea', 'brainstorms/2026-11-19-open-idea', 'idle'],
     ['Closed Idea', 'brainstorms/2026-11-18-closed-idea', 'closed'],
   ]);
 });
@@ -2700,4 +2702,112 @@ test('Schedule Control bar button, page view, and /__schedule GET/POST endpoints
   } finally {
     s.close();
   }
+});
+
+test('Boards rows show the five states in priority order (ongoing > closed > not started > waiting for input > idle) with additions intact', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return {
+      toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(cls) { s.add(cls); }, remove(cls) { s.delete(cls); }, contains(cls) { return s.has(cls); },
+    };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', value: '', hidden: false, disabled: false, children: [], dataset: {}, style: {},
+    classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    get lastChild() { return this.children.at(-1) || null; },
+    set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    addEventListener() {},
+    setAttribute() {},
+    getAttribute() { return null; },
+    focus() {},
+  });
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'send',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = false, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (fn) => fn();\n' +
+    code + '\n' +
+    'return { setRoom, renderDiscussions, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; }, setWorker: ({ pending = null, merged = [] } = {}) => { workerPending = pending; workerMerged = new Set(merged); } };'
+  )($, { createElement: node, title: '' }, { href: '/r/4/__room' }, null, null, () => {}, (cb) => cb(), () => {}, () => {});
+  harness.setFiles([
+    'discussions/2026-11-22-ongoing-round/notes.md',
+    'discussions/2026-11-22-ongoing-worker/notes.md',
+    'discussions/2026-11-22-ongoing-closing/notes.md',
+    'discussions/2026-11-22-closed/notes.md',
+    'discussions/2026-11-22-not-started/notes.md',
+    'discussions/2026-11-22-waiting/notes.md',
+    'discussions/2026-11-22-idle-open/notes.md',
+    'discussions/2026-11-22-idle-saved/notes.md',
+    'brainstorms/2026-11-22-b-ongoing/transcripts/s.md',
+    'brainstorms/2026-11-22-b-waiting/transcripts/s.md',
+    'brainstorms/2026-11-22-b-idle/transcripts/s.md',
+    'brainstorms/2026-11-22-b-closed/transcripts/s.md',
+  ]);
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-22-waiting',
+    discussion: 'Waiting',
+    started: true,
+    closedDiscussions: ['2026-11-22-closed'],
+    closingDiscussions: { '2026-11-22-ongoing-closing': 'waiting' },
+    open: [
+      { active: null, title: 'New discussion (not started)', started: false, current: false, working: false, ongoing: false, waitingForInput: false, url: '/r/u1/__room' },
+      { active: null, title: 'New discussion (worker)', started: false, current: false, working: true, ongoing: true, waitingForInput: false, url: '/r/u2/__room' },
+      { active: 'discussions/2026-11-22-ongoing-round', title: 'Round', started: true, current: false, working: false, ongoing: true, waitingForInput: true, url: '/r/1/__room' },
+      { active: 'discussions/2026-11-22-ongoing-worker', title: 'Worker', started: true, current: false, working: true, ongoing: true, waitingForInput: false, url: '/r/2/__room' },
+      { active: 'discussions/2026-11-22-not-started', title: 'Not started', started: false, current: false, working: false, ongoing: false, waitingForInput: true, url: '/r/3/__room' },
+      { active: 'discussions/2026-11-22-waiting', title: 'Waiting', started: true, current: true, working: false, ongoing: false, waitingForInput: true, url: '/r/4/__room' },
+      { active: 'discussions/2026-11-22-idle-open', title: 'Idle open', started: true, current: false, working: false, ongoing: false, waitingForInput: false, url: '/r/5/__room' },
+      { active: 'brainstorms/2026-11-22-b-ongoing', title: 'B ongoing', brainstorm: true, started: true, current: false, ongoing: true, waitingForInput: true, url: '/r/b1/__room' },
+      { active: 'brainstorms/2026-11-22-b-waiting', title: 'B waiting', brainstorm: true, started: true, current: false, ongoing: false, waitingForInput: true, url: '/r/b2/__room' },
+      { active: 'brainstorms/2026-11-22-b-idle', title: 'B idle', brainstorm: true, started: true, current: false, ongoing: false, waitingForInput: false, url: '/r/b3/__room' },
+    ],
+  });
+  harness.setWorker({
+    pending: [{ lane: '2026-11-22-ongoing-worker', branch: 'worker/2026-11-22-ongoing-worker', ahead: 2, dirty: false }],
+    merged: ['2026-11-22-closed'],
+  });
+  harness.renderDiscussions();
+
+  const boardList = els['list-pane'].firstChild;
+  const rowsIn = (section) => boardList.children.find((c) => c.dataset?.section === section).children
+    .filter((c) => c.className?.includes('discussion-row'));
+  const discRows = rowsIn('discussions');
+  const labelFor = (rows, match) => {
+    const row = rows.find((r) => {
+      const btn = r.children.find((c) => c.className === 'discussion-block')?.children[0];
+      return btn?.title === match || btn?.textContent === match;
+    });
+    const block = row.children.find((c) => c.className === 'discussion-block');
+    return { row, label: block.children.find((c) => c.className === 'local-label').textContent, warn: block.children.find((c) => c.className === 'worker-pending')?.textContent ?? null };
+  };
+
+  assert.equal(labelFor(discRows, 'New discussion (not started)').label, 'not started');
+  assert.equal(labelFor(discRows, 'New discussion (worker)').label, 'ongoing · worker working');
+  assert.equal(labelFor(discRows, 'discussions/2026-11-22-ongoing-round').label, 'ongoing · no changes');
+  assert.equal(labelFor(discRows, 'discussions/2026-11-22-ongoing-worker').label, 'ongoing · worker working');
+  assert.equal(labelFor(discRows, 'discussions/2026-11-22-ongoing-worker').warn, '⚠ Worker: 2 commits not merged into main');
+  assert.equal(labelFor(discRows, 'discussions/2026-11-22-ongoing-closing').label, 'ongoing · closing · waiting for worker · no changes');
+  assert.equal(labelFor(discRows, 'discussions/2026-11-22-closed').label, 'closed · merged');
+  assert.equal(labelFor(discRows, 'discussions/2026-11-22-not-started').label, 'not started · no changes');
+  const waiting = labelFor(discRows, 'discussions/2026-11-22-waiting');
+  assert.equal(waiting.label, 'waiting for input · no changes');
+  assert.ok(waiting.row.className.includes('in-use'), 'current row stays highlighted without a "current" label');
+  assert.equal(labelFor(discRows, 'discussions/2026-11-22-idle-open').label, 'idle · no changes');
+  assert.equal(labelFor(discRows, 'discussions/2026-11-22-idle-saved').label, 'idle · no changes');
+
+  const brainRows = rowsIn('brainstorms');
+  assert.equal(labelFor(brainRows, 'brainstorms/2026-11-22-b-ongoing').label, 'ongoing');
+  assert.equal(labelFor(brainRows, 'brainstorms/2026-11-22-b-waiting').label, 'waiting for input');
+  assert.equal(labelFor(brainRows, 'brainstorms/2026-11-22-b-idle').label, 'idle');
+  assert.equal(labelFor(brainRows, 'brainstorms/2026-11-22-b-closed').label, 'closed');
 });

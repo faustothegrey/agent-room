@@ -97,3 +97,4 @@ branchDiagram: falls back to a plain-text note when gitGraph cannot draw the his
 a detached worker from another discussion reports usage unavailable instead of none yet or the new discussion's totals
 worker report format retry flow: fixed on retry and still wrong after one retry
 worker report format retry flow: retry that changes HEAD keeps changes, logs it, re-runs checks and recordTested, and pauses auto dev
+openList reports ongoing and waitingForInput for discussions and brainstorms (in memory only)

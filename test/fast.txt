@@ -246,3 +246,4 @@ round beforeLap hook checks before each subsequent lap and stops early with noti
 checkQuotaFloor: passes above floor, fails below floor on 5h or weekly, and rejects missing or stale meter readings
 Schedule Control bar button, page view, and /__schedule GET/POST endpoints
 scheduler: CRUD in local state, skips open/closing/low-quota/stale runs, runs as Scheduler and closes, and stops early on mid-round quota drop
+Boards rows show the five states in priority order (ongoing > closed > not started > waiting for input > idle) with additions intact
