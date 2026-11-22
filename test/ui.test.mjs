@@ -5641,3 +5641,156 @@ test('scheduler: CRUD in local state, skips open/closing/low-quota/stale runs, r
   assert.equal(saveSchedule(ctx, { action: 'toggle', id: taskId, enabled: false }).tasks[0].enabled, false);
   assert.equal(saveSchedule(ctx, { action: 'delete', id: taskId }).tasks.length, 0);
 });
+
+test('openList reports ongoing and waitingForInput for discussions and brainstorms (in memory only)', async () => {
+  const { summaryHasNextStep, queueWork } = await import('../src/ui.mjs');
+
+  // 1. summaryHasNextStep
+  assert.equal(summaryHasNextStep('**Agreed**\n- x'), false);
+  assert.equal(summaryHasNextStep('**Agreed**\n- x\n\n**Next step**\n\n**Later**\n- y'), false);
+  assert.equal(summaryHasNextStep('**Agreed**\n- x\n\n**Next step**\n\nSteps left: 1\nOutcome: FINISH'), false);
+  assert.equal(summaryHasNextStep('**Agreed**\n- x\n\n**Next step**\n- Answer: which option?'), true);
+  assert.equal(summaryHasNextStep('**Agreed**\n- x\n\n### Next step\n- Review and merge'), true);
+
+  // 2. Live state transitions on openList: ongoing (round, summary, running/queued worker), waitingForInput, and idle
+  let releaseAgent, releaseWorker;
+  let agentGate = null, workerGate = null;
+  let replies = ['Hello'];
+  const nextReply = () => (replies.length ? replies.shift() : 'PASS');
+  const { first } = await multiRoom({
+    worker: async () => {
+      if (workerGate) await workerGate;
+      return 'done\nDocs: none needed, because test.';
+    },
+  });
+  first.room.agents[0].turn = async () => { if (agentGate) await agentGate; return nextReply(); };
+  first.room.agents[1].turn = async () => 'PASS';
+  const entry = (ctx = first) => ctx.screen.room.open.find((o) => o.current);
+
+  // During a round: ongoing is true
+  agentGate = new Promise((r) => { releaseAgent = r; });
+  const roundPromise = handleLine('hello topic', first);
+  await until(() => first.busy);
+  assert.equal(entry().ongoing, true);
+  replies = ['Hello', 'PASS', '**Agreed**\n- decided\n\n**Next step**\n- Answer: option A or B?'];
+  releaseAgent();
+  agentGate = null;
+  await roundPromise;
+
+  // Auto-summary agreed with non-empty Next step (no worker instruction): waitingForInput is true
+  assert.equal(entry().ongoing, false);
+  assert.equal(entry().waitingForInput, true);
+
+  // Dispatching to the worker clears the latest-agreed-summary Next step case; while worker runs, ongoing is true
+  workerGate = new Promise((r) => { releaseWorker = r; });
+  queueWork(first, 'do work');
+  assert.equal(entry().ongoing, true);
+  await until(() => first.screen.working);
+  assert.equal(entry().ongoing, true);
+  assert.equal(entry().working, true);
+  releaseWorker();
+  workerGate = null;
+  await first.workQueue;
+  assert.equal(entry().ongoing, false);
+  assert.equal(entry().waitingForInput, false);
+
+  // Agreed summary with no Next step -> idle
+  replies = ['**Agreed**\n- done'];
+  await handleLine('/summary', first);
+  assert.equal(entry().waitingForInput, false);
+
+  // autoDevOffer triggers waitingForInput
+  replies = ['**Agreed**\n- ready\n\n**Next step**\n- Send to the Worker: "implement X"'];
+  await handleLine('/summary', first);
+  assert.equal(entry().waitingForInput, true);
+  // Mark that summary as sent and cleared by dispatch; autoDev paused still triggers waitingForInput
+  first.autoDevSent = [first.state.transcript.length - 1];
+  first.workDispatchedLen = first.state.transcript.length;
+  first.autoDev = { status: 'paused', cycle: 1, limit: 5, reason: 'paused' };
+  replies = [];
+  await handleLine('ping', first);
+  assert.equal(entry().waitingForInput, true);
+  first.autoDev = null;
+  // retryFailure.available triggers waitingForInput
+  first.retryFailure = { id: 'r1', available: true };
+  await handleLine('ping 2', first);
+  assert.equal(entry().waitingForInput, true);
+  first.retryFailure = null;
+  await handleLine('ping 3', first);
+  assert.equal(entry().waitingForInput, false);
+
+  // 3. Brainstorm: agreed summary with Next step -> waitingForInput; later message -> idle
+  const { first: brain } = await multiRoom();
+  brain.room.agents[0].turn = async () => nextReply();
+  brain.room.agents[1].turn = async () => 'PASS';
+  await handleLine('/brainstorm', brain);
+  assert.equal(entry(brain).started, false);
+  assert.equal(entry(brain).ongoing, false);
+  assert.equal(entry(brain).waitingForInput, false);
+  replies = ['brainstorm thought'];
+  await handleLine('idea', brain);
+  assert.equal(entry(brain).brainstorm, true);
+  assert.equal(entry(brain).ongoing, false);
+  assert.equal(entry(brain).waitingForInput, false);
+  replies = ['**Agreed**\n- idea\n\n**Next step**\n- Pick a direction'];
+  await handleLine('/summary', brain);
+  assert.equal(entry(brain).waitingForInput, true);
+  replies = ['follow-up'];
+  await handleLine('option 1', brain);
+  assert.equal(entry(brain).waitingForInput, false);
+});
+
+test('a round with no summary (all-pass, failed turn, brainstorm) moves its openList row from ongoing back to idle', async () => {
+  const { first } = await multiRoom();
+  const roomEvents = () => first.events.filter((e) => e.type === 'room').map((e) => e.room.open.find((o) => o.current));
+  const lastEntry = () => first.screen.room.open.find((o) => o.current);
+
+  // 1. All-pass discussion round (no auto-summary)
+  let release;
+  let gate = new Promise((r) => { release = r; });
+  first.room.agents[0].turn = async () => { if (gate) await gate; return 'PASS'; };
+  first.room.agents[1].turn = async () => 'PASS';
+  const p1 = handleLine('quiet topic', first);
+  await until(() => first.busy);
+  assert.equal(lastEntry().ongoing, true);
+  release();
+  gate = null;
+  await p1;
+  assert.equal(lastEntry().ongoing, false);
+  assert.equal(lastEntry().waitingForInput, false);
+  assert.equal(roomEvents().at(-1).ongoing, false);
+
+  // 2. Failed agent turn (no auto-summary)
+  gate = new Promise((r) => { release = r; });
+  first.room.agents[0].turn = async () => { if (gate) await gate; throw new Error('boom'); };
+  const p2 = handleLine('failing turn', first);
+  await until(() => first.busy);
+  assert.equal(lastEntry().ongoing, true);
+  release();
+  gate = null;
+  await p2;
+  assert.equal(lastEntry().ongoing, false);
+  assert.equal(lastEntry().waitingForInput, false);
+  assert.equal(roomEvents().at(-1).ongoing, false);
+
+  // 3. Brainstorm round (never auto-summarizes)
+  const { first: brain } = await multiRoom();
+  await handleLine('/brainstorm', brain);
+  let brainSpoke = false;
+  gate = new Promise((r) => { release = r; });
+  brain.room.agents[0].turn = async () => {
+    if (gate) await gate;
+    if (brainSpoke) return 'PASS';
+    brainSpoke = true;
+    return 'brainstorm idea';
+  };
+  brain.room.agents[1].turn = async () => 'PASS';
+  const p3 = handleLine('spark', brain);
+  await until(() => brain.busy);
+  assert.equal(brain.screen.room.open.find((o) => o.current).ongoing, true);
+  release();
+  gate = null;
+  await p3;
+  assert.equal(brain.screen.room.open.find((o) => o.current).ongoing, false);
+  assert.equal(brain.screen.room.open.find((o) => o.current).waitingForInput, false);
+});

@@ -2714,6 +2714,14 @@ function renderBoards() {
     send('/peek ' + ref);
   };
 
+  const boardState = (openEntry, { closed = false, isCurrent = false, closing = null } = {}) => {
+    if (openEntry?.ongoing || openEntry?.working || closing) return 'ongoing';
+    if (closed) return 'closed';
+    if (openEntry ? !openEntry.started : isCurrent && !room?.started) return 'not started';
+    if (openEntry?.waitingForInput) return 'waiting for input';
+    return 'idle';
+  };
+
   // --- 1. Discussions (active) ---
   const inOrder = ordered(discussionsIn('discussions'), 'discussions');
   const discussions = inOrder ?? discussionsIn('discussions');
@@ -2727,7 +2735,7 @@ function renderBoards() {
     btn.title = 'Show this open discussion: it has not started yet';
     btn.onclick = () => notesGuard(() => { location.href = o.url; });
     block.append(btn);
-    block.append(el('div', 'local-label', 'open' + (o.working ? ' · worker working' : '')));
+    block.append(el('div', 'local-label', boardState(o) + (o.working ? ' · worker working' : '')));
     r.append(block);
     discSection.append(r);
   }
@@ -2781,12 +2789,9 @@ function renderBoards() {
     };
     block.append(nameBtn);
 
-    let statusText = '';
-    if (isCurrent) statusText = 'current' + (room?.started ? ' · started' : '');
-    else if (openHere) statusText = openHere.started ? 'open, paused' : 'not started';
-    else statusText = closed ? 'closed' : 'paused';
-    if (openEntry?.working) statusText += ' · worker working';
     const closing = closingPhase(d);
+    let statusText = boardState(openEntry, { closed, isCurrent, closing });
+    if (openEntry?.working) statusText += ' · worker working';
     if (closing) statusText += ' · ' + closingLabel(closing);
     const work = pendingWork.find((p) => p.lane === d);
     const merged = workerMerged.has(d);
@@ -2899,7 +2904,7 @@ function renderBoards() {
       }
     };
     block.append(nameBtn);
-    block.append(el('div', 'local-label', isCurrent ? 'current' : openHere ? 'open' : 'closed'));
+    block.append(el('div', 'local-label', boardState(openEntry, { closed, isCurrent })));
     row.append(block);
     if (canAct) {
       const { menu, items } = makeRowMenu(path);
