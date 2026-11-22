@@ -2996,6 +2996,32 @@ function chooseFolder() {
   }));
 }
 
+export const roomsFile = () => join(homedir(), '.local', 'state', 'agent-room', 'rooms.json');
+
+// Record a room's canonical root folder for local tools (such as the MCP service).
+// Adds it if missing; never removes entries automatically.
+export function recordRoom(dir, file = roomsFile()) {
+  const root = realpathSync(dir);
+  let rooms = [];
+  if (existsSync(file)) {
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8'));
+      if (Array.isArray(parsed)) rooms = parsed.filter((r) => typeof r === 'string' && r.length > 0);
+    } catch {}
+  }
+  if (rooms.includes(root)) return rooms;
+  rooms.push(root);
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  const temp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(rooms, null, 2) + '\n', { mode: 0o600 });
+    renameSync(temp, file);
+  } finally {
+    if (existsSync(temp)) unlinkSync(temp);
+  }
+  return rooms;
+}
+
 // Switch room…: this server's rooms, straight from its list. `pages`: the pages open on each (on
 // any device), so the chooser doesn't offer a room already open in another window.
 export function listRooms(ctx) {
@@ -3245,6 +3271,7 @@ export const promptText = () => (tty ? '\x1b[1;36mYou ›\x1b[0m ' : 'You › ')
 export async function start(ctx) {
   ctx.openedAt = new Date();
   ctx.screen.startedAt = ctx.openedAt.toISOString(); // the page's and the Dock app's heartbeat show it
+  try { recordRoom(ctx.cwd); } catch {}
   out(ctx, `Room: ${describe(ctx.room)} · worker ${ctx.worker.name} (${ctx.worker.provider}) · root ${ctx.cwd}`);
   out(ctx, `Transcript: in ${join(ctx.cwd, 'discussions')}/, once the first message starts a discussion`);
   // Another open discussion of the launch room replicates as the launch room does.

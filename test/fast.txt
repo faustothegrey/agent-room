@@ -246,3 +246,7 @@ round beforeLap hook checks before each subsequent lap and stops early with noti
 checkQuotaFloor: passes above floor, fails below floor on 5h or weekly, and rejects missing or stale meter readings
 Schedule Control bar button, page view, and /__schedule GET/POST endpoints
 scheduler: CRUD in local state, skips open/closing/low-quota/stale runs, runs as Scheduler and closes, and stops early on mid-round quota drop
+mcp room recording stores canonical realpath, deduplicates, and never removes entries
+mcp list_rooms merges saved and running rooms, skips missing folders, and handles unreachable server
+mcp list_discussions lists open dated discussions and brainstorms and matches active status by realpath
+mcp stdio server handles initialize, ping, tools/list, and tools/call over JSON-RPC

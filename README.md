@@ -7,7 +7,7 @@ Git worktree. It is domain-agnostic: a room is any folder, holding any kind of w
 through your installed Claude Code, Codex and Antigravity (`agy`) CLIs, using their existing authentication and
 subscriptions.
 
-The project stays deliberately small: ten source modules and four dependencies: `marked`, and for
+The project stays deliberately small: eleven source modules and four dependencies: `marked`, and for
 the Terminal pane `@lydell/node-pty`, `ws` and `ghostty-web`. How it works (the two harnesses,
 the main loop, the core protocol, the summary contract, current restrictions) is described in
 [docs/architecture.md](docs/architecture.md); this README covers how to use it.
@@ -852,6 +852,32 @@ worker/<folder-name>` in the room); nothing is merged automatically.
   when it removes the worktree.
 - A worktree separates working copies; it is not a sandbox (see below).
 
+## MCP service (Hermes)
+
+`src/mcp.mjs` provides a read-only MCP service over stdio (`node src/mcp.mjs`) for local clients
+such as Hermes Agent. Whenever a server opens a room, it records the room's canonical root folder
+in `~/.local/state/agent-room/rooms.json` (never removing entries automatically). The service
+exposes two read-only tools:
+
+- `list_rooms`: lists saved rooms (skipping folders that no longer exist) plus rooms open on the
+  running local server (`GET /__rooms` on `127.0.0.1`, port `5566` by default), with each room's
+  running status and active discussion.
+- `list_discussions(root)`: lists open dated folders in `discussions/` and `brainstorms/` (not
+  `discussions/archive/` or `discussions/deferred/`) without reading file contents, and marks the
+  active discussion or brainstorm when that room is running on the server.
+
+To register it in Hermes, add an entry under `mcp_servers` in `~/.hermes/config.yaml` (set `env.AGENT_ROOM_PORT` if your server runs on a port other than `5566`):
+
+```yaml
+mcp_servers:
+  agent-room:
+    command: node
+    args:
+      - /path/to/agent-room/src/mcp.mjs
+    env:
+      AGENT_ROOM_PORT: "5566"
+```
+
 ## Access and limits
 
 Agents have full filesystem access. Keeping brainstorming output inside the active discussion
@@ -896,6 +922,7 @@ agent-room's source.
 | `src/notes.mjs` | The My notes side-pane tab's storage and endpoints: list, read, create, save and remove, with the Terminal's host-only checks. |
 | `src/replicate.mjs` | Separate discussion Git storage, pairing, background transfer and immutable received snapshots. |
 | `src/usage.mjs` | Token accounting, optional quota-meter data and the providers' login status. |
+| `src/mcp.mjs` | Read-only MCP stdio service (`list_rooms`, `list_discussions`) for local clients such as Hermes. |
 
 Run `npm test` for the fast suite, `npm run test:slow` for the slow suite, or `npm run test:all` for both. Tests exercise provider arguments with fake runners, round logic, HTTP endpoints,
 settings persistence across CLI restarts, and screen/terminal coordination; they do not establish
