@@ -3478,7 +3478,7 @@ export async function handleLine(line, ctx) {
   if (line === AUTO_DEV_REPORT) return autoDevReport(ctx);
   if (line === AUTO_DEV_FAILURE) {
     const failure = ctx.workerFailures?.shift();
-    if (failure && failure.owner === ownerOf(ctx)) ctx.state.transcript.push(failure.message);
+    if (failure && failure.owner === ownerOf(ctx)) { ctx.state.transcript.push(failure.message); showHeader(ctx); }
     return;
   }
   const rollback = /^\/rollback\s+(\S+)$/.exec(line);
@@ -3569,14 +3569,14 @@ async function runSummary(ctx, auto = false, extra) {
       }
       if (m.error) note(ctx, `✗ ${m.speaker} failed: ${m.text}`, true);
     },
-  }).finally(() => { ctx.busy = false; });
+  }).finally(() => { ctx.busy = false; showHeader(ctx); });
   if (result) {
     const label = result.outcome === 'agreed' ? `agreed, by ${result.by}` : `not agreed: the last version, by ${result.by}`;
     log(ctx, `**Summary** — ${label}\n\n${result.text}\n\n`);
     out(ctx, `\n${bold('Summary')} ${dim(`(${label})`)} ›\n${result.text}\n`);
     toScreen(ctx, { type: 'message', message: ctx.docs.messageView(result) });
     showHeader(ctx); // auto dev's offer follows the latest agreed summary
-  } else showHeader(ctx);
+  }
   if (status === 'empty' && !auto) note(ctx, 'Nothing to summarize yet.');
   if (status === 'failed') note(ctx, 'The summary stopped because a turn failed.', true);
   if (paused && ctx.autoDev === paused && paused.status === 'paused' && status === 'agreed' && summaryOutcome(result.text) === 'FINISH') finishAutoDev(ctx, paused);
@@ -3661,6 +3661,7 @@ async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = n
     out(ctx, dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
     toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
     captureRound(ctx);
+    showHeader(ctx);
     return { ending, stoppedReason, failedError, turns, spoke };
   } catch (err) {
     // An unknown @name: nothing was sent or recorded.

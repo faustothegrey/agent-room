@@ -5739,3 +5739,58 @@ test('openList reports ongoing and waitingForInput for discussions and brainstor
   await handleLine('option 1', brain);
   assert.equal(entry(brain).waitingForInput, false);
 });
+
+test('a round with no summary (all-pass, failed turn, brainstorm) moves its openList row from ongoing back to idle', async () => {
+  const { first } = await multiRoom();
+  const roomEvents = () => first.events.filter((e) => e.type === 'room').map((e) => e.room.open.find((o) => o.current));
+  const lastEntry = () => first.screen.room.open.find((o) => o.current);
+
+  // 1. All-pass discussion round (no auto-summary)
+  let release;
+  let gate = new Promise((r) => { release = r; });
+  first.room.agents[0].turn = async () => { if (gate) await gate; return 'PASS'; };
+  first.room.agents[1].turn = async () => 'PASS';
+  const p1 = handleLine('quiet topic', first);
+  await until(() => first.busy);
+  assert.equal(lastEntry().ongoing, true);
+  release();
+  gate = null;
+  await p1;
+  assert.equal(lastEntry().ongoing, false);
+  assert.equal(lastEntry().waitingForInput, false);
+  assert.equal(roomEvents().at(-1).ongoing, false);
+
+  // 2. Failed agent turn (no auto-summary)
+  gate = new Promise((r) => { release = r; });
+  first.room.agents[0].turn = async () => { if (gate) await gate; throw new Error('boom'); };
+  const p2 = handleLine('failing turn', first);
+  await until(() => first.busy);
+  assert.equal(lastEntry().ongoing, true);
+  release();
+  gate = null;
+  await p2;
+  assert.equal(lastEntry().ongoing, false);
+  assert.equal(lastEntry().waitingForInput, false);
+  assert.equal(roomEvents().at(-1).ongoing, false);
+
+  // 3. Brainstorm round (never auto-summarizes)
+  const { first: brain } = await multiRoom();
+  await handleLine('/brainstorm', brain);
+  let brainSpoke = false;
+  gate = new Promise((r) => { release = r; });
+  brain.room.agents[0].turn = async () => {
+    if (gate) await gate;
+    if (brainSpoke) return 'PASS';
+    brainSpoke = true;
+    return 'brainstorm idea';
+  };
+  brain.room.agents[1].turn = async () => 'PASS';
+  const p3 = handleLine('spark', brain);
+  await until(() => brain.busy);
+  assert.equal(brain.screen.room.open.find((o) => o.current).ongoing, true);
+  release();
+  gate = null;
+  await p3;
+  assert.equal(brain.screen.room.open.find((o) => o.current).ongoing, false);
+  assert.equal(brain.screen.room.open.find((o) => o.current).waitingForInput, false);
+});
