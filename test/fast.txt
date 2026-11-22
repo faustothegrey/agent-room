@@ -246,3 +246,5 @@ round beforeLap hook checks before each subsequent lap and stops early with noti
 checkQuotaFloor: passes above floor, fails below floor on 5h or weekly, and rejects missing or stale meter readings
 Schedule Control bar button, page view, and /__schedule GET/POST endpoints
 scheduler: CRUD in local state, skips open/closing/low-quota/stale runs, runs as Scheduler and closes, and stops early on mid-round quota drop
+Side pane: two tabs (Explorer/Document), close/reopen, [[D4]] reopen, and split orientation
+Services panel: Control bar services, half-window grid, list collapse/restore, Terminal fit & dot, My notes draft/guard, Discussion/Worker independence, and saved sizes preserved

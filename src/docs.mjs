@@ -520,22 +520,24 @@ const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="vie
 * { box-sizing: border-box; }
 body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; grid-template-columns: 62px var(--list, 240px) 7px 1fr; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 body.list-collapsed { grid-template-columns: 62px 32px 1fr; }
+body.service-open { grid-template-columns: 62px minmax(0, calc((100% - 62px) / 2)) var(--list, 240px) 7px 1fr; }
+body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((100% - 62px) / 2)) 32px 1fr; }
 #control-bar { display: flex; flex-direction: column; align-items: center; gap: .35rem; padding: .45rem .25rem; border-right: 1px solid var(--line); background: linear-gradient(#88812, #88812), Canvas; min-height: 0; }
-.ctrl-btn { width: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .12rem; padding: .42rem .15rem; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--dim); cursor: pointer; }
+.ctrl-btn { position: relative; width: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .12rem; padding: .42rem .15rem; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--dim); cursor: pointer; }
+.ctrl-btn[hidden] { display: none; }
 .ctrl-btn:hover { background: #8882; color: CanvasText; }
 .ctrl-btn.on { background: #3b82f624; border-color: #3b82f666; color: CanvasText; font-weight: 600; }
+#ctrl-terminal.running::after { content: ''; position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
 .ctrl-ico { font-size: 1.05rem; line-height: 1.1; }
 .ctrl-lbl { font-size: .62rem; line-height: 1.1; }
+#services-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: Canvas; }
+#services-panel[hidden] { display: none; }
+#services-bar { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .35rem .65rem; border-bottom: 1px solid var(--line); background: #88808; min-height: 2.2rem; flex: none; }
+#services-title { font-size: .88rem; font-weight: 600; color: CanvasText; }
 #main-panel { display: grid; min-width: 0; min-height: 0; grid-template-columns: var(--left, 55%) 7px 1fr; grid-template-rows: 1fr; }
 #main-panel.stacked { grid-template-columns: 1fr; grid-template-rows: var(--top, 55%) 7px 1fr; }
-#main-panel.side-closed, #main-panel.showing-page { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+#main-panel.side-closed { grid-template-columns: 1fr; grid-template-rows: 1fr; }
 #main-panel.side-closed > #split, #main-panel.side-closed > #right { display: none; }
-#main-panel.showing-page > #left, #main-panel.showing-page > #split, #main-panel.showing-page > #right { display: none; }
-#main-page { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-#main-page[hidden] { display: none; }
-#main-page-bar { display: flex; align-items: center; gap: .6rem; padding: .4rem .8rem; border-bottom: 1px solid var(--line); background: #88808; flex: none; }
-#main-page-back { font-size: .82rem; padding: .2rem .6rem; }
-#main-page-title { font-size: .9rem; font-weight: 600; color: var(--dim); }
 /* The header: three zones, room (left), current discussion (middle), monitoring (right).
    Rare room and server actions sit in the ▾ menus; the gauges never shrink. */
 #header { position: relative; grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(16rem, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
@@ -701,7 +703,6 @@ body.list-collapsed #list-split { display: none; }
 .tab.on { border-bottom-color: var(--accent, #3b82f6); background: var(--tint, #3b82f618); color: CanvasText; font-weight: 600; }
 .tab.news::after { content: ' •'; color: #3b82f6; }
 #tab-explorer.peeking::after { content: ' ●'; color: #f59e0b; }
-#tab-terminal.running::after { content: ' ●'; color: #22c55e; }
 #side-open { margin-left: auto; margin-right: .35rem; }
 #side-controls { margin-left: auto; display: flex; align-items: center; gap: .15rem; padding-right: .3rem; }
 .pane-ctrl { border: 0; background: none; padding: .2rem .45rem; font-size: .82rem; color: var(--dim); border-radius: 4px; }
@@ -926,15 +927,11 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
   <button type="button" class="ctrl-btn" id="ctrl-providers" aria-pressed="false" title="Default providers and models for new discussions, and provider health"><span class="ctrl-ico">⚙</span><span class="ctrl-lbl">Providers</span></button>
   <button type="button" class="ctrl-btn" id="ctrl-instructions" aria-pressed="false" title="The prompts and rulebooks sent to each agent, and when"><span class="ctrl-ico">📜</span><span class="ctrl-lbl">Instructions</span></button>
   <button type="button" class="ctrl-btn" id="ctrl-schedule" aria-pressed="false" title="Scheduled recurring discussions and quota guard"><span class="ctrl-ico">⏰</span><span class="ctrl-lbl">Schedule</span></button>
+  <button type="button" class="ctrl-btn" id="ctrl-notes" aria-pressed="false" hidden title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder."><span class="ctrl-ico">📝</span><span class="ctrl-lbl">My notes</span></button>
+  <button type="button" class="ctrl-btn" id="ctrl-terminal" aria-pressed="false" hidden title="A shell on this computer, in the room's folder. Only from this computer, not from other devices."><span class="ctrl-ico">⌨</span><span class="ctrl-lbl">Terminal</span></button>
 </nav>
-<aside id="list-panel" aria-label="Boards">
-  <div id="list-head"><span id="list-title">Boards</span><button type="button" id="list-toggle" aria-expanded="true" aria-label="Collapse boards list" title="Collapse boards list">«</button></div>
-  <div id="list-pane"></div>
-</aside>
-<div id="list-split" role="separator" aria-orientation="vertical" aria-label="Resize the boards list" tabindex="0" title="Drag to resize"></div>
-<div id="main-panel">
-<div id="main-page" hidden>
-  <div id="main-page-bar"><button type="button" id="main-page-back">← Back</button><span id="main-page-title"></span></div>
+<section id="services-panel" aria-label="Services" hidden>
+  <div id="services-bar"><span id="services-title"></span><button type="button" id="services-close" class="pane-ctrl" title="Close services panel" aria-label="Close services panel">✕</button></div>
   <div class="view" id="providers" hidden>
     <form class="providers-panel" id="providers-form">
       <p class="settings-hint" id="providers-hint"></p>
@@ -951,7 +948,22 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
   </div>
   <div class="view" id="instructions" hidden><div id="instructions-pane"></div></div>
   <div class="view" id="schedule" hidden><div id="schedule-pane"></div></div>
-</div>
+  <div class="view" id="notes" hidden><div id="notes-body">
+    <div id="notes-side"><button id="notes-new" title="Start a new note: the first line is its title">New</button><div id="notes-list"></div></div>
+    <div id="notes-main"><div id="notes-ask" role="alertdialog" aria-labelledby="notes-ask-text" hidden><span id="notes-ask-text"></span><span id="notes-ask-buttons"></span></div><textarea class="box" id="notes-text" aria-label="Note" placeholder="Choose a note, or New. The first line is the note's title." disabled></textarea>
+      <div id="notes-bar"><button id="notes-save" disabled title="Save this note (nothing is saved until you press Save)">Save</button><button id="notes-remove" disabled>Remove</button><span id="notes-status" role="status"></span></div></div>
+  </div></div>
+  <div class="view" id="terminal" hidden>
+    <div id="terminal-bar"><span id="terminal-status">Shell in this room’s folder (this computer only)</span><button type="button" id="terminal-start" hidden title="Start a fresh shell">Start shell</button><button type="button" id="terminal-end" hidden title="Stop the running shell">End shell</button></div>
+    <div id="hostshell-term"></div>
+  </div>
+</section>
+<aside id="list-panel" aria-label="Boards">
+  <div id="list-head"><span id="list-title">Boards</span><button type="button" id="list-toggle" aria-expanded="true" aria-label="Collapse boards list" title="Collapse boards list">«</button></div>
+  <div id="list-pane"></div>
+</aside>
+<div id="list-split" role="separator" aria-orientation="vertical" aria-label="Resize the boards list" tabindex="0" title="Drag to resize"></div>
+<div id="main-panel">
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></div>
   <div class="view" id="talk">
@@ -998,20 +1010,11 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </div>
 <div id="split" role="separator" aria-orientation="vertical" aria-label="Resize the chat and the document" tabindex="0" title="Drag to resize"></div>
 <div id="right">
-  <div id="subtabs" role="tablist"><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button><button class="tab" id="tab-notes" role="tab" hidden title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder.">My notes</button><button class="tab" id="tab-terminal" role="tab" hidden title="A shell on this computer, in the room's folder. Only from this computer, not from other devices.">Terminal</button><span id="side-controls"><button type="button" id="split-orient" class="pane-ctrl" title="Stack conversation above side pane" aria-label="Stack conversation above side pane">⇅</button><button type="button" id="side-close" class="pane-ctrl" title="Close side pane" aria-label="Close side pane">✕</button></span></div>
+  <div id="subtabs" role="tablist"><button class="tab on" id="tab-explorer" role="tab">Explorer</button><button class="tab" id="tab-document" role="tab" disabled title="Choose a file in Explorer">Document</button><span id="side-controls"><button type="button" id="split-orient" class="pane-ctrl" title="Stack conversation above side pane" aria-label="Stack conversation above side pane">⇅</button><button type="button" id="side-close" class="pane-ctrl" title="Close side pane" aria-label="Close side pane">✕</button></span></div>
   <div class="view" id="explorer"><div id="pane"></div></div>
   <div class="view" id="document" hidden>
     <div id="bar"><details class="menu" id="doc-menu"><summary title="Other files in this folder"><span id="current">No document shown.</span></summary><div class="menu-items" id="siblings"></div></details><button id="feed" hidden title="Ask the agents to read this transcript in full">Send to agents</button><label id="follow-label" title="When an agent or the worker names a file in a new message, show it here at once (this browser only)"><input type="checkbox" id="follow"> Follow mentions</label></div>
     <div id="docpane"></div>
-  </div>
-  <div class="view" id="notes" hidden><div id="notes-body">
-    <div id="notes-side"><button id="notes-new" title="Start a new note: the first line is its title">New</button><div id="notes-list"></div></div>
-    <div id="notes-main"><div id="notes-ask" role="alertdialog" aria-labelledby="notes-ask-text" hidden><span id="notes-ask-text"></span><span id="notes-ask-buttons"></span></div><textarea class="box" id="notes-text" aria-label="Note" placeholder="Choose a note, or New. The first line is the note's title." disabled></textarea>
-      <div id="notes-bar"><button id="notes-save" disabled title="Save this note (nothing is saved until you press Save)">Save</button><button id="notes-remove" disabled>Remove</button><span id="notes-status" role="status"></span></div></div>
-  </div></div>
-  <div class="view" id="terminal" hidden>
-    <div id="terminal-bar"><span id="terminal-status">Shell in this room’s folder (this computer only)</span><button type="button" id="terminal-start" hidden title="Start a fresh shell">Start shell</button><button type="button" id="terminal-end" hidden title="Stop the running shell">End shell</button></div>
-    <div id="hostshell-term"></div>
   </div>
 </div>
 </div>
@@ -1127,54 +1130,58 @@ function mention(el, m, live) {
 }
 function statusEl(text, error) { const el = document.createElement('div'); el.className = 'status' + (error ? ' error' : ''); el.textContent = text; return el; }
 
-// Control bar & Main panel pages (Providers / Instructions): open across the full Main panel,
-// collapsing the List panel while shown and restoring its prior open/collapsed state on return.
-// Conversation rounds, worker tasks, running Terminal shells and unsaved My notes stay untouched.
-let mainPage = null, listCollapsedBeforePage = null;
-function updateBackLabel() {
-  const back = $('main-page-back'), title = $('main-page-title');
-  if (back) {
-    const t = typeof currentTitle === 'function' ? currentTitle() : '';
-    back.textContent = '← Back to ' + (t || 'the discussion');
-  }
-  if (title) title.textContent = mainPage === 'providers' ? 'Providers' : mainPage === 'instructions' ? 'Instructions' : mainPage === 'schedule' ? 'Schedule' : '';
+// Control bar & Services panel (Providers / Instructions / Schedule / My notes / Terminal):
+// opens beside the Control bar at half the window, pushing the board area right and collapsing the
+// Boards list while open, restoring its prior open/collapsed state on close. Closing or switching
+// services only hides the panel without asking: rounds, worker tasks, running Terminal shells and
+// unsaved My notes edits stay untouched.
+const SERVICES = { providers: 'Providers', instructions: 'Instructions', schedule: 'Schedule', notes: 'My notes', terminal: 'Terminal' };
+let openServiceName = null, listCollapsedBeforeService = null;
+function fitHostShell(focus = false) {
+  if (openServiceName !== 'terminal' || typeof hostShell === 'undefined' || !hostShell?.fit) return;
+  requestAnimationFrame(() => {
+    if (openServiceName !== 'terminal' || !hostShell?.fit) return;
+    try { hostShell.fit.fit(); if (focus) hostShell.term?.focus(); } catch {}
+  });
 }
-function openMainPage(name) {
-  const next = name === 'providers' || name === 'instructions' || name === 'schedule' ? name : null;
+function openService(name, opts = {}) {
+  const next = name && SERVICES[name] ? name : null;
   if (next) {
-    if (mainPage === null) {
-      listCollapsedBeforePage = document.body.classList.contains('list-collapsed');
+    if (openServiceName === null) {
+      listCollapsedBeforeService = document.body.classList.contains('list-collapsed');
       if (typeof setListCollapsed === 'function') setListCollapsed(true, false);
     }
-    mainPage = next;
-    $('main-panel').classList.add('showing-page');
-    $('main-page').hidden = false;
-    $('providers').hidden = next !== 'providers';
-    $('instructions').hidden = next !== 'instructions';
-    $('schedule').hidden = next !== 'schedule';
-    updateBackLabel();
+    openServiceName = next;
+    document.body.classList.add('service-open');
+    $('services-panel').hidden = false;
+    if ($('services-title')) $('services-title').textContent = SERVICES[next];
+    for (const key of Object.keys(SERVICES)) { if ($(key)) $(key).hidden = next !== key; }
+    if (typeof notes !== 'undefined' && notes) notes.open = next === 'notes';
+    if (typeof syncBoardSizes === 'function') syncBoardSizes();
     if (next === 'providers' && typeof renderProviders === 'function') renderProviders();
     if (next === 'instructions' && typeof renderInstructions === 'function') renderInstructions();
     if (next === 'schedule' && typeof renderSchedule === 'function') renderSchedule();
+    if (next === 'notes' && !opts.skipNotesOpen && typeof openNotes === 'function') openNotes();
+    if (next === 'terminal' && typeof openHostShell === 'function') {
+      if (typeof hostShell === 'undefined' || !hostShell) openHostShell();
+      else fitHostShell(true);
+    }
   } else {
-    if (mainPage === null) return;
-    mainPage = null;
-    $('main-panel').classList.remove('showing-page');
-    $('main-page').hidden = true;
-    $('providers').hidden = true;
-    $('instructions').hidden = true;
-    $('schedule').hidden = true;
-    if (listCollapsedBeforePage !== null && typeof setListCollapsed === 'function') {
-      const restore = listCollapsedBeforePage;
-      listCollapsedBeforePage = null;
+    if (openServiceName === null) return;
+    openServiceName = null;
+    document.body.classList.remove('service-open');
+    $('services-panel').hidden = true;
+    for (const key of Object.keys(SERVICES)) { if ($(key)) $(key).hidden = true; }
+    if (typeof notes !== 'undefined' && notes) notes.open = false;
+    if (listCollapsedBeforeService !== null && typeof setListCollapsed === 'function') {
+      const restore = listCollapsedBeforeService;
+      listCollapsedBeforeService = null;
       setListCollapsed(restore, false);
     }
-    if (typeof sideClosed !== 'undefined' && !sideClosed && typeof subtab !== 'undefined' && subtab === 'terminal' && typeof hostShell !== 'undefined' && hostShell?.fit) {
-      requestAnimationFrame(() => { try { hostShell.fit.fit(); } catch {} });
-    }
+    if (typeof syncBoardSizes === 'function') syncBoardSizes();
   }
-  const active = mainPage ?? 'boards';
-  for (const [id, key] of [['ctrl-boards', 'boards'], ['ctrl-providers', 'providers'], ['ctrl-instructions', 'instructions'], ['ctrl-schedule', 'schedule']]) {
+  const active = openServiceName ?? 'boards';
+  for (const [id, key] of [['ctrl-boards', 'boards'], ['ctrl-providers', 'providers'], ['ctrl-instructions', 'instructions'], ['ctrl-schedule', 'schedule'], ['ctrl-notes', 'notes'], ['ctrl-terminal', 'terminal']]) {
     const b = $(id);
     if (!b) continue;
     b.classList.toggle('on', active === key);
@@ -1184,9 +1191,9 @@ function openMainPage(name) {
 }
 
 // The two conversation tabs (Discussion and Worker). A worker reply while Discussion is shown marks Worker.
+// Switching between Discussion and Worker never closes the open service.
 function showTab(name) {
-  if (name === 'providers' || name === 'instructions' || name === 'schedule') { openMainPage(name); return; }
-  if (mainPage !== null) openMainPage(null);
+  if (SERVICES[name]) { openService(name); return; }
   tab = name;
   $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work';
   $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work');
@@ -1198,17 +1205,18 @@ function showTab(name) {
 $('tab-talk').onclick = () => showTab('talk');
 $('tab-work').onclick = () => showTab('work');
 if ($('ctrl-boards')) $('ctrl-boards').onclick = () => {
-  if (mainPage !== null) return openMainPage(null);
+  if (openServiceName !== null) return openService(null);
   if (document.body.classList.contains('list-collapsed') && typeof setListCollapsed === 'function') {
     setListCollapsed(false);
     post('__workerinfo', {}).catch(() => {});
   }
 };
-if ($('ctrl-providers')) $('ctrl-providers').onclick = () => openMainPage(mainPage === 'providers' ? null : 'providers');
-if ($('ctrl-instructions')) $('ctrl-instructions').onclick = () => openMainPage(mainPage === 'instructions' ? null : 'instructions');
-if ($('ctrl-schedule')) $('ctrl-schedule').onclick = () => openMainPage(mainPage === 'schedule' ? null : 'schedule');
-if ($('main-page-back')) $('main-page-back').onclick = () => openMainPage(null);
-if ($('providers-done')) $('providers-done').onclick = () => openMainPage(null);
+for (const key of Object.keys(SERVICES)) {
+  const b = $('ctrl-' + key);
+  if (b) b.onclick = () => openService(openServiceName === key ? null : key);
+}
+if ($('services-close')) $('services-close').onclick = () => openService(null);
+if ($('providers-done')) $('providers-done').onclick = () => openService(null);
 
 // The Schedule page: quota floor, recurring discussion tasks, and last-run results.
 let scheduleEditingId = null;
@@ -1615,9 +1623,12 @@ const MIN = 260, MIN_H = 140, LIST_MIN = 160, LIST_MAX = 420;
 const KEY = 'agent-room:left', TOP_KEY = 'agent-room:top', LIST_KEY = 'agent-room:list';
 const LIST_COLLAPSED_KEY = 'agent-room:list-collapsed', ORIENT_KEY = 'agent-room:split-orient', SIDE_CLOSED_KEY = 'agent-room:side-closed';
 let stacked = false, sideClosed = false;
+let savedLeft = null, savedTop = null, savedList = null;
+const isBoardNarrowed = () => typeof openServiceName !== 'undefined' && openServiceName !== null;
 function setLeft(px) {
   const avail = mainPanel.getBoundingClientRect().width - split.offsetWidth;
-  const w = Math.round(Math.max(MIN, Math.min(Math.max(MIN, avail - MIN), px)));
+  const min = avail > 0 && avail < MIN * 2 ? Math.max(120, Math.floor(avail / 2)) : MIN;
+  const w = Math.round(Math.max(min, Math.min(Math.max(min, avail - min), px)));
   mainPanel.style.setProperty('--left', w + 'px');
   return w;
 }
@@ -1629,11 +1640,27 @@ function setTop(px) {
 }
 function setList(px) {
   const ctrlW = $('control-bar')?.getBoundingClientRect().width || 62;
-  const max = Math.max(LIST_MIN, Math.min(LIST_MAX, document.documentElement.clientWidth - ctrlW - MIN * 2 - 14));
+  const svcW = isBoardNarrowed() ? ($('services-panel')?.getBoundingClientRect().width || 0) : 0;
+  const max = Math.max(LIST_MIN, Math.min(LIST_MAX, document.documentElement.clientWidth - ctrlW - svcW - MIN * 2 - 14));
   const w = Math.round(Math.max(LIST_MIN, Math.min(max, px)));
   document.body.style.setProperty('--list', w + 'px');
-  if (!stacked && !sideClosed && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
+  if (!stacked && !sideClosed && mainPanel.style.getPropertyValue('--left')) setLeft(savedLeft ?? $('left').getBoundingClientRect().width);
   return w;
+}
+function syncBoardSizes() {
+  if (!document.body.classList.contains('list-collapsed')) {
+    if (savedList) setList(savedList);
+    else document.body.style.removeProperty('--list');
+  }
+  if (!sideClosed) {
+    if (stacked) {
+      if (savedTop) setTop(savedTop);
+      else mainPanel.style.removeProperty('--top');
+    } else {
+      if (savedLeft) setLeft(savedLeft);
+      else mainPanel.style.removeProperty('--left');
+    }
+  }
 }
 function setListCollapsed(collapsed, save = true) {
   document.body.classList.toggle('list-collapsed', collapsed);
@@ -1642,7 +1669,8 @@ function setListCollapsed(collapsed, save = true) {
   listToggle.setAttribute('aria-label', collapsed ? 'Expand boards list' : 'Collapse boards list');
   listToggle.title = collapsed ? 'Expand boards list' : 'Collapse boards list';
   if (save) { try { localStorage.setItem(LIST_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch {} }
-  if (!stacked && !sideClosed && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
+  if (!collapsed && savedList) setList(savedList);
+  if (!stacked && !sideClosed && mainPanel.style.getPropertyValue('--left')) setLeft(savedLeft ?? $('left').getBoundingClientRect().width);
 }
 function setStacked(on, save = true) {
   stacked = !!on;
@@ -1653,11 +1681,10 @@ function setStacked(on, save = true) {
   splitOrient.setAttribute('aria-label', splitOrient.title);
   if (save) { try { localStorage.setItem(ORIENT_KEY, stacked ? 'stacked' : 'side'); } catch {} }
   if (stacked) {
-    try { const t = Number(localStorage.getItem(TOP_KEY)); if (t) setTop(t); } catch {}
+    if (savedTop) setTop(savedTop);
   } else {
-    try { const l = Number(localStorage.getItem(KEY)); if (l) setLeft(l); } catch {}
+    if (savedLeft) setLeft(savedLeft);
   }
-  if (typeof hostShell !== 'undefined' && hostShell?.fit) requestAnimationFrame(() => { try { hostShell.fit.fit(); } catch {} });
 }
 function setSideClosed(closed, save = true) {
   sideClosed = !!closed;
@@ -1665,34 +1692,31 @@ function setSideClosed(closed, save = true) {
   if (sideOpenBtn) sideOpenBtn.hidden = !sideClosed;
   if (save) { try { localStorage.setItem(SIDE_CLOSED_KEY, sideClosed ? '1' : '0'); } catch {} }
   if (!sideClosed) {
-    if (typeof subtab !== 'undefined' && subtab === 'terminal' && typeof hostShell !== 'undefined' && hostShell?.fit) {
-      requestAnimationFrame(() => { try { hostShell.fit.fit(); hostShell.term?.focus(); } catch {} });
-    }
-    if (!stacked && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
-    if (stacked && mainPanel.style.getPropertyValue('--top')) setTop($('left').getBoundingClientRect().height);
+    if (!stacked && (savedLeft || mainPanel.style.getPropertyValue('--left'))) setLeft(savedLeft ?? $('left').getBoundingClientRect().width);
+    if (stacked && (savedTop || mainPanel.style.getPropertyValue('--top'))) setTop(savedTop ?? $('left').getBoundingClientRect().height);
   }
 }
-const keep = (w) => { try { localStorage.setItem(KEY, String(w)); } catch {} };
-const keepTop = (h) => { try { localStorage.setItem(TOP_KEY, String(h)); } catch {} };
-const keepList = (w) => { try { localStorage.setItem(LIST_KEY, String(w)); } catch {} };
+const keep = (w) => { if (isBoardNarrowed()) return; savedLeft = w; try { localStorage.setItem(KEY, String(w)); } catch {} };
+const keepTop = (h) => { if (isBoardNarrowed()) return; savedTop = h; try { localStorage.setItem(TOP_KEY, String(h)); } catch {} };
+const keepList = (w) => { if (isBoardNarrowed()) return; savedList = w; try { localStorage.setItem(LIST_KEY, String(w)); } catch {} };
 try {
-  const savedList = Number(localStorage.getItem(LIST_KEY)); if (savedList) setList(savedList);
+  savedList = Number(localStorage.getItem(LIST_KEY)) || null;
+  savedLeft = Number(localStorage.getItem(KEY)) || null;
+  savedTop = Number(localStorage.getItem(TOP_KEY)) || null;
+  if (savedList) setList(savedList);
   if (localStorage.getItem(LIST_COLLAPSED_KEY) === '1') setListCollapsed(true, false);
   if (localStorage.getItem(ORIENT_KEY) === 'stacked') setStacked(true, false);
   if (localStorage.getItem(SIDE_CLOSED_KEY) === '1') setSideClosed(true, false);
-  const saved = Number(localStorage.getItem(KEY)); if (saved) setLeft(saved);
-  const savedTop = Number(localStorage.getItem(TOP_KEY)); if (savedTop) setTop(savedTop);
+  if (savedLeft) setLeft(savedLeft);
+  if (savedTop) setTop(savedTop);
 } catch {}
 listToggle.onclick = () => {
   const next = !document.body.classList.contains('list-collapsed');
-  setListCollapsed(next);
+  setListCollapsed(next, !isBoardNarrowed());
   if (!next) post('__workerinfo', {}).catch(() => {});
 };
 splitOrient.onclick = () => setStacked(!stacked);
-sideCloseBtn.onclick = () => {
-  if (subtab === 'notes' && typeof notesDirty === 'function' && notesDirty()) return notesGuard(() => setSideClosed(true));
-  setSideClosed(true);
-};
+sideCloseBtn.onclick = () => setSideClosed(true);
 sideOpenBtn.onclick = () => setSideClosed(false);
 listSplit.addEventListener('pointerdown', (e) => {
   if (document.body.classList.contains('list-collapsed')) return;
@@ -1748,13 +1772,10 @@ split.addEventListener('keydown', (e) => {
     keep(setLeft($('left').getBoundingClientRect().width + (e.key === 'ArrowLeft' ? -24 : 24)));
   }
 });
-// A narrower/shorter window must not squeeze one side below MIN/MIN_H.
+// A narrower/shorter window must not squeeze one side below MIN/MIN_H, and must not overwrite saved sizes.
 window.addEventListener('resize', () => {
-  if (!document.body.classList.contains('list-collapsed') && document.body.style.getPropertyValue('--list')) setList($('list-panel').getBoundingClientRect().width);
-  if (!sideClosed) {
-    if (stacked && mainPanel.style.getPropertyValue('--top')) setTop($('left').getBoundingClientRect().height);
-    else if (!stacked && mainPanel.style.getPropertyValue('--left')) setLeft($('left').getBoundingClientRect().width);
-  }
+  syncBoardSizes();
+  if (typeof fitHostShell === 'function') fitHostShell(false);
 });
 function message(m, live = false) {
   localMessages.push(m);
@@ -1866,8 +1887,8 @@ function brainstormTitle(name) {
     ?? room?.checkpoints?.find((c) => c.name === path)?.title;
   return displayTitle(name, saved);
 }
-// The right pane's three subtabs: Discussions, Explorer, Document. Each keeps its place while
-// another is shown: Explorer its tree and scroll position, Document its file and scroll position.
+// The side pane's two tabs: Explorer and Document. Each keeps its place while the other is shown:
+// Explorer its tree and scroll position, Document its file and scroll position.
 let subtab = 'explorer', explorerMode = 'discussion', peek = null, lastActiveKey = undefined;
 const hasDiscussionTree = () => !!(peek || viewing || room?.active);
 const effectiveExplorerMode = () => (hasDiscussionTree() ? explorerMode : 'root');
@@ -1876,32 +1897,16 @@ function showSub(name) {
   subtab = name;
   $('explorer').hidden = name !== 'explorer';
   $('document').hidden = name !== 'document';
-  if ($('notes')) $('notes').hidden = name !== 'notes';
-  if ($('terminal')) $('terminal').hidden = name !== 'terminal';
   $('tab-explorer').classList.toggle('on', name === 'explorer');
   $('tab-document').classList.toggle('on', name === 'document');
-  if ($('tab-notes')) $('tab-notes').classList.toggle('on', name === 'notes');
-  if ($('tab-terminal')) $('tab-terminal').classList.toggle('on', name === 'terminal');
-  if (typeof notes !== 'undefined' && notes) notes.open = name === 'notes';
-  if (name === 'notes' && typeof openNotes === 'function') openNotes();
-  if (name === 'terminal' && typeof openHostShell === 'function') {
-    if (typeof hostShell === 'undefined' || !hostShell) openHostShell();
-    else requestAnimationFrame(() => { try { hostShell.fit?.fit(); hostShell.term?.focus(); } catch {} });
-  }
 }
 function selectSub(name) {
   if (name === 'document' && !doc) return;
-  const run = () => {
-    if (typeof sideClosed !== 'undefined' && sideClosed && typeof setSideClosed === 'function') setSideClosed(false);
-    showSub(name);
-    if (name === 'explorer') revealDoc();
-  };
-  if (subtab === 'notes' && name !== 'notes' && typeof notesDirty === 'function' && notesDirty()) return notesGuard(run);
-  run();
+  if (typeof sideClosed !== 'undefined' && sideClosed && typeof setSideClosed === 'function') setSideClosed(false);
+  showSub(name);
+  if (name === 'explorer') revealDoc();
 }
 $('tab-explorer').onclick = () => selectSub('explorer');
-if ($('tab-notes')) $('tab-notes').onclick = () => selectSub('notes');
-if ($('tab-terminal')) $('tab-terminal').onclick = () => selectSub('terminal');
 // Back to Explorer with a local file shown: if that file is inside the tree Explorer is showing now,
 // unfold its parent folders and scroll it into view. Never re-enters a peek that was ended.
 async function revealDoc() {
@@ -2316,7 +2321,6 @@ function updateReplicaView() {
   const readOnly = !!(viewing || peeking);
   if (room) { $('disc').textContent = currentTitle(); $('disc').dataset.active = !readOnly && room.active ? 'true' : 'false'; }
   updateTabTitle();
-  if (typeof updateBackLabel === 'function') updateBackLabel();
   // Under the title, show the activity of the selected tab.
   $('disc-status').textContent = talkStatus();
   const panel = $('remote-view'); panel.hidden = !readOnly; panel.replaceChildren();
@@ -2693,9 +2697,7 @@ function renderBoards() {
     menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
     return { menu, items };
   };
-  const leaveMainPage = () => { if (typeof mainPage !== 'undefined' && mainPage !== null && typeof openMainPage === 'function') openMainPage(null); };
   const peekFiles = (info) => {
-    leaveMainPage();
     peek = info;
     explorerMode = 'discussion';
     showSub('explorer');
@@ -2704,7 +2706,6 @@ function renderBoards() {
     renderBoards();
   };
   const enterClosedPeek = (ref, path, name, title) => {
-    leaveMainPage();
     peek = { kind: 'local', path, name, title, readonly: true };
     explorerMode = 'discussion';
     showSub('explorer');
@@ -2765,7 +2766,6 @@ function renderBoards() {
     nameBtn.title = path;
     nameBtn.onclick = () => {
       if (isCurrent) {
-        leaveMainPage();
         if (peeking) { peek = null; send('/peek'); }
         else peekFiles(null);
       } else if (openHere) {
@@ -2773,7 +2773,6 @@ function renderBoards() {
       } else if (closed) {
         enterClosedPeek(d, path, d, label);
       } else if (canAct) {
-        leaveMainPage();
         send('/resume ' + d);
       } else {
         peekFiles({ kind: 'local', path, name: d, title: label, readonly: false });
@@ -2889,7 +2888,6 @@ function renderBoards() {
     nameBtn.title = path;
     nameBtn.onclick = () => {
       if (isCurrent) {
-        leaveMainPage();
         if (peeking) { peek = null; send('/peek'); }
         else peekFiles(null);
       } else if (openHere) {
@@ -4024,7 +4022,7 @@ events.onmessage = (e) => {
   if (ev.type === 'work') workMessage(ev.message, true);
   if (ev.type === 'quota') showQuota(ev.gauges, ev.at);
   if (ev.type === 'monitor') showMonitor(ev.monitor);
-  if (ev.type === 'schedule' && mainPage === 'schedule') renderSchedule();
+  if (ev.type === 'schedule' && openServiceName === 'schedule') renderSchedule();
   if (ev.type === 'working') setWorking(ev.name);
   if (ev.type === 'workerinfo') showWorkerInfo(ev.info);
   if (ev.type === 'message') message(ev.message, true);
@@ -4050,17 +4048,17 @@ events.onmessage = (e) => {
   if (ev.type === 'restarting') { restarting = true; commandBusy = true; updateBusy(); status('Restarting the server: this page reloads when the new one answers.'); events.close(); box.disabled = true; wbox.disabled = true; }
 };
 
-// The Terminal tab (host-shell.mjs, after ghostty-web's demo): opening it fetches the token and
-// opens a WebSocket, and the server starts a fresh shell. Switching to another tab or closing the
-// side pane hides the terminal while keeping the shell alive (shown by a green dot on the tab).
-// End shell, reloading the page, or stopping the server ends it. Shown only in pages opened on
-// this computer (the server refuses the others anyway).
+// The Terminal service (host-shell.mjs, after ghostty-web's demo): opening it fetches the token and
+// opens a WebSocket, and the server starts a fresh shell. Switching to another service or closing the
+// Services panel hides the terminal while keeping the shell alive (shown by a green dot on the
+// Terminal Control bar button). End shell, reloading the page, or stopping the server ends it.
+// Shown only in pages opened on this computer (the server refuses the others anyway).
 let hostShell = null;
 const isLocalPage = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
-if (isLocalPage && $('tab-terminal')) $('tab-terminal').hidden = false;
+if (isLocalPage && $('ctrl-terminal')) $('ctrl-terminal').hidden = false;
 function updateTerminalUI() {
   const alive = !!(hostShell && hostShell.alive);
-  if ($('tab-terminal')) $('tab-terminal').classList.toggle('running', alive);
+  if ($('ctrl-terminal')) $('ctrl-terminal').classList.toggle('running', alive);
   if ($('terminal-end')) $('terminal-end').hidden = !alive;
   if ($('terminal-start')) $('terminal-start').hidden = alive;
 }
@@ -4115,10 +4113,11 @@ async function openHostShell() {
 if ($('terminal-end')) $('terminal-end').onclick = () => closeHostShell();
 if ($('terminal-start')) $('terminal-start').onclick = () => openHostShell();
 
-// The My notes tab (notes.mjs): the User's notes for this room's folder, on this computer only. A note
-// is saved only by Save. Unsaved changes are never dropped without asking: inside the tab before
-// another note, New, switching tabs, closing the side pane, or another room; the browser's leave-page
-// warning otherwise; a refresh after a code change keeps them (refreshPage).
+// The My notes service (notes.mjs): the User's notes for this room's folder, on this computer only.
+// A note is saved only by Save. Closing or switching services only hides the panel without asking,
+// keeping unsaved edits. Unsaved changes are never dropped without asking: inside the panel before
+// another note, New, or switching board or room; the browser's leave-page warning otherwise; a
+// refresh after a code change keeps them (refreshPage).
 const notes = { open: false, list: [], id: null, base: '', editing: false, session: 0 }; // id null: a new note; base: its saved text
 // session: changed whenever the editor starts something else (setEditor, clearEditor, a read). A
 // save or read response is applied to the editor only if the session it started in is still current;
@@ -4127,8 +4126,8 @@ const noteText = $('notes-text');
 const notesDirty = () => notes.editing && noteText.value !== notes.base;
 function noteDraft() { return notesDirty() ? { id: notes.id, base: notes.base, text: noteText.value } : null; }
 if (isLocalPage) {
-  if ($('tab-notes')) $('tab-notes').hidden = false;
-  if (noteDraftKept) { setSideClosed(false, false); showSub('notes'); openNotes(noteDraftKept); }
+  if ($('ctrl-notes')) $('ctrl-notes').hidden = false;
+  if (noteDraftKept) { openService('notes', { skipNotesOpen: true }); openNotes(noteDraftKept); }
 }
 addEventListener('beforeunload', (e) => { if (notesDirty() && !refreshing) { e.preventDefault(); e.returnValue = ''; } });
 function notesStatus(text, error) { $('notes-status').textContent = text; $('notes-status').className = error ? 'error' : ''; }
@@ -4147,8 +4146,8 @@ const noteTitle = () => noteText.value.split('\\n')[0].replace(/^\\s*#+\\s*/, ''
 // Runs act now, or once the User agrees to discard the unsaved changes (cancel: if they don't).
 function notesGuard(act, cancel) {
   if (!notesDirty()) return act();
-  if (typeof sideClosed !== 'undefined' && sideClosed && typeof setSideClosed === 'function') setSideClosed(false);
-  if (!notes.open) { if (typeof showSub === 'function') showSub('notes'); else openNotes(); }
+  if (typeof openService === 'function') { if (openServiceName !== 'notes') openService('notes'); }
+  else if (!notes.open) openNotes();
   notesAsk('"' + noteTitle() + '" has unsaved changes.', [
     ['Discard changes', () => { noteText.value = notes.base; act(); }],
     ['Keep editing', () => { cancel?.(); noteText.focus(); }],
