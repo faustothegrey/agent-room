@@ -3180,3 +3180,104 @@ test('relocated controls: + New discussion / + New brainstorm sit at top of Boar
   assert.match(source, /No brainstorms yet: \+ New brainstorm above starts one\./);
   assert.match(source, /Turn it into a discussion \(Actions ▾ on the tab bar\) to have it here\./);
 });
+
+test('workbench UI: New workbench in Actions ▾, worker-only view, 🔧 Boards icon, and Close and Merge/Discard hidden on workbenches', async () => {
+  const s = await serve(fixture(), { clients: new Set(), transcript: [] });
+  const html = await (await s.get('/__room')).text();
+  s.close();
+
+  // New workbench sits in Actions ▾ and CSS gives workbench rows 🔧.
+  const tabs = html.slice(html.indexOf('<div id="tabs"'), html.indexOf('<div class="view" id="talk"'));
+  assert.match(tabs, /id="actions-menu"[\s\S]*id="newworkbench"[^>]*>New workbench<\/button>/);
+  assert.match(html, /#board-list \.entry\.workbench::before \{ content: '🔧'; \}/);
+
+  // Exercise worker-only view, Boards row icon, and hiding Close and Merge / Discard.
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const closeCode = source.slice(source.indexOf('function closeActionLabel('), source.indexOf('async function startCatchUp('));
+  const viewCode = source.slice(source.indexOf('function updateReplicaView()'), source.indexOf('async function remoteFiles()'));
+  const boardsCode = source.slice(source.indexOf('function discussionsIn('), source.indexOf('const renderDiscussions = renderBoards'));
+  const node = (tag = 'div') => {
+    const classes = new Set();
+    const el = {
+      tag, hidden: false, disabled: false, title: '', textContent: '', dataset: {}, style: {}, children: [],
+      get className() { return [...classes].join(' '); },
+      set className(v) { classes.clear(); for (const c of String(v).split(/\s+/).filter(Boolean)) classes.add(c); },
+      classList: {
+        add: (...cs) => cs.forEach((c) => classes.add(c)),
+        remove: (...cs) => cs.forEach((c) => classes.delete(c)),
+        toggle: (c, on) => (on === undefined ? (classes.has(c) ? classes.delete(c) : classes.add(c)) : (on ? classes.add(c) : classes.delete(c))),
+        contains: (c) => classes.has(c),
+      },
+      setAttribute() {},
+      addEventListener() {},
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      set innerHTML(v) { this.children = v === '<div id="board-list"></div>' ? [node('div')] : []; },
+      get firstChild() { return this.children[0] ?? null; },
+    };
+    return el;
+  };
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const harness = new Function('$', 'document', 'box', 'requestAnimationFrame',
+    'let room = null, viewing = null, peeking = null, peek = null, localInput = true, attaching = false, pending = [], viewExpired = false, viewNotice = null, localThinking = null, localWorking = null, replica = null, tab = "talk", dragging = false, renderAfterDrag = false, openRowMenu = null, explorerMode = "discussion";\n' +
+    'const expandedSections = new Set(["discussions", "brainstorms", "archived-deferred"]);\n' +
+    'let cachedDetail = { files: ["discussions/2026-11-23-fix-btn/transcripts/s.md", "discussions/2026-11-23-regular/transcripts/s.md", "discussions/archive/2026-11-22-old-wb/transcripts/s.md"] };\n' +
+    'const isDiscussion = (n) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(n);\n' +
+    'const ordered = () => null, discussionTitle = (n) => n, brainstormTitle = (n) => n, displayTitle = (n, t) => t || n || "", closingPhase = () => null, closingLabel = () => "", resumeTip = () => "", freshButton = () => {}, archiveButton = () => {}, rollbackButtons = () => {}, closeMenus = () => {}, send = () => {}, showSub = () => {}, updateTabs = () => {}, renderExplorer = () => {}, notesGuard = (fn) => fn(), startMerge = () => {}, startDiscard = () => {};\n' +
+    'const updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, renderAutoDev = () => {}, renderAttachments = () => {}, talkStatus = () => "", receivedTime = () => "", currentTitle = () => "", updateTabTitle = () => {};\n' +
+    closeCode + '\n' + viewCode + '\n' + boardsCode + '\n' +
+    'return { setState: ({ r, mergeable, discardable }) => { room = r; workerMergeable = mergeable || {}; workerDiscardable = new Set(discardable || []); workerPending = []; updateReplicaView(); renderBoards(); }, getTab: () => tab };'
+  )($, { createElement: node }, node('textarea'), () => {});
+
+  const wbRoom = {
+    active: 'discussions/2026-11-23-fix-btn',
+    brainstorm: false,
+    workbench: true,
+    workbenches: ['2026-11-23-fix-btn', '2026-11-22-old-wb'],
+    closedDiscussions: ['2026-11-22-old-wb'],
+    multi: true,
+    open: [{ current: true, active: 'discussions/2026-11-23-fix-btn', workbench: true, started: true }],
+  };
+  const mergeInfo = { canMerge: true, targetBranch: 'main' };
+  harness.setState({
+    r: wbRoom,
+    mergeable: { '2026-11-23-fix-btn': mergeInfo, '2026-11-23-regular': mergeInfo },
+    discardable: ['2026-11-23-fix-btn', '2026-11-23-regular'],
+  });
+
+  // Worker-only view: no Discussion tab, no discussion-members panel, no Summarize; switches to Worker tab.
+  assert.equal(harness.getTab(), 'work');
+  assert.equal($('tab-talk').hidden, true);
+  assert.equal($('talk').hidden, true);
+  assert.equal($('work').hidden, false);
+  assert.equal($('talk-settings').hidden, true);
+  assert.equal($('summary').hidden, true);
+  assert.equal($('newworkbench').hidden, false);
+  // Close is shown, but Close and Merge / Close and Discard are hidden on workbenches.
+  assert.equal($('closedisc').hidden, false);
+  assert.equal($('closemerge').hidden, true);
+  assert.equal($('closediscard').hidden, true);
+
+  // Boards rows: workbench rows (active and archived) get class `entry workbench`; regular gets `entry discussion`.
+  const allNodes = [];
+  const walk = (n) => { allNodes.push(n); for (const c of n.children || []) walk(c); };
+  walk($('list-pane'));
+  const wbBtn = allNodes.find((n) => n.textContent === '2026-11-23-fix-btn');
+  const regBtn = allNodes.find((n) => n.textContent === '2026-11-23-regular');
+  const archWbBtn = allNodes.find((n) => n.textContent === '2026-11-22-old-wb');
+  assert.ok(wbBtn?.classList.contains('workbench'));
+  assert.ok(regBtn?.classList.contains('discussion'));
+  assert.ok(!regBtn?.classList.contains('workbench'));
+  assert.ok(archWbBtn?.classList.contains('workbench'));
+
+  // Row ⋯ menus: regular discussion shows Close and Merge + Close and Discard; workbench hides both.
+  const rows = allNodes.filter((n) => n.classList?.contains('discussion-row'));
+  const buttonsIn = (r) => { const out = []; const w = (x) => { if (x.tag === 'button') out.push(x.textContent); for (const c of x.children || []) w(c); }; w(r); return out; };
+  const wbRow = rows.find((r) => buttonsIn(r).includes('2026-11-23-fix-btn'));
+  const regRow = rows.find((r) => buttonsIn(r).includes('2026-11-23-regular'));
+  assert.ok(!buttonsIn(wbRow).includes('Close and Merge'));
+  assert.ok(!buttonsIn(wbRow).includes('Close and Discard'));
+  assert.ok(buttonsIn(regRow).includes('Close and Merge'));
+  assert.ok(buttonsIn(regRow).includes('Close and Discard'));
+});
