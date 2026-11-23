@@ -105,3 +105,5 @@ workbench: Close skips closing-statement agent, waits for running worker task, k
 workbench: Close and Merge and Close and Discard close without closing-statement.md and handle worktree/branch as for a discussion
 workbench: worker prompt paragraph reaches only workbench tasks (not discussion tasks)
 overlapping refreshWorker calls cannot leave an older result shown last
+catchUpWithBranch: allows resolving purely additive conflicts, avoids duplicate merge prefix, and reaches canMerge
+worktreeStatus and workerInfo report unquoted conflict paths and clear them once resolved

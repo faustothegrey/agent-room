@@ -822,6 +822,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .list-section > summary:hover { background: #8882; color: CanvasText; }
 #board-list .local-label { color: var(--dim); font-size: .74rem; margin: .05rem 0 .1rem .4rem; overflow-wrap: anywhere; }
 #board-list .worker-pending { color: light-dark(#b45309, #f59e0b); font-size: .74rem; margin: .1rem 0 .1rem .4rem; overflow-wrap: anywhere; }
+#board-list .worker-conflict { color: light-dark(#b91c1c, #fca5a5); font-size: .74rem; margin: .1rem 0 .1rem .4rem; overflow-wrap: anywhere; }
 #board-list > .worker-pending, .list-section > .worker-pending { margin: .2rem .35rem; }
 #board-list .hint { display: block; font-size: .78rem; margin: .25rem .35rem .45rem; }
 .peek-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .4rem; margin: 0 0 .6rem; padding: .35rem .6rem; border: 1px solid #f59e0b; border-radius: 6px; background: #f59e0b1f; color: light-dark(#92400e, #fcd34d); font-size: .82rem; }
@@ -845,6 +846,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .file-columns { column-width: 14rem; column-gap: .6rem; }
 .local-label { color: var(--dim); font-size: .8rem; margin: .3rem 0; }
 .worker-pending { color: light-dark(#b45309, #f59e0b); font-size: .8rem; margin: .3rem 0; }
+.worker-conflict { color: light-dark(#b91c1c, #fca5a5); font-size: .8rem; margin: .3rem 0; }
 .discussion-info { position: relative; display: inline-block; }
 .discussion-info > button { border: 0; background: none; color: #8fa8ee; padding: .15rem; }
 .info-detail { display: none; position: absolute; right: 0; top: 100%; z-index: 5; width: 15rem; padding: .5rem; background: Canvas; color: CanvasText; border: 1px solid var(--line); border-radius: 4px; font-size: .8rem; }
@@ -2862,9 +2864,10 @@ function renderBoards() {
     send('/peek ' + ref);
   };
 
-  const boardState = (openEntry, { closed = false, isCurrent = false, closing = null } = {}) => {
-    if (openEntry?.ongoing || openEntry?.working || closing) return 'ongoing';
+  const boardState = (openEntry, { closed = false, isCurrent = false, closing = null, conflicts = null, workerBusy = false } = {}) => {
+    if (openEntry?.ongoing || openEntry?.working || closing || workerBusy) return 'ongoing';
     if (closed) return 'closed';
+    if (conflicts?.length) return 'waiting for input';
     if (openEntry ? !openEntry.started : isCurrent && !room?.started) return 'not started';
     if (openEntry?.waitingForInput) return 'waiting for input';
     if (openEntry?.readyForAutoDev) return 'ready for auto dev';
@@ -2938,18 +2941,25 @@ function renderBoards() {
     block.append(nameBtn);
 
     const closing = closingPhase(d);
-    const state = boardState(openEntry, { closed, isCurrent, closing });
+    const work = pendingWork.find((p) => p.lane === d);
+    const conflicts = work?.conflicts ?? [];
+    const workerBusy = !!(openEntry?.working || openEntry?.workerBusy || room?.busyWorkers?.includes(d));
+    const state = boardState(openEntry, { closed, isCurrent, closing, conflicts, workerBusy });
     let statusText = state;
     if (openEntry?.working) statusText += ' · worker working';
     if (closing) statusText += ' · ' + closingLabel(closing);
-    const work = pendingWork.find((p) => p.lane === d);
     const merged = workerMerged.has(d);
     if (merged) statusText += ' · merged';
     else if (workerPending && !work) statusText += ' · no changes';
     const stateEl = el('div', 'local-label', statusText);
-    if (state === 'waiting for input' && openEntry?.waitingReason) stateEl.title = openEntry.waitingReason;
+    const conflictText = conflicts.length ? 'Worker conflict: ' + conflicts.join(', ') : null;
+    if (state === 'waiting for input') {
+      const tip = conflictText || openEntry?.waitingReason;
+      if (tip) stateEl.title = tip;
+    }
     block.append(stateEl);
     if (work) block.append(el('div', 'worker-pending', '⚠ Worker: ' + pendingText(work)));
+    if (conflictText && !workerBusy) block.append(el('div', 'worker-conflict', '⚠ ' + conflictText));
     row.append(block);
 
     if (canAct) {
@@ -3200,6 +3210,9 @@ function renderBoards() {
     const closing = closingPhase(d);
     const merged = workerMerged.has(d);
     block.append(el('div', 'local-label', (s === 'archive' ? 'archived' : 'deferred') + (closed ? ' · closed' : '') + (closing ? ' · ' + closingLabel(closing) : '') + (merged ? ' · merged' : '')));
+    const work = pendingWork.find((p) => p.lane === d);
+    const workerBusy = !!room?.busyWorkers?.includes(d);
+    if (work?.conflicts?.length && !workerBusy) block.append(el('div', 'worker-conflict', '⚠ Worker conflict: ' + work.conflicts.join(', ')));
     row.append(block);
 
     if (canAct) {

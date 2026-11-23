@@ -3750,3 +3750,150 @@ test('workbench UI: + New workbench in Boards, New workbench in Actions ▾, wor
   assert.equal($('closemerge').hidden, false);
   assert.equal($('closemerge').textContent, 'Catch up with main');
 });
+
+test('Boards rows mark unresolved worker conflicts as waiting for input with tooltip and red warning line', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  assert.match(source, /#board-list \.worker-conflict\s*\{[^}]*color:\s*light-dark\(#b91c1c/);
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return {
+      toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(cls) { s.add(cls); }, remove(cls) { s.delete(cls); }, contains(cls) { return s.has(cls); },
+    };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', value: '', hidden: false, disabled: false, children: [], dataset: {}, style: {},
+    classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    get lastChild() { return this.children.at(-1) || null; },
+    set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    addEventListener() {},
+    setAttribute() {},
+    getAttribute() { return null; },
+    focus() {},
+  });
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'send',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = false, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (fn) => fn();\n' +
+    code + '\n' +
+    'return { setRoom, renderDiscussions, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; }, setWorker: ({ pending = null, merged = [] } = {}) => { workerPending = pending; workerMerged = new Set(merged); } };'
+  )($, { createElement: node, title: '' }, { href: '/r/1/__room' }, null, null, () => {}, (cb) => cb(), () => {}, () => {});
+
+  harness.setFiles([
+    'discussions/2026-11-23-idle-conflict/notes.md',
+    'discussions/2026-11-23-saved-conflict/notes.md',
+    'discussions/2026-11-23-worker-running/notes.md',
+    'discussions/2026-11-23-worker-queued/notes.md',
+    'discussions/2026-11-23-round-ongoing/notes.md',
+    'discussions/2026-11-23-closed-conflict/notes.md',
+    'discussions/archive/2026-11-20-arch-conflict/notes.md',
+  ]);
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-23-idle-conflict',
+    discussion: 'Idle conflict',
+    started: true,
+    closedDiscussions: ['2026-11-23-closed-conflict', '2026-11-20-arch-conflict'],
+    closingDiscussions: {},
+    busyWorkers: ['2026-11-23-worker-running', '2026-11-23-worker-queued'],
+    open: [
+      { active: 'discussions/2026-11-23-idle-conflict', title: 'Idle conflict', started: true, current: true, working: false, workerBusy: false, ongoing: false, waitingForInput: false, waitingReason: null, readyForAutoDev: true, url: '/r/1/__room' },
+      { active: 'discussions/2026-11-23-worker-running', title: 'Worker running', started: true, current: false, working: true, workerBusy: true, ongoing: true, waitingForInput: false, url: '/r/2/__room' },
+      { active: 'discussions/2026-11-23-worker-queued', title: 'Worker queued', started: true, current: false, working: false, workerBusy: true, ongoing: true, waitingForInput: false, url: '/r/3/__room' },
+      { active: 'discussions/2026-11-23-round-ongoing', title: 'Round ongoing', started: true, current: false, working: false, workerBusy: false, ongoing: true, waitingForInput: false, url: '/r/4/__room' },
+    ],
+  });
+  harness.setWorker({
+    pending: [
+      { lane: '2026-11-23-idle-conflict', branch: 'worker/2026-11-23-idle-conflict', ahead: 1, dirty: true, conflicts: ['src/a.mjs', 'dir with space/b.txt'] },
+      { lane: '2026-11-23-saved-conflict', branch: 'worker/2026-11-23-saved-conflict', ahead: 1, dirty: true, conflicts: ['README.md'] },
+      { lane: '2026-11-23-worker-running', branch: 'worker/2026-11-23-worker-running', ahead: 1, dirty: true, conflicts: ['src/x.mjs'] },
+      { lane: '2026-11-23-worker-queued', branch: 'worker/2026-11-23-worker-queued', ahead: 1, dirty: true, conflicts: ['src/y.mjs'] },
+      { lane: '2026-11-23-round-ongoing', branch: 'worker/2026-11-23-round-ongoing', ahead: 1, dirty: true, conflicts: ['src/z.mjs'] },
+      { lane: '2026-11-23-closed-conflict', branch: 'worker/2026-11-23-closed-conflict', ahead: 1, dirty: true, conflicts: ['src/closed.mjs'] },
+      { lane: '2026-11-20-arch-conflict', branch: 'worker/2026-11-20-arch-conflict', ahead: 1, dirty: true, conflicts: ['src/arch.mjs'] },
+    ],
+  });
+  harness.renderDiscussions();
+
+  const rowInfo = (section, path) => {
+    const boardList = els['list-pane'].firstChild;
+    const rows = boardList.children.find((c) => c.dataset?.section === section).children
+      .filter((c) => c.className?.includes('discussion-row'));
+    const row = rows.find((r) => r.children.find((c) => c.className === 'discussion-block')?.children[0]?.title === path);
+    const block = row.children.find((c) => c.className === 'discussion-block');
+    const lbl = block.children.find((c) => c.className === 'local-label');
+    const conflict = block.children.find((c) => c.className === 'worker-conflict');
+    return { label: lbl.textContent, labelTitle: lbl.title, conflict: conflict?.textContent ?? null };
+  };
+
+  assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-idle-conflict'), {
+    label: 'waiting for input',
+    labelTitle: 'Worker conflict: src/a.mjs, dir with space/b.txt',
+    conflict: '⚠ Worker conflict: src/a.mjs, dir with space/b.txt',
+  });
+  assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-saved-conflict'), {
+    label: 'waiting for input',
+    labelTitle: 'Worker conflict: README.md',
+    conflict: '⚠ Worker conflict: README.md',
+  });
+  assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-worker-running'), {
+    label: 'ongoing · worker working',
+    labelTitle: '',
+    conflict: null,
+  });
+  assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-worker-queued'), {
+    label: 'ongoing',
+    labelTitle: '',
+    conflict: null,
+  });
+  assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-round-ongoing'), {
+    label: 'ongoing',
+    labelTitle: '',
+    conflict: '⚠ Worker conflict: src/z.mjs',
+  });
+  assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-closed-conflict'), {
+    label: 'closed',
+    labelTitle: '',
+    conflict: '⚠ Worker conflict: src/closed.mjs',
+  });
+  assert.deepEqual(rowInfo('archived-deferred', 'discussions/archive/2026-11-20-arch-conflict'), {
+    label: 'archived · closed',
+    labelTitle: '',
+    conflict: '⚠ Worker conflict: src/arch.mjs',
+  });
+
+  // Once conflicts are gone, rows fall back to their normal state and the red line disappears.
+  harness.setWorker({
+    pending: [
+      { lane: '2026-11-23-idle-conflict', branch: 'worker/2026-11-23-idle-conflict', ahead: 1, dirty: false, conflicts: [] },
+      { lane: '2026-11-23-saved-conflict', branch: 'worker/2026-11-23-saved-conflict', ahead: 1, dirty: false, conflicts: [] },
+      { lane: '2026-11-23-closed-conflict', branch: 'worker/2026-11-23-closed-conflict', ahead: 1, dirty: false, conflicts: [] },
+    ],
+  });
+  harness.renderDiscussions();
+
+  assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-idle-conflict'), {
+    label: 'ready for auto dev',
+    labelTitle: '',
+    conflict: null,
+  });
+  assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-saved-conflict'), {
+    label: 'idle',
+    labelTitle: '',
+    conflict: null,
+  });
+  assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-closed-conflict'), {
+    label: 'closed',
+    labelTitle: '',
+    conflict: null,
+  });
+});
