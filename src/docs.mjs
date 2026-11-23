@@ -567,13 +567,14 @@ body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((1
 #disc-workers[hidden] { display: none; }
 #disc-heading { display: flex; align-items: baseline; gap: .15rem; min-width: 0; }
 #disc { min-width: 0; }
-#actions-menu { flex: none; }
 #disc-status { font-size: .7rem; color: var(--dim); line-height: 1.35; }
-#actions-menu > summary { padding: .15rem .3rem; margin-left: 0; }
-#actions-menu > summary::after { content: '▾'; }
+#actions-menu { flex: none; }
+#actions-menu > summary { padding: .2rem .45rem; margin-left: 0; font-size: .82rem; color: var(--dim); border-radius: 4px; }
+#actions-menu > summary:hover, #actions-menu[open] > summary { color: CanvasText; }
+#actions-menu .menu-items { left: auto; right: 0; }
 #actions-menu[hidden] { display: none; }
-#new-discussion { display: contents; }
-#new-discussion[hidden] { display: none; }
+#board-actions { display: contents; }
+#board-actions[hidden] { display: none; }
 #server-zone { flex-direction: row; align-items: center; gap: .5rem; }
 #server-box { flex: none; display: flex; align-items: center; gap: .15rem; }
 /* Right of "● Server": some replication peer is unreachable (as in Peers…). Amber; red stays the server's. */
@@ -689,8 +690,11 @@ body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((1
 #list-title { font-size: .8rem; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #list-toggle { border: 0; background: none; padding: .1rem .35rem; font-size: .95rem; line-height: 1; color: var(--dim); }
 #list-toggle:hover { background: #8882; color: CanvasText; }
+#list-new { display: flex; flex-wrap: wrap; gap: .35rem; padding: .4rem .5rem; border-bottom: 1px solid var(--line); }
+#list-new[hidden] { display: none; }
+#list-new button { flex: 1 1 auto; font-size: .78rem; padding: .28rem .45rem; white-space: nowrap; text-align: center; }
 #list-pane { flex: 1; min-height: 0; overflow-y: auto; }
-body.list-collapsed #list-title, body.list-collapsed #list-pane { display: none; }
+body.list-collapsed #list-title, body.list-collapsed #list-new, body.list-collapsed #list-pane { display: none; }
 body.list-collapsed #list-head { justify-content: center; padding: .35rem 0; }
 body.list-collapsed #list-split { display: none; }
 #left { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
@@ -703,8 +707,7 @@ body.list-collapsed #list-split { display: none; }
 .tab.on { border-bottom-color: var(--accent, #3b82f6); background: var(--tint, #3b82f618); color: CanvasText; font-weight: 600; }
 .tab.news::after { content: ' •'; color: #3b82f6; }
 #tab-explorer.peeking::after { content: ' ●'; color: #f59e0b; }
-#side-open { margin-left: auto; margin-right: .35rem; }
-#side-controls { margin-left: auto; display: flex; align-items: center; gap: .15rem; padding-right: .3rem; }
+#tab-controls, #side-controls { margin-left: auto; display: flex; align-items: center; gap: .15rem; padding-right: .3rem; }
 .pane-ctrl { border: 0; background: none; padding: .2rem .45rem; font-size: .82rem; color: var(--dim); border-radius: 4px; }
 .pane-ctrl:hover { background: #8882; color: CanvasText; }
 .pane-ctrl[hidden] { display: none; }
@@ -918,7 +921,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b id="room-name">agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions"></summary><div class="menu-items"><button id="summary">Summarize</button><span id="new-discussion" hidden><hr><button id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">New discussion</button><button id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">New brainstorm</button><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
+<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
 <div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 <div id="busy" aria-hidden="true"></div>
 </header>
@@ -960,12 +963,13 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </section>
 <aside id="list-panel" aria-label="Boards">
   <div id="list-head"><span id="list-title">Boards</span><button type="button" id="list-toggle" aria-expanded="true" aria-label="Collapse boards list" title="Collapse boards list">«</button></div>
+  <div id="list-new" hidden><button type="button" id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">+ New discussion</button><button type="button" id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">+ New brainstorm</button></div>
   <div id="list-pane"></div>
 </aside>
 <div id="list-split" role="separator" aria-orientation="vertical" aria-label="Resize the boards list" tabindex="0" title="Drag to resize"></div>
 <div id="main-panel">
 <div id="left">
-  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></div>
+  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><span id="tab-controls"><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions">Actions</summary><div class="menu-items"><button id="summary">Summarize</button><span id="board-actions" hidden><hr><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></span></div>
   <div class="view" id="talk">
     <details class="agent-settings" id="talk-settings">
       <summary>Discussion members · <span id="talk-models">provider & model</span></summary>
@@ -2450,21 +2454,22 @@ function updateReplicaView() {
   $('talk-settings').hidden = readOnly;
   $('summary').hidden = readOnly;
   $('reload').hidden = readOnly;
-  // New discussion (in the header): ends this session (in the terminal); the next message starts the new one.
-  // New brainstorm, beside it, is always offered (it ends a session or a brainstorm the same way).
-  $('new-discussion').hidden = !(room && localInput && !readOnly);
+  const canBoardAct = !!(room && localInput && !readOnly);
+  // + New discussion and + New brainstorm live at the top of the Boards list panel.
+  $('list-new').hidden = !canBoardAct;
   $('newdisc').hidden = !(room?.active || room?.brainstorm);
   // Turn into a discussion: a brainstorm once its first message has named it.
-  $('convert').hidden = !(room?.brainstorm && room.active);
+  $('convert').hidden = !(canBoardAct && room?.brainstorm && room.active);
   // With several discussions open (the screen), New discussion and Resume keep this one open;
   // Close closes it (labelled "Close with pending work" when its branch has pending work).
-  $('closedisc').hidden = !room?.multi || !(room.active || room.brainstorm || room.open?.length > 1);
+  $('closedisc').hidden = !(canBoardAct && room?.multi && (room.active || room.brainstorm || room.open?.length > 1));
   updateCloseButton();
+  $('board-actions').hidden = !canBoardAct || ($('convert').hidden && $('closedisc').hidden);
   if (room?.multi) {
     $('newdisc').title = 'Open a new discussion beside this one, which stays open (click it in Boards to show it again).';
     $('newbrainstorm').title = 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.';
   }
-  $('actions-menu').hidden = ['summary', 'new-discussion'].every((id) => $(id).hidden);
+  $('actions-menu').hidden = ['summary', 'board-actions'].every((id) => $(id).hidden);
   if (peeking && !viewing) {
     const noticeText = 'Peeking at ' + displayTitle(peeking.name, peeking.title) + '. Read-only — click Back to return to the active discussion.' + (peeking.doc ? '' : ' No notes to show.');
     const fillPeekBanner = (target) => {
@@ -2845,7 +2850,7 @@ function renderBoards() {
 
   const currentWorker = room?.open?.find((o) => o.current)?.working ? ' · worker working' : '';
   if (room?.brainstorm && canAct) {
-    discSection.append(el('span', 'hint', 'A brainstorm is shown: it is listed in Brainstorms. Turn it into a discussion (Actions ▾) to have it here.'));
+    discSection.append(el('span', 'hint', 'A brainstorm is shown: it is listed in Brainstorms. Turn it into a discussion (Actions ▾ on the tab bar) to have it here.'));
   } else if (!discussions.length && !unstartedOpen.length && !replica?.received?.some((l) => !l.local)) {
     discSection.append(el('span', 'hint', (room?.started ? '' : 'No active discussions: your first message starts one.') + currentWorker));
   } else if (room && !room.started && canAct) {
@@ -2978,7 +2983,7 @@ function renderBoards() {
   const brainNames = brainOrder ?? discussionsIn('brainstorms');
   const brainSection = makeSection('brainstorms', 'Brainstorms', brainNames.length);
   if (room?.brainstorm && !room.active && canAct) brainSection.append(el('span', 'hint', 'Your first message names this brainstorm and saves it here.'));
-  else if (!brainNames.length) brainSection.append(el('span', 'hint', "No brainstorms yet: New brainstorm (in the header's Actions ▾) starts one."));
+  else if (!brainNames.length) brainSection.append(el('span', 'hint', 'No brainstorms yet: + New brainstorm above starts one.'));
   const canOrderBrain = canAct && !!brainOrder && brainNames.length > 1;
   for (const [i, b] of brainNames.entries()) {
     const path = 'brainstorms/' + b;

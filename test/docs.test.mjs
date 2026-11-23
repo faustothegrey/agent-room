@@ -3277,3 +3277,72 @@ test('worker state refreshes via __workerinfo when Actions ▾ opens, on focus/v
   await discardConfirm.onclick();
   assert.deepEqual(posts.map((p) => p.path), ['__discard', '__discard', '__workerinfo']);
 });
+
+test('relocated controls: + New discussion / + New brainstorm sit at top of Boards, Actions ▾ sits on #tabs next to Side pane, and #disc-zone has no actions menu', async () => {
+  const s = await serve(fixture(), { clients: new Set(), transcript: [] });
+  const html = await (await s.get('/__room')).text();
+  s.close();
+
+  const header = html.slice(html.indexOf('<header id="header">'), html.indexOf('</header>'));
+  const discZone = header.slice(header.indexOf('<div id="disc-zone"'), header.indexOf('<div id="server-zone"'));
+  assert.doesNotMatch(discZone, /id="actions-menu"|id="newdisc"|id="newbrainstorm"|id="summary"|id="closedisc"/);
+  assert.match(discZone, /id="disc"/);
+  assert.match(discZone, /id="disc-status"/);
+  assert.match(discZone, /id="disc-workers"/);
+
+  const listPanel = html.slice(html.indexOf('<aside id="list-panel"'), html.indexOf('</aside>'));
+  assert.match(listPanel, /id="list-head"[\s\S]*id="list-new"[\s\S]*id="newdisc"[^>]*>\+ New discussion<\/button>[\s\S]*id="newbrainstorm"[^>]*>\+ New brainstorm<\/button>[\s\S]*id="list-pane"/);
+  assert.match(html, /body\.list-collapsed #list-title, body\.list-collapsed #list-new, body\.list-collapsed #list-pane \{ display: none; \}/);
+
+  const tabs = html.slice(html.indexOf('<div id="tabs"'), html.indexOf('<div class="view" id="talk"'));
+  assert.match(tabs, /id="tab-talk"[\s\S]*id="tab-work"[\s\S]*id="tab-controls"[\s\S]*id="actions-menu"[\s\S]*>Actions<\/summary>[\s\S]*id="summary"[\s\S]*id="board-actions"[\s\S]*id="convert"[\s\S]*id="closedisc"[\s\S]*id="closemerge"[\s\S]*id="closediscard"[\s\S]*id="side-open"/);
+  assert.doesNotMatch(tabs, /id="newdisc"|id="newbrainstorm"/);
+
+  // Exercise updateReplicaView visibility rules for #list-new, #newdisc, #board-actions, #actions-menu.
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const viewCode = source.slice(source.indexOf('function updateReplicaView()'), source.indexOf('async function remoteFiles()'));
+  const node = (tag = 'div') => ({
+    tag, hidden: false, disabled: false, title: '', textContent: '', dataset: {}, style: {}, children: [],
+    append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+  });
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const harness = new Function('$', 'document', 'box',
+    'let room = null, viewing = null, peeking = null, localInput = true, attaching = false, pending = [], viewExpired = false, viewNotice = null, localThinking = null, localWorking = null, replica = { node: "local", own: {}, received: [] };\n' +
+    'const updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, renderAutoDev = () => {}, updateCloseButton = () => {}, renderAttachments = () => {}, talkStatus = () => "", receivedTime = () => "", currentTitle = () => "", updateTabTitle = () => {}, displayTitle = (n, t) => t || n || "";\n' +
+    viewCode + '\n' +
+    'return { update: (r, v = null, p = null) => { room = r; viewing = v; peeking = p; updateReplicaView(); } };'
+  )($, { createElement: node }, node('textarea'));
+
+  // Fresh unstarted single discussion: + New brainstorm shown, + New discussion hidden, Actions shows only Summarize (no board-actions).
+  harness.update({ active: null, brainstorm: false, multi: true, open: [{ current: true }] });
+  assert.equal($('list-new').hidden, false);
+  assert.equal($('newdisc').hidden, true);
+  assert.equal($('board-actions').hidden, true);
+  assert.equal($('actions-menu').hidden, false);
+
+  // Active discussion: both + New buttons shown, board-actions shown with Close.
+  harness.update({ active: 'discussions/2026-11-23-a', brainstorm: false, multi: true, open: [{ current: true }] });
+  assert.equal($('list-new').hidden, false);
+  assert.equal($('newdisc').hidden, false);
+  assert.equal($('convert').hidden, true);
+  assert.equal($('closedisc').hidden, false);
+  assert.equal($('board-actions').hidden, false);
+  assert.equal($('actions-menu').hidden, false);
+
+  // Active brainstorm: Turn into a discussion and Close shown.
+  harness.update({ active: 'brainstorms/2026-11-23-b', brainstorm: true, multi: true, open: [{ current: true }] });
+  assert.equal($('convert').hidden, false);
+  assert.equal($('closedisc').hidden, false);
+  assert.equal($('board-actions').hidden, false);
+
+  // Read-only (peeking): both #list-new and #actions-menu hidden.
+  harness.update({ active: 'discussions/2026-11-23-a', brainstorm: false, multi: true, open: [{ current: true }] }, null, { title: 'Other', doc: null });
+  assert.equal($('list-new').hidden, true);
+  assert.equal($('actions-menu').hidden, true);
+
+  // Updated hints no longer mention "header's Actions ▾".
+  assert.doesNotMatch(source, /header's Actions/);
+  assert.match(source, /No brainstorms yet: \+ New brainstorm above starts one\./);
+  assert.match(source, /Turn it into a discussion \(Actions ▾ on the tab bar\) to have it here\./);
+});
