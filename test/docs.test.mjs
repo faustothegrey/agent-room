@@ -3897,3 +3897,20 @@ test('Boards rows mark unresolved worker conflicts as waiting for input with too
     conflict: null,
   });
 });
+
+test('setRoom does not auto-open the Providers service when creating a new discussion', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const titleCode = source.slice(source.indexOf('function displayTitle('), source.indexOf('let subtab ='));
+  const roomCode = source.slice(source.indexOf('let room = null;\nfunction setRoom('), source.indexOf('// Settings stay outside'));
+  const node = (tag = 'span') => ({ tag, textContent: '', title: '', hidden: false, open: false, dataset: {}, children: [],
+    replaceChildren(...items) { this.children = items; }, append(...items) { this.children.push(...items); } });
+  const els = { 'room-name': node('b'), disc: node('span'), code: node('span'), 'talk-settings': node('details') };
+  const shownTabs = [];
+  const harness = new Function('$', 'document', 'localInput', 'peeking', 'tab', 'showTab', 'renderAutoDev', 'updateReplicaView', 'updateTabs',
+    titleCode + '\n' + roomCode + '\nreturn { setRoom };')(
+    (id) => els[id], { createElement: (tag) => node(tag) }, true, null, 'talk', (t) => shownTabs.push(t), () => {}, () => {}, () => {});
+
+  harness.setRoom({ folder: '/tmp/project', active: null, discussion: null, fresh: true, started: false });
+  assert.deepEqual(shownTabs, []);
+  assert.equal(els['talk-settings'].open, true);
+});

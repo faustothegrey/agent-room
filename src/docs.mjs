@@ -3488,7 +3488,7 @@ function setRoom(r) {
   if (changed) { peek = null; updateTabs(); }
   // The members panel follows the room: each agent's state, or the usual panel once a new discussion begins.
   if (membersModels && $('talk-settings').open) { if (!r?.fresh) renderMembers(); else $('talk-settings').ontoggle(); }
-  if (fresh) { $('talk-settings').open = true; if (localInput) showTab('providers'); }
+  if (fresh) $('talk-settings').open = true;
   renderAutoDev();
   $('room-name').textContent = r.folder?.replace(/[/]+$/, '').split('/').pop() || r.folder || 'agent-room';
   $('disc').textContent = displayTitle(r.active?.split('/').at(-1), r.discussion);
@@ -3688,8 +3688,8 @@ for (const scope of ['talk', 'work']) {
   form.onsubmit = (e) => { e.preventDefault(); saveChanges(); };
 }
 // The Providers tab: the defaults for new discussions, members and worker together, saved to the
-// shared defaults file (every room). Before this discussion starts they apply to it too. Shown
-// first on a new discussion; the Discussion and Worker tabs' own panels work as before.
+// shared defaults file (every room). Before this discussion starts they apply to it too; the
+// Discussion and Worker tabs' own panels work as before.
 let providerRows = null;
 async function renderProviders() {
   const status = $('providers-status'), agentsBox = $('providers-agent-rows'), workerBox = $('providers-worker-row'), note = $('providers-member-note');
