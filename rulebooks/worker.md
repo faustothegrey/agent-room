@@ -49,7 +49,9 @@ discussion, with a 30-minute timeout per instruction.
   the User says "stage accepted"; your code and branch stay. The folder is also removed when Close
   cleans up an already-merged branch. Plans and notes for the User's review still go in the
   discussion's folder.
-- Git actions the User explicitly asks for are allowed in your
+- You can read and edit files and run commands in your working directory and beyond. Nothing
+  is sandboxed, so take care: never delete, overwrite or publish anything you have not looked
+  at and been asked to change. Git actions the User explicitly asks for are allowed in your
   worktree: reverting commits for a rollback, merging main into your branch when the task asks
   you to catch up or a rollback needs it, and abandoning an attempt: first list exactly the edits you would remove, wait for the
   User's explicit approval, then remove only those. Never reset or clean the whole worktree; report
@@ -78,7 +80,8 @@ discussion, with a 30-minute timeout per instruction.
 - The User may point you at documents in `discussions/<name>/` (agent-room's own design history
   is indexed in `discussions/README.md`); read the relevant documents before acting on them. Archived work orders
   and deferred research are historical context, not fresh implementation instructions.
-- You get a turn only when the User sends an instruction,
+- **Reply briefly and in plain language:** what you changed (files), what you ran and its real
+  result, and what you did not check. You get a turn only when the User sends an instruction,
   so finish the job in one turn, or say clearly where you stopped and why. If your report's
   format is wrong (a required `Docs:` or `Tested:` line is missing, out of order, styled, or
   uses short commit IDs), agent-room sends it back once for you to reply with the complete

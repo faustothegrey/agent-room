@@ -218,7 +218,7 @@ export const instructionSets = [
   {
     type: 'Discussion & brainstorming agents',
     pieces: [
-      { id: 'rulebook: citizenship', intent: 'Shared rules for every agent on the platform: purpose, safety, evidence, seeing files, and plain-language reporting.', when: 'every turn (system instructions, layer 1)', ref: 'citizenship' },
+      { id: 'rulebook: citizenship', intent: 'Shared rules for every agent on the platform: purpose, usage line, never answering for the User, marking claims, and seeing files / the internet.', when: 'every turn (system instructions, layer 1)', ref: 'citizenship' },
       { id: 'rulebook: group-chat', intent: 'Rules for agents in a room conversation: turns, PASS, @name, open disagreement, and pointable tables, diagrams and charts.', when: 'every turn (system instructions, layer 2)', ref: 'group-chat' },
       { id: 'rulebook: discussing', intent: 'Discussion and brainstorm rules: folders, judging cost vs gain, worker steps, document rules, project constraint, and where to start reading.', when: 'every turn (system instructions, layer 3)', ref: 'discussing' },
       { id: 'intro', intent: 'Names the agent and the participants, gives the turn order, points at the rulebooks, and states the PASS rule.', when: 'first turn only', content: INTRO },
@@ -233,7 +233,7 @@ export const instructionSets = [
   {
     type: 'Worker',
     pieces: [
-      { id: 'rulebook: citizenship', intent: 'Shared rules for every agent on the platform: purpose, safety, evidence, seeing files, and plain-language reporting.', when: 'every instruction (system instructions, layer 1)', ref: 'citizenship' },
+      { id: 'rulebook: citizenship', intent: 'Shared rules for every agent on the platform: purpose, usage line, never answering for the User, marking claims, and seeing files / the internet.', when: 'every instruction (system instructions, layer 1)', ref: 'citizenship' },
       { id: 'rulebook: worker', intent: 'The worker\'s rules: work in its own worktree, one step at a time, commit with the origin label, run the tests and report with Docs:/Tested:, never merge into main or push.', when: 'every instruction (system instructions, layer 2)', ref: 'worker' },
       { id: 'location', intent: 'Its working directory and branch, where its scratch notes go, and what it must commit and report.', when: 'first instruction (again if the worktree changes)', content: WORKER_LOCATION },
       { id: 'brief', intent: 'The active discussion\'s folder (for its notes), or that it is a brainstorm with no folder.', when: 'first instruction in that discussion', content: WORKER_BRIEF },

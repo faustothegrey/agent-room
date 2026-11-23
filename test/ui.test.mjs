@@ -6534,6 +6534,7 @@ test('layered rulebooks: joined system instructions, Instructions panel, and Rel
     prev = idx;
   }
   assert.doesNotMatch(d, /for the WORKER agent only/);
+  assert.doesNotMatch(d, /Nothing\s+is sandboxed|Reply briefly and in plain language/);
 
   // Layer order and expected sections in worker instructions (citizenship + worker, no group-chat/discussing).
   const w = ctx.rulebooks.worker;
