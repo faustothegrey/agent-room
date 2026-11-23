@@ -48,7 +48,7 @@ hover or focus the room name for the full **root folder** and, when replication 
 replication line. Under the room name is **● Server ▾** (blue, or red when down), whose menu holds
 **Reload**, **Restart** and **Shutdown server**; hover or focus **Server** for its uptime, port and
 the server's version. An amber ⚠ to the right of **Server** means a replication peer is unreachable
-(hover for how many); click it to open **Peers…**. **Busy workers** (green, hidden when no workers are busy): every open discussion whose worker is working is listed, one per line,
+(hover for how many); click it to open **Peers…**. **Activity** (green, always shown): system messages on the left (the latest two lines, with errors in red and the full text on hover, kept across discussion switches), and on the right every open discussion whose worker is working, one per line,
 as `<title> · Worker is working` (the shown discussion included). **Monitoring** (amber): the monitor panel, with the subscription usage gauges
 and a warning per provider (below).
 
