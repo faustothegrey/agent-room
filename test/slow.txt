@@ -104,3 +104,4 @@ workbench: /workbench creates discussions/<date>-<title>/ with .workbench marker
 workbench: Close skips closing-statement agent, waits for running worker task, keeps worktree with pending work, and Resume restores worker conversation without closing-statement.md
 workbench: Close and Merge and Close and Discard close without closing-statement.md and handle worktree/branch as for a discussion
 workbench: worker prompt paragraph reaches only workbench tasks (not discussion tasks)
+overlapping refreshWorker calls cannot leave an older result shown last
