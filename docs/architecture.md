@@ -204,20 +204,23 @@ every other agent then replies `PASS` to it. Each agent gets at most three turns
 
 ![The summary procedure: drafter rotation, agreement and the empty, failed and not agreed outcomes](diagrams/summary-procedure.svg)
 
-**The format agents are asked to follow (contract).** `summaryFormat` in `src/room.mjs`:
+**The format agents are asked to follow (contract).** `summaryFormat` in `src/instructions.mjs`:
 
 ```text
 **Agreed**
 - …
-**Not agreed**
+**Disputed**
 - the point: each side's view, by name
+**Open**
+- the point: what it waits for: a User decision, a check, a worker report
+Put a disagreement under Disputed only; under Open, don't repeat the Next step question.
 **Next step**
 - Answer: a question / Send to the Worker: "the instruction, word for word" / Do: an action of the User's own
 **Later**
 - the remaining actions in order, one short line each, each saying what it waits for
 ```
 
-Empty sections are left out; at most eight points under Agreed and Not agreed; Next step holds
+Empty sections are left out; at most eight points under Agreed, Disputed and Open; Next step holds
 exactly one action for the User. An instruction for the worker is kept until the User confirms
 it was sent, replaced or withdrawn, quoted word for word when it is the Next step (in a
 discussion, its full text is also kept in the discussion's `pending-instructions.md`).
