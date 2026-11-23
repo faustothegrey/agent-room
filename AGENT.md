@@ -10,11 +10,12 @@ The owner (and User in agent-room) is Fausto; agents may address Fausto by name.
 Current setup, behavior and the source map are in `README.md`. Remaining decisions and
 historical material are in `discussions/` (start at `discussions/README.md`).
 
-**Brainstorming agents** (the discussion agents agent-room starts in a room) follow
-`rulebooks/brainstorming.md`: it is their main reference, sent to them as system
-instructions by the harness. It is **not** your rulebook: if you are working on agent-room's
-code, edit that file like any other source and follow these instructions instead. The separate
-worker receives `rulebooks/worker.md`; that rulebook is also source, not your rulebook.
+**Discussion and brainstorm agents** (the agents agent-room starts in a room) follow
+`rulebooks/citizenship.md`, `rulebooks/group-chat.md` and `rulebooks/discussing.md`, joined in
+that order and sent to them as system instructions by the harness. They are **not** your rulebook:
+if you are working on agent-room's code, edit those files like any other source and follow these
+instructions instead. The separate worker receives `rulebooks/citizenship.md` followed by
+`rulebooks/worker.md`; those rulebooks are also source, not your rulebook.
 
 1. **Report real output.** Never say something passed without running it and reading the result.
 2. **Small diffs.** Change only what the task needs.

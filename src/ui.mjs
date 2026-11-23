@@ -66,7 +66,7 @@ checkpoint for good), /move <name> active|archive|deferred (move a whole discuss
 and the worker's reports, for up to 5 worker cycles), /summary (the agents agree a short
 summary by points; only the result is shown; a summary also follows every round in which an
 agent spoke), /usage (tokens this session and subscription quotas),
-/reload (load edited code and both agent rulebooks, in every room; conversations continue), /restart
+/reload (load edited code and all agent rulebooks, in every room; conversations continue), /restart
 (screen only: a new process on the same port, with every room, each in its discussion in use, from
 its checkpoint), /quit (Quit room: ends this room only, after its round in progress or at most 30s,
 then stopping its agent and worker programs), /shutdown (screen only: Shutdown server, ending every
@@ -265,7 +265,7 @@ export function monitorAgentTurns(agent, session, records) {
   return agent;
 }
 
-// Imports fresh copies of the modules and the two rulebooks and builds a room on ctx.state, and the worker. Returns
+// Imports fresh copies of the modules and the rulebook layers and builds a room on ctx.state, and the worker. Returns
 // the parts to put into ctx; if anything fails it throws, leaving ctx as it was (at most an
 // unused empty session added).
 export async function load(ctx, v) {
@@ -280,8 +280,12 @@ export async function load(ctx, v) {
     ctx.workerSpec ??= saved ? specFor(saved.worker) : 'claude:Worker';
   }
   const instr = await import(`./instructions.mjs${v}`);
-  const instructions = readFileSync(instr.rulebookPath('brainstorming'), 'utf8');
-  const workerInstructions = readFileSync(instr.rulebookPath('worker'), 'utf8');
+  const readRulebook = (name) => readFileSync(ctx.rulebooksDir ? join(ctx.rulebooksDir, instr.RULEBOOKS[name]) : instr.rulebookPath(name), 'utf8');
+  const readRulebooks = (kind) => instr.RULEBOOK_LAYERS[kind]
+    .map((name) => readRulebook(name).trimEnd())
+    .join('\n\n');
+  const instructions = readRulebooks('discussing');
+  const workerInstructions = readRulebooks('worker');
   const { createAgent, claudeTitle, run, findLeftovers, parseCodexEvents, parseAgyOutput } = await import(`./agents.mjs${v}`);
   const { createRoom, closingStatement, formattedTurn } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
@@ -354,6 +358,7 @@ export async function load(ctx, v) {
       closingStatement(agent, options, instr),
     suggestTitle: (message, options) => claudeTitle(message, { ...options, runner }, instr),
     instructions: instr,
+    rulebooks: { discussing: instructions, worker: workerInstructions },
     formattedTurn };
 }
 
@@ -384,10 +389,11 @@ const when = (d) => d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 
 // resolved to its current file text (read afresh, so an edited rulebook shows its new content).
 function instructionRegistry(ctx) {
   const instr = ctx.instructions ?? defaultInstructions;
+  const pathFor = (name) => (ctx.rulebooksDir ? join(ctx.rulebooksDir, instr.RULEBOOKS[name]) : instr.rulebookPath(name));
   return instr.instructionSets.map((set) => ({
     type: set.type,
     pieces: set.pieces.map((piece) => piece.ref
-      ? { id: piece.id, intent: piece.intent, when: piece.when, content: readFileSync(instr.rulebookPath(piece.ref), 'utf8') }
+      ? { id: piece.id, intent: piece.intent, when: piece.when, content: readFileSync(pathFor(piece.ref), 'utf8') }
       : { id: piece.id, intent: piece.intent, when: piece.when, content: piece.content }),
   }));
 }
@@ -3537,7 +3543,7 @@ export async function reloaded(ctx) {
   // A relay whose worker result can't come back any more: pause visibly rather than send again.
   const run = ctx.autoDev;
   if (run?.status === 'running' && run.waiting && !runningTasks(shopOf(ctx)).some((t) => t.origin === ctx) && !ctx.workPending) pauseAutoDev(ctx, 'the worker\'s result was lost in the Reload');
-  note(ctx, 'Reloaded the code and the agents\' rulebook; the conversation continues.\n');
+  note(ctx, 'Reloaded the code and the agents\' rulebooks; the conversation continues.\n');
   toScreen(ctx, { type: 'reloaded', page: ctx.docs.PAGE }); // pages refresh if their code changed
   // The header's version: the checkout as it is at this Reload (the start's snapshot is kept).
   const at = new Date().toISOString();

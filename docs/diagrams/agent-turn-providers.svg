@@ -12,7 +12,7 @@
   <rect x="20" y="62" width="1040" height="60" rx="4" fill="#f3f7fb" stroke="#1168bd"/>
   <text x="34" y="82" fill="#1168bd" font-weight="bold" font-size="13">Caller: room.mjs takeTurn() (discussion / summary, 5 min timeout) or ui.mjs worker lane (30 min timeout)</text>
   <text x="34" y="100" fill="#333">Calls <tspan font-family="monospace">agent.turn(prompt)</tspan>. Holds <tspan font-family="monospace">session</tspan> object in memory (and in checkpoints) so IDs survive Reload, Resume and Restart.</text>
-  <text x="34" y="115" fill="#b07a1f" font-size="11">Role instructions: rulebooks/brainstorming.md (discussion) or rulebooks/worker.md (worker), re-read on Reload.</text>
+  <text x="34" y="115" fill="#b07a1f" font-size="11">Role instructions: citizenship.md + group-chat.md + discussing.md (discussion) or citizenship.md + worker.md (worker), re-read on Reload.</text>
 
   <!-- Arrows to 3 adapters -->
   <line x1="190" y1="122" x2="190" y2="146" stroke="#444" marker-end="url(#a)"/>

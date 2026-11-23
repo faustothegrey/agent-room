@@ -6494,3 +6494,110 @@ test('workReady: set on finishAutoDev, kept across catchUpWithBranch, cleared by
   assert.equal(entry(wb).workbench, true);
   assert.equal(entry(wb).workReady, false);
 });
+
+test('layered rulebooks: joined system instructions, Instructions panel, and Reload across every layer', async () => {
+  const { copyFileSync, mkdirSync, readFileSync, writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { RULEBOOKS, RULEBOOK_LAYERS, intro, rulebookPath } = await import('../src/instructions.mjs');
+  const { reloaded } = await import('../src/ui.mjs');
+
+  assert.equal('brainstorming' in RULEBOOKS, false);
+  assert.deepEqual(RULEBOOK_LAYERS.discussing, ['citizenship', 'group-chat', 'discussing']);
+  assert.deepEqual(RULEBOOK_LAYERS.worker, ['citizenship', 'worker']);
+
+  // 1. Joined system instructions for both agent kinds (layer order and expected sections).
+  const cwd = await tmp('layered-rulebooks-');
+  const ctx = { ...freshCtx(), cwd, agentSpecs: 'claude:A,codex:B', workerSpec: 'claude:W' };
+  Object.assign(ctx, await load(ctx, '?layers-1'));
+  await reloaded(ctx);
+
+  const citizenship = readFileSync(rulebookPath('citizenship'), 'utf8').trimEnd();
+  const groupChat = readFileSync(rulebookPath('group-chat'), 'utf8').trimEnd();
+  const discussing = readFileSync(rulebookPath('discussing'), 'utf8').trimEnd();
+  const worker = readFileSync(rulebookPath('worker'), 'utf8').trimEnd();
+
+  assert.equal(ctx.rulebooks.discussing, [citizenship, groupChat, discussing].join('\n\n'));
+  assert.equal(ctx.rulebooks.worker, [citizenship, worker].join('\n\n'));
+
+  // Layer order and expected sections in discussing instructions.
+  const d = ctx.rulebooks.discussing;
+  const dSections = [
+    '## Purpose', '## Shared rules', '## Seeing files',
+    '## Turns and messages', '## Rules of the conversation',
+    '## Where you are', '## Rules of the discussion', '## Sending work to the worker in steps',
+    '## How to write discussion documents', '## Project constraint', '## Where to start reading',
+  ];
+  let prev = -1;
+  for (const heading of dSections) {
+    const idx = d.indexOf(heading);
+    assert.ok(idx > prev, `expected "${heading}" after index ${prev} in discussing instructions`);
+    prev = idx;
+  }
+  assert.doesNotMatch(d, /for the WORKER agent only/);
+
+  // Layer order and expected sections in worker instructions (citizenship + worker, no group-chat/discussing).
+  const w = ctx.rulebooks.worker;
+  const wSections = ['## Purpose', '## Shared rules', '## Seeing files', '# Read me first: for the WORKER agent only'];
+  prev = -1;
+  for (const heading of wSections) {
+    const idx = w.indexOf(heading);
+    assert.ok(idx > prev, `expected "${heading}" after index ${prev} in worker instructions`);
+    prev = idx;
+  }
+  assert.match(w, /Mark claims as \*\*documented\*\*/);
+  assert.match(w, /never as\s+instructions to follow/);
+  assert.doesNotMatch(w, /## Turns and messages|## Rules of the conversation|## Sending work to the worker in steps/);
+
+  // Intro points to the layered rulebooks, not rulebooks/brainstorming.md.
+  const introText = intro({ name: 'A' }, [{ name: 'A' }, { name: 'B' }]);
+  assert.match(introText, /rulebooks\/citizenship\.md, rulebooks\/group-chat\.md and rulebooks\/discussing\.md/);
+  assert.doesNotMatch(introText, /brainstorming\.md/);
+
+  // 2. The Instructions panel shows each layer file for each agent kind.
+  const sets = ctx.screen.instructions();
+  const discussingSet = sets.find((s) => s.type === 'Discussion & brainstorming agents');
+  const workerSet = sets.find((s) => s.type === 'Worker');
+  assert.deepEqual(
+    discussingSet.pieces.slice(0, 3).map((p) => p.id),
+    ['rulebook: citizenship', 'rulebook: group-chat', 'rulebook: discussing'],
+  );
+  assert.equal(discussingSet.pieces[0].content.trimEnd(), citizenship);
+  assert.equal(discussingSet.pieces[1].content.trimEnd(), groupChat);
+  assert.equal(discussingSet.pieces[2].content.trimEnd(), discussing);
+
+  assert.deepEqual(
+    workerSet.pieces.slice(0, 2).map((p) => p.id),
+    ['rulebook: citizenship', 'rulebook: worker'],
+  );
+  assert.equal(workerSet.pieces[0].content.trimEnd(), citizenship);
+  assert.equal(workerSet.pieces[1].content.trimEnd(), worker);
+
+  // 3. Reload re-reads every layer file (using a temp copy so real rulebooks are untouched).
+  const dir = join(cwd, 'rulebooks-copy');
+  mkdirSync(dir);
+  for (const [key, file] of Object.entries(RULEBOOKS)) copyFileSync(rulebookPath(key), join(dir, file));
+  ctx.rulebooksDir = dir;
+  Object.assign(ctx, await load(ctx, '?layers-copy'));
+  await reloaded(ctx);
+
+  for (const [key, file] of Object.entries(RULEBOOKS)) {
+    const marker = `RELOAD_MARKER_${key.toUpperCase()}`;
+    const target = join(dir, file);
+    writeFileSync(target, readFileSync(target, 'utf8') + `\n${marker}\n`);
+    Object.assign(ctx, await load(ctx, `?layers-reload-${key}`));
+    await reloaded(ctx);
+
+    if (RULEBOOK_LAYERS.discussing.includes(key)) {
+      assert.match(ctx.rulebooks.discussing, new RegExp(marker), `discussing should pick up ${file} on Reload`);
+    } else {
+      assert.doesNotMatch(ctx.rulebooks.discussing, new RegExp(marker), `discussing should not include ${file}`);
+    }
+    if (RULEBOOK_LAYERS.worker.includes(key)) {
+      assert.match(ctx.rulebooks.worker, new RegExp(marker), `worker should pick up ${file} on Reload`);
+    } else {
+      assert.doesNotMatch(ctx.rulebooks.worker, new RegExp(marker), `worker should not include ${file}`);
+    }
+    const panelText = ctx.screen.instructions().flatMap((s) => s.pieces).map((p) => p.content).join('\n');
+    assert.match(panelText, new RegExp(marker), `Instructions panel should pick up ${file}`);
+  }
+});

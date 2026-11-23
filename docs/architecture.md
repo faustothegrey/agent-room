@@ -114,9 +114,10 @@ example through `--mcp-config` or a provider's equivalent). agent-room adds none
 
 ### Role instructions and Agent Skills
 
-- **Role instructions** are agent-room's own protocols: `rulebooks/brainstorming.md` for
-  the discussion agents and `rulebooks/worker.md` for the worker, plus the per-turn
-  prompts above. They are always loaded, on every turn.
+- **Role instructions** are agent-room's own protocols, layered from `.md` files:
+  `rulebooks/citizenship.md` + `rulebooks/group-chat.md` + `rulebooks/discussing.md` for
+  the discussion and brainstorm agents, and `rulebooks/citizenship.md` + `rulebooks/worker.md`
+  for the worker, plus the per-turn prompts above. They are always loaded, on every turn.
 - **Skills** are optional [Agent Skills](https://agentskills.io/specification) packages from the
   provider or the User. agent-room ships none; a Claude agent can use the ones its CLI finds
   (the `Skill` tool is allowed). Skills are usually loaded on demand, so rules that must always

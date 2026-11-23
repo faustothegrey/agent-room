@@ -622,7 +622,7 @@ node src/cli.mjs --help
 | `/summary` | Request an agreed summary. |
 | `/autodev` | Start (or restart) auto dev from the latest agreed summary's worker instruction. |
 | `/usage` | Show session tokens and subscription quotas. |
-| `/reload` | Reload source modules and both agent rulebooks; retain conversation and provider sessions. |
+| `/reload` | Reload source modules and all agent rulebooks; retain conversation and provider sessions. |
 | `/restart` | Screen only: a new server process on the same port, with every room, each resuming its discussion in use from its checkpoint. |
 | `/quit` | Quit room: end this room only, closing every discussion open in its folder and stopping its running agent and worker programs. |
 | `/shutdown` | Screen only: Shutdown server, ending every room (the same as `POST /__shutdown`). |
@@ -913,7 +913,7 @@ display, or live app preview. Discussion-to-worker relay exists only as auto dev
 ## Working on the project
 
 Read [AGENT.md](AGENT.md) for contribution rules and [docs/architecture.md](docs/architecture.md)
-for the design. The two agent rulebooks apply only to agents
+for the design. The agent rulebooks apply only to agents
 started by the room in their respective roles; they are not instructions for someone editing
 agent-room's source.
 
@@ -935,7 +935,7 @@ Run `npm test` for the fast suite, `npm run test:slow` for the slow suite, or `n
 settings persistence across CLI restarts, and screen/terminal coordination; they do not establish
 live provider access or browser appearance.
 
-Edits outside `cli.mjs`, `host-shell.mjs` and `notes.mjs` can be loaded with Reload; both rulebooks are reread too. A failed load
+Edits outside `cli.mjs`, `host-shell.mjs` and `notes.mjs` can be loaded with Reload; all rulebooks are reread too. A failed load
 leaves the previous code running. `cli.mjs`, `host-shell.mjs` and `notes.mjs` changes require Restart. Browser assets are embedded
 in `docs.mjs`; after a Reload, open pages refresh by themselves when they changed.
 
@@ -978,9 +978,11 @@ a fresh room on top of the existing `ctx` and returns only the parts that can ch
 merges them back with `Object.assign`. A load that fails throws before anything is merged, so the
 previous code keeps running and the rooms report the error.
 
-The agent rulebooks are not modules. They are `.md` files (`rulebooks/brainstorming.md` and
-`rulebooks/worker.md`) reread from disk with `readFileSync` on every load, so an edit is picked up
-by the same Reload with no cache-busting.
+The agent rulebooks are not modules. They are layered `.md` files (`rulebooks/citizenship.md`,
+`rulebooks/group-chat.md` and `rulebooks/discussing.md` joined for discussion and brainstorm agents;
+`rulebooks/citizenship.md` and `rulebooks/worker.md` joined for the worker) reread from disk with
+`readFileSync` on every load, so an edit to any layer is picked up by the same Reload with no
+cache-busting.
 
 The prompt templates in `instructions.mjs` need the same freshness, but the turn logic in
 `room.mjs` and `agents.mjs` calls them through a static default import. The two are bridged by a

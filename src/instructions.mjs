@@ -3,9 +3,18 @@
 // A `content` string with {placeholders} shows the template as the panel renders it; the builder
 // next to it fills those placeholders with live values.
 
-// The rulebooks, sent verbatim as system instructions and re-read on Reload. They stay as files
+// The rulebook layers, joined as system instructions and re-read on Reload. They stay as files
 // (hot-reloadable); the panel reads their current text, the registry points at them by `ref`.
-export const RULEBOOKS = { brainstorming: 'brainstorming.md', worker: 'worker.md' };
+export const RULEBOOKS = {
+  citizenship: 'citizenship.md',
+  'group-chat': 'group-chat.md',
+  discussing: 'discussing.md',
+  worker: 'worker.md',
+};
+export const RULEBOOK_LAYERS = {
+  discussing: ['citizenship', 'group-chat', 'discussing'],
+  worker: ['citizenship', 'worker'],
+};
 export const rulebookPath = (name) => new URL(`../rulebooks/${RULEBOOKS[name]}`, import.meta.url);
 
 // ── Discussion / brainstorming agents ──────────────────────────────────────────────────────
@@ -16,14 +25,14 @@ export function intro(agent, agents) {
     `You are ${agent.name}, one of several AI agents in a group conversation with a human user.`,
     `Participants: the User, ${agents.map((a) => a.name).join(', ')}.`,
     `After each User message, agents take turns in this order: ${order}, until all of them pass in a row.`,
-    'You are a brainstorming agent started by agent-room: your rulebook is rulebooks/brainstorming.md, in your system instructions.',
+    'You are a brainstorming agent started by agent-room: your rulebooks are rulebooks/citizenship.md, rulebooks/group-chat.md and rulebooks/discussing.md, in your system instructions.',
     'When you have nothing to add, reply exactly PASS.',
   ].join('\n');
 }
 export const INTRO = `You are {name}, one of several AI agents in a group conversation with a human user.
 Participants: the User, {participants}.
 After each User message, agents take turns in this order: {order}, until all of them pass in a row.
-You are a brainstorming agent started by agent-room: your rulebook is rulebooks/brainstorming.md, in your system instructions.
+You are a brainstorming agent started by agent-room: your rulebooks are rulebooks/citizenship.md, rulebooks/group-chat.md and rulebooks/discussing.md, in your system instructions.
 When you have nothing to add, reply exactly PASS.`;
 
 export function summaryFormat(brainstorm) {
@@ -209,8 +218,10 @@ export const instructionSets = [
   {
     type: 'Discussion & brainstorming agents',
     pieces: [
-      { id: 'rulebook', intent: 'The agent\'s role and rules: how it behaves, the PASS rule, where it writes, summaries, seeing files, and the closing statement.', when: 'every turn (system instructions)', ref: 'brainstorming' },
-      { id: 'intro', intent: 'Names the agent and the participants, gives the turn order, points at the rulebook, and states the PASS rule.', when: 'first turn only', content: INTRO },
+      { id: 'rulebook: citizenship', intent: 'Shared rules for every agent on the platform: purpose, safety, evidence, seeing files, and plain-language reporting.', when: 'every turn (system instructions, layer 1)', ref: 'citizenship' },
+      { id: 'rulebook: group-chat', intent: 'Rules for agents in a room conversation: turns, PASS, @name, open disagreement, and pointable tables, diagrams and charts.', when: 'every turn (system instructions, layer 2)', ref: 'group-chat' },
+      { id: 'rulebook: discussing', intent: 'Discussion and brainstorm rules: folders, judging cost vs gain, worker steps, document rules, project constraint, and where to start reading.', when: 'every turn (system instructions, layer 3)', ref: 'discussing' },
+      { id: 'intro', intent: 'Names the agent and the participants, gives the turn order, points at the rulebooks, and states the PASS rule.', when: 'first turn only', content: INTRO },
       { id: 'briefing', intent: 'Whether it is a new or continued discussion or brainstorm, its folder, and where to write; a continued session also gets the closing statement or handoff and the latest summary.', when: 'once, with the first prompt (after the folder exists)', content: BRIEFING },
       { id: 'restored', intent: 'One sentence telling the agent its session was restored from a checkpoint, and that turns it remembers after that are not in the room\'s record.', when: 'once, after Resume or Restart', content: RESTORED },
       { id: 'new-messages', intent: 'The messages the agent has not seen yet, labelled by speaker, followed by the reply prompt.', when: 'every turn', content: NEW_MESSAGES },
@@ -222,7 +233,8 @@ export const instructionSets = [
   {
     type: 'Worker',
     pieces: [
-      { id: 'rulebook', intent: 'The worker\'s rules: work in its own worktree, commit with the origin label, run the tests and report, never merge into main or push.', when: 'every instruction (system instructions)', ref: 'worker' },
+      { id: 'rulebook: citizenship', intent: 'Shared rules for every agent on the platform: purpose, safety, evidence, seeing files, and plain-language reporting.', when: 'every instruction (system instructions, layer 1)', ref: 'citizenship' },
+      { id: 'rulebook: worker', intent: 'The worker\'s rules: work in its own worktree, one step at a time, commit with the origin label, run the tests and report with Docs:/Tested:, never merge into main or push.', when: 'every instruction (system instructions, layer 2)', ref: 'worker' },
       { id: 'location', intent: 'Its working directory and branch, where its scratch notes go, and what it must commit and report.', when: 'first instruction (again if the worktree changes)', content: WORKER_LOCATION },
       { id: 'brief', intent: 'The active discussion\'s folder (for its notes), or that it is a brainstorm with no folder.', when: 'first instruction in that discussion', content: WORKER_BRIEF },
       { id: 'commit-label', intent: 'The origin label every commit must carry.', when: 'once per worker session (again if the label changes)', content: WORKER_COMMIT },
