@@ -1140,7 +1140,7 @@ async function loadCheckpoint(ctx, saved, name, brainstorm = false, directory = 
       sessions, state, logPath, pendingLog: '', totals: saved.totals ?? {},
       workerBriefed: saved.workerBriefed ?? null, workerTree: saved.workerTree ?? null,
       workerLabel: saved.workerLabel ?? null, workerHandoff: !!saved.workerHandoff, workerSeat: saved.workerSeat ?? randomBytes(6).toString('hex'),
-      agentsStarted: true, autoDev: null, autoDevSent: [], workDispatchedLen: 0, freshSummary: null,
+      agentsStarted: true, autoDev: null, autoDevSent: [], workDispatchedLen: 0, workReady: false, freshSummary: null,
       lastRound: { sessions: saved.sessions.filter(([key]) => !String(key).startsWith('worker:')), state: saved.state, totals: saved.totals ?? {}, doc: saved.doc ?? null },
     });
     const busy = leftWorker(ctx, saved.workerSeat); // its worker, still at work since it was left
@@ -1587,6 +1587,7 @@ function endSession(ctx, why, onReset = null) {
   ctx.autoDev = null; // Resume, Start fresh, New discussion and New brainstorm end an auto dev run
   ctx.autoDevSent = [];
   ctx.workDispatchedLen = 0;
+  ctx.workReady = false;
   Object.assign(screen, { doc: null, thinking: null, status: null, peek: null });
   ctx.logPath = null;
   ctx.pendingLog = '';
@@ -1709,29 +1710,31 @@ function isOngoing(ctx) {
     || !!(shop && ctx.discussion && !ctx.state.brainstorm && shop.closing?.has(ctx.discussion.name));
 }
 function waitingState(ctx) {
+  const workReady = !!ctx.workReady && !ctx.state.brainstorm && !ctx.state.workbench;
   if (ctx.autoDev?.status === 'paused') {
-    return { waitingForInput: true, waitingReason: ctx.autoDev.reason || 'Auto dev paused', readyForAutoDev: false };
+    return { waitingForInput: true, waitingReason: ctx.autoDev.reason || 'Auto dev paused', readyForAutoDev: false, workReady };
   }
   if (ctx.retryFailure?.available) {
     return {
       waitingForInput: true,
       waitingReason: ctx.retryFailure.error ? `Worker failed: ${ctx.retryFailure.error}` : 'Worker failed: Retry available',
       readyForAutoDev: false,
+      workReady,
     };
   }
   const offer = autoDevOffer(ctx);
   if (offer?.error) {
-    return { waitingForInput: true, waitingReason: offer.error, readyForAutoDev: false };
+    return { waitingForInput: true, waitingReason: offer.error, readyForAutoDev: false, workReady };
   }
   const t = ctx.state?.transcript ?? [];
   const last = t.at(-1);
   if (t.length > (ctx.workDispatchedLen ?? 0) && last?.outcome === 'agreed' && summaryHasNextStep(last.text) && !offer?.text) {
-    return { waitingForInput: true, waitingReason: null, readyForAutoDev: false };
+    return { waitingForInput: true, waitingReason: null, readyForAutoDev: false, workReady };
   }
   if (offer?.text) {
-    return { waitingForInput: false, waitingReason: null, readyForAutoDev: true };
+    return { waitingForInput: false, waitingReason: null, readyForAutoDev: true, workReady };
   }
-  return { waitingForInput: false, waitingReason: null, readyForAutoDev: false };
+  return { waitingForInput: false, waitingReason: null, readyForAutoDev: false, workReady };
 }
 function openList(ctx) {
   return siblings(ctx).filter((c) => c.state && c.id && !c.stopped).map((c) => ({ url: pageOf(c), current: c === ctx,
@@ -2545,7 +2548,7 @@ export async function catchUpWithBranch(ctx, name) {
   }
   const target = state.targetBranch;
   const text = `Catch up with ${target}: merge ${target} into ${place.branch} with a normal merge (git merge ${target}). Label any merge commit "[${d.name}] catch up with ${target}". If it clashes, only if every conflict is purely additive (both sides only added independent lines or blocks with no overlapping edits or deletions), resolve it by keeping both additions, stage and commit the merge with the same label, and note what you resolved; for any other conflict, do not force it: leave the state intact and report the conflict. After a successful merge, run the project's tests (npm test, if it has them), report their real output, and end your reply with the line "Tested: <full commit ID of ${place.branch}> with ${target} <full commit ID of ${target}>: tests passed" (or "tests failed"). Never merge into ${target} or push.`;
-  queueWork(opened, text);
+  queueWork(opened, text, null, null, null, { catchUp: true });
   return { ok: true, targetBranch: target };
 }
 
@@ -3087,6 +3090,7 @@ function startAutoDev(ctx) {
     : !s.instruction ? 'the latest agreed summary has no instruction for the worker'
     : s.instruction.error ?? null;
   if (why) return note(ctx, `✗ Auto dev can't start: ${why}.`, true);
+  ctx.workReady = false;
   ctx.autoDev = { status: 'running', cycle: 0, limit: s.steps === null ? AUTO_DEV_CYCLES : Math.min(15, s.steps + 2), lastSteps: s.steps, reason: null, waiting: false, report: null };
   log(ctx, `_(auto dev started: up to ${ctx.autoDev.limit} worker cycles)_\n\n`);
   note(ctx, `Auto dev started: up to ${ctx.autoDev.limit} worker cycles.`);
@@ -3110,6 +3114,10 @@ function relay(ctx, s) {
 // The User typed something: a running auto dev pauses. A worker already running finishes, and its
 // report is still shown and discussed, but nothing more is sent.
 function autoDevInput(ctx, why) {
+  if (ctx.workReady) {
+    ctx.workReady = false;
+    if (ctx.autoDev?.status !== 'running') showHeader(ctx);
+  }
   if (ctx.autoDev?.status === 'running') pauseAutoDev(ctx, why);
 }
 function pauseAutoDev(ctx, reason) {
@@ -3155,6 +3163,7 @@ async function autoDevReport(ctx) {
 }
 function finishAutoDev(ctx, run) {
   Object.assign(run, { status: 'finished', reason: null });
+  ctx.workReady = !ctx.state.brainstorm && !ctx.state.workbench;
   log(ctx, '_(auto dev finished)_\n\n');
   note(ctx, `Auto dev finished. Review and merge ${laneOf(ctx) ? `worker/${laneOf(ctx)}` : WORKER_BRANCH} yourself.`);
   showHeader(ctx);
@@ -3810,6 +3819,7 @@ async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = n
   let roundUsage;
   let spoke = 0; // agent replies that weren't passes or failures
   try {
+    ctx.workReady = false;
     ctx.busy = true;
     showHeader(ctx);
     workNotice(ctx);
@@ -4561,7 +4571,7 @@ export async function retryWork(ctx, id, settings = null) {
     if (settings) await saveSettings(ctx, { ...settings, scope: 'work' });
     if (ctx.retryFailure !== failure || ctx.stopped) throw new Error('This failure is no longer available for retry.');
     if (failure.run && ctx.autoDev === failure.run) failure.run.waiting = true;
-    queueWork(ctx, failure.text, failure.run, failure.rollback, failure);
+    queueWork(ctx, failure.text, failure.run, failure.rollback, failure, { catchUp: !!failure.catchUp });
   } catch (err) {
     if (ctx.retryFailure === failure) failure.available = true;
     showHeader(ctx);
@@ -4583,12 +4593,13 @@ async function sendWorkbenchInstruction(ctx, text) {
   }
   queueWork(ctx, text);
 }
-export function queueWork(ctx, text, run = null, rollback = null, retry = null) {
+export function queueWork(ctx, text, run = null, rollback = null, retry = null, { catchUp = false } = {}) {
   if (ctx.state.brainstorm) return note(ctx, `✗ ${BRAINSTORM_NO_WORK} The instruction was not sent.`, true);
   if (ctx.discussion && shopOf(ctx).closing?.has(ctx.discussion.name)) return note(ctx, '✗ This discussion is closing; the instruction was not sent.', true);
   if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
   if (ctx.stopped) return note(ctx, 'This room is ending: the instruction was not sent.', true);
   ctx.agentsStarted = true;
+  if (!catchUp) ctx.workReady = false;
   const shop = shopOf(ctx);
   let done;
   const finished = new Promise((r) => { done = r; });
@@ -4596,7 +4607,7 @@ export function queueWork(ctx, text, run = null, rollback = null, retry = null) 
   const workName = ctx.discussion && !ctx.state.brainstorm ? ctx.discussion.name : null;
   const record = workName ? { id: randomBytes(6).toString('hex'), task: text, at: new Date().toISOString() } : null;
   shop.sent = (shop.sent ?? 0) + 1; // the order sent, across lanes: one worker session's tasks keep it
-  const task = { origin: ctx, text, run, cycle: retry?.cycle ?? run?.cycle, done, finished, rollback, retry, record, workName, lane: workName, sent: retry?.sent ?? shop.sent, worker: ctx.worker, owner: ownerOf(ctx), label: originLabel(ctx) };
+  const task = { origin: ctx, text, run, cycle: retry?.cycle ?? run?.cycle, done, finished, rollback, retry, catchUp: !!catchUp, record, workName, lane: workName, sent: retry?.sent ?? shop.sent, worker: ctx.worker, owner: ownerOf(ctx), label: originLabel(ctx) };
   const tasks = laneState(shop, workName).tasks;
   if (retry) { const i = tasks.findIndex((t) => t.sent > retry.sent); tasks.splice(i < 0 ? tasks.length : i, 0, task); }
   else tasks.push(task);
@@ -4789,7 +4800,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       out(ctx, red(`\n✗ ${worker.name} (worker) failed: ${entry.text}\n`));
       if (!stopped && !ctx.stopped && record && ownerOf(ctx) === owner) {
         const id = randomBytes(6).toString('hex');
-        ctx.retryFailure = { id, available: true, text: t.retry?.text ?? text, error: entry.text, after: lane?.path ? await git(lane.path, 'rev-parse', 'HEAD').catch(() => null) : null, sent: t.retry?.sent ?? t.sent, cycle, run, rollback };
+        ctx.retryFailure = { id, available: true, text: t.retry?.text ?? text, error: entry.text, after: lane?.path ? await git(lane.path, 'rev-parse', 'HEAD').catch(() => null) : null, sent: t.retry?.sent ?? t.sent, cycle, run, rollback, catchUp: !!t?.catchUp };
         entry.retryId = id;
       }
       show(entry, meta);
