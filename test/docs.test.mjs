@@ -1075,7 +1075,7 @@ test('the room header shows the folder basename, puts the full path in #replica-
   // Exercise setRoom and updateReplicaHeader from the page script.
   const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
   const titleCode = source.slice(source.indexOf('function displayTitle('), source.indexOf('let subtab ='));
-  const replicaCode = source.slice(source.indexOf('const receivedTime ='), source.indexOf('// The status under the title'));
+  const replicaCode = source.slice(source.indexOf('const receivedTime ='), source.indexOf('function talkStatus('));
   const roomCode = source.slice(source.indexOf('let room = null;\nfunction setRoom('), source.indexOf('// Settings stay outside'));
   const node = (tag = 'span') => ({ tag, textContent: '', title: '', hidden: false, dataset: {}, children: [],
     replaceChildren(...items) { this.children = items; }, append(...items) { this.children.push(...items); } });
@@ -1210,18 +1210,34 @@ test('right pane three tabs, header disc-workers, and docLabel behavior', async 
       replaceChildren(...items) { this.children = items; },
     });
     const discWorkers = node('div');
-    const fn = new Function('$', 'document', 'room', titleCode + '\n' + workerCode + '; return updateDiscWorkers;')((id) => id === 'disc-workers' ? discWorkers : null, { createElement: node }, {
-      open: [
-        { active: 'discussions/2026-11-13-topic-a', title: 'Topic A', working: true },
-        { active: 'discussions/2026-11-13-topic-b', title: 'Topic B', working: false },
-        { active: 'discussions/2026-11-13-topic-c', title: '2026-11-13-topic-c', working: 'W' },
-      ],
-    });
+    const discZone = node('div');
+    const fn = new Function('$', 'document', 'room', titleCode + '\n' + workerCode + '; return updateDiscWorkers;')(
+      (id) => (id === 'disc-workers' ? discWorkers : id === 'disc-zone' ? discZone : null),
+      { createElement: node },
+      {
+        open: [
+          { active: 'discussions/2026-11-13-topic-a', title: 'Topic A', working: true },
+          { active: 'discussions/2026-11-13-topic-b', title: 'Topic B', working: false },
+          { active: 'discussions/2026-11-13-topic-c', title: '2026-11-13-topic-c', working: 'W' },
+        ],
+      },
+    );
     fn();
     assert.equal(discWorkers.hidden, false);
+    assert.equal(discZone.hidden, false);
     assert.equal(discWorkers.children.length, 2);
     assert.match(discWorkers.children[0].children[1], /Topic A · Worker is working/);
     assert.match(discWorkers.children[1].children[1], /topic c · Worker is working/);
+
+    // When no workers are busy, both #disc-workers and #disc-zone are hidden.
+    const emptyFn = new Function('$', 'document', 'room', titleCode + '\n' + workerCode + '; return updateDiscWorkers;')(
+      (id) => (id === 'disc-workers' ? discWorkers : id === 'disc-zone' ? discZone : null),
+      { createElement: node },
+      { open: [{ active: 'discussions/2026-11-13-topic-b', title: 'Topic B', working: false }] },
+    );
+    emptyFn();
+    assert.equal(discWorkers.hidden, true);
+    assert.equal(discZone.hidden, true);
 
     // Exercise docLabel
     const labelCode = source.slice(source.indexOf('function docLabel(file) {'), source.indexOf('function currentTitle() {'));
@@ -3112,41 +3128,54 @@ test('Archived and deferred brainstorms appear in Archived · Deferred with read
   assert.equal(sent.at(-1), '/delete brainstorms/archive/2026-11-10-old-idea');
 });
 
-test('relocated controls: + New discussion / + New brainstorm sit at top of Boards, Actions ▾ sits on #tabs next to Side pane, and #disc-zone has no actions menu', async () => {
+test('discussion area header: #disc-header spans #main-panel with title, status, auto dev, and Actions ▾; #disc-zone holds only busy workers', async () => {
   const s = await serve(fixture(), { clients: new Set(), transcript: [] });
   const html = await (await s.get('/__room')).text();
   s.close();
 
   const header = html.slice(html.indexOf('<header id="header">'), html.indexOf('</header>'));
   const discZone = header.slice(header.indexOf('<div id="disc-zone"'), header.indexOf('<div id="server-zone"'));
-  assert.doesNotMatch(discZone, /id="actions-menu"|id="newdisc"|id="newbrainstorm"|id="summary"|id="closedisc"/);
-  assert.match(discZone, /id="disc"/);
-  assert.match(discZone, /id="disc-status"/);
+  assert.doesNotMatch(discZone, /id="disc"|id="disc-status"|id="actions-menu"|id="newdisc"|id="newbrainstorm"|id="summary"|id="closedisc"/);
   assert.match(discZone, /id="disc-workers"/);
+  assert.match(discZone, /<div id="disc-zone"[^>]*hidden/);
+  assert.match(html, /#disc-zone\[hidden\] \{ display: none; \}/);
 
   const listPanel = html.slice(html.indexOf('<aside id="list-panel"'), html.indexOf('</aside>'));
   assert.match(listPanel, /id="list-head"[\s\S]*id="list-new"[\s\S]*id="newdisc"[^>]*>\+ New discussion<\/button>[\s\S]*id="newbrainstorm"[^>]*>\+ New brainstorm<\/button>[\s\S]*id="list-pane"/);
   assert.match(html, /body\.list-collapsed #list-title, body\.list-collapsed #list-new, body\.list-collapsed #list-pane \{ display: none; \}/);
 
-  const tabs = html.slice(html.indexOf('<div id="tabs"'), html.indexOf('<div class="view" id="talk"'));
-  assert.match(tabs, /id="tab-talk"[\s\S]*id="tab-work"[\s\S]*id="tab-controls"[\s\S]*id="actions-menu"[\s\S]*>Actions<\/summary>[\s\S]*id="summary"[\s\S]*id="board-actions"[\s\S]*id="convert"[\s\S]*id="closedisc"[\s\S]*id="closemerge"[\s\S]*id="closediscard"[\s\S]*id="side-open"/);
-  assert.doesNotMatch(tabs, /id="newdisc"|id="newbrainstorm"/);
+  // #disc-header sits at top of #main-panel, spanning both panes (side-by-side and stacked).
+  const mainPanel = html.slice(html.indexOf('<div id="main-panel">'), html.indexOf('<script>'));
+  const discHeader = mainPanel.slice(mainPanel.indexOf('<div id="disc-header"'), mainPanel.indexOf('<div id="left">'));
+  assert.match(discHeader, /id="disc"[\s\S]*id="disc-status"[\s\S]*id="disc-autodev"[\s\S]*id="actions-menu"[\s\S]*>Actions<\/summary>[\s\S]*id="summary"[\s\S]*id="board-actions"[\s\S]*id="convert"[\s\S]*id="closedisc"[\s\S]*id="closemerge"[\s\S]*id="closediscard"/);
+  assert.match(html, /#disc-header \{ grid-column: 1 \/ -1;/);
+  assert.match(html, /#main-panel \{[^}]*grid-template-rows: auto 1fr;/);
+  assert.match(html, /#main-panel\.stacked \{[^}]*grid-template-rows: auto var\(--top, 55%\) 7px 1fr;/);
+  assert.match(html, /#main-panel\.side-closed \{[^}]*grid-template-rows: auto 1fr;/);
 
-  // Exercise updateReplicaView visibility rules for #list-new, #newdisc, #board-actions, #actions-menu.
+  const tabs = html.slice(html.indexOf('<div id="tabs"'), html.indexOf('<div class="view" id="talk"'));
+  assert.match(tabs, /id="tab-talk"[\s\S]*id="tab-work"[\s\S]*id="tab-controls"[\s\S]*id="side-open"/);
+  assert.doesNotMatch(tabs, /id="actions-menu"|id="newdisc"|id="newbrainstorm"/);
+
+  // Exercise updateReplicaView + renderAutoDev: visibility, #disc-autodev states, #autodev paused-only box, and box.placeholder while running.
   const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const autoDevCode = source.slice(source.indexOf('function renderAutoDev()'), source.indexOf('function status('));
   const viewCode = source.slice(source.indexOf('function updateReplicaView()'), source.indexOf('async function remoteFiles()'));
   const node = (tag = 'div') => ({
-    tag, hidden: false, disabled: false, title: '', textContent: '', dataset: {}, style: {}, children: [],
+    tag, hidden: false, disabled: false, title: '', textContent: '', placeholder: '', className: '', dataset: {}, style: {}, children: [],
     append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; },
   });
   const els = {};
   const $ = (id) => els[id] || (els[id] = node(id));
+  const box = node('textarea');
+  box.placeholder = 'Message to the agents…';
   const harness = new Function('$', 'document', 'box',
     'let room = null, viewing = null, peeking = null, localInput = true, attaching = false, pending = [], viewExpired = false, viewNotice = null, localThinking = null, localWorking = null, replica = { node: "local", own: {}, received: [] };\n' +
-    'const updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, renderAutoDev = () => {}, updateCloseButton = () => {}, renderAttachments = () => {}, talkStatus = () => "", receivedTime = () => "", currentTitle = () => "", updateTabTitle = () => {}, displayTitle = (n, t) => t || n || "";\n' +
-    viewCode + '\n' +
+    'const send = () => {}, updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, updateCloseButton = () => {}, renderAttachments = () => {}, talkStatus = () => "", receivedTime = () => "", currentTitle = () => "", updateTabTitle = () => {}, displayTitle = (n, t) => t || n || "";\n' +
+    autoDevCode + '\n' + viewCode + '\n' +
     'return { update: (r, v = null, p = null) => { room = r; viewing = v; peeking = p; updateReplicaView(); } };'
-  )($, { createElement: node }, node('textarea'));
+  )($, { createElement: node, querySelectorAll: () => [] }, box);
 
   // Fresh unstarted single discussion: + New brainstorm shown, + New discussion hidden, Actions shows only Summarize (no board-actions).
   harness.update({ active: null, brainstorm: false, multi: true, open: [{ current: true }] });
@@ -3154,6 +3183,7 @@ test('relocated controls: + New discussion / + New brainstorm sit at top of Boar
   assert.equal($('newdisc').hidden, true);
   assert.equal($('board-actions').hidden, true);
   assert.equal($('actions-menu').hidden, false);
+  assert.equal($('disc-autodev').hidden, true);
 
   // Active discussion: both + New buttons shown, board-actions shown with Close.
   harness.update({ active: 'discussions/2026-11-23-a', brainstorm: false, multi: true, open: [{ current: true }] });
@@ -3164,19 +3194,60 @@ test('relocated controls: + New discussion / + New brainstorm sit at top of Boar
   assert.equal($('board-actions').hidden, false);
   assert.equal($('actions-menu').hidden, false);
 
+  // Auto dev running (worker working / discussion reviewing): shown in #disc-autodev, #autodev hidden, placeholder warns that sending pauses it.
+  harness.update({ active: 'discussions/2026-11-23-a', brainstorm: false, multi: true, open: [{ current: true }], autoDev: { status: 'running', cycle: 2, max: 5, waiting: true } });
+  assert.equal($('disc-autodev').hidden, false);
+  assert.equal($('disc-autodev').textContent, 'Auto dev running · cycle 2 of 5 · worker is working');
+  assert.equal($('autodev').hidden, true);
+  assert.match(box.placeholder, /pauses/i);
+
+  harness.update({ active: 'discussions/2026-11-23-a', brainstorm: false, multi: true, open: [{ current: true }], autoDev: { status: 'running', cycle: 2, max: 5, waiting: false } });
+  assert.equal($('disc-autodev').textContent, 'Auto dev running · cycle 2 of 5 · discussion is reviewing');
+  assert.equal($('autodev').hidden, true);
+
+  // Auto dev paused with offer.text: header shows paused + reason; #autodev shows only next instruction + Restart (no paused header line); placeholder restored.
+  harness.update({ active: 'discussions/2026-11-23-a', brainstorm: false, multi: true, open: [{ current: true }], autoDev: { status: 'paused', reason: 'WAIT FOR USER', max: 5, offer: { text: 'Do step 2' } } });
+  assert.equal($('disc-autodev').hidden, false);
+  assert.equal($('disc-autodev').className, 'paused');
+  assert.equal($('disc-autodev').textContent, 'Auto dev paused · WAIT FOR USER');
+  assert.equal($('autodev').hidden, false);
+  const pausedText = $('autodev').children.map((p) => p.children.map((c) => c.textContent).join('')).join('\n');
+  assert.doesNotMatch(pausedText, /Auto dev paused/);
+  assert.match(pausedText, /Next agreed instruction:/);
+  assert.match(pausedText, /Do step 2/);
+  assert.match(pausedText, /Restart auto dev \(5 more\)/);
+  assert.equal(box.placeholder, 'Message to the agents…');
+
+  // Auto dev paused with offer.error: #autodev shows only the error.
+  harness.update({ active: 'discussions/2026-11-23-a', brainstorm: false, multi: true, open: [{ current: true }], autoDev: { status: 'paused', reason: 'bad format', max: 5, offer: { error: 'missing quotes' } } });
+  assert.equal($('autodev').hidden, false);
+  assert.match($('autodev').children[0].children[0].textContent, /missing quotes/);
+
+  // Auto dev paused with no offer: #autodev stays hidden, #disc-autodev still shows reason.
+  harness.update({ active: 'discussions/2026-11-23-a', brainstorm: false, multi: true, open: [{ current: true }], autoDev: { status: 'paused', reason: 'worker failed', max: 5 } });
+  assert.equal($('disc-autodev').textContent, 'Auto dev paused · worker failed');
+  assert.equal($('autodev').hidden, true);
+
+  // Auto dev finished: shown in #disc-autodev, #autodev hidden.
+  harness.update({ active: 'discussions/2026-11-23-a', brainstorm: false, multi: true, open: [{ current: true }], autoDev: { status: 'finished' } });
+  assert.equal($('disc-autodev').hidden, false);
+  assert.equal($('disc-autodev').textContent, 'Auto dev finished · review and merge its worker branch');
+  assert.equal($('autodev').hidden, true);
+
   // Active brainstorm: Turn into a discussion and Close shown.
   harness.update({ active: 'brainstorms/2026-11-23-b', brainstorm: true, multi: true, open: [{ current: true }] });
   assert.equal($('convert').hidden, false);
   assert.equal($('closedisc').hidden, false);
   assert.equal($('board-actions').hidden, false);
 
-  // Read-only (peeking): both #list-new and #actions-menu hidden.
-  harness.update({ active: 'discussions/2026-11-23-a', brainstorm: false, multi: true, open: [{ current: true }] }, null, { title: 'Other', doc: null });
+  // Read-only (peeking): #list-new, #actions-menu, and #disc-autodev hidden.
+  harness.update({ active: 'discussions/2026-11-23-a', brainstorm: false, multi: true, open: [{ current: true }], autoDev: { status: 'running', cycle: 1, max: 5, waiting: true } }, null, { title: 'Other', doc: null });
   assert.equal($('list-new').hidden, true);
   assert.equal($('actions-menu').hidden, true);
+  assert.equal($('disc-autodev').hidden, true);
 
-  // Updated hints no longer mention "header's Actions ▾".
+  // Updated hints no longer mention "header's Actions ▾" or "Actions ▾ on the tab bar".
   assert.doesNotMatch(source, /header's Actions/);
   assert.match(source, /No brainstorms yet: \+ New brainstorm above starts one\./);
-  assert.match(source, /Turn it into a discussion \(Actions ▾ on the tab bar\) to have it here\./);
+  assert.match(source, /Turn it into a discussion \(Actions ▾ in the discussion header\) to have it here\./);
 });
