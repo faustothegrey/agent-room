@@ -789,7 +789,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #files .entry.unviewable { opacity: .5; cursor: default; }
 #files .entry.unviewable:hover { background: none; }
 #files .entry::before, #board-list .entry::before { display: inline-block; width: 1.4em; }
-#files .entry.folder::before, #board-list .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.discussion::before, #board-list .entry.discussion::before { content: '💬'; } #board-list .entry.brainstorm::before { content: '💡'; }
+#files .entry.folder::before, #board-list .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.discussion::before, #board-list .entry.discussion::before { content: '💬'; } #board-list .entry.brainstorm::before { content: '💡'; } #board-list .entry.workbench::before { content: '🔧'; }
 #files .entry .tag, #board-list .entry .tag { color: var(--dim); font-size: .8rem; margin-left: .5rem; }
 #files .back, #board-list .back { border: 0; background: none; padding: 0; color: var(--dim); font-size: .85rem; margin: 0 0 .4rem; }
 #files .back:hover, #board-list .back:hover { color: CanvasText; text-decoration: underline; }
@@ -968,12 +968,12 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </section>
 <aside id="list-panel" aria-label="Boards">
   <div id="list-head"><span id="list-title">Boards</span><button type="button" id="list-toggle" aria-expanded="true" aria-label="Collapse boards list" title="Collapse boards list">«</button></div>
-  <div id="list-new" hidden><button type="button" id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">+ New discussion</button><button type="button" id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">+ New brainstorm</button></div>
+  <div id="list-new" hidden><button type="button" id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">+ New discussion</button><button type="button" id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">+ New brainstorm</button><button type="button" id="newboard-workbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">+ New workbench</button></div>
   <div id="list-pane"></div>
 </aside>
 <div id="list-split" role="separator" aria-orientation="vertical" aria-label="Resize the boards list" tabindex="0" title="Drag to resize"></div>
 <div id="main-panel">
-<div id="disc-header" aria-label="Current discussion"><div id="disc-info"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span><span id="disc-autodev" aria-live="polite" hidden></span></div><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions">Actions</summary><div class="menu-items"><button id="summary">Summarize</button><span id="board-actions" hidden><hr><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details></div>
+<div id="disc-header" aria-label="Current discussion"><div id="disc-info"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span><span id="disc-autodev" aria-live="polite" hidden></span></div><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions">Actions</summary><div class="menu-items"><button id="summary">Summarize</button><button id="newworkbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">New workbench</button><span id="board-actions" hidden><hr><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details></div>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><span id="tab-controls"><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></span></div>
   <div class="view" id="talk">
@@ -1204,6 +1204,9 @@ function openService(name, opts = {}) {
 // Switching between Discussion and Worker never closes the open service.
 function showTab(name) {
   if (SERVICES[name]) { openService(name); return; }
+  const wbView = (typeof viewing === 'undefined' || !viewing)
+    && (typeof peeking !== 'undefined' && peeking ? peeking.kind === 'workbench' : typeof room !== 'undefined' && !!room?.workbench);
+  if (name === 'talk' && wbView) name = 'work';
   tab = name;
   $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work';
   $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work');
@@ -1526,7 +1529,10 @@ function showWorkerInfo(info) {
   } else if (room?.brainstorm) setWorkerInfo({ lines: [BRAINSTORM_NO_WORK], disabled: true });
   else {
     setWorkerInfo(info);
-    if (!info?.disabled) { wbox.disabled = false; wbox.placeholder = workPlaceholder; }
+    if (!info?.disabled) {
+      wbox.disabled = false;
+      wbox.placeholder = room?.workbench && !room?.active ? 'First instruction to the worker… (names this workbench and starts it)' : workPlaceholder;
+    }
   }
   if (ended || restarting) wbox.disabled = true;
 }
@@ -1910,7 +1916,7 @@ function renderAutoDev() {
   const a = room?.autoDev, el = $('autodev'), head = $('disc-autodev');
   el.hidden = true; el.replaceChildren(); el.className = '';
   if (head) { head.hidden = true; head.textContent = ''; head.className = ''; }
-  if (!a || viewing || peeking || !localInput) return;
+  if (!a || viewing || peeking || !localInput || room?.workbench) return;
   const button = (label) => { const b = document.createElement('button'); b.textContent = label; b.onclick = () => send('/autodev'); return b; };
   const span = (text, cls) => { const e = document.createElement('span'); e.textContent = text; if (cls) e.className = cls; return e; };
   const para = (...parts) => { const p = document.createElement('p'); p.append(...parts); el.append(p); return p; };
@@ -2069,7 +2075,7 @@ function currentTitle() {
 function updateTabTitle() {
   if (doc) { document.title = docLabel(doc) + ' · agent-room'; return; }
   const title = currentTitle();
-  document.title = title && (viewing || peeking || room?.active || room?.brainstorm) ? title + ' · agent-room' : 'agent-room';
+  document.title = title && (viewing || peeking || room?.active || room?.brainstorm || room?.workbench) ? title + ' · agent-room' : 'agent-room';
 }
 // A file chosen (here, on another page, or by the room) opens in Document, which comes to the front.
 function showDoc(file) {
@@ -2080,7 +2086,7 @@ function showDoc(file) {
   const feed = $('feed');
   const p = doc ? doc.split('/') : [];
   const transcript = p.length >= 3 && p.length <= 5 && (p[0] === 'discussions' || p[0] === 'brainstorms') && p.at(-2) === 'transcripts' && p.at(-1).endsWith('.md');
-  feed.hidden = !transcript || !room || doc === room.transcript || !!viewing || $('composer').hidden;
+  feed.hidden = !transcript || !room || !!room.workbench || doc === room.transcript || !!viewing || $('composer').hidden;
   feed.onclick = () => {
     showTab('talk');
     const root = room.folder.endsWith('/') ? room.folder : room.folder + '/';
@@ -2466,25 +2472,36 @@ function updateReplicaView() {
   const kind = room?.brainstorm ? 'brainstorm' : 'discussion';
   $('attach').title = room?.active ? 'Attach files to your next message: saved into this ' + kind + "'s files/ folder when you send it (25 MB at most each)" : 'Send a first message to start the ' + kind + '; then you can attach files';
   renderAttachments();
-  $('talk-settings').hidden = readOnly;
-  $('summary').hidden = readOnly;
+  const wbView = !viewing && (peeking ? peeking.kind === 'workbench' : !!room?.workbench);
+  if ($('tab-talk')) $('tab-talk').hidden = wbView;
+  if (wbView && typeof tab !== 'undefined' && tab !== 'work') {
+    tab = 'work';
+    if ($('talk')) $('talk').hidden = true;
+    if ($('work')) $('work').hidden = false;
+    $('tab-talk')?.classList.remove('on');
+    $('tab-work')?.classList.add('on');
+    $('tab-work')?.classList.remove('news');
+  }
+  $('talk-settings').hidden = readOnly || !!room?.workbench;
+  $('summary').hidden = readOnly || !!room?.workbench;
   $('reload').hidden = readOnly;
   const canBoardAct = !!(room && localInput && !readOnly);
+  if ($('newworkbench')) $('newworkbench').hidden = !canBoardAct;
   // + New discussion and + New brainstorm live at the top of the Boards list panel.
   $('list-new').hidden = !canBoardAct;
-  $('newdisc').hidden = !(room?.active || room?.brainstorm);
+  $('newdisc').hidden = !(room?.active || room?.brainstorm || room?.workbench);
   // Turn into a discussion: a brainstorm once its first message has named it.
   $('convert').hidden = !(canBoardAct && room?.brainstorm && room.active);
   // With several discussions open (the screen), New discussion and Resume keep this one open;
   // Close closes it (labelled "Close with pending work" when its branch has pending work).
-  $('closedisc').hidden = !(canBoardAct && room?.multi && (room.active || room.brainstorm || room.open?.length > 1));
+  $('closedisc').hidden = !(canBoardAct && room?.multi && (room.active || room.brainstorm || room.workbench || room.open?.length > 1));
   updateCloseButton();
   $('board-actions').hidden = !canBoardAct || ($('convert').hidden && $('closedisc').hidden);
   if (room?.multi) {
     $('newdisc').title = 'Open a new discussion beside this one, which stays open (click it in Boards to show it again).';
     $('newbrainstorm').title = 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.';
   }
-  $('actions-menu').hidden = ['summary', 'board-actions'].every((id) => $(id).hidden);
+  $('actions-menu').hidden = ['summary', 'newworkbench', 'board-actions'].every((id) => !$(id) || $(id).hidden);
   if (peeking && !viewing) {
     const noticeText = 'Peeking at ' + displayTitle(peeking.name, peeking.title) + '. Read-only — click Back to return to the active discussion.' + (peeking.doc ? '' : ' No notes to show.');
     const fillPeekBanner = (target) => {
@@ -2842,6 +2859,7 @@ function renderBoards() {
     if (closed) return 'closed';
     if (openEntry ? !openEntry.started : isCurrent && !room?.started) return 'not started';
     if (openEntry?.waitingForInput) return 'waiting for input';
+    if (openEntry?.readyForAutoDev) return 'ready for auto dev';
     return 'idle';
   };
 
@@ -2854,8 +2872,8 @@ function renderBoards() {
   for (const o of unstartedOpen) {
     const r = el('div', 'row discussion-row');
     const block = el('div', 'discussion-block');
-    const btn = el('button', 'entry discussion', o.title);
-    btn.title = 'Show this open discussion: it has not started yet';
+    const btn = el('button', 'entry ' + (o.workbench ? 'workbench' : o.brainstorm ? 'brainstorm' : 'discussion'), o.title);
+    btn.title = 'Show this open ' + (o.workbench ? 'workbench' : o.brainstorm ? 'brainstorm' : 'discussion') + ': it has not started yet';
     btn.onclick = () => notesGuard(() => { location.href = o.url; });
     block.append(btn);
     block.append(el('div', 'local-label', boardState(o) + (o.working ? ' · worker working' : '')));
@@ -2892,7 +2910,8 @@ function renderBoards() {
     if (canOrderDisc) dragRow(row, d, discussions, 'discussions');
 
     const label = discussionTitle(d, path);
-    const nameBtn = el('button', 'entry discussion', label);
+    const isWb = !!room?.workbenches?.includes(d);
+    const nameBtn = el('button', 'entry ' + (isWb ? 'workbench' : 'discussion'), label);
     nameBtn.title = path;
     nameBtn.onclick = () => {
       if (isCurrent) {
@@ -2911,14 +2930,17 @@ function renderBoards() {
     block.append(nameBtn);
 
     const closing = closingPhase(d);
-    let statusText = boardState(openEntry, { closed, isCurrent, closing });
+    const state = boardState(openEntry, { closed, isCurrent, closing });
+    let statusText = state;
     if (openEntry?.working) statusText += ' · worker working';
     if (closing) statusText += ' · ' + closingLabel(closing);
     const work = pendingWork.find((p) => p.lane === d);
     const merged = workerMerged.has(d);
     if (merged) statusText += ' · merged';
     else if (workerPending && !work) statusText += ' · no changes';
-    block.append(el('div', 'local-label', statusText));
+    const stateEl = el('div', 'local-label', statusText);
+    if (state === 'waiting for input' && openEntry?.waitingReason) stateEl.title = openEntry.waitingReason;
+    block.append(stateEl);
     if (work) block.append(el('div', 'worker-pending', '⚠ Worker: ' + pendingText(work)));
     row.append(block);
 
@@ -3024,7 +3046,10 @@ function renderBoards() {
       }
     };
     block.append(nameBtn);
-    block.append(el('div', 'local-label', boardState(openEntry, { closed, isCurrent })));
+    const state = boardState(openEntry, { closed, isCurrent });
+    const stateEl = el('div', 'local-label', state);
+    if (state === 'waiting for input' && openEntry?.waitingReason) stateEl.title = openEntry.waitingReason;
+    block.append(stateEl);
     row.append(block);
     if (canAct) {
       const { menu, items } = makeRowMenu(path);
@@ -3156,7 +3181,8 @@ function renderBoards() {
     const block = el('div', 'discussion-block');
     const label = discussionTitle(d, path);
     const closed = !!room?.closedDiscussions?.includes(d);
-    const nameBtn = el('button', 'entry discussion', label);
+    const isWb = !!room?.workbenches?.includes(d);
+    const nameBtn = el('button', 'entry ' + (isWb ? 'workbench' : 'discussion'), label);
     nameBtn.title = path;
     nameBtn.onclick = () => {
       if (closed) enterClosedPeek(s + '/' + d, path, d, label);
@@ -3424,8 +3450,10 @@ async function openFiles() {
 let room = null;
 function setRoom(r) {
   const changed = room && r && room.active !== r.active;
-  const fresh = r?.fresh && !room?.fresh; // a new discussion or brainstorm, or a page on one: its members are chosen first
+  const wasWb = !!room?.workbench;
+  const fresh = r?.fresh && !room?.fresh && !r?.workbench; // a new discussion or brainstorm, or a page on one: its members are chosen first
   room = r;
+  if (wasWb && !r?.workbench && !peeking && tab === 'work') showTab('talk');
   if (typeof syncBoardLayout === 'function') syncBoardLayout();
   tabTitles();
   for (const [target, sessions] of [['talk-sessions', r.cliSessions?.agents ?? []], ['work-sessions', r.cliSessions?.worker ? [r.cliSessions.worker] : []]]) {
@@ -4105,6 +4133,8 @@ for (const id of ['switchroom', 'newroom', 'reload', 'summary']) $(id).addEventL
 // ending nothing, so one click is enough; in the terminal they end the session in use.
 confirmed($('newdisc'), () => send('/new'), null, () => !room?.multi && room?.started);
 confirmed($('newbrainstorm'), () => send('/brainstorm'), null, () => !room?.multi && room?.started);
+confirmed($('newboard-workbench'), () => send('/workbench'), null, () => !room?.multi && room?.started);
+confirmed($('newworkbench'), () => { closeMenus(); send('/workbench'); }, null, () => !room?.multi && room?.started);
 confirmed($('convert'), () => { closeMenus(); send('/convert ' + room.active); }, 'Click again: it moves to discussions/', () => true);
 confirmed($('closedisc'), () => send('/close'), 'Click again: this discussion closes (its agents stop)', () => !!room?.started);
 $('closemerge').onclick = () => {
@@ -4193,7 +4223,7 @@ events.onmessage = (e) => {
     yourTurn = !ev.thinking; setThinking(ev.thinking); if (!viewing) { showDoc(ev.doc); openFiles(); }
     if (!ev.input) { $('composer').hidden = true; } // terminal mode: the page only watches
     work.clear();
-    if (!ev.worker.length) work.add(statusEl('Give the worker instructions here. It works alongside the discussion and sees only what you send it.'));
+    if (!ev.worker.length) work.add(statusEl(ev.room?.workbench ? 'Send your first instruction to name and start this workbench.' : 'Give the worker instructions here. It works alongside the discussion and sees only what you send it.'));
     ev.worker.forEach((m) => workMessage(m, false));
     if (ev.status) status(ev.status);
     commandBusy = !!ev.busy; updateBusy();
@@ -4717,7 +4747,7 @@ export function resetEvent(screen) {
   return { type: 'reset', messages: peek ? peek.messages : screen.transcript.map(messageView),
     doc: peek ? peek.doc : screen.doc,
     thinking: screen.thinking, status: screen.status, busy: !!screen.busy, input: !!screen.say,
-    room: screen.room ?? null, worker: screen.workerForPage?.() ?? screen.worker ?? [], working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
+    room: screen.room ?? null, worker: peek?.kind === 'workbench' ? (peek.worker ?? []) : (screen.workerForPage?.() ?? screen.worker ?? []), working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
     quota: screen.quota, quotaAt: screen.quotaAt ?? null, monitor: screen.monitor ?? null, newRoom: !!screen.newRoom, page: PAGE,
     replica: screen.replica ?? null, replicaOff: screen.replicaOff ?? null, viewing: screen.viewing ?? null, peek };
 }

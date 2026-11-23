@@ -2889,6 +2889,108 @@ test('Boards rows show the five states in priority order (ongoing > closed > not
   assert.equal(labelFor(brainRows, 'brainstorms/2026-11-22-b-closed').label, 'closed');
 });
 
+test('Boards rows distinguish ready for auto dev from waiting for input and show hover reason on local-label only', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return {
+      toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(cls) { s.add(cls); }, remove(cls) { s.delete(cls); }, contains(cls) { return s.has(cls); },
+    };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', value: '', hidden: false, disabled: false, children: [], dataset: {}, style: {},
+    classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    get lastChild() { return this.children.at(-1) || null; },
+    set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    addEventListener() {},
+    setAttribute() {},
+    getAttribute() { return null; },
+    focus() {},
+  });
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'send',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = false, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (fn) => fn();\n' +
+    code + '\n' +
+    'return { setRoom, renderDiscussions, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; }, setWorker: ({ pending = null, merged = [] } = {}) => { workerPending = pending; workerMerged = new Set(merged); } };'
+  )($, { createElement: node, title: '' }, { href: '/r/1/__room' }, null, null, () => {}, (cb) => cb(), () => {}, () => {});
+  harness.setFiles([
+    'discussions/2026-11-23-ready/notes.md',
+    'discussions/2026-11-23-paused-with-offer/notes.md',
+    'discussions/2026-11-23-retry/notes.md',
+    'discussions/2026-11-23-offer-error/notes.md',
+    'discussions/2026-11-23-next-step/notes.md',
+    'discussions/2026-11-23-ongoing-waiting/notes.md',
+    'discussions/2026-11-23-closed-ready/notes.md',
+    'discussions/2026-11-23-not-started-ready/notes.md',
+  ]);
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-23-ready',
+    discussion: 'Ready',
+    started: true,
+    closedDiscussions: ['2026-11-23-closed-ready'],
+    closingDiscussions: {},
+    open: [
+      { active: 'discussions/2026-11-23-ready', title: 'Ready', started: true, current: true, working: false, ongoing: false, waitingForInput: false, waitingReason: null, readyForAutoDev: true, url: '/r/1/__room' },
+      { active: 'discussions/2026-11-23-paused-with-offer', title: 'Paused', started: true, current: false, working: false, ongoing: false, waitingForInput: true, waitingReason: '5 cycles used', readyForAutoDev: true, url: '/r/2/__room' },
+      { active: 'discussions/2026-11-23-retry', title: 'Retry', started: true, current: false, working: false, ongoing: false, waitingForInput: true, waitingReason: 'Worker failed: exit code 1', readyForAutoDev: false, url: '/r/3/__room' },
+      { active: 'discussions/2026-11-23-offer-error', title: 'Offer error', started: true, current: false, working: false, ongoing: false, waitingForInput: true, waitingReason: 'its quoted instruction is empty', readyForAutoDev: false, url: '/r/4/__room' },
+      { active: 'discussions/2026-11-23-next-step', title: 'Next step', started: true, current: false, working: false, ongoing: false, waitingForInput: true, waitingReason: null, readyForAutoDev: false, url: '/r/5/__room' },
+      { active: 'discussions/2026-11-23-ongoing-waiting', title: 'Ongoing', started: true, current: false, working: false, ongoing: true, waitingForInput: true, waitingReason: '5 cycles used', readyForAutoDev: true, url: '/r/6/__room' },
+      { active: 'discussions/2026-11-23-closed-ready', title: 'Closed', started: true, current: false, working: false, ongoing: false, waitingForInput: false, waitingReason: null, readyForAutoDev: true, url: '/r/7/__room' },
+      { active: 'discussions/2026-11-23-not-started-ready', title: 'Not started', started: false, current: false, working: false, ongoing: false, waitingForInput: false, waitingReason: null, readyForAutoDev: true, url: '/r/8/__room' },
+    ],
+  });
+  harness.setWorker({ pending: [], merged: [] });
+  harness.renderDiscussions();
+
+  const boardList = els['list-pane'].firstChild;
+  const discRows = boardList.children.find((c) => c.dataset?.section === 'discussions').children
+    .filter((c) => c.className?.includes('discussion-row'));
+  const infoFor = (path) => {
+    const row = discRows.find((r) => r.children.find((c) => c.className === 'discussion-block')?.children[0]?.title === path);
+    const block = row.children.find((c) => c.className === 'discussion-block');
+    const btn = block.children[0];
+    const lbl = block.children.find((c) => c.className === 'local-label');
+    return { btnTitle: btn.title, label: lbl.textContent, labelTitle: lbl.title };
+  };
+
+  assert.deepEqual(infoFor('discussions/2026-11-23-ready'), {
+    btnTitle: 'discussions/2026-11-23-ready', label: 'ready for auto dev · no changes', labelTitle: '',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-paused-with-offer'), {
+    btnTitle: 'discussions/2026-11-23-paused-with-offer', label: 'waiting for input · no changes', labelTitle: '5 cycles used',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-retry'), {
+    btnTitle: 'discussions/2026-11-23-retry', label: 'waiting for input · no changes', labelTitle: 'Worker failed: exit code 1',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-offer-error'), {
+    btnTitle: 'discussions/2026-11-23-offer-error', label: 'waiting for input · no changes', labelTitle: 'its quoted instruction is empty',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-next-step'), {
+    btnTitle: 'discussions/2026-11-23-next-step', label: 'waiting for input · no changes', labelTitle: '',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-ongoing-waiting'), {
+    btnTitle: 'discussions/2026-11-23-ongoing-waiting', label: 'ongoing · no changes', labelTitle: '',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-closed-ready'), {
+    btnTitle: 'discussions/2026-11-23-closed-ready', label: 'closed · no changes', labelTitle: '',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-not-started-ready'), {
+    btnTitle: 'discussions/2026-11-23-not-started-ready', label: 'not started · no changes', labelTitle: '',
+  });
+});
+
 test('Per-board layout: saved per room+board, copies on first open, survives Archive/Defer/Convert, read-only peek/view, unnamed new board, and divider drag while service open', () => {
   const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
   const ctrlCode = source.slice(source.indexOf('// Control bar & Services panel'), source.indexOf('// The Schedule page:'));
@@ -3250,4 +3352,118 @@ test('discussion area header: #disc-header spans #main-panel with title, status,
   assert.doesNotMatch(source, /header's Actions/);
   assert.match(source, /No brainstorms yet: \+ New brainstorm above starts one\./);
   assert.match(source, /Turn it into a discussion \(Actions ▾ in the discussion header\) to have it here\./);
+});
+
+test('workbench UI: + New workbench in Boards, New workbench in Actions ▾, worker-only view, 🔧 Boards icon, and Close and Merge/Discard shown on workbenches', async () => {
+  const s = await serve(fixture(), { clients: new Set(), transcript: [] });
+  const html = await (await s.get('/__room')).text();
+  s.close();
+
+  // + New workbench sits beside + New discussion and + New brainstorm at the top of Boards;
+  // New workbench sits in Actions ▾; CSS gives workbench rows 🔧.
+  const listPanel = html.slice(html.indexOf('<aside id="list-panel"'), html.indexOf('</aside>'));
+  assert.match(listPanel, /id="list-new"[\s\S]*id="newdisc"[^>]*>\+ New discussion<\/button>[\s\S]*id="newbrainstorm"[^>]*>\+ New brainstorm<\/button>[\s\S]*id="newboard-workbench"[^>]*>\+ New workbench<\/button>/);
+  const discHeader = html.slice(html.indexOf('<div id="disc-header"'), html.indexOf('<div id="left">'));
+  assert.match(discHeader, /id="actions-menu"[\s\S]*id="newworkbench"[^>]*>New workbench<\/button>/);
+  assert.match(html, /#board-list \.entry\.workbench::before \{ content: '🔧'; \}/);
+
+  // Exercise worker-only view, Boards row icon, and hiding Close and Merge / Discard.
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const closeCode = source.slice(source.indexOf('function closeActionLabel('), source.indexOf('async function startCatchUp('));
+  const viewCode = source.slice(source.indexOf('function updateReplicaView()'), source.indexOf('async function remoteFiles()'));
+  const boardsCode = source.slice(source.indexOf('function discussionsIn('), source.indexOf('const renderDiscussions = renderBoards'));
+  const node = (tag = 'div') => {
+    const classes = new Set();
+    const el = {
+      tag, hidden: false, disabled: false, title: '', textContent: '', dataset: {}, style: {}, children: [],
+      get className() { return [...classes].join(' '); },
+      set className(v) { classes.clear(); for (const c of String(v).split(/\s+/).filter(Boolean)) classes.add(c); },
+      classList: {
+        add: (...cs) => cs.forEach((c) => classes.add(c)),
+        remove: (...cs) => cs.forEach((c) => classes.delete(c)),
+        toggle: (c, on) => (on === undefined ? (classes.has(c) ? classes.delete(c) : classes.add(c)) : (on ? classes.add(c) : classes.delete(c))),
+        contains: (c) => classes.has(c),
+      },
+      setAttribute() {},
+      addEventListener() {},
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      set innerHTML(v) { this.children = v === '<div id="board-list"></div>' ? [node('div')] : []; },
+      get firstChild() { return this.children[0] ?? null; },
+    };
+    return el;
+  };
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const harness = new Function('$', 'document', 'box', 'requestAnimationFrame',
+    'let room = null, viewing = null, peeking = null, peek = null, localInput = true, attaching = false, pending = [], viewExpired = false, viewNotice = null, localThinking = null, localWorking = null, replica = null, tab = "talk", dragging = false, renderAfterDrag = false, openRowMenu = null, explorerMode = "discussion";\n' +
+    'const expandedSections = new Set(["discussions", "brainstorms", "archived-deferred"]);\n' +
+    'let cachedDetail = { files: ["discussions/2026-11-23-fix-btn/transcripts/s.md", "discussions/2026-11-23-regular/transcripts/s.md", "discussions/archive/2026-11-22-old-wb/transcripts/s.md"] };\n' +
+    'const isDiscussion = (n) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(n);\n' +
+    'const ordered = () => null, discussionTitle = (n) => n, brainstormTitle = (n) => n, displayTitle = (n, t) => t || n || "", closingPhase = () => null, closingLabel = () => "", resumeTip = () => "", freshButton = () => {}, archiveButton = () => {}, rollbackButtons = () => {}, closeMenus = () => {}, send = () => {}, showSub = () => {}, updateTabs = () => {}, renderExplorer = () => {}, notesGuard = (fn) => fn(), startMerge = () => {}, startDiscard = () => {};\n' +
+    'const updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, renderAutoDev = () => {}, renderAttachments = () => {}, talkStatus = () => "", receivedTime = () => "", currentTitle = () => "", updateTabTitle = () => {};\n' +
+    closeCode + '\n' + viewCode + '\n' + boardsCode + '\n' +
+    'return { setState: ({ r, mergeable, discardable }) => { room = r; workerMergeable = mergeable || {}; workerDiscardable = new Set(discardable || []); workerPending = []; updateReplicaView(); renderBoards(); }, getTab: () => tab };'
+  )($, { createElement: node }, node('textarea'), () => {});
+
+  const wbRoom = {
+    active: 'discussions/2026-11-23-fix-btn',
+    brainstorm: false,
+    workbench: true,
+    workbenches: ['2026-11-23-fix-btn', '2026-11-22-old-wb'],
+    closedDiscussions: ['2026-11-22-old-wb'],
+    multi: true,
+    open: [{ current: true, active: 'discussions/2026-11-23-fix-btn', workbench: true, started: true }],
+  };
+  const mergeInfo = { canMerge: true, targetBranch: 'main' };
+  harness.setState({
+    r: wbRoom,
+    mergeable: { '2026-11-23-fix-btn': mergeInfo, '2026-11-23-regular': mergeInfo },
+    discardable: ['2026-11-23-fix-btn', '2026-11-23-regular'],
+  });
+
+  // Worker-only view: no Discussion tab, no discussion-members panel, no Summarize; switches to Worker tab.
+  assert.equal(harness.getTab(), 'work');
+  assert.equal($('tab-talk').hidden, true);
+  assert.equal($('talk').hidden, true);
+  assert.equal($('work').hidden, false);
+  assert.equal($('talk-settings').hidden, true);
+  assert.equal($('summary').hidden, true);
+  assert.equal($('newworkbench').hidden, false);
+  // Close, Close and Merge, and Close and Discard are shown on workbenches.
+  assert.equal($('closedisc').hidden, false);
+  assert.equal($('closemerge').hidden, false);
+  assert.equal($('closemerge').textContent, 'Close and Merge');
+  assert.equal($('closediscard').hidden, false);
+
+  // Boards rows: workbench rows (active and archived) get class `entry workbench`; regular gets `entry discussion`.
+  const allNodes = [];
+  const walk = (n) => { allNodes.push(n); for (const c of n.children || []) walk(c); };
+  walk($('list-pane'));
+  const wbBtn = allNodes.find((n) => n.textContent === '2026-11-23-fix-btn');
+  const regBtn = allNodes.find((n) => n.textContent === '2026-11-23-regular');
+  const archWbBtn = allNodes.find((n) => n.textContent === '2026-11-22-old-wb');
+  assert.ok(wbBtn?.classList.contains('workbench'));
+  assert.ok(regBtn?.classList.contains('discussion'));
+  assert.ok(!regBtn?.classList.contains('workbench'));
+  assert.ok(archWbBtn?.classList.contains('workbench'));
+
+  // Row ⋯ menus: both workbench and regular discussion show Close and Merge + Close and Discard.
+  const rows = allNodes.filter((n) => n.classList?.contains('discussion-row'));
+  const buttonsIn = (r) => { const out = []; const w = (x) => { if (x.tag === 'button') out.push(x.textContent); for (const c of x.children || []) w(c); }; w(r); return out; };
+  const wbRow = rows.find((r) => buttonsIn(r).includes('2026-11-23-fix-btn'));
+  const regRow = rows.find((r) => buttonsIn(r).includes('2026-11-23-regular'));
+  assert.ok(buttonsIn(wbRow).includes('Close and Merge'));
+  assert.ok(buttonsIn(wbRow).includes('Close and Discard'));
+  assert.ok(buttonsIn(regRow).includes('Close and Merge'));
+  assert.ok(buttonsIn(regRow).includes('Close and Discard'));
+
+  // Catch up with <branch> also shows on workbenches when behind targetBranch.
+  harness.setState({
+    r: wbRoom,
+    mergeable: { '2026-11-23-fix-btn': { catchUp: true, targetBranch: 'main' } },
+    discardable: ['2026-11-23-fix-btn'],
+  });
+  assert.equal($('closemerge').hidden, false);
+  assert.equal($('closemerge').textContent, 'Catch up with main');
 });

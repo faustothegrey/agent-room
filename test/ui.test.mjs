@@ -5701,25 +5701,54 @@ test('openList reports ongoing and waitingForInput for discussions and brainstor
   await handleLine('/summary', first);
   assert.equal(entry().waitingForInput, false);
 
-  // autoDevOffer triggers waitingForInput
+  // Usable Start auto dev offer triggers readyForAutoDev, not waitingForInput
   replies = ['**Agreed**\n- ready\n\n**Next step**\n- Send to the Worker: "implement X"'];
   await handleLine('/summary', first);
+  const offerIdx = first.state.transcript.length - 1;
+  assert.equal(entry().waitingForInput, false);
+  assert.equal(entry().readyForAutoDev, true);
+  assert.equal(entry().waitingReason, null);
+  // Paused auto dev takes precedence over an available Restart offer and exposes autoDev.reason
+  first.autoDev = { status: 'paused', cycle: 1, limit: 5, reason: 'the discussion waits for you (WAIT FOR USER)' };
+  replies = [];
+  await handleLine('ping paused with offer', first);
   assert.equal(entry().waitingForInput, true);
+  assert.equal(entry().readyForAutoDev, false);
+  assert.equal(entry().waitingReason, 'the discussion waits for you (WAIT FOR USER)');
   // Mark that summary as sent and cleared by dispatch; autoDev paused still triggers waitingForInput
-  first.autoDevSent = [first.state.transcript.length - 1];
+  first.autoDevSent = [offerIdx];
   first.workDispatchedLen = first.state.transcript.length;
   first.autoDev = { status: 'paused', cycle: 1, limit: 5, reason: 'paused' };
-  replies = [];
   await handleLine('ping', first);
   assert.equal(entry().waitingForInput, true);
+  assert.equal(entry().readyForAutoDev, false);
+  assert.equal(entry().waitingReason, 'paused');
   first.autoDev = null;
-  // retryFailure.available triggers waitingForInput
-  first.retryFailure = { id: 'r1', available: true };
+  // retryFailure.available triggers waitingForInput with its failure reason
+  first.retryFailure = { id: 'r1', available: true, error: 'command timed out' };
   await handleLine('ping 2', first);
   assert.equal(entry().waitingForInput, true);
+  assert.equal(entry().readyForAutoDev, false);
+  assert.equal(entry().waitingReason, 'Worker failed: command timed out');
   first.retryFailure = null;
   await handleLine('ping 3', first);
   assert.equal(entry().waitingForInput, false);
+  assert.equal(entry().readyForAutoDev, false);
+  assert.equal(entry().waitingReason, null);
+  // autoDevOffer returning { error } triggers waitingForInput with the offer's error
+  const origB = first.room.agents[1].turn;
+  first.room.agents[1].turn = async () => nextReply();
+  replies = ['**Agreed**\n- ready\n\n**Next step**\n- Send to the Worker: ""'];
+  await handleLine('/summary', first);
+  assert.equal(entry().waitingForInput, true);
+  assert.equal(entry().readyForAutoDev, false);
+  assert.equal(entry().waitingReason, 'its quoted instruction is empty');
+  replies = ['**Agreed**\n- cleared'];
+  await handleLine('/summary', first);
+  first.room.agents[1].turn = origB;
+  assert.equal(entry().waitingForInput, false);
+  assert.equal(entry().readyForAutoDev, false);
+  assert.equal(entry().waitingReason, null);
 
   // 3. Brainstorm: agreed summary with Next step -> waitingForInput; later message -> idle
   const { first: brain } = await multiRoom();
@@ -5949,4 +5978,231 @@ test('name reservation: names in brainstorms/archive/ and brainstorms/deferred/ 
   await handleLine('/convert brainstorms/2026-11-05-clash', ctx);
   assert.ok(existsSync(`${ctx.cwd}/brainstorms/2026-11-05-clash`));
   assert.ok(!existsSync(`${ctx.cwd}/discussions/2026-11-05-clash`));
+});
+
+test('workbench: /workbench creates discussions/<date>-<title>/ with .workbench marker, sends first and later messages straight to worker, and skips discussion agents', async () => {
+  const { existsSync } = await import('node:fs');
+  const { WORKBENCH_MARKER, reloaded } = await import('../src/ui.mjs');
+  const cwd = await tmp('workbench-create-');
+  await gitRoom(cwd);
+  const ctx = { cwd, agentSpecs: 'claude:A,codex:B', workerSpec: 'claude:Worker', state: { transcript: [], seen: new Map() }, sessions: new Map() };
+  Object.assign(ctx, await load(ctx, ''));
+  ctx.suggestTitle = async () => ({ title: 'Fix Button Padding' });
+  ctx.say = () => {};
+  await reloaded(ctx);
+  let agentTurns = 0;
+  for (const a of ctx.room.agents) a.turn = async () => { agentTurns++; return 'should not run'; };
+  const workerGot = [];
+  ctx.worker.turn = async (p) => { workerGot.push(p); return 'Fixed padding.\nDocs: none needed, because small styling fix.'; };
+
+  await handleLine('/workbench', ctx);
+  assert.equal(ctx.state.workbench, true);
+  assert.equal(ctx.discussion, null);
+  assert.equal(ctx.screen.room.workbench, true);
+  assert.equal(ctx.screen.room.discussion, 'New workbench');
+  assert.equal(ctx.screen.room.fresh, false);
+
+  // First message (via Worker box screen.work) names it, creates discussions/<date>-<title>/ with .workbench, and goes to worker.
+  await ctx.screen.work('Adjust the padding on the close button');
+  await ctx.workQueue;
+  assert.equal(agentTurns, 0);
+  assert.ok(ctx.discussion?.name.endsWith('-fix-button-padding'));
+  assert.ok(existsSync(`${cwd}/discussions/${ctx.discussion.name}/${WORKBENCH_MARKER}`));
+  assert.equal(workerGot.length, 1);
+  assert.match(workerGot[0], /Adjust the padding on the close button/);
+  assert.ok(ctx.screen.room.workbenches.includes(ctx.discussion.name));
+
+  // Later message (via handleLine too) goes straight to worker, never as a discussion round.
+  await handleLine('Also align the icon', ctx);
+  await ctx.workQueue;
+  assert.equal(agentTurns, 0);
+  assert.equal(workerGot.length, 2);
+  assert.match(workerGot[1], /Also align the icon/);
+
+  // /summary and /autodev are refused on a workbench without running agents.
+  await handleLine('/summary', ctx);
+  await handleLine('/autodev', ctx);
+  assert.equal(agentTurns, 0);
+});
+
+test('workbench: Close skips closing-statement agent, waits for running worker task, keeps worktree with pending work, and Resume restores worker conversation without closing-statement.md', async () => {
+  const { existsSync, writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { WORKBENCH_MARKER, workerPlace, reloaded } = await import('../src/ui.mjs');
+  const cwd = await tmp('workbench-close-resume-');
+  await gitRoom(cwd);
+  const ctx = { cwd, agentSpecs: 'claude:A,codex:B', workerSpec: 'claude:Worker', state: { transcript: [], seen: new Map() }, sessions: new Map() };
+  Object.assign(ctx, await load(ctx, ''));
+  ctx.suggestTitle = async () => ({ title: 'Quick Fix' });
+  ctx.say = () => {};
+  await reloaded(ctx);
+  ctx.closingStatement = async () => { throw new Error('closing-statement agent must not run on a workbench'); };
+  for (const a of ctx.room.agents) a.turn = async () => { throw new Error('discussion agents must not run on a workbench'); };
+
+  let releaseTask;
+  let taskStarted;
+  const startedP = new Promise((r) => { taskStarted = r; });
+  ctx.worker.turn = async () => {
+    taskStarted();
+    await new Promise((r) => { releaseTask = r; });
+    const place = await workerPlace(cwd, ctx.discussion.name);
+    writeFileSync(`${place.path}/fix.txt`, 'pending change\n');
+    execFileSync('git', ['-C', place.path, 'add', 'fix.txt']);
+    execFileSync('git', ['-C', place.path, 'commit', '-m', `[${ctx.discussion.name}] quick fix`]);
+    const head = execFileSync('git', ['-C', place.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const main = execFileSync('git', ['-C', place.path, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
+    return `Committed the quick fix.\nDocs: none needed, because test commit.\nTested: ${head} with main ${main}: tests passed`;
+  };
+
+  await handleLine('/workbench', ctx);
+  const firstSend = ctx.screen.work('Make the quick fix');
+  await startedP;
+  const wbName = ctx.discussion.name;
+  const wbDir = `${cwd}/discussions/${wbName}`;
+  assert.ok(existsSync(`${wbDir}/${WORKBENCH_MARKER}`));
+
+  // Close while the worker task is running: must wait for it.
+  const closeP = handleLine('/close', ctx);
+  await until(() => ctx.screen.room.closingDiscussions?.[wbName] === 'waiting');
+  assert.equal(ctx.screen.room.closedDiscussions.includes(wbName), false);
+
+  // Finish the worker task; Close now completes without calling closing-statement agent.
+  releaseTask();
+  await firstSend;
+  await ctx.workQueue;
+  await closeP;
+
+  assert.equal(ctx.screen.room.closedDiscussions.includes(wbName), true);
+  assert.equal(existsSync(`${wbDir}/closing-statement.md`), false);
+  // Worktree with pending work was kept.
+  const place = await workerPlace(cwd, wbName);
+  assert.equal(existsSync(place.path), true);
+  // Still recognised as a workbench after closing (and after archiving).
+  assert.ok(ctx.screen.room.workbenches.includes(wbName));
+  await handleLine(`/move ${wbName} archive`, ctx);
+  assert.ok(existsSync(`${cwd}/discussions/archive/${wbName}/${WORKBENCH_MARKER}`));
+  assert.ok(ctx.screen.room.workbenches.includes(wbName));
+
+  // Resume after close (from archive, with cleared in-memory worker log) works without closing-statement.md and restores worker conversation.
+  ctx.shop.log.length = 0;
+  await handleLine(`/resume archive/${wbName}`, ctx);
+  assert.equal(ctx.state.workbench, true);
+  assert.equal(ctx.discussion?.name, wbName);
+  assert.equal(ctx.screen.room.workbench, true);
+  assert.equal(ctx.screen.room.closedDiscussions.includes(wbName), false);
+  const restored = ctx.screen.workerForPage();
+  assert.ok(restored.some((m) => m.speaker === 'User' && /Make the quick fix/.test(m.text ?? m.html)));
+  assert.ok(restored.some((m) => m.speaker === 'Worker' && /Committed the quick fix/.test(m.text ?? m.html)));
+});
+
+test('workbench: excluded from Schedule (list and save reject workbenches)', async () => {
+  const { getSchedule, saveSchedule, WORKBENCH_MARKER } = await import('../src/ui.mjs');
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const cwd = await tmp('workbench-schedule-');
+  mkdirSync(`${cwd}/discussions/2026-11-20-normal-disc`, { recursive: true });
+  mkdirSync(`${cwd}/discussions/2026-11-21-a-workbench`, { recursive: true });
+  writeFileSync(`${cwd}/discussions/2026-11-21-a-workbench/${WORKBENCH_MARKER}`, 'workbench\n');
+  mkdirSync(`${cwd}/discussions/archive/2026-11-19-old-workbench`, { recursive: true });
+  writeFileSync(`${cwd}/discussions/archive/2026-11-19-old-workbench/${WORKBENCH_MARKER}`, 'workbench\n');
+
+  const ctx = { cwd, scheduleFile: `${cwd}/schedule.json`, state: { transcript: [], seen: new Map() }, sessions: new Map(), screen: { clients: new Set(), transcript: [], worker: [] } };
+  const sched = getSchedule(ctx);
+  assert.deepEqual(sched.discussions.map((d) => d.name), ['2026-11-20-normal-disc']);
+  assert.throws(() => saveSchedule(ctx, { action: 'add', discussion: '2026-11-21-a-workbench', prompt: 'run', time: '09:00' }), /Workbenches cannot be scheduled/);
+  assert.throws(() => saveSchedule(ctx, { action: 'add', discussion: 'archive/2026-11-19-old-workbench', prompt: 'run', time: '09:00' }), /Workbenches cannot be scheduled/);
+});
+
+test('workbench: Close and Merge and Close and Discard close without closing-statement.md and handle worktree/branch as for a discussion', async () => {
+  const { existsSync, readFileSync, writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { closeMergePreview, closeAndMerge, closeAndDiscard, workerPlace, reloaded } = await import('../src/ui.mjs');
+  const cwd = await tmp('workbench-merge-discard-');
+  await gitRoom(cwd);
+  const ctx = { cwd, agentSpecs: 'claude:A', workerSpec: 'claude:Worker', state: { transcript: [], seen: new Map() }, sessions: new Map() };
+  Object.assign(ctx, await load(ctx, ''));
+  ctx.say = () => {};
+  await reloaded(ctx);
+  ctx.closingStatement = async () => { throw new Error('closing-statement agent must not run on a workbench'); };
+
+  // 1. Close and Merge on a workbench: merges into main, removes worktree & branch, closes with no closing-statement.md.
+  ctx.suggestTitle = async () => ({ title: 'Merge Me' });
+  ctx.worker.turn = async () => {
+    const place = await workerPlace(cwd, ctx.discussion.name);
+    writeFileSync(`${place.path}/merged.txt`, 'merged fix\n');
+    execFileSync('git', ['-C', place.path, 'add', 'merged.txt']);
+    execFileSync('git', ['-C', place.path, 'commit', '-m', `[${ctx.discussion.name}] merged fix`]);
+    const head = execFileSync('git', ['-C', place.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const main = execFileSync('git', ['-C', place.path, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
+    return `Fixed.\nDocs: none needed, because test.\nTested: ${head} with main ${main}: tests passed`;
+  };
+  await handleLine('/workbench', ctx);
+  await ctx.screen.work('Apply mergeable fix');
+  await ctx.workQueue;
+  const mergeName = ctx.discussion.name;
+  const mergePlace = await workerPlace(cwd, mergeName);
+  const preview = await closeMergePreview(ctx, mergeName);
+  assert.equal(preview.ok, true);
+  const mergeRes = await closeAndMerge(ctx, mergeName, preview.preview.snapshot);
+  assert.equal(mergeRes.ok, true);
+  assert.equal(existsSync(`${cwd}/discussions/${mergeName}/closing-statement.md`), false);
+  assert.equal(ctx.screen.room.closedDiscussions.includes(mergeName), true);
+  assert.equal(readFileSync(`${cwd}/merged.txt`, 'utf8'), 'merged fix\n');
+  assert.equal(existsSync(mergePlace.path), false);
+  assert.equal(execFileSync('git', ['-C', cwd, 'branch', '--list', mergePlace.branch], { encoding: 'utf8' }).trim(), '');
+
+  // 2. Close and Discard on a workbench: saves refs/discarded/..., removes worktree & branch, closes with no closing-statement.md.
+  ctx.suggestTitle = async () => ({ title: 'Discard Me' });
+  ctx.worker.turn = async () => {
+    const place = await workerPlace(cwd, ctx.discussion.name);
+    writeFileSync(`${place.path}/dropped.txt`, 'drop this\n');
+    execFileSync('git', ['-C', place.path, 'add', 'dropped.txt']);
+    execFileSync('git', ['-C', place.path, 'commit', '-m', `[${ctx.discussion.name}] dropped fix`]);
+    const head = execFileSync('git', ['-C', place.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const main = execFileSync('git', ['-C', place.path, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
+    return `Tried.\nDocs: none needed, because test.\nTested: ${head} with main ${main}: tests passed`;
+  };
+  await handleLine('/workbench', ctx);
+  await ctx.screen.work('Try discardable fix');
+  await ctx.workQueue;
+  const discardName = ctx.discussion.name;
+  const discardPlace = await workerPlace(cwd, discardName);
+  const dPrev = await ctx.screen.discardPreview(discardName);
+  const dRes = await closeAndDiscard(ctx, discardName, dPrev.preview.snapshot);
+  assert.equal(dRes.ok, true);
+  assert.match(dRes.savedRef, new RegExp(`^refs/discarded/${discardName}/`));
+  assert.equal(existsSync(`${cwd}/discussions/${discardName}/closing-statement.md`), false);
+  assert.equal(ctx.screen.room.closedDiscussions.includes(discardName), true);
+  assert.equal(existsSync(`${cwd}/dropped.txt`), false);
+  assert.equal(existsSync(discardPlace.path), false);
+  assert.equal(execFileSync('git', ['-C', cwd, 'branch', '--list', discardPlace.branch], { encoding: 'utf8' }).trim(), '');
+});
+
+test('workbench: worker prompt paragraph reaches only workbench tasks (not discussion tasks)', async () => {
+  const { WORKER_WORKBENCH } = await import('../src/instructions.mjs');
+  const { queueWork, reloaded } = await import('../src/ui.mjs');
+  const cwd = await tmp('workbench-prompt-');
+  await gitRoom(cwd);
+  const ctx = { cwd, agentSpecs: 'claude:A', workerSpec: 'claude:Worker', noScreen: true, state: { transcript: [], seen: new Map() }, sessions: new Map() };
+  Object.assign(ctx, await load(ctx, ''));
+  ctx.room.agents[0].turn = async () => 'PASS';
+  ctx.suggestTitle = async () => ({ title: 'Prompt Check' });
+  const prompts = [];
+  ctx.worker.turn = async (p) => { prompts.push(p); return 'ok\nDocs: none needed, because test.'; };
+
+  // Workbench task gets the workbench prompt paragraph.
+  await handleLine('/workbench', ctx);
+  await handleLine('Tighten spacing', ctx);
+  await ctx.workQueue;
+  assert.equal(prompts.length, 1);
+  assert.ok(prompts[0].includes(WORKER_WORKBENCH));
+
+  // Normal discussion task does NOT get the workbench prompt paragraph.
+  await handleLine('/new', ctx);
+  await handleLine('Discuss design', ctx);
+  await reloaded(ctx);
+  ctx.worker.turn = async (p) => { prompts.push(p); return 'ok\nDocs: none needed, because test.'; };
+  queueWork(ctx, 'Implement design');
+  await ctx.workQueue;
+  assert.equal(prompts.length, 2);
+  assert.ok(!prompts[1].includes(WORKER_WORKBENCH));
 });

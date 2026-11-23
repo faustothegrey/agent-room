@@ -192,7 +192,8 @@ export async function listDiscussionsTool(args = {}, opts = {}) {
   const scan = (dir, prefix, kind) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.isDirectory() && DATED.test(entry.name)) {
-        items.push({ name: entry.name, kind, ref: `${prefix}/${entry.name}` });
+        const itemKind = kind === 'discussion' && existsSync(join(dir, entry.name, '.workbench')) ? 'workbench' : kind;
+        items.push({ name: entry.name, kind: itemKind, ref: `${prefix}/${entry.name}` });
       }
     }
   };
