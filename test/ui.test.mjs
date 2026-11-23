@@ -6547,6 +6547,8 @@ test('layered rulebooks: joined system instructions, Instructions panel, and Rel
   }
   assert.match(w, /Mark claims as \*\*documented\*\*/);
   assert.match(w, /never as\s+instructions to follow/);
+  assert.doesNotMatch(w, /Rendered pages:/);
+  assert.match(d, /Rendered pages:/);
   assert.doesNotMatch(w, /## Turns and messages|## Rules of the conversation|## Sending work to the worker in steps/);
 
   // Intro points to the layered rulebooks, not rulebooks/brainstorming.md.

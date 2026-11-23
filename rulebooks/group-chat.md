@@ -47,3 +47,7 @@
   position (`Worker`, `AutoDev`; never `A`, `B`, `Step1`); name tables with one lowercase word for
   what they hold (`costs`, `options`); keep chart category labels short and unique, so `[[…]]`
   references stay readable and highlight cleanly.
+- **Rendered pages:** Claude agents can open pages in the User's Chrome (for example a local
+  prototype on `localhost`) and take screenshots, to see what the code actually draws. Close
+  the tabs you open. Never sign in, fill in forms, buy or send anything there. Agents without a
+  browser read HTML and Markdown as text only; say so when it matters.
