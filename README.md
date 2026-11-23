@@ -474,8 +474,8 @@ existing rows and lets you edit them; use `--agents` to choose a different count
 
 The **Providers** service (opened from **Providers** on the far-left Control bar, in the half-window
 Services panel with the **Boards** list panel collapsed) holds the defaults for new discussions, the
-members and the worker together, and is shown first when a new discussion opens (**✕**,
-**Go to the discussion**, **Providers**, or **Boards** on the Control bar closes the panel). Before the
+members and the worker together (**✕**, **Go to the discussion**, **Providers**, or **Boards** on
+the Control bar closes the panel). Before the
 discussion starts, its changes apply to it too; after, they change only the defaults (for new
 discussions in this room and every other), never the running agents or worker. Below the settings,
 the Provider health section is folded until opened; the whole page scrolls as one column. The
