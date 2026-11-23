@@ -466,6 +466,7 @@ function header(ctx) {
     checkpoints: checkpoints(ctx), // the saved discussions, for Explorer's Resume (see "Checkpoints")
     closedDiscussions: closedDiscussions(ctx),
     closingDiscussions: Object.fromEntries([...(shopOf(ctx).closing?.entries() ?? [])].map(([name, c]) => [name, c.waiting ? 'waiting' : 'writing'])),
+    busyWorkers: [...new Set([...runningTasks(shopOf(ctx)), ...queuedTasks(shopOf(ctx))].map((t) => t.owner).filter(Boolean))],
     back: ctx.previous ?? null, // the discussion before the last switch, until the next one starts
     code: ctx.code ?? null, // the version this process runs (see codeInfo)
     rollbacks: [...(shopOf(ctx).rollbacks?.values() ?? [])].map(({ name, status, report, commit }) => ({ name, status, report, commit })),
@@ -1695,13 +1696,17 @@ const ownerOf = (ctx) => (ctx.discussion && !ctx.state?.brainstorm ? ctx.discuss
 const originLabel = (ctx) => (ctx.state.brainstorm ? 'brainstorm' : ctx.discussion?.name ?? 'no discussion');
 const pageOf = (ctx) => `${roomPath(ctx)}__room`;
 // started: its first message was sent (Explorer shows Resume for it then, Go to before).
-function isOngoing(ctx) {
+function hasWorkerTask(ctx) {
   const shop = ctx.shop;
   const owner = ownerOf(ctx);
-  return !!ctx.busy || !!ctx.screen?.working || (ctx.workPending ?? 0) > 0
+  return !!ctx.screen?.working || (ctx.workPending ?? 0) > 0
     || !!(shop && (runningTasks(shop).some((t) => t.owner === owner)
-      || queuedTasks(shop).some((t) => t.owner === owner)
-      || (ctx.discussion && !ctx.state.brainstorm && shop.closing?.has(ctx.discussion.name))));
+      || queuedTasks(shop).some((t) => t.owner === owner)));
+}
+function isOngoing(ctx) {
+  const shop = ctx.shop;
+  return !!ctx.busy || hasWorkerTask(ctx)
+    || !!(shop && ctx.discussion && !ctx.state.brainstorm && shop.closing?.has(ctx.discussion.name));
 }
 function waitingState(ctx) {
   if (ctx.autoDev?.status === 'paused') {
@@ -1732,6 +1737,7 @@ function openList(ctx) {
   return siblings(ctx).filter((c) => c.state && c.id && !c.stopped).map((c) => ({ url: pageOf(c), current: c === ctx,
     title: c.discussion?.title ?? (c.state.brainstorm ? 'New brainstorm (not started)' : c.state.workbench ? 'New workbench (not started)' : 'New discussion (not started)'),
     active: folderOf(c), brainstorm: !!c.state.brainstorm, workbench: !!c.state.workbench, started: !!c.logPath, working: !!c.screen.working,
+    workerBusy: hasWorkerTask(c),
     ongoing: isOngoing(c), ...waitingState(c) }));
 }
 // The folder's workshop: its lanes (each with its own queue and hold), the discussions' directories
@@ -4011,6 +4017,25 @@ async function linkDeps(place) {
   await appendExclude(place, 'node_modules');
 }
 
+const UNMERGED_CODES = new Set(['UU', 'AA', 'DD', 'AU', 'UA', 'DU', 'UD']);
+export function parsePorcelainConflicts(raw) {
+  if (!raw) return [];
+  const parts = raw.split('\0');
+  const conflicts = [];
+  for (let i = 0; i < parts.length; i++) {
+    const entry = parts[i];
+    if (!entry) continue;
+    const xy = entry.slice(0, 2);
+    const path = entry.slice(3);
+    if (xy[0] === 'R' || xy[0] === 'C' || xy[1] === 'R' || xy[1] === 'C') {
+      i++;
+      continue;
+    }
+    if (UNMERGED_CODES.has(xy) && path) conflicts.push(path);
+  }
+  return conflicts;
+}
+
 // The worktree compared with the room: whether it exists, the room's HEAD, commits on each side,
 // the commit it's based on, and uncommitted changes (the room's outside discussions/, the worktree's).
 export async function worktreeStatus(place) {
@@ -4019,12 +4044,14 @@ export async function worktreeStatus(place) {
   const exists = existsSync(place.path) && (await worktrees(place.top)).some((w) => w.path === real(place.path) && w.branch === place.branch);
   if (!exists) return { exists, head, roomDirty };
   const count = async (range) => Number(await git(place.top, 'rev-list', '--count', range));
-  const [ahead, behind, base, dirty] = await Promise.all([count(`HEAD..${place.branch}`), count(`${place.branch}..HEAD`),
+  const [ahead, behind, base, statusOut] = await Promise.all([count(`HEAD..${place.branch}`), count(`${place.branch}..HEAD`),
     git(place.top, 'merge-base', 'HEAD', place.branch).then((sha) => sha.slice(0, 7), () => 'no common commit'),
-    git(place.path, 'status', '--porcelain').then((out) => out !== '')]);
+    gitRaw(place.path, 'status', '--porcelain', '-z')]);
+  const dirty = statusOut !== '';
+  const conflicts = parsePorcelainConflicts(statusOut);
   const privateDir = await git(place.path, 'rev-parse', '--absolute-git-dir');
   const operation = worktreeOperation(privateDir);
-  return { exists, head, roomDirty, ahead, behind, base, treeDirty: dirty || !!operation, operation };
+  return { exists, head, roomDirty, ahead, behind, base, treeDirty: dirty || !!operation, operation, conflicts };
 }
 
 // Before each instruction: the lane's branch moves forward to the room's HEAD only when it is strictly
@@ -4132,7 +4159,7 @@ async function workerInfo(ctx, seen = new Map(), own = null) {
         : [{ lines: [], brief: [] }, null, null];
       return { lines: [...worktreeLines(place, s), ...checks.lines], summary: laneSummary(place, s, checks.brief), review: !!(s.ahead || s.treeDirty),
         diagram, merge,
-        pending: { lane: place.lane ?? null, branch: place.branch, ahead: s.ahead || 0, dirty: !!s.treeDirty } };
+        pending: { lane: place.lane ?? null, branch: place.branch, ahead: s.ahead || 0, dirty: !!s.treeDirty, conflicts: s.conflicts ?? [] } };
     })());
     return seen.get(place.path);
   };

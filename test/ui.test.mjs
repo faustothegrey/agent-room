@@ -6304,3 +6304,83 @@ test('catchUpWithBranch: allows resolving purely additive conflicts, avoids dupl
   const st = await mergeReadiness(first, place);
   assert.equal(st.canMerge, true, `expected canMerge after resolving additive conflict, got: ${st.disabledReason}`);
 });
+
+test('parsePorcelainConflicts parses all unmerged codes, unquoted paths with spaces/special chars, and skips rename/copy orig paths', async () => {
+  const { parsePorcelainConflicts } = await import('../src/ui.mjs');
+  assert.deepEqual(parsePorcelainConflicts(''), []);
+  assert.deepEqual(parsePorcelainConflicts(' M src/a.mjs\0?? untracked.txt\0A  added.txt\0'), []);
+  const raw = [
+    ' M modified.txt',
+    'R  new name.txt',
+    'UU fake-orig-should-be-skipped.txt',
+    'C  copied "file".txt',
+    'AA fake-copy-orig.txt',
+    'UU dir with spaces/a"b\'c.txt',
+    'AA both added/café.txt',
+    'DD both deleted.txt',
+    'AU added by us.txt',
+    'UA added by them.txt',
+    'DU deleted by us.txt',
+    'UD deleted by them.txt',
+    '?? untracked/with spaces.txt',
+    '',
+  ].join('\0');
+  assert.deepEqual(parsePorcelainConflicts(raw), [
+    'dir with spaces/a"b\'c.txt',
+    'both added/café.txt',
+    'both deleted.txt',
+    'added by us.txt',
+    'added by them.txt',
+    'deleted by us.txt',
+    'deleted by them.txt',
+  ]);
+});
+
+test('worktreeStatus and workerInfo report unquoted conflict paths and clear them once resolved', async () => {
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, workerPlace, worktreeStatus, refreshWorker } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'pipe' }).toString().trim();
+
+  const special = 'my dir/file "quoted" & café.txt';
+  const { first, git } = await multiRoom({ worker: (ctx) => {
+    const tree = ctx.workerDir.path;
+    mkdirSync(`${tree}/my dir`, { recursive: true });
+    writeFileSync(`${tree}/${special}`, 'worker version\n');
+    inTree(tree, 'add', special);
+    inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] edit special file`);
+    return `Edited.\nDocs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+  } });
+
+  mkdirSync(`${first.cwd}/my dir`, { recursive: true });
+  writeFileSync(`${first.cwd}/${special}`, 'base version\n');
+  git('add', special); git('commit', '-q', '-m', 'add special file');
+
+  await handleLine('conflict-status', first);
+  const { name } = first.discussion;
+  queueWork(first, 'edit special file');
+  await first.workQueue;
+
+  writeFileSync(`${first.cwd}/${special}`, 'main version\n');
+  git('add', special); git('commit', '-q', '-m', 'main edits special file');
+
+  const place = await workerPlace(first.cwd, name);
+  assert.throws(() => inTree(place.path, 'merge', 'main'), 'expected merge conflict');
+
+  const s = await worktreeStatus(place);
+  assert.equal(s.treeDirty, true);
+  assert.deepEqual(s.conflicts, [special]);
+
+  await refreshWorker(first);
+  const entry = first.screen.workerInfo.pending.find((p) => p.lane === name);
+  assert.ok(entry);
+  assert.deepEqual(entry.conflicts, [special]);
+
+  // Abort merge -> conflicts clear.
+  inTree(place.path, 'merge', '--abort');
+  const s2 = await worktreeStatus(place);
+  assert.deepEqual(s2.conflicts, []);
+  await refreshWorker(first);
+  const entry2 = first.screen.workerInfo.pending.find((p) => p.lane === name);
+  assert.deepEqual(entry2?.conflicts ?? [], []);
+});
