@@ -1638,19 +1638,36 @@ function isOngoing(ctx) {
       || queuedTasks(shop).some((t) => t.owner === owner)
       || (ctx.discussion && !ctx.state.brainstorm && shop.closing?.has(ctx.discussion.name))));
 }
-function waitingForInput(ctx) {
-  if (autoDevOffer(ctx)) return true;
-  if (ctx.autoDev?.status === 'paused') return true;
-  if (ctx.retryFailure?.available) return true;
+function waitingState(ctx) {
+  if (ctx.autoDev?.status === 'paused') {
+    return { waitingForInput: true, waitingReason: ctx.autoDev.reason || 'Auto dev paused', readyForAutoDev: false };
+  }
+  if (ctx.retryFailure?.available) {
+    return {
+      waitingForInput: true,
+      waitingReason: ctx.retryFailure.error ? `Worker failed: ${ctx.retryFailure.error}` : 'Worker failed: Retry available',
+      readyForAutoDev: false,
+    };
+  }
+  const offer = autoDevOffer(ctx);
+  if (offer?.error) {
+    return { waitingForInput: true, waitingReason: offer.error, readyForAutoDev: false };
+  }
   const t = ctx.state?.transcript ?? [];
   const last = t.at(-1);
-  return t.length > (ctx.workDispatchedLen ?? 0) && last?.outcome === 'agreed' && summaryHasNextStep(last.text);
+  if (t.length > (ctx.workDispatchedLen ?? 0) && last?.outcome === 'agreed' && summaryHasNextStep(last.text) && !offer?.text) {
+    return { waitingForInput: true, waitingReason: null, readyForAutoDev: false };
+  }
+  if (offer?.text) {
+    return { waitingForInput: false, waitingReason: null, readyForAutoDev: true };
+  }
+  return { waitingForInput: false, waitingReason: null, readyForAutoDev: false };
 }
 function openList(ctx) {
   return siblings(ctx).filter((c) => c.state && c.id && !c.stopped).map((c) => ({ url: pageOf(c), current: c === ctx,
     title: c.discussion?.title ?? (c.state.brainstorm ? 'New brainstorm (not started)' : 'New discussion (not started)'),
     active: folderOf(c), brainstorm: !!c.state.brainstorm, started: !!c.logPath, working: !!c.screen.working,
-    ongoing: isOngoing(c), waitingForInput: waitingForInput(c) }));
+    ongoing: isOngoing(c), ...waitingState(c) }));
 }
 // The folder's workshop: its lanes (each with its own queue and hold), the discussions' directories
 // a running task writes to, and the Worker tab's log.

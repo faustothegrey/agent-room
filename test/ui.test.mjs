@@ -5701,25 +5701,54 @@ test('openList reports ongoing and waitingForInput for discussions and brainstor
   await handleLine('/summary', first);
   assert.equal(entry().waitingForInput, false);
 
-  // autoDevOffer triggers waitingForInput
+  // Usable Start auto dev offer triggers readyForAutoDev, not waitingForInput
   replies = ['**Agreed**\n- ready\n\n**Next step**\n- Send to the Worker: "implement X"'];
   await handleLine('/summary', first);
+  const offerIdx = first.state.transcript.length - 1;
+  assert.equal(entry().waitingForInput, false);
+  assert.equal(entry().readyForAutoDev, true);
+  assert.equal(entry().waitingReason, null);
+  // Paused auto dev takes precedence over an available Restart offer and exposes autoDev.reason
+  first.autoDev = { status: 'paused', cycle: 1, limit: 5, reason: 'the discussion waits for you (WAIT FOR USER)' };
+  replies = [];
+  await handleLine('ping paused with offer', first);
   assert.equal(entry().waitingForInput, true);
+  assert.equal(entry().readyForAutoDev, false);
+  assert.equal(entry().waitingReason, 'the discussion waits for you (WAIT FOR USER)');
   // Mark that summary as sent and cleared by dispatch; autoDev paused still triggers waitingForInput
-  first.autoDevSent = [first.state.transcript.length - 1];
+  first.autoDevSent = [offerIdx];
   first.workDispatchedLen = first.state.transcript.length;
   first.autoDev = { status: 'paused', cycle: 1, limit: 5, reason: 'paused' };
-  replies = [];
   await handleLine('ping', first);
   assert.equal(entry().waitingForInput, true);
+  assert.equal(entry().readyForAutoDev, false);
+  assert.equal(entry().waitingReason, 'paused');
   first.autoDev = null;
-  // retryFailure.available triggers waitingForInput
-  first.retryFailure = { id: 'r1', available: true };
+  // retryFailure.available triggers waitingForInput with its failure reason
+  first.retryFailure = { id: 'r1', available: true, error: 'command timed out' };
   await handleLine('ping 2', first);
   assert.equal(entry().waitingForInput, true);
+  assert.equal(entry().readyForAutoDev, false);
+  assert.equal(entry().waitingReason, 'Worker failed: command timed out');
   first.retryFailure = null;
   await handleLine('ping 3', first);
   assert.equal(entry().waitingForInput, false);
+  assert.equal(entry().readyForAutoDev, false);
+  assert.equal(entry().waitingReason, null);
+  // autoDevOffer returning { error } triggers waitingForInput with the offer's error
+  const origB = first.room.agents[1].turn;
+  first.room.agents[1].turn = async () => nextReply();
+  replies = ['**Agreed**\n- ready\n\n**Next step**\n- Send to the Worker: ""'];
+  await handleLine('/summary', first);
+  assert.equal(entry().waitingForInput, true);
+  assert.equal(entry().readyForAutoDev, false);
+  assert.equal(entry().waitingReason, 'its quoted instruction is empty');
+  replies = ['**Agreed**\n- cleared'];
+  await handleLine('/summary', first);
+  first.room.agents[1].turn = origB;
+  assert.equal(entry().waitingForInput, false);
+  assert.equal(entry().readyForAutoDev, false);
+  assert.equal(entry().waitingReason, null);
 
   // 3. Brainstorm: agreed summary with Next step -> waitingForInput; later message -> idle
   const { first: brain } = await multiRoom();
