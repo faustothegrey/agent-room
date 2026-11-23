@@ -3751,7 +3751,7 @@ test('workbench UI: + New workbench in Boards, New workbench in Actions ▾, wor
   assert.equal($('closemerge').textContent, 'Catch up with main');
 });
 
-test('Boards rows mark unresolved worker merge conflicts as waiting for input with tooltip and red warning line', () => {
+test('Boards rows mark unresolved worker conflicts as waiting for input with tooltip and red warning line', () => {
   const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
   assert.match(source, /#board-list \.worker-conflict\s*\{[^}]*color:\s*light-dark\(#b91c1c/);
   const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
@@ -3837,13 +3837,13 @@ test('Boards rows mark unresolved worker merge conflicts as waiting for input wi
 
   assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-idle-conflict'), {
     label: 'waiting for input',
-    labelTitle: 'Worker merge conflict: src/a.mjs, dir with space/b.txt',
-    conflict: '⚠ Worker merge conflict: src/a.mjs, dir with space/b.txt',
+    labelTitle: 'Worker conflict: src/a.mjs, dir with space/b.txt',
+    conflict: '⚠ Worker conflict: src/a.mjs, dir with space/b.txt',
   });
   assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-saved-conflict'), {
     label: 'waiting for input',
-    labelTitle: 'Worker merge conflict: README.md',
-    conflict: '⚠ Worker merge conflict: README.md',
+    labelTitle: 'Worker conflict: README.md',
+    conflict: '⚠ Worker conflict: README.md',
   });
   assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-worker-running'), {
     label: 'ongoing · worker working',
@@ -3858,17 +3858,17 @@ test('Boards rows mark unresolved worker merge conflicts as waiting for input wi
   assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-round-ongoing'), {
     label: 'ongoing',
     labelTitle: '',
-    conflict: '⚠ Worker merge conflict: src/z.mjs',
+    conflict: '⚠ Worker conflict: src/z.mjs',
   });
   assert.deepEqual(rowInfo('discussions', 'discussions/2026-11-23-closed-conflict'), {
     label: 'closed',
     labelTitle: '',
-    conflict: '⚠ Worker merge conflict: src/closed.mjs',
+    conflict: '⚠ Worker conflict: src/closed.mjs',
   });
   assert.deepEqual(rowInfo('archived-deferred', 'discussions/archive/2026-11-20-arch-conflict'), {
     label: 'archived · closed',
     labelTitle: '',
-    conflict: '⚠ Worker merge conflict: src/arch.mjs',
+    conflict: '⚠ Worker conflict: src/arch.mjs',
   });
 
   // Once conflicts are gone, rows fall back to their normal state and the red line disappears.

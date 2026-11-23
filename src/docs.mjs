@@ -2952,7 +2952,7 @@ function renderBoards() {
     if (merged) statusText += ' · merged';
     else if (workerPending && !work) statusText += ' · no changes';
     const stateEl = el('div', 'local-label', statusText);
-    const conflictText = conflicts.length ? 'Worker merge conflict: ' + conflicts.join(', ') : null;
+    const conflictText = conflicts.length ? 'Worker conflict: ' + conflicts.join(', ') : null;
     if (state === 'waiting for input') {
       const tip = conflictText || openEntry?.waitingReason;
       if (tip) stateEl.title = tip;
@@ -3212,7 +3212,7 @@ function renderBoards() {
     block.append(el('div', 'local-label', (s === 'archive' ? 'archived' : 'deferred') + (closed ? ' · closed' : '') + (closing ? ' · ' + closingLabel(closing) : '') + (merged ? ' · merged' : '')));
     const work = pendingWork.find((p) => p.lane === d);
     const workerBusy = !!room?.busyWorkers?.includes(d);
-    if (work?.conflicts?.length && !workerBusy) block.append(el('div', 'worker-conflict', '⚠ Worker merge conflict: ' + work.conflicts.join(', ')));
+    if (work?.conflicts?.length && !workerBusy) block.append(el('div', 'worker-conflict', '⚠ Worker conflict: ' + work.conflicts.join(', ')));
     row.append(block);
 
     if (canAct) {
