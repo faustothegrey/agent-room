@@ -3346,3 +3346,120 @@ test('relocated controls: + New discussion / + New brainstorm sit at top of Boar
   assert.match(source, /No brainstorms yet: \+ New brainstorm above starts one\./);
   assert.match(source, /Turn it into a discussion \(Actions ▾ on the tab bar\) to have it here\./);
 });
+
+test('opening a board row ⋯ menu refreshes worker state via __workerinfo, and renderBoards() reopening it on reply updates items in place without a refresh loop', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const winfoCode = source.slice(source.indexOf('const BRAINSTORM_NO_WORK ='), source.indexOf('function setWorking('));
+  const boardsCode = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return { toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(...c) { c.forEach((x) => s.add(x)); }, remove(...c) { c.forEach((x) => s.delete(x)); }, contains(cls) { return s.has(cls); } };
+  };
+  const pendingToggles = [];
+  const node = (tag = 'div') => {
+    let _open = false;
+    const listeners = {};
+    const el = {
+      tag, className: '', textContent: '', title: '', placeholder: '', disabled: false, hidden: false,
+      children: [], dataset: {}, style: {}, classList: classListFor(),
+      get open() { return _open; },
+      set open(v) {
+        const next = !!v;
+        const changed = next !== _open;
+        _open = next;
+        // Real browsers queue an async toggle event on <details> whenever open changes (even before listeners attach in the same tick).
+        if (changed && tag === 'details') pendingToggles.push(() => { for (const fn of listeners.toggle ?? []) fn({ target: el }); });
+      },
+      get firstChild() { return this.children[0] || null; },
+      set innerHTML(_html) { this.children = [node('div')]; },
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      querySelectorAll() { return []; },
+      querySelector() { return null; },
+      addEventListener(ev, fn) { (listeners[ev] ??= []).push(fn); },
+      setAttribute() {},
+      getAttribute() { return null; },
+    };
+    return el;
+  };
+  const flushToggles = () => { while (pendingToggles.length) pendingToggles.shift()(); };
+  const els = {}, store = new Map(), fetched = [], location = { href: '' };
+  const localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
+  const harness = new Function('$', 'document', 'window', 'matchMedia', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'localStorage', 'fetch', 'send',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, ended = false, restarting = false, posting = 0, viewClient = "t", box = { hidden: false }, wbox = { placeholder: "", disabled: false };\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'let attaching = false, pending = [];\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (act) => act(), status = () => {}, updateBusy = () => {}, busyFailed = () => {};\n' +
+    boardsCode + '\n' + winfoCode + '\n' +
+    'return { setRoom, renderBoards, showWorkerInfo, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
+  )(
+    (id) => els[id] || (els[id] = node(id)),
+    { createElement: node, getElementById: () => null, head: node('head'), title: '' },
+    {}, () => ({ matches: false }), location, null, null, () => {}, (cb) => cb(), () => {}, localStorage,
+    async (url) => { fetched.push(url); return { ok: true, status: 204 }; },
+    () => {},
+  );
+
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-23-a',
+    brainstorm: false,
+    discussion: 'Topic A',
+    started: true,
+    multi: true,
+    open: [{ active: 'discussions/2026-11-23-a', current: true, started: true }],
+    checkpoints: [],
+    closedDiscussions: [],
+  });
+  harness.setFiles(['discussions/2026-11-23-a/notes.md']);
+  harness.showWorkerInfo({
+    lines: [],
+    pending: [{ lane: '2026-11-23-a', branch: 'worker/2026-11-23-a', ahead: 1, dirty: false }],
+    discardable: ['2026-11-23-a'],
+    mergeable: { '2026-11-23-a': { canMerge: true, catchUp: false, disabledReason: null, targetBranch: 'main', behind: 0 } },
+  });
+  flushToggles();
+
+  const rowMenu = () => {
+    const discSection = els['list-pane'].firstChild.children.find((c) => c.dataset?.section === 'discussions');
+    const row = discSection.children.find((c) => c.className.includes('discussion-row'));
+    return row.children.find((c) => c.tag === 'details');
+  };
+  const buttonLabels = (menu) => menu.children[1].children.filter((b) => b.tag === 'button').map((b) => b.textContent);
+
+  // Before opening: stale state offers Close with pending work, Close and Merge, and Close and Discard; no __workerinfo yet.
+  const menu1 = rowMenu();
+  assert.equal(menu1.open, false);
+  assert.ok(buttonLabels(menu1).includes('Close with pending work'));
+  assert.ok(buttonLabels(menu1).includes('Close and Merge'));
+  assert.ok(buttonLabels(menu1).includes('Close and Discard'));
+  assert.deepEqual(fetched, []);
+
+  // User opens the row's ⋯ menu -> refreshes worker state once via __workerinfo.
+  menu1.open = true;
+  flushToggles();
+  assert.deepEqual(fetched, ['__workerinfo']);
+
+  // Reply arrives (worker branch was merged from a terminal): renderBoards() rebuilds the row and programmatically reopens the menu.
+  harness.showWorkerInfo({ lines: [], pending: [], discardable: [], mergeable: {} });
+  flushToggles(); // fires the browser's async toggle from programmatic menu.open = true
+
+  // Menu stays open, items update in place, and no second __workerinfo refresh is triggered (no loop).
+  const menu2 = rowMenu();
+  assert.notEqual(menu2, menu1);
+  assert.equal(menu2.open, true);
+  assert.ok(buttonLabels(menu2).includes('Close'));
+  assert.ok(!buttonLabels(menu2).includes('Close with pending work'));
+  assert.ok(!buttonLabels(menu2).includes('Close and Merge'));
+  assert.ok(!buttonLabels(menu2).includes('Close and Discard'));
+  assert.deepEqual(fetched, ['__workerinfo']);
+
+  // Closing and reopening the row's ⋯ menu as a user triggers a fresh __workerinfo.
+  menu2.open = false;
+  flushToggles();
+  assert.deepEqual(fetched, ['__workerinfo']);
+  menu2.open = true;
+  flushToggles();
+  assert.deepEqual(fetched, ['__workerinfo', '__workerinfo']);
+});

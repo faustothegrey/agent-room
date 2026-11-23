@@ -2801,7 +2801,13 @@ function renderBoards() {
     sum.title = 'Actions';
     menu.append(sum, items);
     menu.open = openRowMenu === path;
-    menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
+    menu.addEventListener('toggle', () => {
+      if (menu.open) {
+        const wasOpen = openRowMenu === path;
+        openRowMenu = path;
+        if (!wasOpen) post('__workerinfo', {}).catch(() => {});
+      } else if (openRowMenu === path) openRowMenu = null;
+    });
     return { menu, items };
   };
   const peekFiles = (info) => {
