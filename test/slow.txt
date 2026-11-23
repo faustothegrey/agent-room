@@ -4,7 +4,6 @@ terminal: with the token and a matching Origin, the WebSocket runs a shell
 terminal: Quit room ends that room's shells; another room's shell keeps working
 replication protocol: B0 scenarios, immutable publication and recovery
 two rooms: pairing, round hooks, independent browser pins, deletion and read-only guards
-every open discussion of a --node launch room replicates, through the launch room's replica
 one server, two rooms: separate state and files, independent rounds, Quit room ends only one
 two open discussions in one room: switching keeps their sessions, and a worker report returns to its origin
 Restart with two rooms: both come back at the same addresses, with their current agents, worker and discussion
@@ -40,7 +39,6 @@ auto dev: never in a brainstorm; New discussion ends a run; Reload keeps it, and
 one workshop per folder: tasks labelled by origin, one worker session, lane and queue each, reports back there; Close discussion; Quit room closes them all
 lanes run at the same time: two discussions' tasks overlap with separate queues, holds, worker sessions and worktrees; a hold in one doesn't stop the other; a third waits for a free place
 a queued task starting after its context switches does not mark the new discussion working
-leftover edits hold their own lane for their origin, which can recover them; other lanes go on; they block Close, Archive and Defer; unknown leftovers hold their lane
 worker changes stay in their discussion and only unstarted changes update defaults
 Stage 2: completed work is reported once before a round, including Worker report rounds, never just by switching
 Stage 2: Defer refuses labelled commits absent from main and permits them after a normal merge
@@ -98,3 +96,6 @@ a detached worker from another discussion reports usage unavailable instead of n
 worker report format retry flow: fixed on retry and still wrong after one retry
 worker report format retry flow: retry that changes HEAD keeps changes, logs it, re-runs checks and recordTested, and pauses auto dev
 openList reports ongoing and waitingForInput for discussions and brainstorms (in memory only)
+CLI accepts agy for discussion and worker and exposes both in settings
+a worker task from a discussion with no full checkpoint yet is recorded too, and reported on the next Resume
+branchDiagram: strips leading [label] from subjects and tags third-branch merges with tag: "merge"
