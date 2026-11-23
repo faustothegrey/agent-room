@@ -522,8 +522,9 @@ independently of the selected discussion and worker models.
 ## Summaries and usage
 
 **Summarize**, or `/summary`, asks the discussion agents to agree a summary by points under
-**Agreed**, **Not agreed**, **Next step** and **Later**, leaving out empty sections, with at most
-eight points under Agreed and Not agreed. **Next step** holds exactly one action for you: `Answer:`
+**Agreed**, **Disputed**, **Open**, **Next step** and **Later**, leaving out empty sections, with at most
+eight points under Agreed, Disputed and Open. Disagreements go under Disputed only; Open records
+what each point waits for and does not repeat the Next step question. **Next step** holds exactly one action for you: `Answer:`
 a question, `Send to the Worker: "…"` with a one-line instruction word for word (a multi-line
 instruction must instead follow `Send to the Worker:` alone on its line as a `>` block quote; saved
 summaries in the old multi-line inline form still resume), or
