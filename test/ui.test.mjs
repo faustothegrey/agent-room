@@ -132,9 +132,9 @@ async function gitRoom(dir) {
   git('commit', '-q', '--allow-empty', '-m', 'start');
   return git;
 }
-// Waits (at most 2 seconds) until `ready()` is true.
-async function until(ready) {
-  for (let t = 0; !ready(); t++) { if (t > 2000) throw new Error('timed out'); await new Promise((r) => setTimeout(r, 1)); }
+// Waits (at most `ms`, 2 seconds by default) until `ready()` is true.
+async function until(ready, ms = 2000) {
+  for (let t = 0; !ready(); t++) { if (t > ms) throw new Error('timed out'); await new Promise((r) => setTimeout(r, 1)); }
 }
 
 test('the first message creates the discussion (titled by Claude) and its transcript before the agents see it', async () => {
@@ -2513,7 +2513,9 @@ test('lanes run at the same time: two discussions\' tasks overlap with separate 
   await until(() => la.blockedBy && gates.has('c: waits'));
   assert.deepEqual([la.blockedBy.origin, lb.blockedBy, lc.blockedBy], [first, null, null]);
   gates.get('b: one')('ok');
-  await until(() => gates.has('b: two')); // b's next task, in order, while a's lane holds
+  // b's next task, in order, while a's lane holds (the lane's git checks and Worker tab refreshes
+  // between two tasks can take a few seconds)
+  await until(() => gates.has('b: two'), 10000);
   gates.get('b: two')('ok'); gates.get('c: waits')('ok');
   await Promise.all([second.workQueue, third.workQueue]);
   assert.deepEqual([started.slice(0, 2).map(([t]) => t).sort(), started.slice(2).map(([t]) => t)], [['a: leave edits', 'b: one'], ['c: waits', 'b: two']]);
