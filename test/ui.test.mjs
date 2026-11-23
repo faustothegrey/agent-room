@@ -6206,3 +6206,57 @@ test('workbench: worker prompt paragraph reaches only workbench tasks (not discu
   assert.equal(prompts.length, 2);
   assert.ok(!prompts[1].includes(WORKER_WORKBENCH));
 });
+
+test('catchUpWithBranch: allows resolving purely additive conflicts, avoids duplicate merge prefix, and reaches canMerge', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, workerPlace, mergeReadiness, catchUpWithBranch } = await import('../src/ui.mjs');
+  const { WORKER_MERGE, workerMerge } = await import('../src/instructions.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'pipe' }).toString().trim();
+
+  assert.match(WORKER_MERGE, /purely additive/);
+  assert.match(workerMerge(true, false, { branch: 'worker/x' }, 'x'), /purely additive/);
+
+  let catchUpPrompt = '';
+  let step = 'work';
+  const { first, git } = await multiRoom({ worker: (ctx, p) => {
+    const tree = ctx.workerDir.path;
+    if (step === 'work') {
+      writeFileSync(`${tree}/list.txt`, 'base\nworker-line\n');
+      inTree(tree, 'add', 'list.txt');
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] append worker line`);
+      return `Added worker-line.\nDocs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+    }
+    catchUpPrompt = p;
+    assert.throws(() => inTree(tree, 'merge', 'main'), 'expected additive conflict on list.txt');
+    writeFileSync(`${tree}/list.txt`, 'base\nmain-line\nworker-line\n');
+    inTree(tree, 'add', 'list.txt');
+    inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] catch up with main`);
+    return `Resolved purely additive conflict in list.txt.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+  } });
+
+  writeFileSync(`${first.cwd}/list.txt`, 'base\n');
+  git('add', 'list.txt'); git('commit', '-q', '-m', 'add list');
+
+  await handleLine('additive-catch-up', first);
+  const { name } = first.discussion;
+  queueWork(first, 'append line');
+  await first.workQueue;
+
+  // Main adds an independent line at the same spot -> purely additive conflict.
+  writeFileSync(`${first.cwd}/list.txt`, 'base\nmain-line\n');
+  git('add', 'list.txt'); git('commit', '-q', '-m', 'main appends line');
+
+  step = 'catchup';
+  const cu = await catchUpWithBranch(first, name);
+  assert.equal(cu.ok, true);
+  await first.workQueue;
+
+  assert.match(catchUpPrompt, /Catch up with main: merge main into /);
+  assert.match(catchUpPrompt, /purely additive/);
+  assert.doesNotMatch(catchUpPrompt, /Before the instruction below, first merge main into /);
+
+  const place = await workerPlace(first.cwd, name);
+  const st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, true, `expected canMerge after resolving additive conflict, got: ${st.disabledReason}`);
+});

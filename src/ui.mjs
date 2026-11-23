@@ -2538,7 +2538,7 @@ export async function catchUpWithBranch(ctx, name) {
     throw new Error(`${place.branch} already contains ${state.targetBranch}.`);
   }
   const target = state.targetBranch;
-  const text = `Catch up with ${target}: merge ${target} into ${place.branch} with a normal merge (git merge ${target}). Label any merge commit "[${d.name}] catch up with ${target}". If it clashes, do not force it: leave the state intact and report the conflict. After a successful merge, run the project's tests (npm test, if it has them), report their real output, and end your reply with the line "Tested: <full commit ID of ${place.branch}> with ${target} <full commit ID of ${target}>: tests passed" (or "tests failed"). Never merge into ${target} or push.`;
+  const text = `Catch up with ${target}: merge ${target} into ${place.branch} with a normal merge (git merge ${target}). Label any merge commit "[${d.name}] catch up with ${target}". If it clashes, only if every conflict is purely additive (both sides only added independent lines or blocks with no overlapping edits or deletions), resolve it by keeping both additions, stage and commit the merge with the same label, and note what you resolved; for any other conflict, do not force it: leave the state intact and report the conflict. After a successful merge, run the project's tests (npm test, if it has them), report their real output, and end your reply with the line "Tested: <full commit ID of ${place.branch}> with ${target} <full commit ID of ${target}>: tests passed" (or "tests failed"). Never merge into ${target} or push.`;
   queueWork(opened, text);
   return { ok: true, targetBranch: target };
 }
@@ -4653,9 +4653,10 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       const commit = instr.workerCommit(own, label, place);
       const workbenchNote = instr.workerWorkbench ? instr.workerWorkbench(!!own.workbench || isWorkbenchDir(d?.dir)) : '';
       const leftover = recovery ? instr.workerLeftover(recovery, label, place) : '';
+      const isCatchUpAction = /^Catch up with \S+: merge \S+ into /i.test(text);
       const mainBehind = owedMain || !recovery && await gitOk(place.path, 'rev-parse', '--verify', 'main^{commit}') &&
         Number(await git(place.path, 'rev-list', '--count', 'HEAD..main')) > 0;
-      const merge = instr.workerMerge(mainBehind, rollback, place, label);
+      const merge = isCatchUpAction ? '' : instr.workerMerge(mainBehind, rollback, place, label);
       const interrupted = instr.workerInterrupted(told);
       if (told.length) work.interrupted = work.interrupted.filter((r) => !told.includes(r));
       const retryBrief = t?.retry ? `Your earlier attempt at this instruction failed: ${t.retry.error}\nInspect the current worktree and Git state first, including uncommitted edits and any merge or revert in progress. Commits made since the failure:\n${t.retry.after ? (await git(place.path, 'log', '--format=%H %s', `${t.retry.after}..HEAD`).catch(() => '(could not read commits)') || '(none)') : '(the failure commit could not be determined)'}\n\n` : '';
@@ -4670,7 +4671,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       // Stopped while its worktree was prepared: its worker never starts.
       if (t?.stopNow) throw new Error('stopped by the User before the worker started');
       if (t) t.turnStarted = true;
-      const askedCatchUp = Boolean((mainBehind && !rollback) || /^Catch up with \S+: merge \S+ into /i.test(text));
+      const askedCatchUp = Boolean((mainBehind && !rollback) || isCatchUpAction);
       const formatLog = (msg, err = false) => {
         workLog(`_(${msg})_\n\n`);
         workNote(ctx, msg, err, label, owner);
