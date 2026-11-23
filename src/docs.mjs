@@ -1615,16 +1615,96 @@ function setWorking(name) {
 }
 
 // The dividers: #list-split resizes the Boards list panel, and #split resizes the conversation vs
-// the side pane (horizontally when side by side, vertically when stacked). Widths, heights,
-// orientation, list collapse and side-pane close state are kept in this browser, per address.
+// the side pane (horizontally when side by side, vertically when stacked). Boards list width and
+// collapsed state are shared per browser; side-pane open/closed, orientation and divider position
+// are saved per room and board folder name in this browser (with the old shared keys giving the
+// starting layout on page load).
 const mainPanel = $('main-panel'), split = $('split'), listSplit = $('list-split'), listToggle = $('list-toggle');
 const splitOrient = $('split-orient'), sideCloseBtn = $('side-close'), sideOpenBtn = $('side-open');
 const MIN = 260, MIN_H = 140, LIST_MIN = 160, LIST_MAX = 420;
 const KEY = 'agent-room:left', TOP_KEY = 'agent-room:top', LIST_KEY = 'agent-room:list';
 const LIST_COLLAPSED_KEY = 'agent-room:list-collapsed', ORIENT_KEY = 'agent-room:split-orient', SIDE_CLOSED_KEY = 'agent-room:side-closed';
+const BOARD_LAYOUT_KEY = 'agent-room:board-layout:';
 let stacked = false, sideClosed = false;
 let savedLeft = null, savedTop = null, savedList = null;
+let appliedLayoutId = null, layoutBeforeReadOnly = null;
 const isBoardNarrowed = () => typeof openServiceName !== 'undefined' && openServiceName !== null;
+const isReadOnlyLayout = () => (typeof peeking !== 'undefined' && !!peeking) || (typeof viewing !== 'undefined' && !!viewing);
+const boardFolderName = (ref) => {
+  if (!ref || typeof ref !== 'string') return null;
+  return ref.replace(/[/]+$/, '').split('/').at(-1) || null;
+};
+function boardLayoutStorageKey(folder, boardName) {
+  if (!folder || !boardName) return null;
+  return BOARD_LAYOUT_KEY + JSON.stringify([folder, boardName]);
+}
+function readBoardLayout(folder, boardName) {
+  const k = boardLayoutStorageKey(folder, boardName);
+  if (!k) return null;
+  try {
+    const raw = localStorage.getItem(k);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    if (!v || typeof v !== 'object') return null;
+    return {
+      stacked: !!v.stacked,
+      sideClosed: !!v.sideClosed,
+      left: typeof v.left === 'number' && v.left > 0 ? Math.round(v.left) : null,
+      top: typeof v.top === 'number' && v.top > 0 ? Math.round(v.top) : null,
+    };
+  } catch { return null; }
+}
+function captureLayout() {
+  return { stacked, sideClosed, left: savedLeft, top: savedTop };
+}
+function saveBoardLayout(folder = typeof room !== 'undefined' ? room?.folder : null, boardName = typeof room !== 'undefined' ? boardFolderName(room?.active) : null) {
+  if (isReadOnlyLayout()) return;
+  const k = boardLayoutStorageKey(folder, boardName);
+  if (!k) return;
+  try { localStorage.setItem(k, JSON.stringify(captureLayout())); } catch {}
+}
+function applyLayout(layout) {
+  if (!layout) return;
+  savedLeft = typeof layout.left === 'number' && layout.left > 0 ? Math.round(layout.left) : null;
+  savedTop = typeof layout.top === 'number' && layout.top > 0 ? Math.round(layout.top) : null;
+  if (!savedLeft) mainPanel.style.removeProperty('--left');
+  if (!savedTop) mainPanel.style.removeProperty('--top');
+  setStacked(!!layout.stacked, false);
+  setSideClosed(!!layout.sideClosed, false);
+  syncBoardSizes();
+}
+function syncBoardLayout() {
+  const folder = typeof room !== 'undefined' ? room?.folder : null;
+  if (!folder) return;
+  const ro = isReadOnlyLayout();
+  const boardName = (typeof viewing !== 'undefined' && viewing)
+    ? boardFolderName(viewing.name || viewing.discussion)
+    : (typeof peeking !== 'undefined' && peeking)
+      ? boardFolderName(peeking.path || peeking.name)
+      : boardFolderName(room?.active);
+  const nextId = JSON.stringify([ro, folder, boardName || '']);
+  if (nextId === appliedLayoutId) return;
+  const wasRo = typeof appliedLayoutId === 'string' && appliedLayoutId.startsWith('[true,');
+  if (ro && !wasRo) layoutBeforeReadOnly = captureLayout();
+  appliedLayoutId = nextId;
+  if (ro) {
+    const saved = readBoardLayout(folder, boardName);
+    if (saved) applyLayout(saved);
+    return;
+  }
+  if (wasRo) {
+    const restore = (boardName && readBoardLayout(folder, boardName)) || layoutBeforeReadOnly;
+    layoutBeforeReadOnly = null;
+    if (restore) applyLayout(restore);
+    if (boardName && !readBoardLayout(folder, boardName)) saveBoardLayout(folder, boardName);
+    return;
+  }
+  layoutBeforeReadOnly = null;
+  if (!boardName) return; // unnamed new board: keep layout changes on screen until named
+  const saved = readBoardLayout(folder, boardName);
+  if (saved) applyLayout(saved);
+  else saveBoardLayout(folder, boardName);
+}
 function setLeft(px) {
   const avail = mainPanel.getBoundingClientRect().width - split.offsetWidth;
   const min = avail > 0 && avail < MIN * 2 ? Math.max(120, Math.floor(avail / 2)) : MIN;
@@ -1679,7 +1759,10 @@ function setStacked(on, save = true) {
   splitOrient.textContent = stacked ? '⇆' : '⇅';
   splitOrient.title = stacked ? 'Place conversation and side pane side by side' : 'Stack conversation above side pane';
   splitOrient.setAttribute('aria-label', splitOrient.title);
-  if (save) { try { localStorage.setItem(ORIENT_KEY, stacked ? 'stacked' : 'side'); } catch {} }
+  if (save && !isReadOnlyLayout()) {
+    try { localStorage.setItem(ORIENT_KEY, stacked ? 'stacked' : 'side'); } catch {}
+    saveBoardLayout();
+  }
   if (stacked) {
     if (savedTop) setTop(savedTop);
   } else {
@@ -1690,14 +1773,27 @@ function setSideClosed(closed, save = true) {
   sideClosed = !!closed;
   mainPanel.classList.toggle('side-closed', sideClosed);
   if (sideOpenBtn) sideOpenBtn.hidden = !sideClosed;
-  if (save) { try { localStorage.setItem(SIDE_CLOSED_KEY, sideClosed ? '1' : '0'); } catch {} }
+  if (save && !isReadOnlyLayout()) {
+    try { localStorage.setItem(SIDE_CLOSED_KEY, sideClosed ? '1' : '0'); } catch {}
+    saveBoardLayout();
+  }
   if (!sideClosed) {
     if (!stacked && (savedLeft || mainPanel.style.getPropertyValue('--left'))) setLeft(savedLeft ?? $('left').getBoundingClientRect().width);
     if (stacked && (savedTop || mainPanel.style.getPropertyValue('--top'))) setTop(savedTop ?? $('left').getBoundingClientRect().height);
   }
 }
-const keep = (w) => { if (isBoardNarrowed()) return; savedLeft = w; try { localStorage.setItem(KEY, String(w)); } catch {} };
-const keepTop = (h) => { if (isBoardNarrowed()) return; savedTop = h; try { localStorage.setItem(TOP_KEY, String(h)); } catch {} };
+const keep = (w) => {
+  if (isReadOnlyLayout()) return;
+  savedLeft = w;
+  if (!isBoardNarrowed()) { try { localStorage.setItem(KEY, String(w)); } catch {} }
+  saveBoardLayout();
+};
+const keepTop = (h) => {
+  if (isReadOnlyLayout()) return;
+  savedTop = h;
+  if (!isBoardNarrowed()) { try { localStorage.setItem(TOP_KEY, String(h)); } catch {} }
+  saveBoardLayout();
+};
 const keepList = (w) => { if (isBoardNarrowed()) return; savedList = w; try { localStorage.setItem(LIST_KEY, String(w)); } catch {} };
 try {
   savedList = Number(localStorage.getItem(LIST_KEY)) || null;
@@ -2038,6 +2134,7 @@ async function viewRemote(line) {
   viewing = (await res.json()).viewing;
   peek = null;
   viewExpired = false; viewNotice = null;
+  if (typeof syncBoardLayout === 'function') syncBoardLayout();
   updateReplicaView();
   showDoc(null);
   talk.clear();
@@ -2122,6 +2219,7 @@ function setPeeking(p) {
     updateTabs();
   }
   renderWorkerStop();
+  if (typeof syncBoardLayout === 'function') syncBoardLayout();
 }
 function closeActionLabel(lane) {
   return lane && (workerPending ?? []).some((p) => p.lane === lane) ? 'Close with pending work' : 'Close';
@@ -3242,6 +3340,7 @@ function setRoom(r) {
   const changed = room && r && room.active !== r.active;
   const fresh = r?.fresh && !room?.fresh; // a new discussion or brainstorm, or a page on one: its members are chosen first
   room = r;
+  if (typeof syncBoardLayout === 'function') syncBoardLayout();
   tabTitles();
   for (const [target, sessions] of [['talk-sessions', r.cliSessions?.agents ?? []], ['work-sessions', r.cliSessions?.worker ? [r.cliSessions.worker] : []]]) {
     const el = $(target); if (!el) continue; el.replaceChildren();

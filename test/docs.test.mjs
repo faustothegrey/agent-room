@@ -2868,3 +2868,147 @@ test('Boards rows show the five states in priority order (ongoing > closed > not
   assert.equal(labelFor(brainRows, 'brainstorms/2026-11-22-b-idle').label, 'idle');
   assert.equal(labelFor(brainRows, 'brainstorms/2026-11-22-b-closed').label, 'closed');
 });
+
+test('Per-board layout: saved per room+board, copies on first open, survives Archive/Defer/Convert, read-only peek/view, unnamed new board, and divider drag while service open', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const ctrlCode = source.slice(source.indexOf('// Control bar & Services panel'), source.indexOf('// The Schedule page:'));
+  const dividerCode = source.slice(source.indexOf('// The dividers:'), source.indexOf('function message('));
+  const classListFor = () => {
+    const set = new Set();
+    return { toggle(cls, v) { if (v === undefined ? !set.has(cls) : v) set.add(cls); else set.delete(cls); },
+      add(...c) { c.forEach((x) => set.add(x)); }, remove(...c) { c.forEach((x) => set.delete(x)); }, contains(cls) { return set.has(cls); } };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', value: '', hidden: false, disabled: false, children: [], dataset: {},
+    style: { props: {}, setProperty(k, v) { this.props[k] = v; }, removeProperty(k) { delete this.props[k]; }, getPropertyValue(k) { return this.props[k] || ''; } },
+    attrs: {}, setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return this.attrs[k] ?? null; },
+    offsetWidth: 7, offsetHeight: 7, getBoundingClientRect: () => ({ width: 800, height: 600, left: 0, top: 0 }),
+    classList: classListFor(),
+    listeners: {},
+    addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+    removeEventListener(type, fn) { this.listeners[type] = (this.listeners[type] || []).filter((f) => f !== fn); },
+    setPointerCapture() {},
+    append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    focus() {},
+  });
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const document = {
+    body: node('body'),
+    documentElement: { clientWidth: 1400, clientHeight: 800 },
+    createElement: node,
+    getElementById: (id) => els[id] || null,
+    addEventListener() {},
+  };
+  $('control-bar').getBoundingClientRect = () => ({ width: 62, height: 600, left: 0, top: 0 });
+  $('main-panel').getBoundingClientRect = () => ({ width: document.body.classList.contains('service-open') ? 540 : 1100, height: 600, left: 62, top: 0 });
+  $('services-panel').getBoundingClientRect = () => ({ width: document.body.classList.contains('service-open') ? 669 : 0, height: 600, left: 62, top: 0 });
+  $('left').getBoundingClientRect = () => ({ width: parseInt($('main-panel').style.getPropertyValue('--left') || '500', 10), height: parseInt($('main-panel').style.getPropertyValue('--top') || '300', 10), left: 62, top: 0 });
+
+  // Starting layout on page load comes from the old shared keys.
+  const store = new Map([
+    ['agent-room:left', '620'],
+    ['agent-room:top', '310'],
+    ['agent-room:split-orient', 'side'],
+    ['agent-room:side-closed', '0'],
+    ['agent-room:list', '260'],
+  ]);
+  const localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
+  const window = { addEventListener() {} };
+
+  const harness = new Function('$', 'document', 'window', 'localStorage', 'requestAnimationFrame', 'post',
+    'let tab = "talk", room = null, peeking = null, viewing = null, box = $("box"), wbox = $("wbox");\n' +
+    'const updateReplicaView = () => {};\n' +
+    ctrlCode + '\n' + dividerCode + '\n' +
+    'return {\n' +
+    '  setRoomState: (r) => { room = r; syncBoardLayout(); },\n' +
+    '  setPeekState: (p) => { peeking = p; syncBoardLayout(); },\n' +
+    '  setViewState: (v) => { viewing = v; syncBoardLayout(); },\n' +
+    '  openService, boardLayoutStorageKey, readBoardLayout,\n' +
+    '  state: () => ({ stacked, sideClosed, savedLeft, savedTop, savedList, leftCss: $("main-panel").style.getPropertyValue("--left"), topCss: $("main-panel").style.getPropertyValue("--top") }),\n' +
+    '};'
+  )($, document, window, localStorage, (cb) => cb(), async () => {});
+
+  // 1. Page load reads old shared keys and does not delete them.
+  assert.deepEqual(harness.state(), { stacked: false, sideClosed: false, savedLeft: 620, savedTop: 310, savedList: 260, leftCss: '620px', topCss: '310px' });
+  assert.equal(store.get('agent-room:left'), '620');
+
+  // 2. First time Board A is shown with no saved layout: copies on-screen layout and saves at once.
+  const folder = '/tmp/my-room';
+  harness.setRoomState({ folder, active: 'discussions/2026-11-21-alpha' });
+  const keyA = harness.boardLayoutStorageKey(folder, '2026-11-21-alpha');
+  assert.deepEqual(JSON.parse(store.get(keyA)), { stacked: false, sideClosed: false, left: 620, top: 310 });
+
+  // Customize Board A: stack it, drag divider vertically via keyboard, close side pane.
+  $('split-orient').onclick();
+  for (const fn of $('split').listeners.keydown) fn({ key: 'ArrowDown', preventDefault() {} }); // 310 + 24 = 334
+  $('side-close').onclick();
+  assert.deepEqual(JSON.parse(store.get(keyA)), { stacked: true, sideClosed: true, left: 620, top: 334 });
+
+  // 3. Switch to Board B (already has a saved layout): applies B's layout; list stays shared.
+  const keyB = harness.boardLayoutStorageKey(folder, '2026-11-21-beta');
+  store.set(keyB, JSON.stringify({ stacked: false, sideClosed: false, left: 480, top: null }));
+  harness.setRoomState({ folder, active: 'discussions/2026-11-21-beta' });
+  assert.equal(harness.state().stacked, false);
+  assert.equal(harness.state().sideClosed, false);
+  assert.equal(harness.state().savedLeft, 480);
+  assert.equal(harness.state().leftCss, '480px');
+  assert.equal(harness.state().savedList, 260); // shared Boards list width untouched
+
+  // 4. Key matches across Archive, Defer, and Turn into a discussion (brainstorms/<name> -> discussions/<name>).
+  const keyIdea = harness.boardLayoutStorageKey(folder, '2026-11-21-idea');
+  store.set(keyIdea, JSON.stringify({ stacked: true, sideClosed: false, left: 500, top: 270 }));
+  harness.setRoomState({ folder, active: 'brainstorms/2026-11-21-idea' });
+  assert.equal(harness.state().stacked, true);
+  assert.equal(harness.state().savedTop, 270);
+  // Turn into a discussion keeps the same key & layout.
+  harness.setRoomState({ folder, active: 'discussions/2026-11-21-idea' });
+  assert.equal(harness.state().stacked, true);
+  assert.equal(harness.state().savedTop, 270);
+  // Archive / Defer paths resolve to the same key when peeking.
+  harness.setRoomState({ folder, active: 'discussions/2026-11-21-beta' }); // back to B (stacked: false, left: 480)
+  assert.equal(harness.state().stacked, false);
+  harness.setPeekState({ path: 'discussions/archive/2026-11-21-idea', name: 'archive/2026-11-21-idea' });
+  assert.equal(harness.state().stacked, true);
+  assert.equal(harness.state().savedTop, 270);
+
+  // 5. While peeking: drags and toggles apply on screen only and NEVER save; leaving peek restores Board B.
+  $('side-close').onclick();
+  for (const fn of $('split').listeners.keydown) fn({ key: 'ArrowUp', preventDefault() {} });
+  assert.deepEqual(JSON.parse(store.get(keyIdea)), { stacked: true, sideClosed: false, left: 500, top: 270 }); // unchanged!
+  assert.deepEqual(JSON.parse(store.get(keyB)), { stacked: false, sideClosed: false, left: 480, top: null }); // unchanged!
+  harness.setPeekState(null);
+  assert.equal(harness.state().stacked, false);
+  assert.equal(harness.state().sideClosed, false);
+  assert.equal(harness.state().savedLeft, 480);
+
+  // Viewing a peer's chat read-only also shows saved layout if present, never saves, and restores on return.
+  harness.setViewState({ discussion: '2026-11-21-idea', name: '2026-11-21-idea', node: 'peer1' });
+  assert.equal(harness.state().stacked, true);
+  $('split-orient').onclick(); // temporary toggle while viewing
+  assert.deepEqual(JSON.parse(store.get(keyIdea)), { stacked: true, sideClosed: false, left: 500, top: 270 }); // unchanged!
+  harness.setViewState(null);
+  assert.equal(harness.state().stacked, false);
+  assert.equal(harness.state().savedLeft, 480);
+
+  // 6. Unnamed new board: keep layout changes made before first message, save once named.
+  harness.setRoomState({ folder, active: null });
+  $('split-orient').onclick(); // stacked: true
+  $('side-close').onclick(); // sideClosed: true
+  harness.setRoomState({ folder, active: 'discussions/2026-11-23-fresh-topic' });
+  const keyFresh = harness.boardLayoutStorageKey(folder, '2026-11-23-fresh-topic');
+  assert.deepEqual(JSON.parse(store.get(keyFresh)), { stacked: true, sideClosed: true, left: 480, top: null });
+
+  // 7. Widths applied only because a service is open are NOT saved, but a user-dragged divider IS saved for that board.
+  harness.setRoomState({ folder, active: 'discussions/2026-11-21-beta' }); // left: 480, side-by-side, side open
+  assert.equal(harness.state().leftCss, '480px');
+  harness.openService('providers');
+  assert.equal(harness.state().leftCss, '273px'); // automatically clamped for narrower board area
+  assert.equal(JSON.parse(store.get(keyB)).left, 480); // NOT overwritten by automatic clamping!
+  // Now user drags/keys the divider while Providers is open: saved for Board B!
+  for (const fn of $('split').listeners.keydown) fn({ key: 'ArrowRight', preventDefault() {} }); // clamped to max of narrowed area (273) or moved
+  const draggedLeft = parseInt($('main-panel').style.getPropertyValue('--left'), 10);
+  assert.equal(JSON.parse(store.get(keyB)).left, draggedLeft);
+  harness.openService(null);
+  assert.equal(harness.state().savedLeft, draggedLeft);
+});
