@@ -22,11 +22,15 @@ test('UI mode: the screen is the room\'s input, its replies come back as events,
 
     const events = (await fetch(`${base}__events`)).body.getReader();
     let buf = '';
+    // The next event, skipping header refreshes ('room'): the screen sends them whenever the header may change.
     const next = async () => {
-      while (!buf.includes('\n\n')) buf += new TextDecoder().decode((await events.read()).value);
-      const [chunk, ...rest] = buf.split('\n\n');
-      buf = rest.join('\n\n');
-      return JSON.parse(chunk.replace(/^data: /, ''));
+      for (;;) {
+        while (!buf.includes('\n\n')) buf += new TextDecoder().decode((await events.read()).value);
+        const [chunk, ...rest] = buf.split('\n\n');
+        buf = rest.join('\n\n');
+        const event = JSON.parse(chunk.replace(/^data: /, ''));
+        if (event.type !== 'room') return event;
+      }
     };
     const say = (text) => fetch(`${base}__say`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
 

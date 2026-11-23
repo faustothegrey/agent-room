@@ -1058,7 +1058,7 @@ async function loadCheckpoint(ctx, saved, name, brainstorm = false, directory = 
       sessions, state, logPath, pendingLog: '', totals: saved.totals ?? {},
       workerBriefed: saved.workerBriefed ?? null, workerTree: saved.workerTree ?? null,
       workerLabel: saved.workerLabel ?? null, workerHandoff: !!saved.workerHandoff, workerSeat: saved.workerSeat ?? randomBytes(6).toString('hex'),
-      agentsStarted: true, autoDev: null, autoDevSent: [], freshSummary: null,
+      agentsStarted: true, autoDev: null, autoDevSent: [], workDispatchedLen: 0, freshSummary: null,
       lastRound: { sessions: saved.sessions.filter(([key]) => !String(key).startsWith('worker:')), state: saved.state, totals: saved.totals ?? {}, doc: saved.doc ?? null },
     });
     const busy = leftWorker(ctx, saved.workerSeat); // its worker, still at work since it was left
@@ -1463,6 +1463,7 @@ function endSession(ctx, why, onReset = null) {
   ctx.retryFailure = null;
   ctx.autoDev = null; // Resume, Start fresh, New discussion and New brainstorm end an auto dev run
   ctx.autoDevSent = [];
+  ctx.workDispatchedLen = 0;
   Object.assign(screen, { doc: null, thinking: null, status: null, peek: null });
   ctx.logPath = null;
   ctx.pendingLog = '';
@@ -1560,10 +1561,27 @@ const ownerOf = (ctx) => (ctx.discussion && !ctx.state?.brainstorm ? ctx.discuss
 const originLabel = (ctx) => (ctx.state.brainstorm ? 'brainstorm' : ctx.discussion?.name ?? 'no discussion');
 const pageOf = (ctx) => `${roomPath(ctx)}__room`;
 // started: its first message was sent (Explorer shows Resume for it then, Go to before).
+function isOngoing(ctx) {
+  const shop = ctx.shop;
+  const owner = ownerOf(ctx);
+  return !!ctx.busy || !!ctx.screen?.working || (ctx.workPending ?? 0) > 0
+    || !!(shop && (runningTasks(shop).some((t) => t.owner === owner)
+      || queuedTasks(shop).some((t) => t.owner === owner)
+      || (ctx.discussion && !ctx.state.brainstorm && shop.closing?.has(ctx.discussion.name))));
+}
+function waitingForInput(ctx) {
+  if (autoDevOffer(ctx)) return true;
+  if (ctx.autoDev?.status === 'paused') return true;
+  if (ctx.retryFailure?.available) return true;
+  const t = ctx.state?.transcript ?? [];
+  const last = t.at(-1);
+  return t.length > (ctx.workDispatchedLen ?? 0) && last?.outcome === 'agreed' && summaryHasNextStep(last.text);
+}
 function openList(ctx) {
   return siblings(ctx).filter((c) => c.state && c.id && !c.stopped).map((c) => ({ url: pageOf(c), current: c === ctx,
     title: c.discussion?.title ?? (c.state.brainstorm ? 'New brainstorm (not started)' : 'New discussion (not started)'),
-    active: folderOf(c), brainstorm: !!c.state.brainstorm, started: !!c.logPath, working: !!c.screen.working }));
+    active: folderOf(c), brainstorm: !!c.state.brainstorm, started: !!c.logPath, working: !!c.screen.working,
+    ongoing: isOngoing(c), waitingForInput: waitingForInput(c) }));
 }
 // The folder's workshop: its lanes (each with its own queue and hold), the discussions' directories
 // a running task writes to, and the Worker tab's log.
@@ -2813,6 +2831,10 @@ function nextStepBlocks(summary) {
   });
   return { lines, start, end, sectionLines, blocks };
 }
+export function summaryHasNextStep(summary) {
+  const { start, sectionLines } = nextStepBlocks(summary);
+  return start >= 0 && sectionLines.some((l) => l.trim() && !STEPS_LINE(l));
+}
 function isInlineMultiLineInstruction(summary, instr) {
   if (!instr?.text || !instr.text.includes('\n')) return false;
   return nextStepBlocks(summary).blocks.length === 0;
@@ -3483,7 +3505,7 @@ export async function handleLine(line, ctx) {
   if (line === AUTO_DEV_REPORT) return autoDevReport(ctx);
   if (line === AUTO_DEV_FAILURE) {
     const failure = ctx.workerFailures?.shift();
-    if (failure && failure.owner === ownerOf(ctx)) ctx.state.transcript.push(failure.message);
+    if (failure && failure.owner === ownerOf(ctx)) { ctx.state.transcript.push(failure.message); showHeader(ctx); }
     return;
   }
   const rollback = /^\/rollback\s+(\S+)$/.exec(line);
@@ -3549,6 +3571,7 @@ async function runSummary(ctx, auto = false, extra) {
   let used;
   log(ctx, auto ? '_(auto-summary)_\n\n' : '_(summary requested)_\n\n');
   ctx.busy = true;
+  showHeader(ctx);
   const { status, result } = await ctx.room.summary({ extra,
     check: (text) => checkSummary(text, { autoDev: autoDevMode }),
     onFormatNote(text, err) {
@@ -3573,7 +3596,7 @@ async function runSummary(ctx, auto = false, extra) {
       }
       if (m.error) note(ctx, `✗ ${m.speaker} failed: ${m.text}`, true);
     },
-  }).finally(() => { ctx.busy = false; });
+  }).finally(() => { ctx.busy = false; showHeader(ctx); });
   if (result) {
     const label = result.outcome === 'agreed' ? `agreed, by ${result.by}` : `not agreed: the last version, by ${result.by}`;
     log(ctx, `**Summary** — ${label}\n\n${result.text}\n\n`);
@@ -3606,6 +3629,7 @@ async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = n
   let spoke = 0; // agent replies that weren't passes or failures
   try {
     ctx.busy = true;
+    showHeader(ctx);
     workNotice(ctx);
     const roundRes = await ctx.room.round(line, { speaker, beforeLap,
       onTurnStart(agent) {
@@ -3664,9 +3688,11 @@ async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = n
     out(ctx, dim(`── your turn · ${parts.filter(Boolean).join(' · ')} ──`));
     toScreen(ctx, { type: 'turn', text: `your turn · ${parts.filter(Boolean).join(' · ')}` });
     captureRound(ctx);
+    showHeader(ctx);
     return { ending, stoppedReason, failedError, turns, spoke };
   } catch (err) {
     // An unknown @name: nothing was sent or recorded.
+    showHeader(ctx);
     note(ctx, `✗ ${err.message}`, true);
     return { ending: 'failed', stoppedReason: null, failedError: err.message, turns, spoke };
   }
@@ -4344,7 +4370,9 @@ export function queueWork(ctx, text, run = null, rollback = null, retry = null) 
   if (retry) { const i = tasks.findIndex((t) => t.sent > retry.sent); tasks.splice(i < 0 ? tasks.length : i, 0, task); }
   else tasks.push(task);
   if (record) { const queued = workOf(shop, workName).queued; if (retry) queued.unshift(record); else queued.push(record); persistWork(ctx, workName); }
+  ctx.workDispatchedLen = ctx.state.transcript.length;
   ctx.workPending = (ctx.workPending ?? 0) + 1;
+  showHeader(ctx);
   ctx.workQueue = Promise.all([ctx.workQueue, finished]).then(() => {});
   // A bug here must not jam the queue: report it, and the next instruction still runs.
   pump(shop).catch((err) => note(ctx, `✗ ${err.stack}\n`, true));
