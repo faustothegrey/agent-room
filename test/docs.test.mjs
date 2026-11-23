@@ -2873,6 +2873,108 @@ test('Boards rows show the five states in priority order (ongoing > closed > not
   assert.equal(labelFor(brainRows, 'brainstorms/2026-11-22-b-closed').label, 'closed');
 });
 
+test('Boards rows distinguish ready for auto dev from waiting for input and show hover reason on local-label only', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return {
+      toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(cls) { s.add(cls); }, remove(cls) { s.delete(cls); }, contains(cls) { return s.has(cls); },
+    };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', value: '', hidden: false, disabled: false, children: [], dataset: {}, style: {},
+    classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    get lastChild() { return this.children.at(-1) || null; },
+    set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    addEventListener() {},
+    setAttribute() {},
+    getAttribute() { return null; },
+    focus() {},
+  });
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'send',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = false, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (fn) => fn();\n' +
+    code + '\n' +
+    'return { setRoom, renderDiscussions, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; }, setWorker: ({ pending = null, merged = [] } = {}) => { workerPending = pending; workerMerged = new Set(merged); } };'
+  )($, { createElement: node, title: '' }, { href: '/r/1/__room' }, null, null, () => {}, (cb) => cb(), () => {}, () => {});
+  harness.setFiles([
+    'discussions/2026-11-23-ready/notes.md',
+    'discussions/2026-11-23-paused-with-offer/notes.md',
+    'discussions/2026-11-23-retry/notes.md',
+    'discussions/2026-11-23-offer-error/notes.md',
+    'discussions/2026-11-23-next-step/notes.md',
+    'discussions/2026-11-23-ongoing-waiting/notes.md',
+    'discussions/2026-11-23-closed-ready/notes.md',
+    'discussions/2026-11-23-not-started-ready/notes.md',
+  ]);
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-23-ready',
+    discussion: 'Ready',
+    started: true,
+    closedDiscussions: ['2026-11-23-closed-ready'],
+    closingDiscussions: {},
+    open: [
+      { active: 'discussions/2026-11-23-ready', title: 'Ready', started: true, current: true, working: false, ongoing: false, waitingForInput: false, waitingReason: null, readyForAutoDev: true, url: '/r/1/__room' },
+      { active: 'discussions/2026-11-23-paused-with-offer', title: 'Paused', started: true, current: false, working: false, ongoing: false, waitingForInput: true, waitingReason: '5 cycles used', readyForAutoDev: true, url: '/r/2/__room' },
+      { active: 'discussions/2026-11-23-retry', title: 'Retry', started: true, current: false, working: false, ongoing: false, waitingForInput: true, waitingReason: 'Worker failed: exit code 1', readyForAutoDev: false, url: '/r/3/__room' },
+      { active: 'discussions/2026-11-23-offer-error', title: 'Offer error', started: true, current: false, working: false, ongoing: false, waitingForInput: true, waitingReason: 'its quoted instruction is empty', readyForAutoDev: false, url: '/r/4/__room' },
+      { active: 'discussions/2026-11-23-next-step', title: 'Next step', started: true, current: false, working: false, ongoing: false, waitingForInput: true, waitingReason: null, readyForAutoDev: false, url: '/r/5/__room' },
+      { active: 'discussions/2026-11-23-ongoing-waiting', title: 'Ongoing', started: true, current: false, working: false, ongoing: true, waitingForInput: true, waitingReason: '5 cycles used', readyForAutoDev: true, url: '/r/6/__room' },
+      { active: 'discussions/2026-11-23-closed-ready', title: 'Closed', started: true, current: false, working: false, ongoing: false, waitingForInput: false, waitingReason: null, readyForAutoDev: true, url: '/r/7/__room' },
+      { active: 'discussions/2026-11-23-not-started-ready', title: 'Not started', started: false, current: false, working: false, ongoing: false, waitingForInput: false, waitingReason: null, readyForAutoDev: true, url: '/r/8/__room' },
+    ],
+  });
+  harness.setWorker({ pending: [], merged: [] });
+  harness.renderDiscussions();
+
+  const boardList = els['list-pane'].firstChild;
+  const discRows = boardList.children.find((c) => c.dataset?.section === 'discussions').children
+    .filter((c) => c.className?.includes('discussion-row'));
+  const infoFor = (path) => {
+    const row = discRows.find((r) => r.children.find((c) => c.className === 'discussion-block')?.children[0]?.title === path);
+    const block = row.children.find((c) => c.className === 'discussion-block');
+    const btn = block.children[0];
+    const lbl = block.children.find((c) => c.className === 'local-label');
+    return { btnTitle: btn.title, label: lbl.textContent, labelTitle: lbl.title };
+  };
+
+  assert.deepEqual(infoFor('discussions/2026-11-23-ready'), {
+    btnTitle: 'discussions/2026-11-23-ready', label: 'ready for auto dev · no changes', labelTitle: '',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-paused-with-offer'), {
+    btnTitle: 'discussions/2026-11-23-paused-with-offer', label: 'waiting for input · no changes', labelTitle: '5 cycles used',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-retry'), {
+    btnTitle: 'discussions/2026-11-23-retry', label: 'waiting for input · no changes', labelTitle: 'Worker failed: exit code 1',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-offer-error'), {
+    btnTitle: 'discussions/2026-11-23-offer-error', label: 'waiting for input · no changes', labelTitle: 'its quoted instruction is empty',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-next-step'), {
+    btnTitle: 'discussions/2026-11-23-next-step', label: 'waiting for input · no changes', labelTitle: '',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-ongoing-waiting'), {
+    btnTitle: 'discussions/2026-11-23-ongoing-waiting', label: 'ongoing · no changes', labelTitle: '',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-closed-ready'), {
+    btnTitle: 'discussions/2026-11-23-closed-ready', label: 'closed · no changes', labelTitle: '',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-not-started-ready'), {
+    btnTitle: 'discussions/2026-11-23-not-started-ready', label: 'not started · no changes', labelTitle: '',
+  });
+});
+
 test('Per-board layout: saved per room+board, copies on first open, survives Archive/Defer/Convert, read-only peek/view, unnamed new board, and divider drag while service open', () => {
   const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
   const ctrlCode = source.slice(source.indexOf('// Control bar & Services panel'), source.indexOf('// The Schedule page:'));

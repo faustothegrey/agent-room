@@ -2820,6 +2820,7 @@ function renderBoards() {
     if (closed) return 'closed';
     if (openEntry ? !openEntry.started : isCurrent && !room?.started) return 'not started';
     if (openEntry?.waitingForInput) return 'waiting for input';
+    if (openEntry?.readyForAutoDev) return 'ready for auto dev';
     return 'idle';
   };
 
@@ -2889,14 +2890,17 @@ function renderBoards() {
     block.append(nameBtn);
 
     const closing = closingPhase(d);
-    let statusText = boardState(openEntry, { closed, isCurrent, closing });
+    const state = boardState(openEntry, { closed, isCurrent, closing });
+    let statusText = state;
     if (openEntry?.working) statusText += ' · worker working';
     if (closing) statusText += ' · ' + closingLabel(closing);
     const work = pendingWork.find((p) => p.lane === d);
     const merged = workerMerged.has(d);
     if (merged) statusText += ' · merged';
     else if (workerPending && !work) statusText += ' · no changes';
-    block.append(el('div', 'local-label', statusText));
+    const stateEl = el('div', 'local-label', statusText);
+    if (state === 'waiting for input' && openEntry?.waitingReason) stateEl.title = openEntry.waitingReason;
+    block.append(stateEl);
     if (work) block.append(el('div', 'worker-pending', '⚠ Worker: ' + pendingText(work)));
     row.append(block);
 
@@ -3002,7 +3006,10 @@ function renderBoards() {
       }
     };
     block.append(nameBtn);
-    block.append(el('div', 'local-label', boardState(openEntry, { closed, isCurrent })));
+    const state = boardState(openEntry, { closed, isCurrent });
+    const stateEl = el('div', 'local-label', state);
+    if (state === 'waiting for input' && openEntry?.waitingReason) stateEl.title = openEntry.waitingReason;
+    block.append(stateEl);
     row.append(block);
     if (canAct) {
       const { menu, items } = makeRowMenu(path);
