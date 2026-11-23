@@ -8,7 +8,7 @@ through your installed Claude Code, Codex and Antigravity (`agy`) CLIs, using th
 subscriptions.
 
 The project stays deliberately small: ten source modules and four dependencies: `marked`, and for
-the Terminal pane `@lydell/node-pty`, `ws` and `ghostty-web`. How it works (the two harnesses,
+the Terminal service `@lydell/node-pty`, `ws` and `ghostty-web`. How it works (the two harnesses,
 the main loop, the core protocol, the summary contract, current restrictions) is described in
 [docs/architecture.md](docs/architecture.md); this README covers how to use it.
 
@@ -154,7 +154,7 @@ worker's, as their panels list them ("<provider> default" for CLI default).
     as unknown. No Retry is offered; the discussion's next instruction tells the worker once that
     its previous one was stopped. Uncommitted edits hold the worktree for this discussion, as
     below.
-- **Control bar** (far-left vertical rail below the header, beside the **Boards** list panel and **Main panel**): four buttons — **Boards**, **Providers**, **Instructions** (the prompt catalog), and **Schedule** (recurring discussions). Clicking **Providers**, **Instructions**, or **Schedule** opens it across the full Main panel (one at a time) and collapses the **Boards** list panel to its thin strip; clicking **← Back to `<title>`**, **Boards**, toggling the active button, or picking a board row returns to the conversation and restores the list panel's previous open or collapsed state. Opening Providers, Instructions, or Schedule never interrupts running rounds, worker tasks, or a running Terminal shell, and preserves unsaved **My notes** edits. Clicking a provider name or its `⚠` in the header's monitor panel also opens **Providers** here with its health section expanded.
+- **Control bar & Services panel** (far-left vertical rail below the header, beside the **Services panel** and the board area — **Boards** list, **Discussion/Worker**, and **Side pane**): **Boards** plus five services — **Providers**, **Instructions** (the prompt catalog), **Schedule** (recurring discussions), and on local pages (`127.0.0.1` or `localhost`) **My notes** and **Terminal**. Clicking a service opens it in the **Services panel** (one at a time, taking half the window right next to the Control bar), pushing the board area to the right half where it stays usable (with **Explorer**/**Document** left open as it is, and temporary narrower widths never overwriting saved divider or list sizes) and collapsing the **Boards** list to its thin strip. Clicking another service switches to it; clicking the open service's button again, **Boards**, or **`✕`** closes the panel and restores the **Boards** list's previous open or collapsed state. Closing or switching services only hides the panel without asking: unsaved **My notes** edits stay and a running **Terminal** shell keeps running (marked by a green dot on the **Terminal** Control bar button). Opening a service never interrupts running rounds or worker tasks, and clicking **Discussion** or **Worker** never closes the open service. Clicking a provider name or its `⚠` in the header's monitor panel also opens **Providers** here with its health section expanded.
 - **Schedule** (Control bar → **Schedule**): configure recurring daily runs for this room's discussions and a shared quota guard.
   - Each scheduled task has a **discussion** (picked from the room's discussions), a **saved prompt**, a **daily time** (`HH:MM`, local), and an **on/off** switch; tasks can be added, edited and deleted on the page. Tasks and the quota floor are stored per room in `~/.local/state/agent-room/schedules/<sha256 of the room folder>.json`, outside the project's working tree and `git status`.
   - **Quota guard:** one **quota floor** in percent remaining (default `50%`) applies to all providers, across both their 5-hour and weekly windows.
@@ -164,12 +164,14 @@ worker's, as their panels list them ("<provider> default" for CLI default).
     - Before each subsequent lap, the quota floor is checked again; if it fails, the round stops early (skipping auto-summary), writes the reason in the discussion, and closes the discussion as the Close button does, keeping what was said and recording in the closing statement that the run stopped early and is not a completed review.
     - If agent-room is not running at the scheduled time, nothing happens (no catch-up).
   - **Last run:** each task displays when it last ran and its outcome — `ran`, `skipped` (with reason), `stopped by the quota guard` (with reason), or `failed` (with error).
+- **My notes** (Control bar → **My notes**, local pages only: `127.0.0.1` or `localhost`): your own free-text notes for this room's folder (separate from a discussion's `notes.md`). **New**, a list of notes (title and last-saved date), and an editor with **Save** and **Remove**; a note's first line is its title. A note is saved only by **Save**; **Remove** asks inside the panel first. Closing or switching services hides the panel without asking and keeps unsaved edits; unsaved changes are never dropped without asking: the panel opens and asks before switching notes, **New**, or switching board or room in this window; leaving or reloading the page gets the browser's leave-page warning, and the automatic refresh after a code change keeps them and reopens **My notes** in the Services panel. Notes are Markdown files in `~/.local/share/agent-room/notes/<hash of the room folder>/`, one per note, named by time and random letters (never the title): never in the room's folder, never replicated, and the agents are not told about them.
+- **Terminal** (Control bar → **Terminal**, local pages only: `127.0.0.1` or `localhost`; see **Access and limits**): a shell on this computer, in the room's folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening it starts a fresh shell and fits it to the Services panel (and refits on window resize); switching to another service or closing the Services panel hides the terminal while keeping the shell running (shown by a green dot on the **Terminal** Control bar button). Click **End shell** inside the panel to stop it (reloading the page or stopping the server also ends it).
 - **Boards** (left list panel, collapsible to a `«`/`»` strip and resizable by dragging its divider, both remembered per browser):
   - Organized into collapsible sections: **Discussions** (active, open by default), **Brainstorms** (open by default), **Archived · Deferred** (folded by default with count), and **Received from peers** (folded by default with count, when peers have discussions).
   - Each row shows its display title (saved title, or the folder name without its leading date and with spaces; hover for the folder path), its state — the first that applies among `ongoing` (a round or summary is running, a worker task is running or queued, or it is closing), `closed`, `not started` (no message sent yet), `waiting for input` (in memory only: an unsent agreed summary instruction, paused auto dev, a worker failure offering Retry, or a latest agreed summary with a non-empty Next step; shows `idle` after a restart), and `idle` (the row on screen is highlighted without a separate label) — plus `· worker working`, the closing phase, `merged` or `no changes`, and any amber worker warning (`⚠ Worker: 2 commits not merged into main · uncommitted changes`; `worker/main` or non-active unmerged branches appear above the active list). Worker branch status is rechecked after each worker task, when expanding the **Boards** list panel, and when clicking the **Worker** tab. Active discussions and brainstorms each keep your drag-and-drop / **Move up** / **Move down** order per room in this browser.
   - Clicking an **active** board's row switches to it (like Go to / Continue). Clicking a **closed** discussion (active, archived or deferred) or **closed** brainstorm peeks at it read-only — **chat and files** together, without starting any agent or worker session. Secondary row actions (**Resume** / **Continue**, **Peek files**, **Close**, **Close and Merge**, **Close and Discard**, **Archive**, **Defer**, **Make active**, **Turn into a discussion**, **Start fresh**, **Delete**, **Move up** / **Move down**, rollback, and peers' **View chat**) live in each row's **`⋯`** menu.
   - **Peek**: while peeking at a closed board, both the Discussion and Worker message boxes are disabled with a read-only notice, a **Back** button to return to the active discussion, and an explicit **Resume** button. An orange banner ("Looking at <name> · Back to current") and an orange dot on the Explorer tab also mark the peek, and Document's path line names the peeked board.
-- **Side pane** (**Explorer**, **Document**, **My notes** and **Terminal** — four mutually exclusive tabs, one at a time):
+- **Side pane** (**Explorer** and **Document** — two mutually exclusive tabs, one at a time):
   - **Close, reopen, and split orientation.** Click **`✕`** in the side pane header to close the side pane so Discussion/Worker takes the full Main panel; click **◫ Side pane** in the Discussion/Worker header to reopen it to the last selected tab. Clicking a `[[D4]]` / diagram / chart reference, a file link, or a **📄 Show …** button in chat while the side pane is closed reopens it to **Document** (and highlights the reference). Click **`⇅`/`⇆`** beside **`✕`** to switch the Main panel between side-by-side and stacked (conversation above, side pane below), dragging the divider in either direction; orientation and pane sizes are remembered per browser.
   - In **Explorer**, view one tree at a time, chosen with the bar `[ Discussion | Room checkout | Worker copy ]` (Worker copy is coming soon). Under the bar, a line shows the folder and branch. **Discussion** shows the active (or peeked) discussion's files. **Room checkout** shows the room's root checkout, excluding hidden and gitignored files (non-discussion files in `discussions/`, such as `discussions/README.md`, remain reachable). Code, config, and other text files open as plain text in Document; supported images and PDFs stay viewable; files that cannot be displayed are greyed out ("can't be shown here").
   - In **Document**, view the chosen file with its path. Each tab keeps its place when you switch; Document is disabled until a file is chosen. The chosen document stays selected when agents edit other files, and open documents check for changes every two seconds. Drag the divider to resize the panes. Browsing is available during agent turns and does not notify the agents.
@@ -199,20 +201,6 @@ worker's, as their panels list them ("<provider> default" for CLI default).
     message box offer them (**📄 Show notes.md**; ✕ dismisses, your next message clears them). With
     **Follow mentions** on (Document's bar; off by default, remembered by this browser only), the first
     file named is shown at once instead; otherwise the chosen document stays as it is.
-  - **My notes** (local pages only: `127.0.0.1` or `localhost`): your own free-text notes for this room's folder (separate from a discussion's `notes.md`). **New**, a list of
-    notes (title and last-saved date), and an editor with **Save** and **Remove**; a note's first
-    line is its title. A note is saved only by **Save**; **Remove** asks inside the tab first.
-    Unsaved changes are never dropped without asking: the tab asks before another note, New,
-    switching side-pane tabs, closing the side pane, or switching room in this window; leaving or reloading the
-    page gets the browser's leave-page warning, and the automatic refresh after a code change keeps
-    them. Notes are Markdown files in `~/.local/share/agent-room/notes/<hash of the room folder>/`,
-    one per note, named by time and random letters (never the title): never in the room's folder,
-    never replicated, and the agents are not told about them.
-  - **Terminal** (local pages only: `127.0.0.1` or `localhost`; see **Access and limits**): a shell on this computer, in the room's
-    folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening the tab starts a
-    fresh shell; switching to another tab or closing the side pane hides the terminal while keeping
-    the shell running (shown by a green dot on the **Terminal** tab). Click **End shell** inside the
-    tab to stop it (reloading the page or stopping the server also ends it).
 - **Transcripts** are in each discussion's (and brainstorm's) `transcripts/` folder, under **Explorer**. On an
   earlier session's transcript, **Send to agents** asks the discussion agents to read it as
   background; it does not resume its sessions.
@@ -470,10 +458,10 @@ speak. Untick a member only after ticking its replacement. Names suggested from 
 editable. If a discussion was launched with one or more than three agents, the panel keeps all its
 existing rows and lets you edit them; use `--agents` to choose a different count.
 
-The **Providers** page (opened from **Providers** on the far-left Control bar, filling the Main
-panel with the **Boards** list panel collapsed) holds the defaults for new discussions, the
-members and the worker together, and is shown first when a new discussion opens (**← Back to …**,
-**Go to the discussion**, or **Boards** on the Control bar returns to the conversation). Before the
+The **Providers** service (opened from **Providers** on the far-left Control bar, in the half-window
+Services panel with the **Boards** list panel collapsed) holds the defaults for new discussions, the
+members and the worker together, and is shown first when a new discussion opens (**✕**,
+**Go to the discussion**, **Providers**, or **Boards** on the Control bar closes the panel). Before the
 discussion starts, its changes apply to it too; after, they change only the defaults (for new
 discussions in this room and every other), never the running agents or worker. Below the settings,
 the Provider health section is folded until opened; the whole page scrolls as one column. The
@@ -866,12 +854,12 @@ rulebook is prefixed to the first prompt and sent again when it changes.
 
 The server listens on `0.0.0.0`: devices on the LAN can open its printed IP address and
 send instructions to local agents. This version has no authentication; use it on a trusted LAN. Browser input endpoints require the room's own origin
-when supplied and JSON requests. The **Terminal** pane is for this computer only: its token
+when supplied and JSON requests. The **Terminal** service is for this computer only: its token
 and WebSocket requests are refused unless they come from a loopback address, name the server
 as `localhost`, `127.0.0.1` or `[::1]`, and (for the WebSocket) carry a matching Origin and the
 server's random token, as in ghostty-web's demo server. It runs with your account's rights, like
-the agents; any program on this computer that sends those headers can reach it. The **Notes**
-pane's requests get the same loopback, Host and Origin checks (without a token), and its changes
+the agents; any program on this computer that sends those headers can reach it. The **My notes**
+service's requests get the same loopback, Host and Origin checks (without a token), and its changes
 must be JSON. There is no remote stop,
 automatic recovery after a crash (Resume each discussion from its checkpoint), streaming reply
 display, or live app preview. Discussion-to-worker relay exists only as auto dev
@@ -892,8 +880,8 @@ agent-room's source.
 | `src/room.mjs` | Discussion turns, unseen messages, passes and summary agreement. |
 | `src/ui.mjs` | Room setup, persistent defaults, commands, discussions, worker queue, logging and launch integration. |
 | `src/docs.mjs` | Local HTTP server handlers, document rendering, browser UI and live events. |
-| `src/host-shell.mjs` | The Terminal side-pane tab's shell: token endpoint, WebSocket, host-only checks and shell lifetime. |
-| `src/notes.mjs` | The My notes side-pane tab's storage and endpoints: list, read, create, save and remove, with the Terminal's host-only checks. |
+| `src/host-shell.mjs` | The Terminal service's shell: token endpoint, WebSocket, host-only checks and shell lifetime. |
+| `src/notes.mjs` | The My notes service's storage and endpoints: list, read, create, save and remove, with the Terminal's host-only checks. |
 | `src/replicate.mjs` | Separate discussion Git storage, pairing, background transfer and immutable received snapshots. |
 | `src/usage.mjs` | Token accounting, optional quota-meter data and the providers' login status. |
 
@@ -932,7 +920,7 @@ never uses a static import for these, because a static import of a local module 
 reload would silently miss it.
 
 Two modules are excluded by that rule and need Restart like `cli.mjs`: `host-shell.mjs` and
-`notes.mjs`, the Terminal and My notes side-pane tabs. They are statically imported by `docs.mjs` without a
+`notes.mjs`, the Terminal and My notes services. They are statically imported by `docs.mjs` without a
 version tag, so a reloaded `docs.mjs` still resolves them to their cached instances: the tag
 applies only to the module it is written on, never to that module's own static imports.
 

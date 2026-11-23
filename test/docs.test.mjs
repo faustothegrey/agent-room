@@ -2399,7 +2399,7 @@ test('List panel: collapsible sections, row click switches active or peeks close
   assert.equal(harness.getPeek(), null);
 });
 
-test('Side pane: four tabs (Explorer/Document/My notes/Terminal), close/reopen, [[D4]] reopen, split orientation, and Terminal survival', async () => {
+test('Side pane: two tabs (Explorer/Document), close/reopen, [[D4]] reopen, and split orientation', async () => {
   const root = mkdtempSync(join(tmpdir(), 'side-pane-'));
   const s = await serve(root, { clients: new Set(), transcript: [] });
   try {
@@ -2407,8 +2407,8 @@ test('Side pane: four tabs (Explorer/Document/My notes/Terminal), close/reopen, 
     assert.match(html, /id="main-panel"/);
     assert.match(html, /id="tab-explorer"/);
     assert.match(html, /id="tab-document"/);
-    assert.match(html, /id="tab-notes"[^>]*hidden[^>]*>My notes<\/button>/);
-    assert.match(html, /id="tab-terminal"[^>]*hidden[^>]*>Terminal<\/button>/);
+    assert.doesNotMatch(html, /id="tab-notes"/);
+    assert.doesNotMatch(html, /id="tab-terminal"/);
     assert.match(html, /id="split-orient"/);
     assert.match(html, /id="side-close"/);
     assert.match(html, /id="side-open"/);
@@ -2429,7 +2429,7 @@ test('Side pane: four tabs (Explorer/Document/My notes/Terminal), close/reopen, 
     };
     const node = (tag = 'div') => ({
       tag, className: '', textContent: '', title: '', value: '', hidden: false, disabled: false, children: [], dataset: {},
-      style: { props: {}, setProperty(k, v) { this.props[k] = v; }, getPropertyValue(k) { return this.props[k] || ''; } },
+      style: { props: {}, setProperty(k, v) { this.props[k] = v; }, removeProperty(k) { delete this.props[k]; }, getPropertyValue(k) { return this.props[k] || ''; } },
       attrs: {}, setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return this.attrs[k] ?? null; },
       offsetWidth: 7, offsetHeight: 7, getBoundingClientRect: () => ({ width: 800, height: 600, left: 0, top: 0 }),
       classList: classListFor(),
@@ -2451,40 +2451,34 @@ test('Side pane: four tabs (Explorer/Document/My notes/Terminal), close/reopen, 
     const store = new Map();
     const localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
     const window = { addEventListener() {} };
-    let shellStarts = 0, shellStops = 0, notesOpens = 0, guardCalls = 0, fitCalls = 0;
     const harness = new Function('$', 'document', 'window', 'localStorage', 'location', 'requestAnimationFrame', 'post',
       'let viewing = null, room = { active: "discussions/2026-11-21-a" }, doc = "discussions/2026-11-21-a/notes.md";\n' +
-      'let hostShell = null, notes = { open: false, editing: false, base: "" }, noteText = { value: "" };\n' +
-      'const notesDirty = () => notes.editing && noteText.value !== notes.base;\n' +
-      'const openNotes = () => { notes.open = true; };\n' +
-      'const openHostShell = () => { hostShell = { alive: true, fit: { fit: () => {} }, term: { focus: () => {} } }; $("tab-terminal").classList.add("running"); };\n' +
-      'const closeHostShell = () => { hostShell = null; $("tab-terminal").classList.remove("running"); };\n' +
-      'const notesGuard = (act) => { if (!notesDirty()) return act(); $("notes-ask").hidden = false; $("notes-ask")._discard = () => { noteText.value = notes.base; $("notes-ask").hidden = true; act(); }; };\n' +
       'const openFiles = async () => {}, pane = { querySelectorAll: () => [] }, expandedLines = new Set(), inDiscussion = () => false;\n' +
       dividerCode + '\n' + subCode + '\n' + refCode + '\n' +
-      'return { setStacked, setSideClosed, showSub, selectSub, notes, noteText, getHostShell: () => hostShell, closeHostShell, getSubtab: () => subtab, isSideClosed: () => sideClosed, isStacked: () => stacked };'
+      'return { setStacked, setSideClosed, showSub, selectSub, getSubtab: () => subtab, isSideClosed: () => sideClosed, isStacked: () => stacked };'
     )($, document, window, localStorage, { origin: 'http://127.0.0.1:5566' }, (cb) => cb(), async () => {});
 
-    // 1. Switching to Terminal starts a shell and marks #tab-terminal.running; switching away or closing side pane keeps it alive.
-    $('tab-terminal').onclick();
-    assert.equal(harness.getSubtab(), 'terminal');
-    assert.ok(harness.getHostShell()?.alive);
-    assert.equal($('tab-terminal').classList.contains('running'), true);
-
+    // 1. Switch between Explorer and Document.
+    $('tab-document').onclick();
+    assert.equal(harness.getSubtab(), 'document');
+    assert.equal($('document').hidden, false);
+    assert.equal($('explorer').hidden, true);
     $('tab-explorer').onclick();
     assert.equal(harness.getSubtab(), 'explorer');
-    assert.equal($('terminal').hidden, true);
-    assert.ok(harness.getHostShell()?.alive); // still running!
-    assert.equal($('tab-terminal').classList.contains('running'), true);
+    assert.equal($('explorer').hidden, false);
+    assert.equal($('document').hidden, true);
 
-    // 2. Close side pane with ✕: hides side pane, shows side-open, keeps Terminal alive; side-open restores last tab.
+    // 2. Close side pane with ✕: hides side pane, shows side-open; side-open restores last tab.
     $('side-close').onclick();
     assert.equal(harness.isSideClosed(), true);
     assert.equal($('main-panel').classList.contains('side-closed'), true);
     assert.equal($('side-open').hidden, false);
-    assert.ok(harness.getHostShell()?.alive);
+    $('side-open').onclick();
+    assert.equal(harness.isSideClosed(), false);
+    assert.equal(harness.getSubtab(), 'explorer');
 
     // 3. Clicking [[D4]] in chat while side pane is closed reopens it to Document and highlights D4.
+    $('side-close').onclick();
     const refEl = { dataset: { ref: 'D4' } };
     for (const fn of docListeners.click) fn({ target: { closest: (sel) => (sel === '.ref[data-ref]' ? refEl : null) } });
     assert.equal(harness.isSideClosed(), false);
@@ -2505,31 +2499,13 @@ test('Side pane: four tabs (Explorer/Document/My notes/Terminal), close/reopen, 
     assert.equal($('split').getAttribute('aria-orientation'), 'vertical');
     assert.equal($('split-orient').textContent, '⇅');
     assert.equal(store.get('agent-room:split-orient'), 'side');
-
-    // 5. My notes unsaved-changes prompt guards switching tabs and closing the side pane.
-    $('tab-notes').onclick();
-    assert.equal(harness.getSubtab(), 'notes');
-    harness.notes.editing = true;
-    harness.notes.base = 'saved';
-    harness.noteText.value = 'unsaved edit';
-    $('notes-ask').hidden = true;
-    $('tab-explorer').onclick();
-    assert.equal(harness.getSubtab(), 'notes'); // stayed on My notes until user confirms
-    assert.equal($('notes-ask').hidden, false);
-    $('notes-ask')._discard();
-    assert.equal(harness.getSubtab(), 'explorer');
-
-    // Explicit End shell stops it and removes the running dot.
-    harness.closeHostShell();
-    assert.equal(harness.getHostShell(), null);
-    assert.equal($('tab-terminal').classList.contains('running'), false);
   } finally {
     s.close();
   }
 });
 
-test('Control bar: Boards / Providers / Instructions, full Main panel with Back, List panel collapse/restore, Monitor→Providers, and Terminal/My notes preserved', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'control-bar-'));
+test('Services panel: Control bar services, half-window grid, list collapse/restore, Terminal fit & dot, My notes draft/guard, Discussion/Worker independence, and saved sizes preserved', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'services-panel-'));
   const s = await serve(root, { clients: new Set(), transcript: [] });
   try {
     const html = await (await s.get('/__room')).text();
@@ -2537,15 +2513,30 @@ test('Control bar: Boards / Providers / Instructions, full Main panel with Back,
     assert.match(html, /id="ctrl-boards"/);
     assert.match(html, /id="ctrl-providers"/);
     assert.match(html, /id="ctrl-instructions"/);
-    assert.match(html, /id="main-page"/);
-    assert.match(html, /id="main-page-back"/);
+    assert.match(html, /id="ctrl-schedule"/);
+    assert.match(html, /id="ctrl-notes"[^>]*hidden/);
+    assert.match(html, /id="ctrl-terminal"[^>]*hidden/);
+    assert.match(html, /id="services-panel"[^>]*hidden/);
+    assert.match(html, /id="services-close"/);
+    assert.doesNotMatch(html, /id="main-page"/);
     assert.doesNotMatch(html, /id="tab-providers"/);
     assert.doesNotMatch(html, /id="tab-instructions"/);
+    assert.doesNotMatch(html, /id="tab-notes"/);
+    assert.doesNotMatch(html, /id="tab-terminal"/);
+
+    // CSS grid places #services-panel between #control-bar and #list-panel at half width.
+    const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] || '';
+    assert.match(style, /body\.service-open\s*\{[^}]*grid-template-columns:/);
+    assert.match(style, /body\.service-open\.list-collapsed\s*\{[^}]*grid-template-columns:/);
+    assert.match(style, /#ctrl-terminal\.running::after/);
+    assert.ok(html.indexOf('id="control-bar"') < html.indexOf('id="services-panel"'));
+    assert.ok(html.indexOf('id="services-panel"') < html.indexOf('id="list-panel"'));
 
     const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
-    const ctrlCode = source.slice(source.indexOf('// Control bar & Main panel pages'), source.indexOf('// The Instructions tab:'));
+    const ctrlCode = source.slice(source.indexOf('// Control bar & Services panel'), source.indexOf('// The Schedule page:'));
     const dividerCode = source.slice(source.indexOf('// The dividers:'), source.indexOf('function message('));
     const monitorCode = source.slice(source.indexOf('function providerName('), source.indexOf('function showMonitor('));
+    const notesGuardCode = source.slice(source.indexOf('function notesAsk('), source.indexOf('function setEditor('));
     const classListFor = () => {
       const set = new Set();
       return { toggle(cls, v) { if (v === undefined ? !set.has(cls) : v) set.add(cls); else set.delete(cls); },
@@ -2553,84 +2544,150 @@ test('Control bar: Boards / Providers / Instructions, full Main panel with Back,
     };
     const node = (tag = 'div') => ({
       tag, className: '', textContent: '', title: '', value: '', hidden: false, disabled: false, open: false, children: [], dataset: {},
-      style: { props: {}, setProperty(k, v) { this.props[k] = v; }, getPropertyValue(k) { return this.props[k] || ''; } },
+      style: { props: {}, setProperty(k, v) { this.props[k] = v; }, removeProperty(k) { delete this.props[k]; }, getPropertyValue(k) { return this.props[k] || ''; } },
       attrs: {}, setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return this.attrs[k] ?? null; },
       offsetWidth: 7, offsetHeight: 7, getBoundingClientRect: () => ({ width: 800, height: 600, left: 62, top: 0 }),
       classList: classListFor(),
       append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+      get lastChild() { return this.children[this.children.length - 1] || null; },
       addEventListener() {}, focus() {}, scrollIntoView() {},
     });
     const els = {};
     const $ = (id) => els[id] || (els[id] = node(id));
     const document = {
       body: node('body'),
-      documentElement: { clientWidth: 1200, clientHeight: 800 },
+      documentElement: { clientWidth: 1400, clientHeight: 800 },
       createElement: node,
       getElementById: (id) => els[id] || null,
       addEventListener() {},
     };
-    const store = new Map();
+    // Simulate #control-bar (62px), #services-panel (669px when open), and #main-panel narrowing to 540px while a service is open.
+    $('control-bar').getBoundingClientRect = () => ({ width: 62, height: 600, left: 0, top: 0 });
+    $('main-panel').getBoundingClientRect = () => ({ width: document.body.classList.contains('service-open') ? 540 : 1100, height: 600, left: 62, top: 0 });
+    $('services-panel').getBoundingClientRect = () => ({ width: document.body.classList.contains('service-open') ? 669 : 0, height: 600, left: 62, top: 0 });
+    const store = new Map([['agent-room:left', '620'], ['agent-room:list', '280']]);
     const localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
-    const window = { addEventListener() {} };
+    const winListeners = {};
+    const window = { addEventListener: (type, fn) => { (winListeners[type] ||= []).push(fn); } };
     const harness = new Function('$', 'document', 'window', 'localStorage', 'requestAnimationFrame', 'post',
-      'let tab = "talk", subtab = "explorer", box = $("box"), wbox = $("wbox"), renderedProviders = 0, renderedInstructions = 0;\n' +
-      'let hostShell = { alive: true, fit: { fit: () => {} } }, noteText = { value: "unsaved draft" };\n' +
+      'let tab = "talk", subtab = "explorer", box = $("box"), wbox = $("wbox"), renderedProviders = 0, renderedInstructions = 0, fitCalls = 0, shellStarts = 0;\n' +
+      'let hostShell = null, notes = { open: false, editing: false, base: "" }, noteText = $("notes-text");\n' +
+      'const notesDirty = () => notes.editing && noteText.value !== notes.base;\n' +
+      'const openNotes = () => { notes.open = true; };\n' +
+      'const openHostShell = () => { shellStarts++; hostShell = { alive: true, fit: { fit: () => { fitCalls++; } }, term: { focus: () => {} } }; $("ctrl-terminal").classList.add("running"); };\n' +
+      'const closeHostShell = () => { hostShell = null; $("ctrl-terminal").classList.remove("running"); };\n' +
       'const currentTitle = () => "WhatsApp UI", updateReplicaView = () => {}, providerHealth = () => ({ level: "amber", box: document.createElement("span") });\n' +
       'const renderProviders = () => { renderedProviders++; }, renderInstructions = () => { renderedInstructions++; };\n' +
-      dividerCode + '\n' + ctrlCode + '\n' + monitorCode + '\n' +
-      'return { openMainPage, showTab, setListCollapsed, providerName, getMainPage: () => mainPage, getHostShell: () => hostShell, getNoteText: () => noteText.value, counts: () => ({ renderedProviders, renderedInstructions }) };'
+      ctrlCode + '\n' + dividerCode + '\n' + monitorCode + '\n' + notesGuardCode + '\n' +
+      'return { openService, showTab, setListCollapsed, providerName, notes, noteText, notesGuard, closeHostShell, getService: () => openServiceName, getHostShell: () => hostShell, getTab: () => tab, isSideClosed: () => sideClosed, isStacked: () => stacked, counts: () => ({ renderedProviders, renderedInstructions, fitCalls, shellStarts }) };'
     )($, document, window, localStorage, (cb) => cb(), async () => {});
 
-    // 1. Open Providers from Control bar: fills Main panel, collapses List panel (was open), shows ← Back to <title>.
+    // Saved divider width (620px) is applied initially.
+    assert.equal($('main-panel').style.getPropertyValue('--left'), '620px');
+    assert.equal(document.body.style.getPropertyValue('--list'), '280px');
+
+    // 1. Open Providers from Control bar: opens Services panel, collapses List panel (was open), leaves side pane open, clamps --left without overwriting localStorage.
     assert.equal(document.body.classList.contains('list-collapsed'), false);
     $('ctrl-providers').onclick();
-    assert.equal(harness.getMainPage(), 'providers');
-    assert.equal($('main-panel').classList.contains('showing-page'), true);
+    assert.equal(harness.getService(), 'providers');
+    assert.equal(document.body.classList.contains('service-open'), true);
+    assert.equal($('services-panel').hidden, false);
+    assert.equal($('services-title').textContent, 'Providers');
     assert.equal($('providers').hidden, false);
     assert.equal($('instructions').hidden, true);
     assert.equal(document.body.classList.contains('list-collapsed'), true);
     assert.equal(store.get('agent-room:list-collapsed'), undefined); // temporary collapse does not overwrite saved preference
-    assert.equal($('main-page-back').textContent, '← Back to WhatsApp UI');
+    assert.equal(harness.isSideClosed(), false); // Explorer/Document stays open
+    assert.equal(harness.isStacked(), false); // not stacked automatically
+    assert.equal($('main-panel').style.getPropertyValue('--left'), '273px'); // clamped to fit 540px board area
+    assert.equal(store.get('agent-room:left'), '620'); // saved divider size is NOT overwritten
+    assert.equal(store.get('agent-room:list'), '280'); // saved list size is NOT overwritten
     assert.equal($('ctrl-providers').classList.contains('on'), true);
     assert.equal($('ctrl-boards').classList.contains('on'), false);
 
-    // 2. Switch to Instructions (mutually exclusive): List stays collapsed, prior state still remembered as open.
-    $('ctrl-instructions').onclick();
-    assert.equal(harness.getMainPage(), 'instructions');
+    // 2. Clicking Discussion or Worker never closes the open service.
+    $('tab-work').onclick();
+    assert.equal(harness.getTab(), 'work');
+    assert.equal(harness.getService(), 'providers');
+    $('tab-talk').onclick();
+    assert.equal(harness.getTab(), 'talk');
+    assert.equal(harness.getService(), 'providers');
+
+    // 3. Switch to My notes, make an unsaved edit, then switch to Terminal: hides My notes without asking and keeps edits.
+    $('ctrl-notes').onclick();
+    assert.equal(harness.getService(), 'notes');
+    assert.equal($('notes').hidden, false);
     assert.equal($('providers').hidden, true);
-    assert.equal($('instructions').hidden, false);
-    assert.equal($('ctrl-instructions').classList.contains('on'), true);
-    assert.equal($('ctrl-providers').classList.contains('on'), false);
+    harness.notes.editing = true;
+    harness.notes.base = 'saved';
+    harness.noteText.value = 'unsaved edit';
+    $('notes-ask').hidden = true;
 
-    // 3. Return via ← Back: restores List panel to open, preserves running Terminal and unsaved My notes.
-    $('main-page-back').onclick();
-    assert.equal(harness.getMainPage(), null);
-    assert.equal($('main-panel').classList.contains('showing-page'), false);
+    $('ctrl-terminal').onclick();
+    assert.equal(harness.getService(), 'terminal');
+    assert.equal($('notes').hidden, true);
+    assert.equal($('notes-ask').hidden, true); // no prompt on switching services
+    assert.equal(harness.noteText.value, 'unsaved edit'); // edits kept
+    assert.equal(harness.counts().shellStarts, 1);
+    assert.ok(harness.getHostShell()?.alive);
+    assert.equal($('ctrl-terminal').classList.contains('running'), true); // green dot on Control bar button
+
+    // Window resize fits Terminal when open.
+    const fitsBefore = harness.counts().fitCalls;
+    for (const fn of winListeners.resize || []) fn();
+    assert.equal(harness.counts().fitCalls, fitsBefore + 1);
+    assert.equal(store.get('agent-room:left'), '620'); // resize while service open never overwrites saved width
+
+    // 4. Close Services panel via active Terminal button: restores List panel and saved --left (620px), keeps Terminal alive and My notes edits.
+    $('ctrl-terminal').onclick();
+    assert.equal(harness.getService(), null);
+    assert.equal(document.body.classList.contains('service-open'), false);
+    assert.equal($('services-panel').hidden, true);
     assert.equal(document.body.classList.contains('list-collapsed'), false);
+    assert.equal($('main-panel').style.getPropertyValue('--left'), '620px'); // restored saved width!
     assert.equal($('ctrl-boards').classList.contains('on'), true);
-    assert.equal(harness.getHostShell().alive, true);
-    assert.equal(harness.getNoteText(), 'unsaved draft');
+    assert.ok(harness.getHostShell()?.alive);
+    assert.equal($('ctrl-terminal').classList.contains('running'), true);
+    assert.equal(harness.noteText.value, 'unsaved edit');
 
-    // 4. If List panel was already collapsed before opening Providers, returning via Boards keeps it collapsed.
+    // Reopening Terminal does not start a second shell and refits the running one.
+    const fitsBeforeReopen = harness.counts().fitCalls;
+    $('ctrl-terminal').onclick();
+    assert.equal(harness.counts().shellStarts, 1);
+    assert.equal(harness.counts().fitCalls, fitsBeforeReopen + 1);
+
+    // 5. notesGuard opens My notes in the Services panel (not side pane) when leaving a board with unsaved edits.
+    let leftBoard = false;
+    harness.notesGuard(() => { leftBoard = true; });
+    assert.equal(harness.getService(), 'notes');
+    assert.equal($('notes-ask').hidden, false);
+    assert.equal(leftBoard, false);
+    $('notes-ask-buttons').children[0].onclick(); // Discard changes
+    assert.equal(leftBoard, true);
+
+    // 6. If List panel was already collapsed before opening a service, closing via Boards keeps it collapsed.
+    $('ctrl-boards').onclick(); // close notes
     harness.setListCollapsed(true, true);
     $('ctrl-providers').onclick();
-    assert.equal(harness.getMainPage(), 'providers');
+    assert.equal(harness.getService(), 'providers');
     $('ctrl-boards').onclick();
-    assert.equal(harness.getMainPage(), null);
+    assert.equal(harness.getService(), null);
     assert.equal(document.body.classList.contains('list-collapsed'), true);
 
-    // 5. Clicking a provider name in Monitor opens Providers in Main panel and expands #health-details.
+    // 7. Clicking a provider name in Monitor opens Providers in Services panel and expands #health-details.
     harness.setListCollapsed(false, true);
     const monitorBadge = harness.providerName('claude', 'Claude', true);
     monitorBadge.onclick();
-    assert.equal(harness.getMainPage(), 'providers');
+    assert.equal(harness.getService(), 'providers');
     assert.equal($('health-details').open, true);
     assert.equal(document.body.classList.contains('list-collapsed'), true);
 
-    // 6. Toggling off active Providers button returns to conversation and restores List panel.
-    $('ctrl-providers').onclick();
-    assert.equal(harness.getMainPage(), null);
-    assert.equal(document.body.classList.contains('list-collapsed'), false);
+    // 8. End shell removes the green dot from #ctrl-terminal.
+    harness.closeHostShell();
+    assert.equal($('ctrl-terminal').classList.contains('running'), false);
+
+    // 9. noteDraftKept after reload opens My notes in Services panel (not side pane).
+    assert.match(source, /if \(noteDraftKept\) \{ openService\('notes', \{ skipNotesOpen: true \}\); openNotes\(noteDraftKept\); \}/);
   } finally {
     s.close();
   }
