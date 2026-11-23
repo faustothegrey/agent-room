@@ -5950,3 +5950,47 @@ test('name reservation: names in brainstorms/archive/ and brainstorms/deferred/ 
   assert.ok(existsSync(`${ctx.cwd}/brainstorms/2026-11-05-clash`));
   assert.ok(!existsSync(`${ctx.cwd}/discussions/2026-11-05-clash`));
 });
+
+test('overlapping refreshWorker calls cannot leave an older result shown last', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, refreshWorker } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  const { first, git } = await multiRoom({ worker: (ctx) => {
+    const tree = ctx.workerDir.path;
+    writeFileSync(`${tree}/feat.txt`, 'ok\n');
+    inTree(tree, 'add', 'feat.txt');
+    inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] add feat`);
+    return `Docs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+  } });
+
+  await handleLine('overlap-refresh', first);
+  const { name } = first.discussion;
+  queueWork(first, 'make commit');
+  await first.workQueue;
+  assert.equal(first.screen.workerInfo.mergeable[name]?.canMerge, true);
+
+  // Start an older refresh that reads the pre-merge state, then pause right before it broadcasts.
+  let paused, release;
+  const atPause = new Promise((r) => { paused = r; });
+  const canResume = new Promise((r) => { release = r; });
+  const older = refreshWorker(first, { _beforeBroadcast: async () => { paused(); await canResume; } });
+  await atPause;
+
+  // Merge the worker branch from a terminal, then run a newer refresh to completion.
+  git('merge', '--no-ff', '-m', `[${name}] merge from terminal`, `worker/${name}`);
+  const eventsBeforeNewer = first.events.filter((e) => e.type === 'workerinfo').length;
+  await refreshWorker(first);
+  const eventsAfterNewer = first.events.filter((e) => e.type === 'workerinfo').length;
+  assert.equal(eventsAfterNewer, eventsBeforeNewer + 1);
+  assert.deepEqual(first.screen.workerInfo.mergeable, {});
+  assert.deepEqual(first.screen.workerInfo.pending, []);
+
+  // Release the older refresh: it must not overwrite screen.workerInfo or emit a stale workerinfo event.
+  release();
+  await older;
+  assert.equal(first.events.filter((e) => e.type === 'workerinfo').length, eventsAfterNewer);
+  assert.deepEqual(first.screen.workerInfo.mergeable, {});
+  assert.deepEqual(first.screen.workerInfo.pending, []);
+});

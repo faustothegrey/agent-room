@@ -3966,8 +3966,11 @@ export async function codeInfo(dir = dirname(dirname(fileURLToPath(import.meta.u
 // `place`: the lane to prepare (a task's); by default the lane of the discussion in use. The Worker
 // tab of each open discussion shows its own lane first, then every other lane with something to
 // review, each with its checks (laneChecks), recomputed here: after each task, and when the tab is shown.
-export async function refreshWorker(ctx, { prepare = false, fastForward = true, place = null } = {}) {
+export async function refreshWorker(ctx, { prepare = false, fastForward = true, place = null, _beforeBroadcast = null } = {}) {
   place ??= await lanePlace(ctx, laneOf(ctx));
+  const holder = siblings(ctx).find((c) => c.screen);
+  const shop = holder ? shopOf(holder) : null;
+  const nextSeq = () => (shop ? (shop.refreshSeq = (shop.refreshSeq ?? 0) + 1) : 0);
   if (prepare && !place.disabled) {
     try {
       await ensureWorktree(place); await ignoreNotes(place); await linkDeps(place);
@@ -3975,15 +3978,27 @@ export async function refreshWorker(ctx, { prepare = false, fastForward = true, 
       if (fastForward) s = await catchUp(place, s);
       (ctx.workerDir ??= { path: null }).path = s.exists ? place.cwd : null;
     } catch (err) {
+      const seq = nextSeq();
       const info = { lines: [`✗ ${err.message}`], error: true };
-      for (const c of siblings(ctx)) if (c.screen) { c.screen.workerInfo = info; toScreen(c, { type: 'workerinfo', info }); }
+      if (!shop || seq === shop.refreshSeq) {
+        for (const c of siblings(ctx)) if (c.screen) { c.screen.workerInfo = info; toScreen(c, { type: 'workerinfo', info }); }
+      }
       throw err;
     }
   }
+  const seq = nextSeq();
   const seen = new Map(); // each lane's lines, computed once for all the open discussions
+  const updates = [];
   for (const c of siblings(ctx)) {
     if (!c.screen) continue;
+    if (shop && seq !== shop.refreshSeq) return place;
     const info = await workerInfo(c, seen, c === ctx && !prepare ? place : null);
+    updates.push([c, info]);
+  }
+  if (_beforeBroadcast) await _beforeBroadcast();
+  if (shop && seq !== shop.refreshSeq) return place;
+  for (const [c, info] of updates) {
+    if (!c.screen) continue;
     c.screen.workerInfo = info;
     toScreen(c, { type: 'workerinfo', info });
   }
