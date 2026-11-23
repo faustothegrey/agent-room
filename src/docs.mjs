@@ -203,7 +203,7 @@ const DISC_SECTIONS = new Set(['archive', 'deferred']);
 // kept even when .gitignore ignores patterns such as transcripts/. Room checkout files outside them respect .gitignore.
 function inDiscussion(rel) {
   const p = rel.split(/[/\\]/);
-  if (p[0] === 'brainstorms') return p.length >= 2 && isDatedDiscussion(p[1]);
+  if (p[0] === 'brainstorms') return p.length >= 2 && (isDatedDiscussion(p[1]) || DISC_SECTIONS.has(p[1]));
   return p[0] === 'discussions' && ((p.length >= 2 && isDatedDiscussion(p[1])) || (p.length >= 2 && DISC_SECTIONS.has(p[1])));
 }
 function isGitIgnored(dir, rel) {
@@ -2038,6 +2038,7 @@ function docLabel(file) {
   if (p[0] === 'discussions' && p.length >= 3 && isDiscussion(p[1])) return discussionTitle(p[1], 'discussions/' + p[1]) + ' · ' + p.slice(2).join('/');
   if (p[0] === 'brainstorms' && p.length >= 3 && isDiscussion(p[1])) return brainstormTitle(p[1]) + ' · ' + p.slice(2).join('/');
   if (p[0] === 'discussions' && p.length >= 4 && SECTIONS[p[1]] && isDiscussion(p[2])) return discussionTitle(p[2], 'discussions/' + p[1] + '/' + p[2]) + ' · ' + p.slice(3).join('/');
+  if (p[0] === 'brainstorms' && p.length >= 4 && SECTIONS[p[1]] && isDiscussion(p[2])) return brainstormTitle(p[2]) + ' · ' + p.slice(3).join('/');
   return 'Room checkout · ' + file;
 }
 function currentTitle() {
@@ -2566,7 +2567,7 @@ setInterval(async () => { if (viewing) { try { const r = await post('__view', { 
 // itself: the index of its discussions).
 const isDiscussion = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(name);
 const SECTIONS = { archive: 'Archive', deferred: 'Deferred' };
-const inDiscussion = (f) => { const p = f.split('/'); return p[0] === 'brainstorms' ? p.length >= 2 && isDiscussion(p[1]) : p[0] === 'discussions' && p.length >= 2 && (isDiscussion(p[1]) || Boolean(SECTIONS[p[1]])); };
+const inDiscussion = (f) => { const p = f.split('/'); return (p[0] === 'brainstorms' || p[0] === 'discussions') && p.length >= 2 && (isDiscussion(p[1]) || Boolean(SECTIONS[p[1]])); };
 // The discussion a list path shows, as /resume and /move name it ("<name>" or "archive/<name>"), or null.
 function discussionOf(parts) {
   if (parts.length === 2 && isDiscussion(parts[1])) return { ref: parts[1], section: null };
@@ -2627,20 +2628,21 @@ function rollbackButtons(row, details, name, ref, inUse) {
 }
 const pendingArchives = new Set();
 function archiveButton(b, ref) {
-  const pending = pendingArchives.has('discussions/' + ref);
+  const key = ref.startsWith('brainstorms/') ? ref : 'discussions/' + ref;
+  const pending = pendingArchives.has(key);
   b.classList.toggle('archiving', pending);
   b.setAttribute('aria-busy', String(pending));
   if (pending) b.disabled = true;
   b.onclick = async () => {
     if (ended) return;
-    pendingArchives.add('discussions/' + ref);
+    pendingArchives.add(key);
     archiveButton(b, ref);
     try {
       const res = await post('__say', { text: '/move ' + ref + ' archive' });
       if (res.ok) return; // Accepted into the queue: keep spinning until the moved event.
       status(await res.text(), true);
     } catch (err) { status(err.message, true); }
-    pendingArchives.delete('discussions/' + ref);
+    pendingArchives.delete(key);
     openFiles();
   };
 }
@@ -3033,6 +3035,14 @@ function renderBoards() {
       close.title = close.disabled ? 'It is not open' : 'Close it: its agents stop; its checkpoint is kept';
       close.onclick = () => { closeMenus(); send('/close ' + path); };
       items.append(close);
+      for (const [mLabel, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
+        const mb = el('button', '', mLabel);
+        mb.disabled = !closed;
+        mb.title = !closed ? 'Close this brainstorm before moving it into ' + target + '/.' : 'Move the whole brainstorm into ' + target + '/';
+        mb.onclick = () => { closeMenus(); send('/move ' + path + ' ' + target); };
+        if (target === 'archive') archiveButton(mb, path);
+        items.append(mb);
+      }
       const convert = el('button', '', 'Turn into a discussion');
       convert.title = 'Move it to discussions/: its agents keep their sessions and are told the new folder; the worker can then be sent work.';
       confirmed(convert, () => { closeMenus(); send('/convert ' + path); }, 'Click again: it moves to discussions/', () => true);
@@ -3056,14 +3066,68 @@ function renderBoards() {
   }
 
   // --- 3. Archived · Deferred (folded by default) ---
-  const archivedItems = discussionsIn('discussions/archive').map((d) => ({ s: 'archive', d }));
-  const deferredItems = discussionsIn('discussions/deferred').map((d) => ({ s: 'deferred', d }));
+  const archivedItems = [
+    ...discussionsIn('discussions/archive').map((d) => ({ s: 'archive', d, kind: 'discussion' })),
+    ...discussionsIn('brainstorms/archive').map((d) => ({ s: 'archive', d, kind: 'brainstorm' })),
+  ].sort((a, b) => b.d.localeCompare(a.d));
+  const deferredItems = [
+    ...discussionsIn('discussions/deferred').map((d) => ({ s: 'deferred', d, kind: 'discussion' })),
+    ...discussionsIn('brainstorms/deferred').map((d) => ({ s: 'deferred', d, kind: 'brainstorm' })),
+  ].sort((a, b) => b.d.localeCompare(a.d));
   const inactiveItems = [...archivedItems, ...deferredItems];
   const inactiveSection = makeSection('archived-deferred', 'Archived · Deferred', inactiveItems.length);
   if (!inactiveItems.length) {
-    inactiveSection.append(el('span', 'hint', 'No archived or deferred discussions.'));
+    inactiveSection.append(el('span', 'hint', 'No archived or deferred discussions or brainstorms.'));
   }
-  for (const { s, d } of inactiveItems) {
+  for (const { s, d, kind } of inactiveItems) {
+    if (kind === 'brainstorm') {
+      const path = 'brainstorms/' + s + '/' + d;
+      const isPeeking = (peek?.kind === 'local' && peek.path === path) || (peeking?.path === path);
+      const row = el('div', 'row discussion-row' + (isPeeking ? ' peeking' : ''));
+      const block = el('div', 'discussion-block');
+      const label = brainstormTitle(d);
+      const nameBtn = el('button', 'entry brainstorm', label);
+      nameBtn.title = path;
+      nameBtn.onclick = () => enterClosedPeek(path, path, d, label);
+      block.append(nameBtn);
+      block.append(el('div', 'local-label', s === 'archive' ? 'archived brainstorm' : 'deferred brainstorm'));
+      row.append(block);
+
+      if (canAct) {
+        const { menu, items } = makeRowMenu(path);
+        const b = el('button', '', 'Resume');
+        b.title = 'Resume: makes it active first';
+        b.onclick = () => { closeMenus(); send('/resume ' + path); };
+        items.append(b);
+        const pf = el('button', '', 'Peek files');
+        pf.title = 'Show this brainstorm’s files in Explorer without moving it';
+        pf.onclick = () => { closeMenus(); peekFiles({ kind: 'local', path, name: d, title: label, readonly: true }); };
+        items.append(pf);
+        const p = el('button', '', 'Peek chat & files');
+        p.title = 'Look at this closed brainstorm read-only: its conversation and files, without reopening it.';
+        p.onclick = () => { closeMenus(); enterClosedPeek(path, path, d, label); };
+        items.append(p);
+        const makeActive = el('button', '', 'Make active');
+        makeActive.onclick = () => { closeMenus(); send('/move ' + path + ' active'); };
+        items.append(makeActive);
+        const otherSection = s === 'archive' ? 'deferred' : 'archive';
+        const moveOther = el('button', '', otherSection === 'archive' ? 'Archive' : 'Defer');
+        moveOther.onclick = () => { closeMenus(); send('/move ' + path + ' ' + otherSection); };
+        if (otherSection === 'archive') archiveButton(moveOther, path);
+        items.append(moveOther);
+        const fresh = el('button', '', 'Start fresh');
+        fresh.title = 'Makes it active first. New agent sessions, briefed from its latest summary or, with none, pointed at its transcripts. Its saved sessions and chat are discarded.';
+        confirmed(fresh, () => { closeMenus(); send('/fresh ' + path); }, 'Click again: its saved sessions and chat are discarded', () => true);
+        items.append(fresh);
+        const del = el('button', 'danger', 'Delete');
+        del.title = 'Delete its folder (transcripts, drawings) and its checkpoint';
+        confirmed(del, () => { closeMenus(); send('/delete ' + path); }, 'Click again: its folder (transcripts, drawings) and checkpoint are removed; uncommitted files are lost for good', () => true);
+        items.append(del);
+        row.append(menu);
+      }
+      inactiveSection.append(row);
+      continue;
+    }
     const path = 'discussions/' + s + '/' + d;
     const isPeeking = (peek?.kind === 'local' && peek.path === path) || (peeking?.path === path);
     const row = el('div', 'row discussion-row' + (isPeeking ? ' peeking' : ''));
