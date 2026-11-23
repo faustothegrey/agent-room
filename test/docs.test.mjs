@@ -3181,12 +3181,15 @@ test('relocated controls: + New discussion / + New brainstorm sit at top of Boar
   assert.match(source, /Turn it into a discussion \(Actions ▾ on the tab bar\) to have it here\./);
 });
 
-test('workbench UI: New workbench in Actions ▾, worker-only view, 🔧 Boards icon, and Close and Merge/Discard hidden on workbenches', async () => {
+test('workbench UI: + New workbench in Boards, New workbench in Actions ▾, worker-only view, 🔧 Boards icon, and Close and Merge/Discard shown on workbenches', async () => {
   const s = await serve(fixture(), { clients: new Set(), transcript: [] });
   const html = await (await s.get('/__room')).text();
   s.close();
 
-  // New workbench sits in Actions ▾ and CSS gives workbench rows 🔧.
+  // + New workbench sits beside + New discussion and + New brainstorm at the top of Boards;
+  // New workbench sits in Actions ▾; CSS gives workbench rows 🔧.
+  const listPanel = html.slice(html.indexOf('<aside id="list-panel"'), html.indexOf('</aside>'));
+  assert.match(listPanel, /id="list-new"[\s\S]*id="newdisc"[^>]*>\+ New discussion<\/button>[\s\S]*id="newbrainstorm"[^>]*>\+ New brainstorm<\/button>[\s\S]*id="newboard-workbench"[^>]*>\+ New workbench<\/button>/);
   const tabs = html.slice(html.indexOf('<div id="tabs"'), html.indexOf('<div class="view" id="talk"'));
   assert.match(tabs, /id="actions-menu"[\s\S]*id="newworkbench"[^>]*>New workbench<\/button>/);
   assert.match(html, /#board-list \.entry\.workbench::before \{ content: '🔧'; \}/);
@@ -3254,10 +3257,11 @@ test('workbench UI: New workbench in Actions ▾, worker-only view, 🔧 Boards 
   assert.equal($('talk-settings').hidden, true);
   assert.equal($('summary').hidden, true);
   assert.equal($('newworkbench').hidden, false);
-  // Close is shown, but Close and Merge / Close and Discard are hidden on workbenches.
+  // Close, Close and Merge, and Close and Discard are shown on workbenches.
   assert.equal($('closedisc').hidden, false);
-  assert.equal($('closemerge').hidden, true);
-  assert.equal($('closediscard').hidden, true);
+  assert.equal($('closemerge').hidden, false);
+  assert.equal($('closemerge').textContent, 'Close and Merge');
+  assert.equal($('closediscard').hidden, false);
 
   // Boards rows: workbench rows (active and archived) get class `entry workbench`; regular gets `entry discussion`.
   const allNodes = [];
@@ -3271,13 +3275,22 @@ test('workbench UI: New workbench in Actions ▾, worker-only view, 🔧 Boards 
   assert.ok(!regBtn?.classList.contains('workbench'));
   assert.ok(archWbBtn?.classList.contains('workbench'));
 
-  // Row ⋯ menus: regular discussion shows Close and Merge + Close and Discard; workbench hides both.
+  // Row ⋯ menus: both workbench and regular discussion show Close and Merge + Close and Discard.
   const rows = allNodes.filter((n) => n.classList?.contains('discussion-row'));
   const buttonsIn = (r) => { const out = []; const w = (x) => { if (x.tag === 'button') out.push(x.textContent); for (const c of x.children || []) w(c); }; w(r); return out; };
   const wbRow = rows.find((r) => buttonsIn(r).includes('2026-11-23-fix-btn'));
   const regRow = rows.find((r) => buttonsIn(r).includes('2026-11-23-regular'));
-  assert.ok(!buttonsIn(wbRow).includes('Close and Merge'));
-  assert.ok(!buttonsIn(wbRow).includes('Close and Discard'));
+  assert.ok(buttonsIn(wbRow).includes('Close and Merge'));
+  assert.ok(buttonsIn(wbRow).includes('Close and Discard'));
   assert.ok(buttonsIn(regRow).includes('Close and Merge'));
   assert.ok(buttonsIn(regRow).includes('Close and Discard'));
+
+  // Catch up with <branch> also shows on workbenches when behind targetBranch.
+  harness.setState({
+    r: wbRoom,
+    mergeable: { '2026-11-23-fix-btn': { catchUp: true, targetBranch: 'main' } },
+    discardable: ['2026-11-23-fix-btn'],
+  });
+  assert.equal($('closemerge').hidden, false);
+  assert.equal($('closemerge').textContent, 'Catch up with main');
 });

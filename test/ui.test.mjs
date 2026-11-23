@@ -6082,3 +6082,98 @@ test('workbench: excluded from Schedule (list and save reject workbenches)', asy
   assert.throws(() => saveSchedule(ctx, { action: 'add', discussion: '2026-11-21-a-workbench', prompt: 'run', time: '09:00' }), /Workbenches cannot be scheduled/);
   assert.throws(() => saveSchedule(ctx, { action: 'add', discussion: 'archive/2026-11-19-old-workbench', prompt: 'run', time: '09:00' }), /Workbenches cannot be scheduled/);
 });
+
+test('workbench: Close and Merge and Close and Discard close without closing-statement.md and handle worktree/branch as for a discussion', async () => {
+  const { existsSync, readFileSync, writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { closeMergePreview, closeAndMerge, closeAndDiscard, workerPlace, reloaded } = await import('../src/ui.mjs');
+  const cwd = await tmp('workbench-merge-discard-');
+  await gitRoom(cwd);
+  const ctx = { cwd, agentSpecs: 'claude:A', workerSpec: 'claude:Worker', state: { transcript: [], seen: new Map() }, sessions: new Map() };
+  Object.assign(ctx, await load(ctx, ''));
+  ctx.say = () => {};
+  await reloaded(ctx);
+  ctx.closingStatement = async () => { throw new Error('closing-statement agent must not run on a workbench'); };
+
+  // 1. Close and Merge on a workbench: merges into main, removes worktree & branch, closes with no closing-statement.md.
+  ctx.suggestTitle = async () => ({ title: 'Merge Me' });
+  ctx.worker.turn = async () => {
+    const place = await workerPlace(cwd, ctx.discussion.name);
+    writeFileSync(`${place.path}/merged.txt`, 'merged fix\n');
+    execFileSync('git', ['-C', place.path, 'add', 'merged.txt']);
+    execFileSync('git', ['-C', place.path, 'commit', '-m', `[${ctx.discussion.name}] merged fix`]);
+    const head = execFileSync('git', ['-C', place.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const main = execFileSync('git', ['-C', place.path, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
+    return `Fixed.\nDocs: none needed, because test.\nTested: ${head} with main ${main}: tests passed`;
+  };
+  await handleLine('/workbench', ctx);
+  await ctx.screen.work('Apply mergeable fix');
+  await ctx.workQueue;
+  const mergeName = ctx.discussion.name;
+  const mergePlace = await workerPlace(cwd, mergeName);
+  const preview = await closeMergePreview(ctx, mergeName);
+  assert.equal(preview.ok, true);
+  const mergeRes = await closeAndMerge(ctx, mergeName, preview.preview.snapshot);
+  assert.equal(mergeRes.ok, true);
+  assert.equal(existsSync(`${cwd}/discussions/${mergeName}/closing-statement.md`), false);
+  assert.equal(ctx.screen.room.closedDiscussions.includes(mergeName), true);
+  assert.equal(readFileSync(`${cwd}/merged.txt`, 'utf8'), 'merged fix\n');
+  assert.equal(existsSync(mergePlace.path), false);
+  assert.equal(execFileSync('git', ['-C', cwd, 'branch', '--list', mergePlace.branch], { encoding: 'utf8' }).trim(), '');
+
+  // 2. Close and Discard on a workbench: saves refs/discarded/..., removes worktree & branch, closes with no closing-statement.md.
+  ctx.suggestTitle = async () => ({ title: 'Discard Me' });
+  ctx.worker.turn = async () => {
+    const place = await workerPlace(cwd, ctx.discussion.name);
+    writeFileSync(`${place.path}/dropped.txt`, 'drop this\n');
+    execFileSync('git', ['-C', place.path, 'add', 'dropped.txt']);
+    execFileSync('git', ['-C', place.path, 'commit', '-m', `[${ctx.discussion.name}] dropped fix`]);
+    const head = execFileSync('git', ['-C', place.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const main = execFileSync('git', ['-C', place.path, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
+    return `Tried.\nDocs: none needed, because test.\nTested: ${head} with main ${main}: tests passed`;
+  };
+  await handleLine('/workbench', ctx);
+  await ctx.screen.work('Try discardable fix');
+  await ctx.workQueue;
+  const discardName = ctx.discussion.name;
+  const discardPlace = await workerPlace(cwd, discardName);
+  const dPrev = await ctx.screen.discardPreview(discardName);
+  const dRes = await closeAndDiscard(ctx, discardName, dPrev.preview.snapshot);
+  assert.equal(dRes.ok, true);
+  assert.match(dRes.savedRef, new RegExp(`^refs/discarded/${discardName}/`));
+  assert.equal(existsSync(`${cwd}/discussions/${discardName}/closing-statement.md`), false);
+  assert.equal(ctx.screen.room.closedDiscussions.includes(discardName), true);
+  assert.equal(existsSync(`${cwd}/dropped.txt`), false);
+  assert.equal(existsSync(discardPlace.path), false);
+  assert.equal(execFileSync('git', ['-C', cwd, 'branch', '--list', discardPlace.branch], { encoding: 'utf8' }).trim(), '');
+});
+
+test('workbench: worker prompt paragraph reaches only workbench tasks (not discussion tasks)', async () => {
+  const { WORKER_WORKBENCH } = await import('../src/instructions.mjs');
+  const { queueWork, reloaded } = await import('../src/ui.mjs');
+  const cwd = await tmp('workbench-prompt-');
+  await gitRoom(cwd);
+  const ctx = { cwd, agentSpecs: 'claude:A', workerSpec: 'claude:Worker', noScreen: true, state: { transcript: [], seen: new Map() }, sessions: new Map() };
+  Object.assign(ctx, await load(ctx, ''));
+  ctx.room.agents[0].turn = async () => 'PASS';
+  ctx.suggestTitle = async () => ({ title: 'Prompt Check' });
+  const prompts = [];
+  ctx.worker.turn = async (p) => { prompts.push(p); return 'ok\nDocs: none needed, because test.'; };
+
+  // Workbench task gets the workbench prompt paragraph.
+  await handleLine('/workbench', ctx);
+  await handleLine('Tighten spacing', ctx);
+  await ctx.workQueue;
+  assert.equal(prompts.length, 1);
+  assert.ok(prompts[0].includes(WORKER_WORKBENCH));
+
+  // Normal discussion task does NOT get the workbench prompt paragraph.
+  await handleLine('/new', ctx);
+  await handleLine('Discuss design', ctx);
+  await reloaded(ctx);
+  ctx.worker.turn = async (p) => { prompts.push(p); return 'ok\nDocs: none needed, because test.'; };
+  queueWork(ctx, 'Implement design');
+  await ctx.workQueue;
+  assert.equal(prompts.length, 2);
+  assert.ok(!prompts[1].includes(WORKER_WORKBENCH));
+});

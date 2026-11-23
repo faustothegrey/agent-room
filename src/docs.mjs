@@ -963,7 +963,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </section>
 <aside id="list-panel" aria-label="Boards">
   <div id="list-head"><span id="list-title">Boards</span><button type="button" id="list-toggle" aria-expanded="true" aria-label="Collapse boards list" title="Collapse boards list">«</button></div>
-  <div id="list-new" hidden><button type="button" id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">+ New discussion</button><button type="button" id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">+ New brainstorm</button></div>
+  <div id="list-new" hidden><button type="button" id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">+ New discussion</button><button type="button" id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">+ New brainstorm</button><button type="button" id="newboard-workbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">+ New workbench</button></div>
   <div id="list-pane"></div>
 </aside>
 <div id="list-split" role="separator" aria-orientation="vertical" aria-label="Resize the boards list" tabindex="0" title="Drag to resize"></div>
@@ -2258,17 +2258,16 @@ function updateCloseButton() {
   const b = $('closedisc');
   if (!b) return;
   const activeLane = !room?.brainstorm && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
-  const isWb = !!room?.workbench || !!(activeLane && room?.workbenches?.includes(activeLane));
   const label = room?.brainstorm ? 'Close brainstorm' : closeActionLabel(activeLane);
   if (b.dataset.armed) b.dataset.label = label;
   else b.textContent = label;
   const m = $('closemerge');
   if (m) {
-    if (b.hidden || !activeLane || !!room?.brainstorm || isWb || !!room?.closedDiscussions?.includes(activeLane)) m.hidden = true;
+    if (b.hidden || !activeLane || !!room?.brainstorm || !!room?.closedDiscussions?.includes(activeLane)) m.hidden = true;
     else configureMergeButton(m, activeLane);
   }
   const d = $('closediscard');
-  if (d) d.hidden = b.hidden || !activeLane || !!room?.brainstorm || isWb || !workerDiscardable?.has(activeLane) || !!room?.closedDiscussions?.includes(activeLane);
+  if (d) d.hidden = b.hidden || !activeLane || !!room?.brainstorm || !workerDiscardable?.has(activeLane) || !!room?.closedDiscussions?.includes(activeLane);
 }
 async function startCatchUp(name) {
   try {
@@ -2961,13 +2960,13 @@ function renderBoards() {
         const close = el('button', '', closeActionLabel(d));
         close.onclick = () => { closeMenus(); send('/close ' + d); };
         items.append(close);
-        if (!isWb && workerMergeable?.[d]) {
+        if (workerMergeable?.[d]) {
           const merge = el('button', '', 'Close and Merge');
           configureMergeButton(merge, d);
           merge.onclick = () => { closeMenus(); startMerge(d); };
           items.append(merge);
         }
-        if (!isWb && workerDiscardable.has(d)) {
+        if (workerDiscardable.has(d)) {
           const discard = el('button', 'danger', 'Close and Discard');
           discard.onclick = () => { closeMenus(); startDiscard(d); };
           items.append(discard);
@@ -4110,6 +4109,7 @@ for (const id of ['switchroom', 'newroom', 'reload', 'summary']) $(id).addEventL
 // ending nothing, so one click is enough; in the terminal they end the session in use.
 confirmed($('newdisc'), () => send('/new'), null, () => !room?.multi && room?.started);
 confirmed($('newbrainstorm'), () => send('/brainstorm'), null, () => !room?.multi && room?.started);
+confirmed($('newboard-workbench'), () => send('/workbench'), null, () => !room?.multi && room?.started);
 confirmed($('newworkbench'), () => { closeMenus(); send('/workbench'); }, null, () => !room?.multi && room?.started);
 confirmed($('convert'), () => { closeMenus(); send('/convert ' + room.active); }, 'Click again: it moves to discussions/', () => true);
 confirmed($('closedisc'), () => send('/close'), 'Click again: this discussion closes (its agents stop)', () => !!room?.started);

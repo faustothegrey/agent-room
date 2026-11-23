@@ -1183,7 +1183,7 @@ function detachWorker(ctx) {
   if (!old) return;
   const key = `worker:${parseSpec(ctx.workerSpec ?? 'claude:Worker', true).name}`;
   old.seat = { id: ctx.workerSeat ?? null, key, session: ctx.sessions?.get(key) ?? null, origin: originLabel(ctx),
-    discussion: ctx.discussion ?? null, logPath: ctx.logPath ?? null, brainstorm: !!ctx.state.brainstorm,
+    discussion: ctx.discussion ?? null, logPath: ctx.logPath ?? null, brainstorm: !!ctx.state.brainstorm, workbench: !!ctx.state.workbench,
     briefed: ctx.workerBriefed ?? null, tree: ctx.workerTree ?? null, label: ctx.workerLabel ?? null, handoff: !!ctx.workerHandoff };
   const session = {};
   ctx.sessions?.set(key, session);
@@ -2057,7 +2057,7 @@ async function closeNamedDiscussion(ctx, name, { extraLine = null, rethrow = fal
         switchTo(target, null);
       }
     }
-    note(ctx, workbench ? `Closed workbench ${d.name}.${cleanupLine ? ` ${cleanupLine}` : ''}` : `Closed ${d.name}. Closing statement written by ${writer}.`);
+    note(ctx, workbench ? `Closed workbench ${d.name}.${(extraLine ?? cleanupLine) ? ` ${extraLine ?? cleanupLine}` : ''}` : `Closed ${d.name}. Closing statement written by ${writer}.`);
     if (snapshot) saveClosed(ctx, target, snapshot);
     return true;
   } catch (err) {
@@ -4557,7 +4557,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   // terminal) keeps that discussion's session and briefing in its seat (see detachWorker).
   const worker = t?.worker?.seat ? t.worker : ctx.worker;
   const seat = worker !== ctx.worker ? worker.seat : null;
-  const own = seat ?? { briefed: ctx.workerBriefed, tree: ctx.workerTree, label: ctx.workerLabel, handoff: ctx.workerHandoff, brainstorm: !!ctx.state.brainstorm };
+  const own = seat ?? { briefed: ctx.workerBriefed, tree: ctx.workerTree, label: ctx.workerLabel, handoff: ctx.workerHandoff, brainstorm: !!ctx.state.brainstorm, workbench: !!ctx.state.workbench };
   const shop = shopOf(ctx), screen = ctx.screen, label = t?.label ?? (seat ? seat.origin : originLabel(ctx)), owner = t?.owner ?? ownerOf(ctx);
   // First of all: its discussion's checkpoint records it as running (see "Work in flight").
   const record = t?.record, work = record ? workOf(shop, t.workName) : null;
@@ -4634,6 +4634,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       const brief = instr.workerBrief(d, own, place);
       const tree = instr.workerLocation(own, place, ctx, NOTES);
       const commit = instr.workerCommit(own, label, place);
+      const workbenchNote = instr.workerWorkbench ? instr.workerWorkbench(!!own.workbench || isWorkbenchDir(d?.dir)) : '';
       const leftover = recovery ? instr.workerLeftover(recovery, label, place) : '';
       const mainBehind = owedMain || !recovery && await gitOk(place.path, 'rev-parse', '--verify', 'main^{commit}') &&
         Number(await git(place.path, 'rev-list', '--count', 'HEAD..main')) > 0;
@@ -4648,7 +4649,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
         gauges: ctx.screen?.quota,
         measured: ctx.screen?.quotaAt?.measured,
       });
-      const prompt = `${makeUsageLine()}\n\n` + interrupted + brief + tree + commit + retryBrief + leftover + merge + (history ? instr.workerHistory(history, text) : text);
+      const prompt = `${makeUsageLine()}\n\n` + interrupted + brief + tree + commit + workbenchNote + retryBrief + leftover + merge + (history ? instr.workerHistory(history, text) : text);
       // Stopped while its worktree was prepared: its worker never starts.
       if (t?.stopNow) throw new Error('stopped by the User before the worker started');
       if (t) t.turnStarted = true;

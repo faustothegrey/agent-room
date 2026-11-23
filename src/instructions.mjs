@@ -145,6 +145,11 @@ export function workerCommit(own, label, place) {
 }
 export const WORKER_COMMIT = `These instructions come from [{label}]. When a task is complete, commit it on {branch} with a message starting "[{label}]" and give the commit ID in your reply.`;
 
+export const WORKER_WORKBENCH = `This is a workbench for a quick, small fix (no discussion agents). Keep the change and its commits small. In your reply, say what the User should check on screen. If the request turns out big enough to need a discussion instead, say so plainly before making large changes.`;
+export function workerWorkbench(isWorkbench) {
+  return isWorkbench ? `${WORKER_WORKBENCH}\n\n` : '';
+}
+
 export function workerLeftover(recovery, label, place) {
   return `Uncommitted edits are left in your worktree from the earlier task from [${label}] "${recovery.task}"${recovery.before ? ` (${place.branch} was at ${recovery.before.slice(0, 7)} when it started)` : ''}: this discussion's next worker tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those. Inspect and resolve any merge or revert already in progress before further work; never force it or start a fresh operation over it.\n\n`;
 }
@@ -216,6 +221,7 @@ export const instructionSets = [
       { id: 'location', intent: 'Its working directory and branch, where its scratch notes go, and what it must commit and report.', when: 'first instruction (again if the worktree changes)', content: WORKER_LOCATION },
       { id: 'brief', intent: 'The active discussion\'s folder (for its notes), or that it is a brainstorm with no folder.', when: 'first instruction in that discussion', content: WORKER_BRIEF },
       { id: 'commit-label', intent: 'The origin label every commit must carry.', when: 'once per worker session (again if the label changes)', content: WORKER_COMMIT },
+      { id: 'workbench', intent: 'Keep workbench changes and commits small, say what to check on screen, and flag requests that need a discussion instead.', when: 'workbench instructions only', content: WORKER_WORKBENCH },
       { id: 'catch-up', intent: 'Merge main into its branch first, run the tests, and report with a Tested line.', when: 'when its branch is behind main', content: WORKER_MERGE },
       { id: 'interrupted', intent: 'That its previous instruction was interrupted and to check the worktree.', when: 'once, after Restart, Quit or a crash', content: WORKER_INTERRUPTED },
       { id: 'stopped', intent: 'That the User stopped its previous instruction and to check the worktree.', when: 'once, after Stop now', content: WORKER_STOPPED },
