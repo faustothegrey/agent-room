@@ -238,3 +238,4 @@ Boards rows show the five states in priority order (ongoing > closed > not start
 a round with no summary (all-pass, failed turn, brainstorm) moves its openList row from ongoing back to idle
 Side pane: two tabs (Explorer/Document), close/reopen, [[D4]] reopen, and split orientation
 Services panel: Control bar services, half-window grid, list collapse/restore, Terminal fit & dot, My notes draft/guard, Discussion/Worker independence, and saved sizes preserved
+Per-board layout: saved per room+board, copies on first open, survives Archive/Defer/Convert, read-only peek/view, unnamed new board, and divider drag while service open
