@@ -2295,7 +2295,7 @@ test('auto dev: while paused, any agreed summary ending in Outcome: FINISH finis
   assert.doesNotMatch(drafts().at(-1), /Auto dev is|End the summary with one last line/);
 });
 
-test('auto dev: while a run is active, the status under the title says so instead of "your turn"', async () => {
+test('auto dev: while a run is active, talkStatus omits "your turn" and "Auto dev running" (auto dev has its own header item)', async () => {
   const { readFileSync } = await import('node:fs');
   const page = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
   const code = page.slice(page.indexOf('function talkStatus('), page.indexOf('function updateReplicaView('));
@@ -2303,7 +2303,7 @@ test('auto dev: while a run is active, the status under the title says so instea
     more.tab ?? 'talk', more.working ?? null, room, null, null, more.thinking ?? null, true);
   const started = { started: true, paused: false };
   assert.equal(status({ ...started, autoDev: { status: null } }), 'your turn');
-  assert.equal(status({ ...started, autoDev: { status: 'running' } }), 'Auto dev running');
+  assert.equal(status({ ...started, autoDev: { status: 'running' } }), '');
   assert.equal(status({ ...started, autoDev: { status: 'running' } }, { thinking: 'A' }), 'A is thinking');
   assert.equal(status({ ...started, autoDev: { status: 'paused' } }), 'your turn');
   assert.equal(status({ ...started, autoDev: { status: 'finished' } }), 'your turn');

@@ -48,9 +48,7 @@ hover or focus the room name for the full **root folder** and, when replication 
 replication line. Under the room name is **● Server ▾** (blue, or red when down), whose menu holds
 **Reload**, **Restart** and **Shutdown server**; hover or focus **Server** for its uptime, port and
 the server's version. An amber ⚠ to the right of **Server** means a replication peer is unreachable
-(hover for how many); click it to open **Peers…**. **Current discussion** (green): on the left, the selected
-discussion's or brainstorm's title (**New brainstorm** before a brainstorm's first message), or **No discussion started**, with its state under it (who is thinking, or your
-turn); on the right, every open discussion whose worker is working is listed, one per line,
+(hover for how many); click it to open **Peers…**. **Busy workers** (green, hidden when no workers are busy): every open discussion whose worker is working is listed, one per line,
 as `<title> · Worker is working` (the shown discussion included). **Monitoring** (amber): the monitor panel, with the subscription usage gauges
 and a warning per provider (below).
 
@@ -117,7 +115,8 @@ The provider panels' headings name the models in use, such as **Discussion membe
 default, Codex default** and **Worker · Opus**: each enabled discussion agent's model and the
 worker's, as their panels list them ("<provider> default" for CLI default).
 
-- **Discussion / Worker tab bar:** switches between **Discussion** and **Worker**, with **Actions ▾** on the right next to **◫ Side pane** (reachable from both tabs). **Actions ▾** holds **Summarize**, **New workbench**, **Turn into a discussion** (when a brainstorm is shown), **Close** (**Close with pending work** when the worker branch has unmerged commits or uncommitted edits; **Close brainstorm** for a brainstorm), **Close and Merge** (or **Catch up with `<branch>`**, when the discussion's or workbench's branch has commits not in the room's current branch), and **Close and Discard** (when discarding would lose commits not in the room's current branch, tracked edits, or untracked files). On a workbench, only the **Worker** chat is shown (no **Discussion** tab, discussion-members panel, **Summarize**, or Auto dev).
+- **Discussion header:** spans both the Discussion/Worker pane and the Side pane (side by side or stacked), above their tab bars. On the left, it shows the selected discussion's or brainstorm's title (**New brainstorm** before a brainstorm's first message, or **No discussion started**), its tab status (who is thinking, your turn, closing phase, peeking/read-only, or worker working/idle), and, separately on both tabs, any active **auto dev** status (running cycle and phase, paused with reason, or finished). On the right, **Actions ▾** holds **Summarize**, **New workbench**, **Turn into a discussion** (when a brainstorm is shown), **Close** (**Close with pending work** when the worker branch has unmerged commits or uncommitted edits; **Close brainstorm** for a brainstorm), **Close and Merge** (or **Catch up with `<branch>`**, when the discussion's or workbench's branch has commits not in the room's current branch), and **Close and Discard** (when discarding would lose commits not in the room's current branch, tracked edits, or untracked files).
+- **Discussion / Worker tab bar:** switches between **Discussion** and **Worker**, with **◫ Side pane** on the right when the side pane is closed. On a workbench, only the **Worker** chat is shown (no **Discussion** tab, discussion-members panel, **Summarize**, or Auto dev).
 - **Discussion:** send messages to the brainstorming agents. Enter sends; Shift+Enter adds
   a line. Start with `@name` to address one agent. Agents take turns in the configured order,
   stopping when everyone passes consecutively, a turn fails, or the lap cap is reached (10 laps in a
@@ -559,11 +558,13 @@ also announced in the Discussion ("Auto dev sent the instruction "…" to the Wo
 which the agents receive and the transcript keeps. The worker's full reply comes back to the Discussion as a **Worker report** and starts a round. If the worker fails, auto dev pauses with **Retry** and **Retry with…** in the Worker tab; the failure appears in the Discussion without starting a round, and the agents receive it with your next message. You can discuss it without ending that pause. A successful retry reports at the same cycle and resumes the run, unless it was restarted or ended meanwhile; another failure leaves it paused. That round is always summarized, and the summary must end with `Outcome: SEND`, `FINISH` or
 `WAIT FOR USER`; passing on it accepts its quoted instruction exactly as it stands. Only an agreed
 SEND summary written after the latest report sends its instruction, once; repeating earlier text
-there is a deliberate retry. The run pauses, with its reason above the message box, on `WAIT FOR
-USER`, an unagreed summary, a failed discussion turn, a message you type in either tab (a running
+there is a deliberate retry. The run pauses, with its reason in the discussion header, on `WAIT FOR
+USER`, an unagreed summary, a failed discussion turn, a message you type in either tab (while auto
+dev runs, the Discussion message box placeholder notes that sending a message pauses it; a running
 worker still reports, but nothing more is sent), or when the cycle limit is reached (failed attempts count;
-the last report is still reviewed). When paused, the next agreed instruction is shown with **Restart
-auto dev**, which starts a new run. A summary can put `Steps left: N` immediately before its Outcome line to set the limit from the plan, including the step being sent; the limit rises only when the count rises (to cycles used + N + 2, at most 15); otherwise it stays or falls, so fix rounds use up its slack. This is a guardrail, not a cost cap: a corrected count can grant more cycles. While paused, any summary asks for `Outcome: FINISH`
+the last report is still reviewed). When paused, the next agreed instruction and **Restart
+auto dev** (or any reason the instruction can't be sent) appear above the message box, and **Restart
+auto dev** starts a new run. A summary can put `Steps left: N` immediately before its Outcome line to set the limit from the plan, including the step being sent; the limit rises only when the count rises (to cycles used + N + 2, at most 15); otherwise it stays or falls, so fix rounds use up its slack. This is a guardrail, not a cost cap: a corrected count can grant more cycles. While paused, any summary asks for `Outcome: FINISH`
 or `WAIT FOR USER` instead, and sends nothing. An agreed `FINISH`, running or paused, ends the run:
 review and merge the discussion's branch (`worker/<name>`) yourself, as ever. During auto dev, each summary draft or revision is also checked before review for its `Outcome:` line (`SEND`, `FINISH` or `WAIT FOR USER` while running, with an instruction for `SEND` and any `Steps left:` line a whole number above 0 just before `Outcome:`; `FINISH` or `WAIT FOR USER` while paused). An instruction that can't be read reliably from Next step (two of them, no
 closing quotation mark, multi-line inline quotes in a new summary…) or a summary whose instruction or `Outcome:` failed the format check is never sent, and the page says why (a bad `Steps left:` line alone is logged and ignored). Reload keeps a run, its cycle count, a failure pause and its retry buttons,

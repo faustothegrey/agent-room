@@ -534,13 +534,15 @@ body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((1
 #services-panel[hidden] { display: none; }
 #services-bar { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .35rem .65rem; border-bottom: 1px solid var(--line); background: #88808; min-height: 2.2rem; flex: none; }
 #services-title { font-size: .88rem; font-weight: 600; color: CanvasText; }
-#main-panel { display: grid; min-width: 0; min-height: 0; grid-template-columns: var(--left, 55%) 7px 1fr; grid-template-rows: 1fr; }
-#main-panel.stacked { grid-template-columns: 1fr; grid-template-rows: var(--top, 55%) 7px 1fr; }
-#main-panel.side-closed { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+#main-panel { display: grid; min-width: 0; min-height: 0; grid-template-columns: var(--left, 55%) 7px 1fr; grid-template-rows: auto 1fr; }
+#main-panel.stacked { grid-template-columns: 1fr; grid-template-rows: auto var(--top, 55%) 7px 1fr; }
+#main-panel.side-closed { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
 #main-panel.side-closed > #split, #main-panel.side-closed > #right { display: none; }
-/* The header: three zones, room (left), current discussion (middle), monitoring (right).
+#disc-header { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: .4rem .8rem; padding: .3rem .65rem; border-bottom: 1px solid var(--line); background: #88808; min-height: 2.2rem; min-width: 0; }
+#disc-info { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .6rem; min-width: 0; overflow-wrap: anywhere; }
+/* The header: three zones, room (left), busy workers (middle, hidden when none), monitoring (right).
    Rare room and server actions sit in the ▾ menus; the gauges never shrink. */
-#header { position: relative; grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(16rem, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
+#header { position: relative; grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(0, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
 .zone { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; border: 1.5px solid var(--zone); border-radius: 6px; padding: .3rem .6rem; align-self: stretch; justify-content: center; }
 #room-zone { --zone: #5a7bd8; padding-inline: 1.5rem; } #disc-zone { --zone: #4caf7a; } #server-zone { --zone: #d6a84c; }
 /* Details shown on hover or keyboard focus of the room name and of "Server" (not while their menu is open). */
@@ -561,13 +563,16 @@ body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((1
 .menu-items button:hover { background: #8882; }
 .menu-items .danger { color: #ef4444; }
 .menu-items hr { width: 100%; border: 0; border-top: 1px solid var(--line); margin: .25rem 0; }
-#disc-zone { flex-direction: row; align-items: center; gap: .3rem .8rem; justify-content: space-between; }
-#disc-text { flex: 0 1 auto; min-width: 5rem; display: flex; flex-direction: column; overflow-wrap: anywhere; }
+#disc-zone { flex-direction: row; align-items: center; gap: .3rem .8rem; justify-content: flex-end; }
+#disc-zone[hidden] { display: none; }
 #disc-workers { flex: 0 1 auto; display: flex; flex-direction: column; align-items: flex-end; gap: .1rem; font-size: .72rem; color: light-dark(#b45309, #f59e0b); text-align: right; }
 #disc-workers[hidden] { display: none; }
-#disc-heading { display: flex; align-items: baseline; gap: .15rem; min-width: 0; }
 #disc { min-width: 0; }
-#disc-status { font-size: .7rem; color: var(--dim); line-height: 1.35; }
+#disc-status { font-size: .75rem; color: var(--dim); line-height: 1.35; }
+#disc-status:empty { display: none; }
+#disc-autodev { font-size: .75rem; color: light-dark(#15803d, #86efac); line-height: 1.35; }
+#disc-autodev.paused { color: light-dark(#b45309, #fcd34d); }
+#disc-autodev[hidden] { display: none; }
 #actions-menu { flex: none; }
 #actions-menu > summary { padding: .2rem .45rem; margin-left: 0; font-size: .82rem; color: var(--dim); border-radius: 4px; }
 #actions-menu > summary:hover, #actions-menu[open] > summary { color: CanvasText; }
@@ -575,7 +580,7 @@ body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((1
 #actions-menu[hidden] { display: none; }
 #board-actions { display: contents; }
 #board-actions[hidden] { display: none; }
-#server-zone { flex-direction: row; align-items: center; gap: .5rem; }
+#server-zone { grid-column: 3; flex-direction: row; align-items: center; gap: .5rem; }
 #server-box { flex: none; display: flex; align-items: center; gap: .15rem; }
 /* Right of "● Server": some replication peer is unreachable (as in Peers…). Amber; red stays the server's. */
 #peer-warning { border: 0; background: none; padding: 0 .2rem; font-size: .8rem; line-height: 1.1; color: light-dark(#92600a, #d6a84c); }
@@ -606,7 +611,7 @@ body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((1
 .discard-dialog .discard-buttons { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .9rem; }
 .discard-dialog .danger { color: #ef4444; border-color: #ef4444; }
 #rooms { max-width: min(28rem, 80vw); font: inherit; font-size: .75rem; }
-#disc { font-size: .75rem; color: var(--dim); line-height: 1.35; }
+#disc { font-size: .85rem; color: var(--dim); line-height: 1.35; }
 #disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
 #code { font-size: .7rem; color: var(--dim); font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
 #winfo { font-size: .75rem; color: var(--dim); padding: .4rem .8rem; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: .2rem; }
@@ -921,7 +926,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b id="room-name">agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Current discussion"><div id="disc-text"><div id="disc-heading"><span id="disc" title="The active discussion"></span></div><span id="disc-status" aria-live="polite"></span></div><div id="disc-workers" aria-live="polite" hidden></div></div>
+<div id="disc-zone" class="zone" aria-label="Busy workers" hidden><div id="disc-workers" aria-live="polite" hidden></div></div>
 <div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 <div id="busy" aria-hidden="true"></div>
 </header>
@@ -968,8 +973,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </aside>
 <div id="list-split" role="separator" aria-orientation="vertical" aria-label="Resize the boards list" tabindex="0" title="Drag to resize"></div>
 <div id="main-panel">
+<div id="disc-header" aria-label="Current discussion"><div id="disc-info"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span><span id="disc-autodev" aria-live="polite" hidden></span></div><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions">Actions</summary><div class="menu-items"><button id="summary">Summarize</button><button id="newworkbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">New workbench</button><span id="board-actions" hidden><hr><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details></div>
 <div id="left">
-  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><span id="tab-controls"><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions">Actions</summary><div class="menu-items"><button id="summary">Summarize</button><button id="newworkbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">New workbench</button><span id="board-actions" hidden><hr><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></span></div>
+  <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><span id="tab-controls"><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></span></div>
   <div class="view" id="talk">
     <details class="agent-settings" id="talk-settings">
       <summary>Discussion members · <span id="talk-models">provider & model</span></summary>
@@ -1723,7 +1729,8 @@ function setLeft(px) {
   return w;
 }
 function setTop(px) {
-  const avail = mainPanel.getBoundingClientRect().height - split.offsetHeight;
+  const headH = $('disc-header')?.offsetHeight || 0;
+  const avail = mainPanel.getBoundingClientRect().height - headH - split.offsetHeight;
   const h = Math.round(Math.max(MIN_H, Math.min(Math.max(MIN_H, avail - MIN_H), px)));
   mainPanel.style.setProperty('--top', h + 'px');
   return h;
@@ -1854,13 +1861,14 @@ split.addEventListener('pointerdown', (e) => {
   const vert = stacked;
   document.body.classList.add(vert ? 'resizing-v' : 'resizing');
   const rect = () => mainPanel.getBoundingClientRect();
-  const move = (ev) => (vert ? setTop(ev.clientY - rect().top - 3) : setLeft(ev.clientX - rect().left - 3));
+  const topOffset = () => rect().top + ($('disc-header')?.offsetHeight || 0);
+  const move = (ev) => (vert ? setTop(ev.clientY - topOffset() - 3) : setLeft(ev.clientX - rect().left - 3));
   const stop = (ev) => {
     split.removeEventListener('pointermove', move);
     split.removeEventListener('pointerup', stop);
     split.removeEventListener('pointercancel', stop);
     document.body.classList.remove('resizing', 'resizing-v');
-    if (vert) keepTop(setTop(ev.clientY - rect().top - 3));
+    if (vert) keepTop(setTop(ev.clientY - topOffset() - 3));
     else keep(setLeft(ev.clientX - rect().left - 3));
   };
   split.addEventListener('pointermove', move);
@@ -1901,30 +1909,37 @@ async function stopWorker(mode) {
 confirmed($('wstop-after'), () => stopWorker('after'), 'Click again: stop after this task; queued instructions are cancelled', () => true);
 confirmed($('wstop-now'), () => stopWorker('now'), 'Click again: stop now; partial edits may be left', () => true);
 // Auto dev (see ui.mjs): Start beside the latest agreed summary's instruction, or why it can't be
-// sent; while a run is going or paused, its line above the message box, with Restart when paused.
+// sent; its status sits in the discussion header on both tabs, and when paused #autodev above the
+// message box holds the next agreed instruction, Restart button, or offer error.
 function renderAutoDev() {
   document.querySelectorAll('.autodev-offer').forEach((e) => e.remove());
-  const a = room?.autoDev, el = $('autodev');
+  const a = room?.autoDev, el = $('autodev'), head = $('disc-autodev');
   el.hidden = true; el.replaceChildren(); el.className = '';
-  if (!a || viewing || !localInput || room?.workbench) return;
+  if (head) { head.hidden = true; head.textContent = ''; head.className = ''; }
+  if (!a || viewing || peeking || !localInput || room?.workbench) return;
   const button = (label) => { const b = document.createElement('button'); b.textContent = label; b.onclick = () => send('/autodev'); return b; };
   const span = (text, cls) => { const e = document.createElement('span'); e.textContent = text; if (cls) e.className = cls; return e; };
   const para = (...parts) => { const p = document.createElement('p'); p.append(...parts); el.append(p); return p; };
   if (a.status === 'running') {
-    el.hidden = false;
-    para(span('Auto dev running · cycle ' + a.cycle + ' of ' + a.max + ' · ' + (a.waiting ? 'worker is working' : 'discussion is reviewing') + ' '), span('(typing a message pauses it)', 'hint'));
+    if (head) { head.hidden = false; head.textContent = 'Auto dev running · cycle ' + a.cycle + ' of ' + a.max + ' · ' + (a.waiting ? 'worker is working' : 'discussion is reviewing'); }
     return;
   }
   if (a.status === 'paused') {
-    el.hidden = false; el.className = 'paused';
-    para(span('Auto dev paused · '), span('reason: ' + a.reason, 'why'));
+    if (head) { head.hidden = false; head.className = 'paused'; head.textContent = 'Auto dev paused · ' + a.reason; }
     if (a.offer?.text) {
+      el.hidden = false; el.className = 'paused';
       para(span('Next agreed instruction:', 'hint')); para(span(a.offer.text, 'next'));
       para(button('Restart auto dev (' + a.max + ' more)'), span(' Restarting grants another ' + a.max + ' worker cycles.', 'hint'));
-    } else if (a.offer?.error) para(span("The latest agreed instruction can’t be sent: " + a.offer.error + '.', 'why'));
+    } else if (a.offer?.error) {
+      el.hidden = false; el.className = 'paused';
+      para(span("The latest agreed instruction can’t be sent: " + a.offer.error + '.', 'why'));
+    }
     return;
   }
-  if (a.status === 'finished') { el.hidden = false; para(span('Auto dev finished. Review and merge its worker branch yourself (the Worker tab names it).')); }
+  if (a.status === 'finished' && head) {
+    head.hidden = false;
+    head.textContent = 'Auto dev finished · review and merge its worker branch';
+  }
   if (!a.offer) return;
   const summaries = [...$('chat').querySelectorAll('.msg.summary:not(.not-agreed)')];
   const target = summaries.at(-1);
@@ -2182,7 +2197,7 @@ function updateReplicaHeader() {
   info.textContent = r.node + ' ' + (r.addresses[0] || '127.0.0.1:' + location.port) + ' · ' + line + ' · ' + project;
   el.append(info);
 }
-// The status under the title, for the selected tab. While auto dev runs, the turn is not the User's.
+// The status next to the title, for the selected tab. While auto dev runs, the turn is not the User's.
 function talkStatus() {
   const activeName = !room?.brainstorm && room?.active?.startsWith('discussions/') ? room.active.split('/').at(-1) : null;
   const closing = !peeking && !viewing ? closingPhase(activeName) : null;
@@ -2192,16 +2207,17 @@ function talkStatus() {
   if (peeking) return 'peeking at ' + displayTitle(peeking.name, peeking.title) + ' · read-only';
   if (viewing) return 'read-only';
   if (localThinking) return localThinking + ' is thinking';
-  if (room.autoDev?.status === 'running') return 'Auto dev running';
+  if (room.autoDev?.status === 'running') return '';
   return room.started && yourTurn ? 'your turn' : '';
 }
 function closingPhase(name) { return (name && room?.closingDiscussions?.[name]) || null; }
 function closingLabel(phase) { return phase === 'waiting' ? 'closing · waiting for worker' : phase === 'writing' ? 'closing · writing statement' : ''; }
 function updateDiscWorkers() {
-  const el = $('disc-workers');
+  const el = $('disc-workers'), zone = $('disc-zone');
   if (!el) return;
   const workers = (room?.open ?? []).filter((o) => o.working);
   el.hidden = !workers.length;
+  if (zone) zone.hidden = !workers.length;
   el.replaceChildren(...workers.map((o) => {
     const s = document.createElement('span');
     const dot = document.createElement('span');
@@ -2442,6 +2458,7 @@ function updateReplicaView() {
   box.hidden = !!viewing;
   box.disabled = readOnly || (typeof ended !== 'undefined' && ended) || (typeof restarting !== 'undefined' && restarting);
   if (peeking && !viewing) box.placeholder = 'Peeking read-only — click Back to return to the active discussion.';
+  else if (!readOnly && room?.autoDev?.status === 'running') box.placeholder = 'Auto dev is running — sending a message pauses it. (Enter sends, Shift+Enter for a new line)';
   else if (updateReplicaView.talkPlaceholder) box.placeholder = updateReplicaView.talkPlaceholder;
   if (typeof wbox !== 'undefined' && wbox) {
     if (readOnly) {
@@ -2874,7 +2891,7 @@ function renderBoards() {
 
   const currentWorker = room?.open?.find((o) => o.current)?.working ? ' · worker working' : '';
   if (room?.brainstorm && canAct) {
-    discSection.append(el('span', 'hint', 'A brainstorm is shown: it is listed in Brainstorms. Turn it into a discussion (Actions ▾ on the tab bar) to have it here.'));
+    discSection.append(el('span', 'hint', 'A brainstorm is shown: it is listed in Brainstorms. Turn it into a discussion (Actions ▾ in the discussion header) to have it here.'));
   } else if (!discussions.length && !unstartedOpen.length && !replica?.received?.some((l) => !l.local)) {
     discSection.append(el('span', 'hint', (room?.started ? '' : 'No active discussions: your first message starts one.') + currentWorker));
   } else if (room && !room.started && canAct) {
