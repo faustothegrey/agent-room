@@ -5796,3 +5796,157 @@ test('a round with no summary (all-pass, failed turn, brainstorm) moves its open
   assert.equal(brain.screen.room.open.find((o) => o.current).ongoing, false);
   assert.equal(brain.screen.room.open.find((o) => o.current).waitingForInput, false);
 });
+
+test('/move for brainstorms: archive, deferred, active, never overwrites existing folder, and refuses while open', async () => {
+  const { existsSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { first: ctx, hub } = await multiRoom();
+  const root = `${ctx.cwd}/brainstorms`;
+  mkdirSync(`${root}/2026-11-01-sketch/transcripts`, { recursive: true });
+  writeFileSync(`${root}/2026-11-01-sketch/transcripts/s.md`, 'notes');
+
+  // Move active -> archive (creates archive/), archive -> deferred (creates deferred/), deferred -> active.
+  await handleLine('/move brainstorms/2026-11-01-sketch archive', ctx);
+  assert.ok(existsSync(`${root}/archive/2026-11-01-sketch/transcripts/s.md`));
+  assert.ok(!existsSync(`${root}/2026-11-01-sketch`));
+
+  await handleLine('/move brainstorms/archive/2026-11-01-sketch deferred', ctx);
+  assert.ok(existsSync(`${root}/deferred/2026-11-01-sketch/transcripts/s.md`));
+  assert.ok(!existsSync(`${root}/archive/2026-11-01-sketch`));
+
+  await handleLine('/move brainstorms/deferred/2026-11-01-sketch active', ctx);
+  assert.ok(existsSync(`${root}/2026-11-01-sketch/transcripts/s.md`));
+  assert.ok(!existsSync(`${root}/deferred/2026-11-01-sketch`));
+
+  // Never move over an existing folder.
+  mkdirSync(`${root}/archive/2026-11-01-sketch`, { recursive: true });
+  writeFileSync(`${root}/archive/2026-11-01-sketch/keep.txt`, 'keep');
+  await handleLine('/move brainstorms/2026-11-01-sketch archive', ctx);
+  assert.ok(existsSync(`${root}/2026-11-01-sketch/transcripts/s.md`));
+  assert.ok(existsSync(`${root}/archive/2026-11-01-sketch/keep.txt`));
+
+  // Refuse while open on screen (current context) or open in a sibling context.
+  await handleLine('/brainstorm', ctx);
+  await handleLine('start idea', ctx);
+  const openName = ctx.discussion.name;
+  await handleLine(`/move brainstorms/${openName} archive`, ctx);
+  assert.ok(existsSync(`${root}/${openName}`));
+  assert.ok(!existsSync(`${root}/archive/${openName}`));
+
+  // Open in a sibling context: still refused from another context.
+  await handleLine('/new', ctx);
+  const other = [...hub.rooms.values()].find((r) => r !== ctx);
+  assert.ok(other);
+  await handleLine(`/move brainstorms/${openName} deferred`, other);
+  assert.ok(existsSync(`${root}/${openName}`));
+  assert.ok(!existsSync(`${root}/deferred/${openName}`));
+});
+
+test('archived and deferred brainstorms: /peek in place, /resume and /fresh make active first (keeping checkpoint key), /delete removes folder and checkpoint, /convert requires active', async () => {
+  const { existsSync, mkdirSync, writeFileSync, realpathSync } = await import('node:fs');
+  const { dirname } = await import('node:path');
+  const ctx = await freshSession(['from A', 'from B'], async () => ({ title: 'Unused' }));
+  ctx.noScreen = false;
+  const root = `${ctx.cwd}/brainstorms`;
+  const makeArchived = async (section, name, title, summaryText = null) => {
+    mkdirSync(`${root}/${section}/${name}/transcripts`, { recursive: true });
+    writeFileSync(`${root}/${section}/${name}/transcripts/s.md`, 'log');
+    const cp = await checkpointPath(ctx.cwd, `brainstorms/${name}`);
+    mkdirSync(dirname(cp), { recursive: true });
+    writeFileSync(cp, JSON.stringify({
+      version: 1, root: realpathSync(ctx.cwd), brainstorm: true,
+      discussion: { name, title },
+      state: {
+        transcript: [
+          { speaker: 'User', text: 'hello' },
+          ...(summaryText ? [{ speaker: 'Summary', text: summaryText, outcome: 'agreed' }] : []),
+        ],
+        seen: [],
+      },
+      sessions: [],
+    }));
+    return cp;
+  };
+
+  // 1. /peek from archive peeks in place without moving or starting a session.
+  const cpPeek = await makeArchived('archive', '2026-11-02-peek-me', 'Peek Me');
+  await handleLine('/peek brainstorms/archive/2026-11-02-peek-me', ctx);
+  assert.equal(ctx.screen.peek.name, '2026-11-02-peek-me');
+  assert.equal(ctx.screen.peek.ref, 'brainstorms/archive/2026-11-02-peek-me');
+  assert.equal(ctx.screen.peek.path, 'brainstorms/archive/2026-11-02-peek-me');
+  assert.equal(ctx.screen.peek.title, 'Peek Me');
+  assert.equal(ctx.screen.peek.messages.length, 1);
+  assert.ok(existsSync(`${root}/archive/2026-11-02-peek-me`));
+  assert.ok(!existsSync(`${root}/2026-11-02-peek-me`));
+  assert.ok(existsSync(cpPeek));
+
+  // /convert refuses an archived brainstorm (must Make active first).
+  await handleLine('/convert brainstorms/archive/2026-11-02-peek-me', ctx);
+  assert.ok(existsSync(`${root}/archive/2026-11-02-peek-me`));
+  assert.ok(!existsSync(`${ctx.cwd}/discussions/2026-11-02-peek-me`));
+
+  // 2. /delete from archive removes both folder and checkpoint (keyed under brainstorms/<name>).
+  await handleLine('/delete brainstorms/archive/2026-11-02-peek-me', ctx);
+  assert.ok(!existsSync(`${root}/archive/2026-11-02-peek-me`));
+  assert.ok(!existsSync(cpPeek));
+  assert.equal(ctx.screen.peek, null);
+
+  // 3. /resume from archive makes it active first and loads its checkpoint under brainstorms/<name>.
+  const cwd2 = await tmp('brain-archive-resume-');
+  const ctx2 = await brainstormRoom(cwd2, 'brain-arch');
+  const root2 = `${cwd2}/brainstorms`;
+  await handleLine('/brainstorm', ctx2);
+  await handleLine('earlier idea', ctx2);
+  const resName = ctx2.discussion.name;
+  const cpRes = await checkpointPath(cwd2, `brainstorms/${resName}`);
+  await handleLine('/close', ctx2);
+  await handleLine(`/move brainstorms/${resName} archive`, ctx2);
+  assert.ok(existsSync(`${root2}/archive/${resName}`));
+  assert.ok(existsSync(cpRes)); // checkpoint key stays brainstorms/<name>
+  await handleLine(`/resume brainstorms/archive/${resName}`, ctx2);
+  assert.ok(existsSync(`${root2}/${resName}`));
+  assert.ok(!existsSync(`${root2}/archive/${resName}`));
+  assert.equal(ctx2.discussion.dir, `${root2}/${resName}`);
+  assert.equal(ctx2.state.brainstorm, true);
+  assert.ok(ctx2.state.transcript.some((m) => m.text === 'earlier idea'));
+
+  // 4. /fresh from deferred makes it active first and keeps checkpoint under brainstorms/<name>.
+  await handleLine('/close', ctx2);
+  await handleLine(`/move brainstorms/${resName} deferred`, ctx2);
+  assert.ok(existsSync(`${root2}/deferred/${resName}`));
+  await handleLine(`/fresh brainstorms/deferred/${resName}`, ctx2);
+  assert.ok(existsSync(`${root2}/${resName}`));
+  assert.ok(!existsSync(`${root2}/deferred/${resName}`));
+  assert.equal(ctx2.discussion.dir, `${root2}/${resName}`);
+  assert.equal(ctx2.state.brainstorm, true);
+  assert.ok(existsSync(cpRes));
+});
+
+test('name reservation: names in brainstorms/archive/ and brainstorms/deferred/ are skipped for new brainstorms and new discussions, and /convert refuses a taken name', async () => {
+  const { existsSync, mkdirSync } = await import('node:fs');
+  const ctx = await freshSession(['from A', 'from B'], async () => ({ title: 'Shared Topic' }));
+  ctx.noScreen = true;
+  const today = (() => {
+    const d = new Date(), pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  })();
+  const base = `${today}-shared-topic`;
+  mkdirSync(`${ctx.cwd}/brainstorms/archive/${base}`, { recursive: true });
+  mkdirSync(`${ctx.cwd}/brainstorms/deferred/${base}-2`, { recursive: true });
+
+  // New brainstorm skips both archived and deferred brainstorm names.
+  await handleLine('/brainstorm', ctx);
+  await handleLine('idea 1', ctx);
+  assert.equal(ctx.discussion.name, `${base}-3`);
+
+  // New discussion skips archived, deferred, and active brainstorm names.
+  await handleLine('/new', ctx);
+  await handleLine('disc 1', ctx);
+  assert.equal(ctx.discussion.name, `${base}-4`);
+
+  // /convert refuses when target name exists in discussions/archive/ or brainstorms/archive/.
+  mkdirSync(`${ctx.cwd}/brainstorms/2026-11-05-clash`, { recursive: true });
+  mkdirSync(`${ctx.cwd}/discussions/archive/2026-11-05-clash`, { recursive: true });
+  await handleLine('/convert brainstorms/2026-11-05-clash', ctx);
+  assert.ok(existsSync(`${ctx.cwd}/brainstorms/2026-11-05-clash`));
+  assert.ok(!existsSync(`${ctx.cwd}/discussions/2026-11-05-clash`));
+});

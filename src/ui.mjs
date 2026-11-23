@@ -522,12 +522,18 @@ export const slug = (title) => title.normalize('NFKD').replace(/[̀-ͯ]/g, '').t
 const SECTIONS = ['archive', 'deferred'];
 const DATED = /^\d{4}-\d{2}-\d{2}-/;
 
-// A brainstorm is a folder in <root>/brainstorms/, named as a discussion is (never the name of one in
-// discussions/, archive/ or deferred/, nor the other way round), holding transcripts/ and, if agents
-// draw, drawings/. Its checkpoint key is "brainstorms/<name>" (a discussion's is its name), and so
-// is its ref in /resume, /fresh, /convert and /delete. Turn into a discussion moves it to discussions/.
+// A brainstorm is a folder in <root>/brainstorms/ (or brainstorms/archive/, brainstorms/deferred/),
+// named as a discussion is (never the name of one in discussions/, archive/ or deferred/, nor the
+// other way round), holding transcripts/ and, if agents draw, drawings/. Its checkpoint key is
+// "brainstorms/<name>" in every section (a discussion's is its name). Turn into a discussion moves
+// an active brainstorm to discussions/.
 const BRAINSTORMS = 'brainstorms';
 const brainstormRef = (ref) => /^brainstorms\/([^/\\]+)$/.exec(ref ?? '')?.[1] ?? null;
+function brainstormDirRef(parent, ref) {
+  if (!ref?.startsWith(`${BRAINSTORMS}/`)) return null;
+  const d = discussionRef(parent, ref.slice(BRAINSTORMS.length + 1));
+  return d ? { ...d, key: `${BRAINSTORMS}/${d.name}` } : null;
+}
 const isBrainstorm = (c, name) => !!c.state?.brainstorm && c.discussion?.name === name;
 const isDiscussion = (c, name) => !c.state?.brainstorm && c.discussion?.name === name;
 // Its folder under the root ("discussions/<name>" or "brainstorms/<name>"), its checkpoint key and
@@ -535,8 +541,10 @@ const isDiscussion = (c, name) => !c.state?.brainstorm && c.discussion?.name ===
 const folderOf = (ctx) => (ctx.discussion ? `${ctx.state?.brainstorm ? BRAINSTORMS : 'discussions'}/${ctx.discussion.name}` : null);
 const keyOf = (ctx) => (ctx.state?.brainstorm ? `${BRAINSTORMS}/${ctx.discussion.name}` : ctx.discussion.name);
 // Where a new discussion's or brainstorm's name must also be free: the other kind's folders.
-const takenElsewhere = (cwd, brainstorm) => (brainstorm
-  ? [join(cwd, 'discussions'), ...SECTIONS.map((s) => join(cwd, 'discussions', s))] : [join(cwd, BRAINSTORMS)]);
+const takenElsewhere = (cwd, brainstorm) => {
+  const other = join(cwd, brainstorm ? 'discussions' : BRAINSTORMS);
+  return [other, ...SECTIONS.map((s) => join(other, s))];
+};
 
 // A discussion named by the User or the page: "<date>-<title>" (active) or "archive/<date>-<title>" /
 // "deferred/<date>-<title>". Resolves to { section: null | 'archive' | 'deferred', name } or null.
@@ -547,9 +555,10 @@ function discussionRef(parent, ref) {
   return existsSync(join(parent, section ?? '', name)) ? { section, name } : null;
 }
 
-// /move <discussion> active|archive|deferred: the whole folder moves (documents and transcripts).
-// Not the discussion this session is using (its transcript is open there).
+// /move <discussion|brainstorms/...> active|archive|deferred: the whole folder moves (documents and transcripts).
+// Not the discussion this session is using (its transcript is open there), and never an open brainstorm.
 async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) {
+  if (ref?.startsWith(`${BRAINSTORMS}/`)) return moveBrainstorm(ctx, ref, to);
   const parent = join(ctx.cwd, 'discussions');
   const d = discussionRef(parent, ref ?? '');
   if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent}.`, true), null;
@@ -611,6 +620,47 @@ async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) 
   log(ctx, `_(moved the discussion ${d.name} to ${target ?? 'active'})_\n\n`);
   note(ctx, `Moved the discussion ${d.name} to ${target ? `${target}/` : 'the active discussions'}.`);
   return { name: d.name };
+}
+
+// /move brainstorms/<name>|brainstorms/archive/<name>|brainstorms/deferred/<name> active|archive|deferred:
+// moves the whole brainstorm folder. Refuses while open or on screen, and never overwrites an existing folder.
+// The checkpoint stays under its key "brainstorms/<name>".
+function moveBrainstorm(ctx, ref, to) {
+  const parent = join(ctx.cwd, BRAINSTORMS);
+  const b = brainstormDirRef(parent, ref ?? '');
+  if (!b) return note(ctx, `✗ No brainstorm "${ref}" in ${parent}.`, true), null;
+  const target = to === 'active' ? null : to;
+  if (to !== 'active' && !SECTIONS.includes(to)) return note(ctx, '✗ Move it to active, archive or deferred.', true), null;
+  if (b.section === target) return { name: b.name };
+  const from = join(parent, b.section ?? '', b.name);
+  if (ctx.discussion?.dir === from || siblings(ctx).some((c) => !c.stopped && (c.discussion?.dir === from || isBrainstorm(c, b.name))))
+    return note(ctx, `✗ ${b.name} is open: close it before moving it.`, true), null;
+  const dest = join(parent, target ?? '', b.name);
+  if (existsSync(dest)) return note(ctx, `✗ There is already a brainstorm ${b.name} in ${target ?? BRAINSTORMS}/.`, true), null;
+  mkdirSync(dirname(dest), { recursive: true });
+  renameSync(from, dest);
+  const rel = (section) => [BRAINSTORMS, ...(section ? [section] : []), b.name].join('/');
+  const fromRel = rel(b.section), toRel = rel(target);
+  for (const c of siblings(ctx)) {
+    if (!c.screen) continue;
+    if (c.screen.doc?.startsWith(fromRel + '/')) {
+      c.screen.doc = toRel + c.screen.doc.slice(fromRel.length);
+      toScreen(c, { type: 'doc', file: c.screen.doc });
+    }
+    if (c.screen.peek?.path === fromRel) {
+      c.screen.peek = {
+        ...c.screen.peek,
+        ref: toRel,
+        path: toRel,
+        doc: c.screen.peek.doc?.startsWith(fromRel + '/') ? toRel + c.screen.peek.doc.slice(fromRel.length) : c.screen.peek.doc,
+      };
+      toScreen(c, c.docs.resetEvent(c.screen));
+    }
+    toScreen(c, { type: 'moved', from: fromRel, to: toRel });
+  }
+  log(ctx, `_(moved the brainstorm ${b.name} to ${target ?? 'active'})_\n\n`);
+  note(ctx, `Moved the brainstorm ${b.name} to ${target ? `${target}/` : 'the active brainstorms'}.`);
+  return { name: b.name };
 }
 
 // Rollback is an ordinary, origin-labelled worker task. Git reasoning and changes stay with
@@ -1160,17 +1210,20 @@ function peekDiscussion(ctx, ref) {
     return note(ctx, 'Back to the discussion in use.');
   }
   if (ref.startsWith(`${BRAINSTORMS}/`)) {
-    const name = brainstormRef(ref), dir = name && join(ctx.cwd, BRAINSTORMS, name);
-    if (!name || !DATED.test(name) || !existsSync(dir)) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}.`, true);
+    const b = brainstormDirRef(join(ctx.cwd, BRAINSTORMS), ref);
+    if (!b) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}.`, true);
+    const { name, section, key } = b;
+    const dir = join(ctx.cwd, BRAINSTORMS, section ?? '', name);
+    const path = section ? `${BRAINSTORMS}/${section}/${name}` : `${BRAINSTORMS}/${name}`;
     if (siblings(ctx).some((c) => isBrainstorm(c, name))) return note(ctx, `✗ ${name} is not closed. Peek is for closed boards: the open ones are already on screen.`, true);
-    const saved = readCheckpoint(ctx, ref);
+    const saved = readCheckpoint(ctx, key);
     const transcript = Array.isArray(saved?.state?.transcript) ? saved.state.transcript : [];
     if (ctx.noScreen) {
       const body = transcript.length ? transcript.map((m) => `**${m.speaker}**\n\n${m.text ?? ''}`).join('\n\n') : 'This brainstorm has no saved conversation.';
       return note(ctx, `${name}\n\n${body}\n`);
     }
     const notes = existsSync(join(dir, 'notes.md')) ? relative(ctx.cwd, join(dir, 'notes.md')).split(sep).join('/') : null;
-    ctx.screen.peek = { name, ref, path: `${BRAINSTORMS}/${name}`, kind: 'brainstorm', title: saved?.discussion?.title ?? name, messages: transcript.map(ctx.docs.messageView), doc: notes };
+    ctx.screen.peek = { name, ref: path, path, kind: 'brainstorm', title: saved?.discussion?.title ?? name, messages: transcript.map(ctx.docs.messageView), doc: notes };
     toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
     return note(ctx, `Peeking at ${name} — read-only. Back (or /peek) returns to the discussion in use.`);
   }
@@ -1281,13 +1334,15 @@ const refOf = (ctx) => (ctx.discussion ? keyOf(ctx) : null);
 // checkpoint, the same agent sessions and chat continue; otherwise (none, or after Start fresh) the
 // next message starts a fresh session there, briefed from the latest summary or its transcripts.
 async function resumeBrainstorm(ctx, ref) {
-  const name = brainstormRef(ref), dir = name && join(ctx.cwd, BRAINSTORMS, name);
-  if (!name || !DATED.test(name) || !existsSync(dir)) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}.`, true);
+  const b = brainstormDirRef(join(ctx.cwd, BRAINSTORMS), ref);
+  if (!b) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}.`, true);
+  const { name, section, key } = b;
   const open = siblings(ctx).find((c) => c !== ctx && isBrainstorm(c, name));
   if (open) return goto(ctx, open);
   if (isBrainstorm(ctx, name)) return note(ctx, `${name} is the brainstorm in use here.`);
   if (multi(ctx) && !fresh(ctx)) return besideWith(ctx, (next) => resumeBrainstorm(next, ref));
-  const saved = readCheckpoint(ctx, ref);
+  if (section && !moveBrainstorm(ctx, ref, 'active')) return;
+  const saved = readCheckpoint(ctx, key);
   if (saved && !saved.fresh) return continueFrom(ctx, saved, name, true);
   if (saved?.fresh && (saved.version !== 1 || saved.root !== realpathSync(ctx.cwd) || saved.discussion?.name !== name || !saved.brainstorm))
     throw new Error(`The checkpoint of ${name} is invalid. It was kept; Start fresh starts the brainstorm from its latest summary or transcripts instead.`);
@@ -1346,18 +1401,20 @@ async function suspendTransfers(ctx, name) {
 // wasn't agreed) or, with none, pointed at its transcripts. Its saved sessions and chat are
 // discarded: the checkpoint keeps only that summary, until the fresh session's first round.
 async function freshBrainstorm(ctx, ref) {
-  const name = brainstormRef(ref), dir = name && join(ctx.cwd, BRAINSTORMS, name);
-  if (!name || !DATED.test(name) || !existsSync(dir)) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}.`, true);
+  const b = brainstormDirRef(join(ctx.cwd, BRAINSTORMS), ref);
+  if (!b) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}.`, true);
+  const { name, section, key } = b;
   const open = siblings(ctx).find((c) => c !== ctx && isBrainstorm(c, name));
-  if (open) { open.say?.(`/fresh ${ref}`); return goto(ctx, open); } // it starts afresh there
+  if (open) { open.say?.(`/fresh ${key}`); return goto(ctx, open); } // it starts afresh there
   if (multi(ctx) && !fresh(ctx) && !isBrainstorm(ctx, name)) return besideWith(ctx, (next) => freshBrainstorm(next, ref));
+  if (section && !moveBrainstorm(ctx, ref, 'active')) return;
   const title = ctx.discussion && isBrainstorm(ctx, name) ? ctx.discussion.title : null;
   await leaveSession(ctx, `starting the brainstorm ${name} afresh`); // saves its checkpoint first
-  const before = readCheckpoint(ctx, ref);
+  const before = readCheckpoint(ctx, key);
   const summary = checkpointSummary(before);
   const saved = { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
     discussion: { name, title: title ?? (typeof before?.discussion?.title === 'string' ? before.discussion.title : name) }, brainstorm: true, fresh: true, summary };
-  writeCheckpoint(ctx, ref, saved);
+  writeCheckpoint(ctx, key, saved);
   enterBrainstorm(ctx, name, saved);
   note(ctx, `Started the brainstorm ${name} afresh: your next message starts a new session there, ${summary ? `with its latest summary${summary.outcome === 'agreed' ? '' : ' (not agreed)'}` : 'pointing the agents to its transcripts'}. Its saved sessions and chat were discarded.`);
 }
@@ -1368,12 +1425,14 @@ async function freshBrainstorm(ctx, ref) {
 // discussion rules apply. The worker starts fresh at the discussion's first task. Open elsewhere, it
 // is converted there, between its rounds.
 async function convertBrainstorm(ctx, ref) {
-  const name = brainstormRef(ref), from = name && join(ctx.cwd, BRAINSTORMS, name);
-  if (!name || !DATED.test(name) || !existsSync(from)) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}.`, true);
+  const b = brainstormDirRef(join(ctx.cwd, BRAINSTORMS), ref);
+  if (!b) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}.`, true);
+  if (b.section) return note(ctx, `✗ ${b.name} is in ${b.section}/: make it active before turning it into a discussion.`, true);
+  const name = b.name, from = join(ctx.cwd, BRAINSTORMS, name);
   const open = siblings(ctx).find((c) => isBrainstorm(c, name));
   if (open && open !== ctx) { open.say?.(`/convert ${ref}`); return goto(ctx, open); }
   const parent = join(ctx.cwd, 'discussions'), dest = join(parent, name);
-  const clash = [dest, ...SECTIONS.map((s) => join(parent, s, name))].find((p) => existsSync(p));
+  const clash = [dest, ...SECTIONS.map((s) => join(parent, s, name)), ...SECTIONS.map((s) => join(ctx.cwd, BRAINSTORMS, s, name))].find((p) => existsSync(p));
   if (clash) return note(ctx, `✗ ${name} can't become a discussion: ${relative(ctx.cwd, clash)} already exists. Nothing was moved.`, true);
   mkdirSync(parent, { recursive: true });
   // mkdir claims the name (it fails if the folder exists by now); the rename then replaces that empty folder.
@@ -1422,13 +1481,23 @@ async function convertBrainstorm(ctx, ref) {
 // /delete brainstorms/<name> (Delete): its folder (transcripts, drawings) and checkpoint are removed
 // for good. Never an open brainstorm (the page disables the button too).
 function deleteBrainstorm(ctx, ref) {
-  const name = brainstormRef(ref), dir = name && join(ctx.cwd, BRAINSTORMS, name);
-  if (!name || !DATED.test(name) || !existsSync(dir)) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}.`, true);
+  const b = brainstormDirRef(join(ctx.cwd, BRAINSTORMS), ref);
+  if (!b) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}.`, true);
+  const { name, section, key } = b;
+  const dir = join(ctx.cwd, BRAINSTORMS, section ?? '', name);
+  const fromRel = section ? `${BRAINSTORMS}/${section}/${name}` : `${BRAINSTORMS}/${name}`;
   if (siblings(ctx).some((c) => !c.stopped && isBrainstorm(c, name))) return note(ctx, `✗ ${name} is open: close it before deleting it. Nothing was deleted.`, true);
   try { rmSync(dir, { recursive: true }); } catch (err) { return note(ctx, `✗ Couldn't delete ${name}: ${err.message}`, true); }
-  try { unlinkSync(checkpointFile(ctx, ref)); } catch (err) { if (err.code !== 'ENOENT') note(ctx, `✗ Couldn't remove ${name}'s checkpoint: ${err.message}`, true); }
+  try { unlinkSync(checkpointFile(ctx, key)); } catch (err) { if (err.code !== 'ENOENT') note(ctx, `✗ Couldn't remove ${name}'s checkpoint: ${err.message}`, true); }
   listedCheckpoints.clear();
-  for (const c of siblings(ctx)) if (c.screen) toScreen(c, { type: 'moved', from: `${BRAINSTORMS}/${name}`, to: null });
+  for (const c of siblings(ctx)) {
+    if (!c.screen) continue;
+    if (c.screen.peek?.path === fromRel) {
+      c.screen.peek = null;
+      toScreen(c, c.docs.resetEvent(c.screen));
+    }
+    toScreen(c, { type: 'moved', from: fromRel, to: null });
+  }
   showHeader(ctx);
   note(ctx, `Deleted the brainstorm ${name}: its folder and checkpoint are gone.`);
 }

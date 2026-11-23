@@ -2001,10 +2001,10 @@ test('Brainstorms tab: rows by title with their actions, and an order of their o
   const els = {}, store = new Map(), sent = [], location = { href: '' };
   const localStorage = { getItem: (k) => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)) };
   const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'localStorage', 'fetch', 'send',
-    'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, ended = false, posting = 0, viewClient = "t", box = { hidden: false }, wbox = {};\n' +
     'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
     'let attaching = false, pending = [];\n' +
-    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (act) => act();\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (act) => act(), status = () => {}, updateBusy = () => {}, busyFailed = () => {};\n' +
     code + '\n' +
     'return { setRoom, renderBrainstorms, renderDiscussions, forgetOrder, ' +
     '  setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
@@ -2043,8 +2043,12 @@ test('Brainstorms tab: rows by title with their actions, and an order of their o
   assert.equal(sent.at(-1), '/resume brainstorms/2026-11-12-closed');
   click(action('Open idea', 'Go to'));
   assert.equal(location.href, '/r/x-d2/__room');
-  // The actions menu: Resume, Peek files, Close, Turn into a discussion, Start fresh, Delete, Move up / Move down; no Archive or Defer.
-  assert.deepEqual(menuLabels('Closed idea'), ['Resume', 'Peek files', 'Close', 'Turn into a discussion', 'Start fresh', 'Delete', 'Move up', 'Move down']);
+  // The actions menu: Resume, Peek files, Close, Archive, Defer, Turn into a discussion, Start fresh, Delete, Move up / Move down.
+  assert.deepEqual(menuLabels('Closed idea'), ['Resume', 'Peek files', 'Close', 'Archive', 'Defer', 'Turn into a discussion', 'Start fresh', 'Delete', 'Move up', 'Move down']);
+  assert.equal(action('Current idea', 'Archive').disabled, true);
+  assert.equal(action('Open idea', 'Defer').disabled, true);
+  assert.equal(action('Closed idea', 'Archive').disabled, false);
+  assert.equal(action('Closed idea', 'Defer').disabled, false);
   assert.equal(action('Closed idea', 'Close').disabled, true); // not open
   assert.equal(action('Open idea', 'Close').disabled, false);
   click(action('Open idea', 'Close'));
@@ -3011,4 +3015,99 @@ test('Per-board layout: saved per room+board, copies on first open, survives Arc
   assert.equal(JSON.parse(store.get(keyB)).left, draggedLeft);
   harness.openService(null);
   assert.equal(harness.state().savedLeft, draggedLeft);
+});
+
+test('Archived and deferred brainstorms appear in Archived · Deferred with read-only peek, expected ⋯ menu (no Turn into a discussion), and servable files', async () => {
+  // 1. Server-side docFiles includes archived and deferred brainstorm files.
+  const root = mkdtempSync(join(tmpdir(), 'brainstorm-archive-docs-'));
+  mkdirSync(join(root, 'brainstorms', 'archive', '2026-11-10-old-idea', 'transcripts'), { recursive: true });
+  mkdirSync(join(root, 'brainstorms', 'deferred', '2026-11-11-later-idea', 'transcripts'), { recursive: true });
+  writeFileSync(join(root, 'brainstorms', 'archive', '2026-11-10-old-idea', 'transcripts', 's.md'), 'hi');
+  writeFileSync(join(root, 'brainstorms', 'deferred', '2026-11-11-later-idea', 'transcripts', 's.md'), 'later');
+  const listed = docFiles(root, null);
+  assert.ok(listed.includes('brainstorms/archive/2026-11-10-old-idea/transcripts/s.md'));
+  assert.ok(listed.includes('brainstorms/deferred/2026-11-11-later-idea/transcripts/s.md'));
+
+  // 2. Client-side Boards rendering & menus.
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return { toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(...c) { c.forEach((x) => s.add(x)); }, remove(...c) { c.forEach((x) => s.delete(x)); }, contains(cls) { return s.has(cls); } };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', disabled: false, children: [], dataset: {}, style: {}, classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; }, querySelector() { return null; }, addEventListener() {}, setAttribute() {}, getAttribute() { return null; },
+  });
+  const els = {}, store = new Map(), sent = [], posted = [], location = { href: '' };
+  const localStorage = { getItem: (k) => store.has(k) ? store.get(k) : null, setItem: (k, v) => store.set(k, String(v)) };
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'localStorage', 'fetch', 'send',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, ended = false, posting = 0, viewClient = "t", box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'let attaching = false, pending = [];\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (act) => act(), status = () => {}, updateBusy = () => {}, busyFailed = () => {};\n' +
+    code + '\n' +
+    'return { setRoom, renderBoards, docLabel, getPeek: () => peek, ' +
+    '  setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
+  )((id) => els[id] || (els[id] = node(id)), { createElement: node, title: '' }, location, null, null, () => {}, (cb) => cb(), () => {}, localStorage,
+    async (url, opts) => { posted.push(JSON.parse(opts.body).text); return { ok: true }; },
+    (line) => sent.push(line));
+
+  const checkpoints = [
+    { name: 'brainstorms/2026-11-10-old-idea', at: 'x', kind: 'full', title: 'Old Idea' },
+    { name: 'brainstorms/2026-11-11-later-idea', at: 'x', kind: 'full', title: 'Later Idea' },
+  ];
+  harness.setRoom({ folder: '/tmp/project', active: 'discussions/2026-11-20-main', brainstorm: false, discussion: 'Main', started: true, multi: true, open: [], checkpoints, closedDiscussions: [] });
+  harness.setFiles([
+    'discussions/2026-11-20-main/notes.md',
+    'brainstorms/archive/2026-11-10-old-idea/transcripts/s.md',
+    'brainstorms/deferred/2026-11-11-later-idea/transcripts/s.md',
+  ]);
+  harness.renderBoards();
+
+  assert.equal(harness.docLabel('brainstorms/archive/2026-11-10-old-idea/transcripts/s.md'), 'Old Idea · transcripts/s.md');
+  assert.equal(harness.docLabel('brainstorms/deferred/2026-11-11-later-idea/transcripts/s.md'), 'Later Idea · transcripts/s.md');
+
+  const section = els['list-pane'].firstChild.children.find((c) => c.dataset?.section === 'archived-deferred');
+  assert.equal(section.open, false);
+  assert.equal(section.children[0].textContent, 'Archived · Deferred (2)');
+  const rows = section.children.filter((c) => c.className.includes('discussion-row'));
+  const block = (r) => r.children.find((c) => c.className === 'discussion-block');
+  const rowByTitle = (t) => rows.find((r) => block(r).children[0].textContent === t);
+  const menuLabels = (t) => rowByTitle(t).children.find((c) => c.tag === 'details').children[1].children.filter((b) => b.tag === 'button').map((b) => b.textContent);
+  const action = (t, label) => rowByTitle(t).children.find((c) => c.tag === 'details').children[1].children.find((b) => b.textContent === label || b.dataset.label === label);
+  const click = (b) => b.onclick({ stopPropagation() {} });
+
+  // Labels
+  assert.equal(block(rowByTitle('Old Idea')).children[1].textContent, 'archived brainstorm');
+  assert.equal(block(rowByTitle('Later Idea')).children[1].textContent, 'deferred brainstorm');
+
+  // Menus mirror archived/deferred discussions + Delete, and omit Turn into a discussion.
+  assert.deepEqual(menuLabels('Old Idea'), ['Resume', 'Peek files', 'Peek chat & files', 'Make active', 'Defer', 'Start fresh', 'Delete']);
+  assert.deepEqual(menuLabels('Later Idea'), ['Resume', 'Peek files', 'Peek chat & files', 'Make active', 'Archive', 'Start fresh', 'Delete']);
+
+  // Clicking peeks read-only (chat & files).
+  block(rowByTitle('Old Idea')).children[0].onclick();
+  assert.equal(sent.at(-1), '/peek brainstorms/archive/2026-11-10-old-idea');
+  assert.equal(harness.getPeek()?.path, 'brainstorms/archive/2026-11-10-old-idea');
+
+  // Menu actions send the right commands.
+  click(action('Old Idea', 'Make active'));
+  assert.equal(sent.at(-1), '/move brainstorms/archive/2026-11-10-old-idea active');
+  click(action('Old Idea', 'Defer'));
+  assert.equal(sent.at(-1), '/move brainstorms/archive/2026-11-10-old-idea deferred');
+  await click(action('Later Idea', 'Archive'));
+  assert.equal(posted.at(-1), '/move brainstorms/deferred/2026-11-11-later-idea archive');
+  click(action('Old Idea', 'Resume'));
+  assert.equal(sent.at(-1), '/resume brainstorms/archive/2026-11-10-old-idea');
+  const freshBtn = action('Old Idea', 'Start fresh');
+  click(freshBtn); click(freshBtn);
+  assert.equal(sent.at(-1), '/fresh brainstorms/archive/2026-11-10-old-idea');
+  const delBtn = action('Old Idea', 'Delete');
+  click(delBtn); click(delBtn);
+  assert.equal(sent.at(-1), '/delete brainstorms/archive/2026-11-10-old-idea');
 });

@@ -169,7 +169,7 @@ worker's, as their panels list them ("<provider> default" for CLI default).
 - **Boards** (left list panel, collapsible to a `«`/`»` strip and resizable by dragging its divider, both remembered per browser):
   - Organized into collapsible sections: **Discussions** (active, open by default), **Brainstorms** (open by default), **Archived · Deferred** (folded by default with count), and **Received from peers** (folded by default with count, when peers have discussions).
   - Each row shows its display title (saved title, or the folder name without its leading date and with spaces; hover for the folder path), its state — the first that applies among `ongoing` (a round or summary is running, a worker task is running or queued, or it is closing), `closed`, `not started` (no message sent yet), `waiting for input` (in memory only: an unsent agreed summary instruction, paused auto dev, a worker failure offering Retry, or a latest agreed summary with a non-empty Next step; shows `idle` after a restart), and `idle` (the row on screen is highlighted without a separate label) — plus `· worker working`, the closing phase, `merged` or `no changes`, and any amber worker warning (`⚠ Worker: 2 commits not merged into main · uncommitted changes`; `worker/main` or non-active unmerged branches appear above the active list). Worker branch status is rechecked after each worker task, when expanding the **Boards** list panel, and when clicking the **Worker** tab. Active discussions and brainstorms each keep your drag-and-drop / **Move up** / **Move down** order per room in this browser.
-  - Clicking an **active** board's row switches to it (like Go to / Continue). Clicking a **closed** discussion (active, archived or deferred) or **closed** brainstorm peeks at it read-only — **chat and files** together, without starting any agent or worker session. Secondary row actions (**Resume** / **Continue**, **Peek files**, **Close**, **Close and Merge**, **Close and Discard**, **Archive**, **Defer**, **Make active**, **Turn into a discussion**, **Start fresh**, **Delete**, **Move up** / **Move down**, rollback, and peers' **View chat**) live in each row's **`⋯`** menu.
+  - Clicking an **active** board's row switches to it (like Go to / Continue). Clicking a **closed** discussion or **closed** brainstorm (active, archived or deferred) peeks at it read-only — **chat and files** together, without starting any agent or worker session. Archived and deferred brainstorms appear in **Archived · Deferred** labelled `archived brainstorm` or `deferred brainstorm`. Secondary row actions (**Resume** / **Continue**, **Peek files**, **Close**, **Close and Merge**, **Close and Discard**, **Archive**, **Defer**, **Make active**, **Turn into a discussion**, **Start fresh**, **Delete**, **Move up** / **Move down**, rollback, and peers' **View chat**) live in each row's **`⋯`** menu.
   - **Peek**: while peeking at a closed board, both the Discussion and Worker message boxes are disabled with a read-only notice, a **Back** button to return to the active discussion, and an explicit **Resume** button. An orange banner ("Looking at <name> · Back to current") and an orange dot on the Explorer tab also mark the peek, and Document's path line names the peeked board.
 - **Side pane** (**Explorer** and **Document** — two mutually exclusive tabs, one at a time):
   - **Close, reopen, and split orientation.** Click **`✕`** in the side pane header to close the side pane so Discussion/Worker takes the full Main panel; click **◫ Side pane** in the Discussion/Worker header to reopen it to the last selected tab. Clicking a `[[D4]]` / diagram / chart reference, a file link, or a **📄 Show …** button in chat while the side pane is closed reopens it to **Document** (and highlights the reference). Click **`⇅`/`⇆`** beside **`✕`** to switch the Main panel between side-by-side and stacked (conversation above, side pane below), dragging the divider in either direction; side-pane open/closed state, orientation, and divider size are remembered per board in this browser (keyed by room and board folder name, preserved across Archive, Defer, and Turn into a discussion; a board with no saved layout yet copies the layout on screen the first time it is shown, and peeking or viewing a peer's chat shows that board's saved layout if it has one without saving changes).
@@ -334,8 +334,8 @@ totals.
 the same agents, turns and `PASS` rules. Its first message gets a title from Claude and a folder,
 as a discussion's does, but under `brainstorms/` at the root: `brainstorms/<date>-<title>/`, holding
 `transcripts/`, `drawings/` if the agents draw, and `files/` if you attach files. A name is never one already taken in
-`discussions/` (`archive/` and `deferred/` included), nor a discussion's one taken in `brainstorms/`.
-It saves checkpoints like a discussion (below), under the key `brainstorms/<name>` and with no worker
+`discussions/` (`archive/` and `deferred/` included) or in `brainstorms/archive/` and `brainstorms/deferred/`, nor a discussion's one taken in `brainstorms/` (`archive/` and `deferred/` included).
+It saves checkpoints like a discussion (below), under the key `brainstorms/<name>` in every section and with no worker
 part, so Resume (`/resume brainstorms/<name>`), Close and Restart work as for discussions. The agents
 are told it is a brainstorm: they write nothing except drawings in its `drawings/`, may read the
 project, and propose turning it into a discussion when something else tangible is wanted. A
@@ -344,7 +344,19 @@ discussion to send work." and refuses instructions; there is no auto dev or auto
 summary (manual **Summarize** works), and the lap cap is 20. Brainstorms are not replicated to
 peers. Typing in a room with no discussion still starts a discussion.
 
-**Turn into a discussion** (in a brainstorm row's **`⋯`** menu in **Boards** or in **Actions ▾**, two clicks; `/convert
+**Archive and defer (brainstorms).** A closed brainstorm's **`⋯`** menu in **Boards** offers **Archive**
+and **Defer** (or `/move brainstorms/<name> archive|deferred`), moving the whole folder into
+`brainstorms/archive/` or `brainstorms/deferred/` (created when first needed) while keeping its
+checkpoint under `brainstorms/<name>`; open brainstorms cannot be moved. Archived and deferred
+brainstorms are listed in the folded **Archived · Deferred** section (labelled `archived brainstorm`
+or `deferred brainstorm`); clicking one peeks read-only (chat and files), and its **`⋯`** menu offers
+**Resume**, **Peek files**, **Peek chat & files**, **Make active** (`/move brainstorms/archive/<name> active`),
+the other of **Archive** / **Defer**, **Start fresh**, and **Delete** (make it active first before
+**Turn into a discussion**). `/resume` and `/fresh` on `brainstorms/archive/<name>` or
+`brainstorms/deferred/<name>` make it active first; `/peek` peeks in place; `/delete` removes the
+folder and checkpoint.
+
+**Turn into a discussion** (in an active brainstorm row's **`⋯`** menu in **Boards** or in **Actions ▾**, two clicks; `/convert
 brainstorms/<name>`) moves `brainstorms/<name>/` to `discussions/<name>/`, never over an existing
 folder (checked as it moves: then nothing moves), and its checkpoint to the discussion's key. The
 agents keep their sessions: each is told once, in its next prompt, the new folder and that the
@@ -352,7 +364,7 @@ discussion rules apply from then on (an open one carries on at once; a closed on
 The worker starts fresh at the discussion's first task. **Start fresh** on a brainstorm (`/fresh
 brainstorms/<name>`) starts new agent sessions briefed from its latest summary (marked when it
 wasn't agreed) or, with none, pointed at its `transcripts/` to read first, as the source that a
-summary may leave details out of. **Delete** (`/delete brainstorms/<name>`) refuses an open brainstorm.
+summary may leave details out of. **Delete** (`/delete brainstorms/<name>`, or in `archive/` / `deferred/`) refuses an open brainstorm.
 
 **Every discussion saves itself.** After every round (with or without its summary), every
 `/summary` and every worker task, and when its session ends (Close, New discussion, Quit room,
@@ -592,16 +604,16 @@ node src/cli.mjs --help
 | Command | Effect |
 |---|---|
 | `/docs` | Browse documents; in terminal mode, ↑/↓ selects, Enter opens, Esc leaves the picker. |
-| `/resume <folder-name>` | Show an open discussion, continue a paused checkpoint, or reopen a closed discussion with fresh sessions from its closing statement. `archive/…` or `deferred/…` is made active first; `brainstorms/<folder-name>` resumes a brainstorm. |
-| `/fresh <folder-name>` | Start fresh: new sessions there, from its closing statement or pending handoff, notes and its checkpoint's latest summary; the saved sessions and chat are discarded. `brainstorms/<folder-name>`: from its latest summary or its transcripts. |
+| `/resume <folder-name>` | Show an open discussion, continue a paused checkpoint, or reopen a closed discussion with fresh sessions from its closing statement. `archive/…` or `deferred/…` is made active first; `brainstorms/<folder-name>` (and `brainstorms/archive/…`, `brainstorms/deferred/…`) resumes a brainstorm (making it active first if archived or deferred). |
+| `/fresh <folder-name>` | Start fresh: new sessions there, from its closing statement or pending handoff, notes and its checkpoint's latest summary; the saved sessions and chat are discarded. `brainstorms/<folder-name>` (and `brainstorms/archive/…`, `brainstorms/deferred/…`, made active first): from its latest summary or its transcripts. |
 | `/new` | On the screen, open a new discussion beside this one (which stays open). In the terminal, end this session; your next message starts a new discussion. Its worker tasks finish in its own worker session; the new discussion's worker starts fresh. |
 | `/close` | Close the discussion shown; `/close <folder-name>` also closes a paused one. Waits for its worker, writes a closing statement (appending a pending-work line if the branch has unmerged commits or uncommitted edits), and keeps the worker branch and worktree intact (refuses immediately if tasks are queued behind an unresolved-edits hold). |
 | `/brainstorm` | Start a brainstorm (on the screen beside this one; in the terminal, ending this session). Its first message names it in `brainstorms/`. |
 | `/convert brainstorms/<folder-name>` | Turn into a discussion: the folder moves to `discussions/`, the agents keep their sessions and are told. |
-| `/delete brainstorms/<folder-name>` | Delete a closed brainstorm's folder and checkpoint, for good. |
+| `/delete brainstorms/<folder-name>` | Delete a closed brainstorm's folder and checkpoint, for good (also accepts `brainstorms/archive/<folder-name>` and `brainstorms/deferred/<folder-name>`). |
 | `/rollback <folder-name>` | Queue Archive with rollback as a worker task; review its report before archiving. |
 | `/archive-rollback <folder-name>` | Explicitly confirm archive after a successful rollback report (switch away first). |
-| `/move <folder-name> active\|archive\|deferred` | Move a closed discussion into `archive/` or `deferred/`, or move it back to active without reopening it. |
+| `/move <folder-name> active\|archive\|deferred` | Move a closed discussion or closed brainstorm (`brainstorms/<folder-name>`, `brainstorms/archive/…`, `brainstorms/deferred/…`) into `archive/` or `deferred/`, or move it back to active without reopening it. |
 | `/summary` | Request an agreed summary. |
 | `/autodev` | Start (or restart) auto dev from the latest agreed summary's worker instruction. |
 | `/usage` | Show session tokens and subscription quotas. |
