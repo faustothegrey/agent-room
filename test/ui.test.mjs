@@ -6384,3 +6384,113 @@ test('worktreeStatus and workerInfo report unquoted conflict paths and clear the
   const entry2 = first.screen.workerInfo.pending.find((p) => p.lane === name);
   assert.deepEqual(entry2?.conflicts ?? [], []);
 });
+
+test('workReady: set on finishAutoDev, kept across catchUpWithBranch, cleared by new message or other worker task, never on workbench', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, catchUpWithBranch, refreshWorker } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'pipe' }).toString().trim();
+
+  let workerGate = null, releaseWorker = null;
+  let step = 'impl';
+  const { first, git } = await multiRoom({
+    worker: async (ctx) => {
+      if (workerGate) await workerGate;
+      const tree = ctx.workerDir.path;
+      if (step === 'impl') {
+        writeFileSync(`${tree}/feat.txt`, 'feature v1\n');
+        inTree(tree, 'add', 'feat.txt');
+        inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] implement feature`);
+        return `Implemented.\nDocs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+      }
+      if (step === 'catchup') {
+        inTree(tree, 'merge', '--no-edit', 'main');
+        return `Caught up.\nDocs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+      }
+      return 'Extra work done.\nDocs: none needed, because test.';
+    },
+  });
+
+  // Queue-based say so auto dev report rounds run in order.
+  const queue = [];
+  let pumping = false;
+  first.say = (line) => {
+    queue.push(line);
+    if (pumping) return;
+    pumping = true;
+    (async () => {
+      while (queue.length) await handleLine(queue.shift(), first);
+      pumping = false;
+    })();
+  };
+
+  let replies = [
+    'Let us build feat.',
+    'PASS',
+    '**Agreed**\n- Build feat\n\n**Next step**\n- Send to the Worker: "implement feat"',
+  ];
+  const nextReply = () => (replies.length ? replies.shift() : 'PASS');
+  first.room.agents[0].turn = async () => nextReply();
+  first.room.agents[1].turn = async (p) => (/Outcome: FINISH|write a short summary/i.test(p) ? nextReply() : 'PASS');
+  const entry = (ctx = first) => ctx.screen.room.open.find((o) => o.current);
+
+  // Without auto dev, workReady is false.
+  await handleLine('build feat', first);
+  const { name } = first.discussion;
+  assert.equal(entry().workReady, false);
+  assert.equal(entry().readyForAutoDev, true);
+
+  // Start auto dev -> worker implements -> report round summarizes with Outcome: FINISH -> workReady is true.
+  replies = ['Looks good.', 'PASS', '**Agreed**\n- Feature complete\n\nOutcome: FINISH'];
+  await handleLine('/autodev', first);
+  await until(() => first.autoDev?.status === 'finished' && !pumping);
+  await first.workQueue;
+  assert.equal(entry().workReady, true);
+  assert.equal(entry().ongoing, false);
+
+  // Advance main so Catch up is needed; refreshWorker reports catchUp: true.
+  writeFileSync(`${first.cwd}/other.txt`, 'main moved\n');
+  git('add', 'other.txt'); git('commit', '-q', '-m', 'main moves');
+  await refreshWorker(first);
+  assert.equal(first.screen.workerInfo.mergeable[name]?.catchUp, true);
+
+  // Built-in catchUpWithBranch keeps workReady across the Catch up task (ongoing while running, workReady after).
+  step = 'catchup';
+  workerGate = new Promise((r) => { releaseWorker = r; });
+  const cu = await catchUpWithBranch(first, name);
+  assert.equal(cu.ok, true);
+  assert.equal(entry().ongoing, true);
+  await until(() => first.screen.working);
+  assert.equal(entry().working, true);
+  releaseWorker();
+  workerGate = null;
+  await first.workQueue;
+  assert.equal(entry().ongoing, false);
+  assert.equal(entry().workReady, true);
+  assert.equal(first.screen.workerInfo.mergeable[name]?.canMerge, true);
+
+  // A new discussion message clears workReady.
+  replies = ['PASS'];
+  await handleLine('one more thought', first);
+  assert.equal(entry().workReady, false);
+
+  // Finish auto dev again (from paused + /summary Outcome: FINISH), then verify another worker task clears workReady.
+  first.autoDev = { status: 'paused', cycle: 1, limit: 5, reason: 'paused' };
+  replies = ['**Agreed**\n- All done again\n\nOutcome: FINISH'];
+  await handleLine('/summary', first);
+  assert.equal(entry().workReady, true);
+
+  step = 'other';
+  queueWork(first, 'do an extra tweak');
+  await first.workQueue;
+  assert.equal(entry().workReady, false);
+
+  // Workbenches never show workReady.
+  const { first: wb } = await multiRoom({ worker: async () => 'done\nDocs: none needed, because test.' });
+  await handleLine('/workbench', wb);
+  wb.workReady = true;
+  await handleLine('small fix', wb);
+  await wb.workQueue;
+  assert.equal(entry(wb).workbench, true);
+  assert.equal(entry(wb).workReady, false);
+});

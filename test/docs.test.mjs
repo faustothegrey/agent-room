@@ -3919,3 +3919,145 @@ test('setRoom does not auto-open the Providers service when creating a new discu
   assert.deepEqual(shownTabs, []);
   assert.equal(els['talk-settings'].open, true);
 });
+
+test('Boards rows show work ready with ranking, merge suffixes, no-suffix cases, and Catch up transitions', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return {
+      toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(cls) { s.add(cls); }, remove(cls) { s.delete(cls); }, contains(cls) { return s.has(cls); },
+    };
+  };
+  const node = (tag = 'div') => ({
+    tag, className: '', textContent: '', title: '', value: '', hidden: false, disabled: false, children: [], dataset: {}, style: {},
+    classList: classListFor(),
+    get firstChild() { return this.children[0] || null; },
+    get lastChild() { return this.children.at(-1) || null; },
+    set innerHTML(html) { this.children = [node('div')]; },
+    append(...items) { this.children.push(...items); },
+    replaceChildren(...items) { this.children = items; },
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    addEventListener() {},
+    setAttribute() {},
+    getAttribute() { return null; },
+    focus() {},
+  });
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const harness = new Function('$', 'document', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'send',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = false, localInput = true, box = { hidden: false }, wbox = {};\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (fn) => fn();\n' +
+    code + '\n' +
+    'return { setRoom, renderDiscussions, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; }, setWorker: ({ pending = null, mergeable = {}, merged = [] } = {}) => { workerPending = pending; workerMergeable = mergeable; workerMerged = new Set(merged); } };'
+  )($, { createElement: node, title: '' }, { href: '/r/1/__room' }, null, null, () => {}, (cb) => cb(), () => {}, () => {});
+
+  harness.setFiles([
+    'discussions/2026-11-23-mergeable/notes.md',
+    'discussions/2026-11-23-catchup/notes.md',
+    'discussions/2026-11-23-blocked/notes.md',
+    'discussions/2026-11-23-no-branch/notes.md',
+    'discussions/2026-11-23-already-merged/notes.md',
+    'discussions/2026-11-23-ready-wins/notes.md',
+    'discussions/2026-11-23-waiting-wins/notes.md',
+    'discussions/2026-11-23-conflict-wins/notes.md',
+    'discussions/2026-11-23-ongoing-wins/notes.md',
+    'discussions/2026-11-23-closed-wins/notes.md',
+    'discussions/2026-11-23-not-started-wins/notes.md',
+    'discussions/2026-11-23-workbench/notes.md',
+    'discussions/2026-11-23-idle/notes.md',
+  ]);
+  const makeRoom = (overrides = {}) => ({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-23-mergeable',
+    discussion: 'Mergeable',
+    started: true,
+    closedDiscussions: ['2026-11-23-closed-wins'],
+    closingDiscussions: {},
+    workbenches: ['2026-11-23-workbench'],
+    open: [
+      { active: 'discussions/2026-11-23-mergeable', title: 'Mergeable', started: true, current: true, working: false, ongoing: false, waitingForInput: false, readyForAutoDev: false, workReady: true, url: '/r/1/__room' },
+      { active: 'discussions/2026-11-23-catchup', title: 'Catchup', started: true, current: false, working: false, ongoing: false, waitingForInput: false, readyForAutoDev: false, workReady: true, url: '/r/2/__room' },
+      { active: 'discussions/2026-11-23-blocked', title: 'Blocked', started: true, current: false, working: false, ongoing: false, waitingForInput: false, readyForAutoDev: false, workReady: true, url: '/r/3/__room' },
+      { active: 'discussions/2026-11-23-no-branch', title: 'No branch', started: true, current: false, working: false, ongoing: false, waitingForInput: false, readyForAutoDev: false, workReady: true, url: '/r/4/__room' },
+      { active: 'discussions/2026-11-23-already-merged', title: 'Already merged', started: true, current: false, working: false, ongoing: false, waitingForInput: false, readyForAutoDev: false, workReady: true, url: '/r/5/__room' },
+      { active: 'discussions/2026-11-23-ready-wins', title: 'Ready wins', started: true, current: false, working: false, ongoing: false, waitingForInput: false, readyForAutoDev: true, workReady: true, url: '/r/6/__room' },
+      { active: 'discussions/2026-11-23-waiting-wins', title: 'Waiting wins', started: true, current: false, working: false, ongoing: false, waitingForInput: true, waitingReason: 'Auto dev paused', readyForAutoDev: false, workReady: true, url: '/r/7/__room' },
+      { active: 'discussions/2026-11-23-conflict-wins', title: 'Conflict wins', started: true, current: false, working: false, ongoing: false, waitingForInput: false, readyForAutoDev: false, workReady: true, url: '/r/8/__room' },
+      { active: 'discussions/2026-11-23-ongoing-wins', title: 'Ongoing wins', started: true, current: false, working: true, ongoing: true, waitingForInput: false, readyForAutoDev: false, workReady: true, url: '/r/9/__room' },
+      { active: 'discussions/2026-11-23-closed-wins', title: 'Closed wins', started: true, current: false, working: false, ongoing: false, waitingForInput: false, readyForAutoDev: false, workReady: true, url: '/r/10/__room' },
+      { active: 'discussions/2026-11-23-not-started-wins', title: 'Not started', started: false, current: false, working: false, ongoing: false, waitingForInput: false, readyForAutoDev: false, workReady: true, url: '/r/11/__room' },
+      { active: 'discussions/2026-11-23-workbench', title: 'Workbench', workbench: true, started: true, current: false, working: false, ongoing: false, waitingForInput: false, readyForAutoDev: false, workReady: true, url: '/r/12/__room' },
+      { active: 'discussions/2026-11-23-idle', title: 'Idle', started: true, current: false, working: false, ongoing: false, waitingForInput: false, readyForAutoDev: false, workReady: false, url: '/r/13/__room' },
+    ],
+    ...overrides,
+  });
+
+  const infoFor = (path) => {
+    const boardList = els['list-pane'].firstChild;
+    const discRows = boardList.children.find((c) => c.dataset?.section === 'discussions').children
+      .filter((c) => c.className?.includes('discussion-row'));
+    const row = discRows.find((r) => r.children.find((c) => c.className === 'discussion-block')?.children[0]?.title === path);
+    const block = row.children.find((c) => c.className === 'discussion-block');
+    const lbl = block.children.find((c) => c.className === 'local-label');
+    return { label: lbl.textContent, labelTitle: lbl.title };
+  };
+
+  harness.setRoom(makeRoom());
+  harness.setWorker({
+    pending: [
+      { lane: '2026-11-23-mergeable', branch: 'worker/2026-11-23-mergeable', ahead: 1, dirty: false, conflicts: [] },
+      { lane: '2026-11-23-catchup', branch: 'worker/2026-11-23-catchup', ahead: 1, dirty: false, conflicts: [] },
+      { lane: '2026-11-23-blocked', branch: 'worker/2026-11-23-blocked', ahead: 1, dirty: true, conflicts: [] },
+      { lane: '2026-11-23-conflict-wins', branch: 'worker/2026-11-23-conflict-wins', ahead: 1, dirty: true, conflicts: ['src/a.mjs'] },
+      { lane: '2026-11-23-ongoing-wins', branch: 'worker/2026-11-23-ongoing-wins', ahead: 1, dirty: false, conflicts: [] },
+    ],
+    mergeable: {
+      '2026-11-23-mergeable': { canMerge: true, catchUp: false, disabledReason: null, targetBranch: 'main', behind: 0 },
+      '2026-11-23-catchup': { canMerge: false, catchUp: true, disabledReason: null, targetBranch: 'main', behind: 2 },
+      '2026-11-23-blocked': { canMerge: false, catchUp: false, disabledReason: 'The worker\'s worktree has uncommitted edits.', targetBranch: 'main', behind: 0 },
+    },
+    merged: ['2026-11-23-already-merged'],
+  });
+  harness.renderDiscussions();
+
+  // Three merge suffixes + no-suffix cases
+  assert.deepEqual(infoFor('discussions/2026-11-23-mergeable'), { label: 'work ready · mergeable', labelTitle: '' });
+  assert.deepEqual(infoFor('discussions/2026-11-23-catchup'), { label: 'work ready · needs catch-up', labelTitle: '' });
+  assert.deepEqual(infoFor('discussions/2026-11-23-blocked'), {
+    label: 'work ready · merge blocked',
+    labelTitle: 'The worker\'s worktree has uncommitted edits.',
+  });
+  assert.deepEqual(infoFor('discussions/2026-11-23-no-branch'), { label: 'work ready · no changes', labelTitle: '' });
+  assert.deepEqual(infoFor('discussions/2026-11-23-already-merged'), { label: 'work ready · merged', labelTitle: '' });
+
+  // Ranking: ongoing, closed, not started, waiting for input (incl. conflicts), ready for auto dev all beat work ready; work ready beats idle; workbenches never show it
+  assert.deepEqual(infoFor('discussions/2026-11-23-ready-wins'), { label: 'ready for auto dev · no changes', labelTitle: '' });
+  assert.deepEqual(infoFor('discussions/2026-11-23-waiting-wins'), { label: 'waiting for input · no changes', labelTitle: 'Auto dev paused' });
+  assert.deepEqual(infoFor('discussions/2026-11-23-conflict-wins'), { label: 'waiting for input', labelTitle: 'Worker conflict: src/a.mjs' });
+  assert.deepEqual(infoFor('discussions/2026-11-23-ongoing-wins'), { label: 'ongoing · worker working', labelTitle: '' });
+  assert.deepEqual(infoFor('discussions/2026-11-23-closed-wins'), { label: 'closed · no changes', labelTitle: '' });
+  assert.deepEqual(infoFor('discussions/2026-11-23-not-started-wins'), { label: 'not started · no changes', labelTitle: '' });
+  assert.deepEqual(infoFor('discussions/2026-11-23-workbench'), { label: 'idle · no changes', labelTitle: '' });
+  assert.deepEqual(infoFor('discussions/2026-11-23-idle'), { label: 'idle · no changes', labelTitle: '' });
+
+  // Without workerPending loaded yet, no-branch row omits any suffix
+  harness.setWorker({ pending: null, mergeable: {}, merged: [] });
+  harness.renderDiscussions();
+  assert.deepEqual(infoFor('discussions/2026-11-23-no-branch'), { label: 'work ready', labelTitle: '' });
+
+  // After Catch up finishes on ongoing-wins, it returns to work ready · mergeable
+  const afterCatchUp = makeRoom();
+  afterCatchUp.open = afterCatchUp.open.map((o) => (o.active === 'discussions/2026-11-23-ongoing-wins' ? { ...o, working: false, ongoing: false } : o));
+  harness.setRoom(afterCatchUp);
+  harness.setWorker({
+    pending: [{ lane: '2026-11-23-ongoing-wins', branch: 'worker/2026-11-23-ongoing-wins', ahead: 2, dirty: false, conflicts: [] }],
+    mergeable: { '2026-11-23-ongoing-wins': { canMerge: true, catchUp: false, disabledReason: null, targetBranch: 'main', behind: 0 } },
+    merged: [],
+  });
+  harness.renderDiscussions();
+  assert.deepEqual(infoFor('discussions/2026-11-23-ongoing-wins'), { label: 'work ready · mergeable', labelTitle: '' });
+});

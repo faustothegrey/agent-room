@@ -2869,6 +2869,7 @@ function renderBoards() {
     if (openEntry ? !openEntry.started : isCurrent && !room?.started) return 'not started';
     if (openEntry?.waitingForInput) return 'waiting for input';
     if (openEntry?.readyForAutoDev) return 'ready for auto dev';
+    if (openEntry?.workReady && !openEntry.workbench && !openEntry.brainstorm) return 'work ready';
     return 'idle';
   };
 
@@ -2944,6 +2945,18 @@ function renderBoards() {
     const workerBusy = !!(openEntry?.working || openEntry?.workerBusy || room?.busyWorkers?.includes(d));
     const state = boardState(openEntry, { closed, isCurrent, closing, conflicts, workerBusy });
     let statusText = state;
+    let mergeBlockedReason = null;
+    if (state === 'work ready') {
+      const m = workerMergeable?.[d];
+      if (m) {
+        if (m.canMerge) statusText += ' · mergeable';
+        else if (m.catchUp) statusText += ' · needs catch-up';
+        else {
+          statusText += ' · merge blocked';
+          if (m.disabledReason) mergeBlockedReason = m.disabledReason;
+        }
+      }
+    }
     if (openEntry?.working) statusText += ' · worker working';
     if (closing) statusText += ' · ' + closingLabel(closing);
     const merged = workerMerged.has(d);
@@ -2954,6 +2967,8 @@ function renderBoards() {
     if (state === 'waiting for input') {
       const tip = conflictText || openEntry?.waitingReason;
       if (tip) stateEl.title = tip;
+    } else if (mergeBlockedReason) {
+      stateEl.title = mergeBlockedReason;
     }
     block.append(stateEl);
     if (work) block.append(el('div', 'worker-pending', '⚠ Worker: ' + pendingText(work)));
