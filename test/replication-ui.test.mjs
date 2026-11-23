@@ -344,3 +344,57 @@ test('concurrent bootstrap pairings cannot replace an established room identity'
     assert.equal((await pair(...loser)).status,409);assert.deepEqual(await R.roomInfo(r.s),info);
   } finally { await new Promise(ok=>server.close(ok)); await R.removeTree(root); }
 });
+
+test('workbench: never replicated to peers on Close or startup publishing', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdirSync, realpathSync, writeFileSync } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  const { homedir } = await import('node:os');
+  const root = await fs.mkdtemp(join(tmpdir(), 'rep-wb-'));
+  const cwd = join(root, 'room');
+  mkdirSync(cwd, { recursive: true });
+  execFileSync('git', ['init', '-b', 'main'], { cwd, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd, stdio: 'ignore' });
+  writeFileSync(join(cwd, 'a.txt'), 'init\n');
+  execFileSync('git', ['add', '.'], { cwd, stdio: 'ignore' });
+  execFileSync('git', ['commit', '-m', 'init'], { cwd, stdio: 'ignore' });
+
+  const ctx = {
+    cwd, node: 'Mac', peers: [], port: 0, noScreen: true,
+    agentSpecs: 'claude:A', workerSpec: 'claude:Worker',
+    state: { transcript: [], seen: new Map() }, sessions: new Map(),
+  };
+  Object.assign(ctx, await ui.load(ctx, ''));
+  ctx.suggestTitle = async () => ({ title: 'Tiny Tweak' });
+  ctx.closingStatement = async () => { throw new Error('closing statement must not run'); };
+  ctx.worker.turn = async () => 'Done.\nDocs: none needed, because test.';
+  await ui.start(ctx);
+  try {
+    await ui.handleLine('/workbench', ctx);
+    await ui.handleLine('Tweak spacing', ctx);
+    await ctx.workQueue;
+    const wbName = ctx.discussion.name;
+    await ui.handleLine('/close', ctx);
+
+    // Close did not capture or publish the workbench, and canSend refuses it.
+    assert.deepEqual(await R.ownLines(ctx.replica.s), {});
+    assert.equal(ctx.replica.canSend(wbName), false);
+
+    // Startup publishing also ignores any closed entry belonging to a workbench.
+    const fakeSnap = { discussion: 'fake-wb-id', commit: '0'.repeat(40), parent: null };
+    const closedDir = join(homedir(), '.local', 'state', 'agent-room', 'paused',
+      createHash('sha256').update(realpathSync(cwd)).digest('hex'), 'closed');
+    const closedFile = join(closedDir, createHash('sha256').update(wbName).digest('hex'));
+    writeFileSync(closedFile, JSON.stringify({ name: wbName, snapshot: fakeSnap }));
+    ctx.replicaState = {};
+    await ui.reloaded(ctx);
+    assert.deepEqual(await R.ownLines(ctx.replica.s), {});
+    assert.equal(ctx.replica.canSend(wbName), false);
+  } finally {
+    await ui.stopRoom(ctx);
+    await ui.ended(ctx);
+    ctx.hub?.server?.close();
+    await R.removeTree(root);
+  }
+});

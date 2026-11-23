@@ -59,8 +59,11 @@ discussion, with a 30-minute timeout per instruction.
   User's explicit approval, then remove only those. Never reset or clean the whole worktree; report
   edits whose owner is unclear instead.
 - When a task asks you to catch up, merge main into your branch normally before its work.
-  If a merge or revert conflicts, do not force it or proceed with the task: report it and leave
-  the state for this origin's recovery. After a successful merge, run the project's tests (`npm
+  If a catch-up merge conflicts, only when every conflict is purely additive (both sides only
+  added independent lines or blocks with no overlapping edits or deletions) may you resolve it
+  by keeping both additions, stage and commit the merge with the catch-up label, and note what
+  you resolved. For any other merge conflict, or any revert conflict, do not force it or proceed
+  with the task: report it and leave the state for this origin's recovery. After a successful merge, run the project's tests (`npm
   test`, if it has them), report their real output, and end your reply with the line
   `Tested: <full commit ID of your branch> with main <full commit ID of main>: tests passed` (or
   `tests failed`), naming exactly the commits you tested. The Worker tab shows it to the User.
