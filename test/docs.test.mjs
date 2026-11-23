@@ -3230,6 +3230,172 @@ test('Archived and deferred brainstorms appear in Archived · Deferred with read
   assert.equal(sent.at(-1), '/delete brainstorms/archive/2026-11-10-old-idea');
 });
 
+test('worker state refreshes via __workerinfo when Actions ▾ opens, on focus/visibilitychange (at most once per 5s), and when Close and Merge, Close and Discard or Catch up fails', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const winfoCode = source.slice(source.indexOf('const BRAINSTORM_NO_WORK ='), source.indexOf('function setWorking('));
+  const closeCode = source.slice(source.indexOf('function closeActionLabel('), source.indexOf('function updateReplicaView('));
+  const menuCode = source.slice(source.indexOf('const WORKERINFO_FOCUS_MS ='), source.indexOf('const closeMenus ='));
+
+  const node = (tag = 'div', id = '') => {
+    const listeners = {};
+    return {
+      tag, id, className: '', textContent: '', placeholder: '', title: '', open: false, hidden: false, disabled: false,
+      children: [], dataset: {},
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      querySelectorAll() { return []; },
+      matches(sel) { return sel === 'details.menu' && this.tag === 'details' && this.className.split(' ').includes('menu'); },
+      addEventListener(ev, fn) { (listeners[ev] ??= []).push(fn); },
+      showModal() { this.open = true; },
+      close() { this.open = false; this.onclose?.(); },
+      remove() { this.removed = true; },
+    };
+  };
+
+  const docListeners = {}, winListeners = {};
+  const dialogs = [];
+  const body = { append(el) { dialogs.push(el); } };
+  const actionsMenu = Object.assign(node('details', 'actions-menu'), { className: 'menu' });
+  const serverMenu = Object.assign(node('details', 'server-menu'), { className: 'menu' });
+  const closedisc = node('button', 'closedisc');
+  const closemerge = node('button', 'closemerge');
+  const closediscard = node('button', 'closediscard');
+  const winfo = node('div', 'winfo');
+  const wbox = node('textarea', 'wbox');
+  const doc = {
+    visibilityState: 'visible',
+    body,
+    head: node('head'),
+    createElement: (tag) => node(tag),
+    getElementById: () => null,
+    querySelectorAll: (sel) => (sel === 'details.menu' ? [actionsMenu, serverMenu] : []),
+    addEventListener(ev, fn) { (docListeners[ev] ??= []).push(fn); },
+  };
+  const win = {
+    addEventListener(ev, fn) { (winListeners[ev] ??= []).push(fn); },
+  };
+
+  let now = 10_000;
+  const FakeDate = { now: () => now };
+  const posts = [];
+  const statuses = [];
+  let postHandler = async () => ({ ok: true, json: async () => ({}), text: async () => '' });
+  const post = async (path, payload) => {
+    posts.push({ path, payload });
+    if (path === '__workerinfo') return { ok: true, status: 204 };
+    return postHandler(path, payload);
+  };
+
+  const harness = new Function('$', 'document', 'window', 'Date', 'matchMedia', 'wbox', 'post', 'status', 'renderDiscussions',
+    'let room = { active: "discussions/2026-11-23-a", brainstorm: false }, workerPending = null, workerDiscardable = new Set(), workerMergeable = {}, workerMerged = new Set(), ended = false, restarting = false;\n' +
+    closeCode + '\n' + winfoCode + '\n' + menuCode + '\n' +
+    'return { showWorkerInfo, startMerge, startDiscard, startCatchUp };'
+  )(
+    (id) => ({ closedisc, closemerge, closediscard, winfo, 'actions-menu': actionsMenu, 'server-menu': serverMenu }[id] ?? node('div', id)),
+    doc, win, FakeDate, () => ({ matches: false }), wbox, post, (msg, err) => statuses.push({ msg, err }), () => {},
+  );
+
+  // Initial stale state: Actions ▾ offers Close and Merge.
+  harness.showWorkerInfo({
+    lines: [],
+    pending: [{ lane: '2026-11-23-a', branch: 'worker/2026-11-23-a', ahead: 1, dirty: false }],
+    discardable: ['2026-11-23-a'],
+    mergeable: { '2026-11-23-a': { canMerge: true, catchUp: false, disabledReason: null, targetBranch: 'main', behind: 0 } },
+  });
+  assert.equal(closemerge.hidden, false);
+  assert.equal(closemerge.disabled, false);
+
+  // (1) Opening Actions ▾ posts __workerinfo without blocking; closing or opening another menu does not.
+  actionsMenu.open = true;
+  for (const fn of docListeners.toggle ?? []) fn({ target: actionsMenu });
+  assert.deepEqual(posts.map((p) => p.path), ['__workerinfo']);
+  assert.equal(actionsMenu.open, true);
+  // Reply arrives while Actions ▾ is still open -> menu buttons update in place.
+  harness.showWorkerInfo({ lines: [], pending: [], discardable: [], mergeable: {} });
+  assert.equal(actionsMenu.open, true);
+  assert.equal(closemerge.hidden, true);
+  assert.equal(closediscard.hidden, true);
+  assert.equal(closedisc.textContent, 'Close');
+
+  // Closing Actions ▾ does not post __workerinfo.
+  actionsMenu.open = false;
+  for (const fn of docListeners.toggle ?? []) fn({ target: actionsMenu });
+  // Opening a different menu does not post __workerinfo.
+  serverMenu.open = true;
+  for (const fn of docListeners.toggle ?? []) fn({ target: serverMenu });
+  assert.equal(posts.length, 1);
+
+  // (2) Window focus / visibilitychange: refreshes at most once every 5 seconds.
+  posts.length = 0;
+  for (const fn of winListeners.focus ?? []) fn();
+  assert.deepEqual(posts.map((p) => p.path), ['__workerinfo']);
+  // Immediate visibilitychange + focus within 5s are throttled.
+  now += 1000;
+  doc.visibilityState = 'visible';
+  for (const fn of docListeners.visibilitychange ?? []) fn();
+  for (const fn of winListeners.focus ?? []) fn();
+  assert.equal(posts.length, 1);
+  // Hidden tab never refreshes even after 5s.
+  now += 5000;
+  doc.visibilityState = 'hidden';
+  for (const fn of docListeners.visibilitychange ?? []) fn();
+  for (const fn of winListeners.focus ?? []) fn();
+  assert.equal(posts.length, 1);
+  // Becoming visible after >= 5s refreshes once, then throttles immediate focus.
+  doc.visibilityState = 'visible';
+  for (const fn of docListeners.visibilitychange ?? []) fn();
+  for (const fn of winListeners.focus ?? []) fn();
+  assert.equal(posts.length, 2);
+
+  // (3) Failures in Close and Merge (preview & confirm), Close and Discard (preview & confirm), and Catch up each post __workerinfo.
+  const fail409 = (msg) => async () => ({ ok: false, status: 409, text: async () => msg });
+
+  // Catch up failure
+  posts.length = 0;
+  postHandler = fail409('no unmerged commits');
+  await harness.startCatchUp('2026-11-23-a');
+  assert.deepEqual(posts.map((p) => p.path), ['__catchup', '__workerinfo']);
+  assert.equal(statuses.at(-1).err, true);
+
+  // Close and Merge preview failure
+  posts.length = 0;
+  postHandler = fail409('2026-11-23-a has no commits not in the room\'s current branch to merge.');
+  await harness.startMerge('2026-11-23-a');
+  assert.deepEqual(posts.map((p) => p.path), ['__merge', '__workerinfo']);
+
+  // Close and Merge confirm failure
+  posts.length = 0;
+  dialogs.length = 0;
+  postHandler = async (_path, payload) => {
+    if (!payload.snapshot) return { ok: true, json: async () => ({ preview: { title: 'Merge worker/2026-11-23-a into main', commits: [], untracked: [], snapshot: 'snap1' } }) };
+    return { ok: false, status: 409, text: async () => 'merge conflict' };
+  };
+  await harness.startMerge('2026-11-23-a');
+  assert.deepEqual(posts.map((p) => p.path), ['__merge']); // preview succeeded: no extra __workerinfo
+  const mergeConfirm = dialogs.at(-1).children.find((c) => c.className === 'discard-buttons').children[1];
+  await mergeConfirm.onclick();
+  assert.deepEqual(posts.map((p) => p.path), ['__merge', '__merge', '__workerinfo']);
+
+  // Close and Discard preview failure
+  posts.length = 0;
+  postHandler = fail409('nothing to discard');
+  await harness.startDiscard('2026-11-23-a');
+  assert.deepEqual(posts.map((p) => p.path), ['__discard', '__workerinfo']);
+
+  // Close and Discard confirm failure
+  posts.length = 0;
+  dialogs.length = 0;
+  postHandler = async (_path, payload) => {
+    if (!payload.snapshot) return { ok: true, json: async () => ({ preview: { commits: [], tracked: [], untracked: [], ignored: [], snapshot: 'snap2' } }) };
+    return { ok: false, status: 409, text: async () => 'discard failed' };
+  };
+  await harness.startDiscard('2026-11-23-a');
+  assert.deepEqual(posts.map((p) => p.path), ['__discard']);
+  const discardConfirm = dialogs.at(-1).children.find((c) => c.className === 'discard-buttons').children[1];
+  await discardConfirm.onclick();
+  assert.deepEqual(posts.map((p) => p.path), ['__discard', '__discard', '__workerinfo']);
+});
+
 test('discussion area header: #disc-header spans #main-panel with title, status, auto dev, and Actions ▾; #disc-zone holds only busy workers', async () => {
   const s = await serve(fixture(), { clients: new Set(), transcript: [] });
   const html = await (await s.get('/__room')).text();
@@ -3352,6 +3518,123 @@ test('discussion area header: #disc-header spans #main-panel with title, status,
   assert.doesNotMatch(source, /header's Actions/);
   assert.match(source, /No brainstorms yet: \+ New brainstorm above starts one\./);
   assert.match(source, /Turn it into a discussion \(Actions ▾ in the discussion header\) to have it here\./);
+});
+
+test('opening a board row ⋯ menu refreshes worker state via __workerinfo, and renderBoards() reopening it on reply updates items in place without a refresh loop', async () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const winfoCode = source.slice(source.indexOf('const BRAINSTORM_NO_WORK ='), source.indexOf('function setWorking('));
+  const boardsCode = source.slice(source.indexOf('const urlFor ='), source.indexOf('// Settings stay outside'));
+  const classListFor = () => {
+    const s = new Set();
+    return { toggle(cls, v) { if (v === undefined ? !s.has(cls) : v) s.add(cls); else s.delete(cls); },
+      add(...c) { c.forEach((x) => s.add(x)); }, remove(...c) { c.forEach((x) => s.delete(x)); }, contains(cls) { return s.has(cls); } };
+  };
+  const pendingToggles = [];
+  const node = (tag = 'div') => {
+    let _open = false;
+    const listeners = {};
+    const el = {
+      tag, className: '', textContent: '', title: '', placeholder: '', disabled: false, hidden: false,
+      children: [], dataset: {}, style: {}, classList: classListFor(),
+      get open() { return _open; },
+      set open(v) {
+        const next = !!v;
+        const changed = next !== _open;
+        _open = next;
+        // Real browsers queue an async toggle event on <details> whenever open changes (even before listeners attach in the same tick).
+        if (changed && tag === 'details') pendingToggles.push(() => { for (const fn of listeners.toggle ?? []) fn({ target: el }); });
+      },
+      get firstChild() { return this.children[0] || null; },
+      set innerHTML(_html) { this.children = [node('div')]; },
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      querySelectorAll() { return []; },
+      querySelector() { return null; },
+      addEventListener(ev, fn) { (listeners[ev] ??= []).push(fn); },
+      setAttribute() {},
+      getAttribute() { return null; },
+    };
+    return el;
+  };
+  const flushToggles = () => { while (pendingToggles.length) pendingToggles.shift()(); };
+  const els = {}, store = new Map(), fetched = [], location = { href: '' };
+  const localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
+  const harness = new Function('$', 'document', 'window', 'matchMedia', 'location', 'viewing', 'peeking', 'renderAutoDev', 'requestAnimationFrame', 'setInterval', 'localStorage', 'fetch', 'send',
+    'let tab = "talk", replica = null, localThinking = null, yourTurn = true, localInput = true, ended = false, restarting = false, posting = 0, viewClient = "t", box = { hidden: false }, wbox = { placeholder: "", disabled: false };\n' +
+    'let doc = null, docpane = $("docpane"), pane = $("pane");\n' +
+    'let attaching = false, pending = [];\n' +
+    'const renderAttachments = () => {}, closeMenus = () => {}, notesGuard = (act) => act(), status = () => {}, updateBusy = () => {}, busyFailed = () => {};\n' +
+    boardsCode + '\n' + winfoCode + '\n' +
+    'return { setRoom, renderBoards, showWorkerInfo, setFiles: (files) => { cachedDetail = { files, unviewable: new Set(), branch: "main" }; } };'
+  )(
+    (id) => els[id] || (els[id] = node(id)),
+    { createElement: node, getElementById: () => null, head: node('head'), title: '' },
+    {}, () => ({ matches: false }), location, null, null, () => {}, (cb) => cb(), () => {}, localStorage,
+    async (url) => { fetched.push(url); return { ok: true, status: 204 }; },
+    () => {},
+  );
+
+  harness.setRoom({
+    folder: '/tmp/project',
+    active: 'discussions/2026-11-23-a',
+    brainstorm: false,
+    discussion: 'Topic A',
+    started: true,
+    multi: true,
+    open: [{ active: 'discussions/2026-11-23-a', current: true, started: true }],
+    checkpoints: [],
+    closedDiscussions: [],
+  });
+  harness.setFiles(['discussions/2026-11-23-a/notes.md']);
+  harness.showWorkerInfo({
+    lines: [],
+    pending: [{ lane: '2026-11-23-a', branch: 'worker/2026-11-23-a', ahead: 1, dirty: false }],
+    discardable: ['2026-11-23-a'],
+    mergeable: { '2026-11-23-a': { canMerge: true, catchUp: false, disabledReason: null, targetBranch: 'main', behind: 0 } },
+  });
+  flushToggles();
+
+  const rowMenu = () => {
+    const discSection = els['list-pane'].firstChild.children.find((c) => c.dataset?.section === 'discussions');
+    const row = discSection.children.find((c) => c.className.includes('discussion-row'));
+    return row.children.find((c) => c.tag === 'details');
+  };
+  const buttonLabels = (menu) => menu.children[1].children.filter((b) => b.tag === 'button').map((b) => b.textContent);
+
+  // Before opening: stale state offers Close with pending work, Close and Merge, and Close and Discard; no __workerinfo yet.
+  const menu1 = rowMenu();
+  assert.equal(menu1.open, false);
+  assert.ok(buttonLabels(menu1).includes('Close with pending work'));
+  assert.ok(buttonLabels(menu1).includes('Close and Merge'));
+  assert.ok(buttonLabels(menu1).includes('Close and Discard'));
+  assert.deepEqual(fetched, []);
+
+  // User opens the row's ⋯ menu -> refreshes worker state once via __workerinfo.
+  menu1.open = true;
+  flushToggles();
+  assert.deepEqual(fetched, ['__workerinfo']);
+
+  // Reply arrives (worker branch was merged from a terminal): renderBoards() rebuilds the row and programmatically reopens the menu.
+  harness.showWorkerInfo({ lines: [], pending: [], discardable: [], mergeable: {} });
+  flushToggles(); // fires the browser's async toggle from programmatic menu.open = true
+
+  // Menu stays open, items update in place, and no second __workerinfo refresh is triggered (no loop).
+  const menu2 = rowMenu();
+  assert.notEqual(menu2, menu1);
+  assert.equal(menu2.open, true);
+  assert.ok(buttonLabels(menu2).includes('Close'));
+  assert.ok(!buttonLabels(menu2).includes('Close with pending work'));
+  assert.ok(!buttonLabels(menu2).includes('Close and Merge'));
+  assert.ok(!buttonLabels(menu2).includes('Close and Discard'));
+  assert.deepEqual(fetched, ['__workerinfo']);
+
+  // Closing and reopening the row's ⋯ menu as a user triggers a fresh __workerinfo.
+  menu2.open = false;
+  flushToggles();
+  assert.deepEqual(fetched, ['__workerinfo']);
+  menu2.open = true;
+  flushToggles();
+  assert.deepEqual(fetched, ['__workerinfo', '__workerinfo']);
 });
 
 test('workbench UI: + New workbench in Boards, New workbench in Actions ▾, worker-only view, 🔧 Boards icon, and Close and Merge/Discard shown on workbenches', async () => {

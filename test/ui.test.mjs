@@ -5980,6 +5980,50 @@ test('name reservation: names in brainstorms/archive/ and brainstorms/deferred/ 
   assert.ok(!existsSync(`${ctx.cwd}/discussions/2026-11-05-clash`));
 });
 
+test('overlapping refreshWorker calls cannot leave an older result shown last', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, refreshWorker } = await import('../src/ui.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
+
+  const { first, git } = await multiRoom({ worker: (ctx) => {
+    const tree = ctx.workerDir.path;
+    writeFileSync(`${tree}/feat.txt`, 'ok\n');
+    inTree(tree, 'add', 'feat.txt');
+    inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] add feat`);
+    return `Docs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+  } });
+
+  await handleLine('overlap-refresh', first);
+  const { name } = first.discussion;
+  queueWork(first, 'make commit');
+  await first.workQueue;
+  assert.equal(first.screen.workerInfo.mergeable[name]?.canMerge, true);
+
+  // Start an older refresh that reads the pre-merge state, then pause right before it broadcasts.
+  let paused, release;
+  const atPause = new Promise((r) => { paused = r; });
+  const canResume = new Promise((r) => { release = r; });
+  const older = refreshWorker(first, { _beforeBroadcast: async () => { paused(); await canResume; } });
+  await atPause;
+
+  // Merge the worker branch from a terminal, then run a newer refresh to completion.
+  git('merge', '--no-ff', '-m', `[${name}] merge from terminal`, `worker/${name}`);
+  const eventsBeforeNewer = first.events.filter((e) => e.type === 'workerinfo').length;
+  await refreshWorker(first);
+  const eventsAfterNewer = first.events.filter((e) => e.type === 'workerinfo').length;
+  assert.equal(eventsAfterNewer, eventsBeforeNewer + 1);
+  assert.deepEqual(first.screen.workerInfo.mergeable, {});
+  assert.deepEqual(first.screen.workerInfo.pending, []);
+
+  // Release the older refresh: it must not overwrite screen.workerInfo or emit a stale workerinfo event.
+  release();
+  await older;
+  assert.equal(first.events.filter((e) => e.type === 'workerinfo').length, eventsAfterNewer);
+  assert.deepEqual(first.screen.workerInfo.mergeable, {});
+  assert.deepEqual(first.screen.workerInfo.pending, []);
+});
+
 test('workbench: /workbench creates discussions/<date>-<title>/ with .workbench marker, sends first and later messages straight to worker, and skips discussion agents', async () => {
   const { existsSync } = await import('node:fs');
   const { WORKBENCH_MARKER, reloaded } = await import('../src/ui.mjs');
@@ -6205,4 +6249,58 @@ test('workbench: worker prompt paragraph reaches only workbench tasks (not discu
   await ctx.workQueue;
   assert.equal(prompts.length, 2);
   assert.ok(!prompts[1].includes(WORKER_WORKBENCH));
+});
+
+test('catchUpWithBranch: allows resolving purely additive conflicts, avoids duplicate merge prefix, and reaches canMerge', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const { queueWork, workerPlace, mergeReadiness, catchUpWithBranch } = await import('../src/ui.mjs');
+  const { WORKER_MERGE, workerMerge } = await import('../src/instructions.mjs');
+  const inTree = (path, ...a) => execFileSync('git', ['-C', path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'pipe' }).toString().trim();
+
+  assert.match(WORKER_MERGE, /purely additive/);
+  assert.match(workerMerge(true, false, { branch: 'worker/x' }, 'x'), /purely additive/);
+
+  let catchUpPrompt = '';
+  let step = 'work';
+  const { first, git } = await multiRoom({ worker: (ctx, p) => {
+    const tree = ctx.workerDir.path;
+    if (step === 'work') {
+      writeFileSync(`${tree}/list.txt`, 'base\nworker-line\n');
+      inTree(tree, 'add', 'list.txt');
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] append worker line`);
+      return `Added worker-line.\nDocs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+    }
+    catchUpPrompt = p;
+    assert.throws(() => inTree(tree, 'merge', 'main'), 'expected additive conflict on list.txt');
+    writeFileSync(`${tree}/list.txt`, 'base\nmain-line\nworker-line\n');
+    inTree(tree, 'add', 'list.txt');
+    inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] catch up with main`);
+    return `Resolved purely additive conflict in list.txt.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
+  } });
+
+  writeFileSync(`${first.cwd}/list.txt`, 'base\n');
+  git('add', 'list.txt'); git('commit', '-q', '-m', 'add list');
+
+  await handleLine('additive-catch-up', first);
+  const { name } = first.discussion;
+  queueWork(first, 'append line');
+  await first.workQueue;
+
+  // Main adds an independent line at the same spot -> purely additive conflict.
+  writeFileSync(`${first.cwd}/list.txt`, 'base\nmain-line\n');
+  git('add', 'list.txt'); git('commit', '-q', '-m', 'main appends line');
+
+  step = 'catchup';
+  const cu = await catchUpWithBranch(first, name);
+  assert.equal(cu.ok, true);
+  await first.workQueue;
+
+  assert.match(catchUpPrompt, /Catch up with main: merge main into /);
+  assert.match(catchUpPrompt, /purely additive/);
+  assert.doesNotMatch(catchUpPrompt, /Before the instruction below, first merge main into /);
+
+  const place = await workerPlace(first.cwd, name);
+  const st = await mergeReadiness(first, place);
+  assert.equal(st.canMerge, true, `expected canMerge after resolving additive conflict, got: ${st.disabledReason}`);
 });

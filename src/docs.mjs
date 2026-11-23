@@ -2291,7 +2291,7 @@ async function startCatchUp(name) {
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     status('Queued catch-up with ' + data.targetBranch + ' for ' + name + '. Review the report, then click Close and Merge again.', false);
-  } catch (err) { status(err.message, true); }
+  } catch (err) { status(err.message, true); post('__workerinfo', {}).catch(() => {}); }
 }
 async function startMerge(name) {
   const m = workerMergeable?.[name];
@@ -2302,7 +2302,7 @@ async function startMerge(name) {
     const data = await res.json();
     if (data.catchUp) return showCatchUpDialog(name, data);
     showMergeDialog(name, data.preview, false);
-  } catch (err) { status(err.message, true); }
+  } catch (err) { status(err.message, true); post('__workerinfo', {}).catch(() => {}); }
 }
 function showCatchUpDialog(name, data) {
   const dialog = document.createElement('dialog');
@@ -2368,6 +2368,7 @@ function showMergeDialog(name, initialPreview, initialChanged) {
         dialog.close();
       } catch (err) {
         render(current, false, err.message);
+        post('__workerinfo', {}).catch(() => {});
       }
     };
     buttons.append(cancel, confirm); dialog.append(buttons);
@@ -2383,7 +2384,7 @@ async function startDiscard(name) {
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     showDiscardDialog(name, data.preview, false);
-  } catch (err) { status(err.message, true); }
+  } catch (err) { status(err.message, true); post('__workerinfo', {}).catch(() => {}); }
 }
 function showDiscardDialog(name, initialPreview, initialChanged) {
   const dialog = document.createElement('dialog');
@@ -2429,6 +2430,7 @@ function showDiscardDialog(name, initialPreview, initialChanged) {
         dialog.close();
       } catch (err) {
         render(current, false, err.message);
+        post('__workerinfo', {}).catch(() => {});
       }
     };
     buttons.append(cancel, confirm); dialog.append(buttons);
@@ -2833,7 +2835,13 @@ function renderBoards() {
     sum.title = 'Actions';
     menu.append(sum, items);
     menu.open = openRowMenu === path;
-    menu.addEventListener('toggle', () => { if (menu.open) openRowMenu = path; else if (openRowMenu === path) openRowMenu = null; });
+    menu.addEventListener('toggle', () => {
+      if (menu.open) {
+        const wasOpen = openRowMenu === path;
+        openRowMenu = path;
+        if (!wasOpen) post('__workerinfo', {}).catch(() => {});
+      } else if (openRowMenu === path) openRowMenu = null;
+    });
     return { menu, items };
   };
   const peekFiles = (info) => {
@@ -4123,8 +4131,25 @@ function showQuota(gauges, at) {
 // The ▾ menus (the header's and Explorer's discussion rows): one open at a time; a click outside or
 // Escape closes them. Actions that open something else close their menu; the two-click ones keep it
 // open for the second click.
+const WORKERINFO_FOCUS_MS = 5000;
+let lastFocusWorkerRefresh = -Infinity;
+function refreshWorkerOnReturn() {
+  if (document.visibilityState === 'hidden') return;
+  const now = Date.now();
+  if (now - lastFocusWorkerRefresh < WORKERINFO_FOCUS_MS) return;
+  lastFocusWorkerRefresh = now;
+  post('__workerinfo', {}).catch(() => {});
+}
+window.addEventListener('focus', refreshWorkerOnReturn);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshWorkerOnReturn(); });
 const menus = () => [...document.querySelectorAll('details.menu')];
-document.addEventListener('toggle', (e) => { const m = e.target; if (m.matches?.('details.menu') && m.open) menus().forEach((o) => { if (o !== m) o.open = false; }); }, true);
+document.addEventListener('toggle', (e) => {
+  const m = e.target;
+  if (m.matches?.('details.menu') && m.open) {
+    menus().forEach((o) => { if (o !== m) o.open = false; });
+    if (m.id === 'actions-menu') post('__workerinfo', {}).catch(() => {});
+  }
+}, true);
 const closeMenus = () => menus().forEach((m) => { m.open = false; });
 document.addEventListener('click', (e) => { if (!e.target.closest('details.menu')) closeMenus(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
