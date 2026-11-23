@@ -1229,7 +1229,7 @@ test('right pane three tabs, header disc-workers, and docLabel behavior', async 
     assert.match(discWorkers.children[0].children[1], /Topic A · Worker is working/);
     assert.match(discWorkers.children[1].children[1], /topic c · Worker is working/);
 
-    // When no workers are busy, both #disc-workers and #disc-zone are hidden.
+    // When no workers are busy, #disc-workers is hidden while #disc-zone stays visible.
     const emptyFn = new Function('$', 'document', 'room', titleCode + '\n' + workerCode + '; return updateDiscWorkers;')(
       (id) => (id === 'disc-workers' ? discWorkers : id === 'disc-zone' ? discZone : null),
       { createElement: node },
@@ -1237,7 +1237,7 @@ test('right pane three tabs, header disc-workers, and docLabel behavior', async 
     );
     emptyFn();
     assert.equal(discWorkers.hidden, true);
-    assert.equal(discZone.hidden, true);
+    assert.equal(discZone.hidden, false);
 
     // Exercise docLabel
     const labelCode = source.slice(source.indexOf('function docLabel(file) {'), source.indexOf('function currentTitle() {'));
@@ -3396,7 +3396,7 @@ test('worker state refreshes via __workerinfo when Actions ▾ opens, on focus/v
   assert.deepEqual(posts.map((p) => p.path), ['__discard', '__discard', '__workerinfo']);
 });
 
-test('discussion area header: #disc-header spans #main-panel with title, status, auto dev, and Actions ▾; #disc-zone holds only busy workers', async () => {
+test('discussion area header: #disc-header spans #main-panel with title, status, auto dev, and Actions ▾; #disc-zone holds system messages and busy workers', async () => {
   const s = await serve(fixture(), { clients: new Set(), transcript: [] });
   const html = await (await s.get('/__room')).text();
   s.close();
@@ -3404,9 +3404,14 @@ test('discussion area header: #disc-header spans #main-panel with title, status,
   const header = html.slice(html.indexOf('<header id="header">'), html.indexOf('</header>'));
   const discZone = header.slice(header.indexOf('<div id="disc-zone"'), header.indexOf('<div id="server-zone"'));
   assert.doesNotMatch(discZone, /id="disc"|id="disc-status"|id="actions-menu"|id="newdisc"|id="newbrainstorm"|id="summary"|id="closedisc"/);
-  assert.match(discZone, /id="disc-workers"/);
-  assert.match(discZone, /<div id="disc-zone"[^>]*hidden/);
-  assert.match(html, /#disc-zone\[hidden\] \{ display: none; \}/);
+  assert.match(discZone, /<div id="disc-zone" class="zone" aria-label="Activity">/);
+  assert.doesNotMatch(discZone, /<div id="disc-zone"[^>]*hidden/);
+  assert.match(discZone, /id="system-messages"[^>]*role="log"[^>]*aria-label="System messages"[^>]*aria-live="polite"[^>]*aria-relevant="additions"[\s\S]*id="disc-workers"/);
+  assert.doesNotMatch(html, /#disc-zone\[hidden\]/);
+  assert.match(html, /#disc-zone \{[^}]*min-height:/);
+  assert.match(html, /#system-messages \{ flex: 1 1 0; min-width: 0;/);
+  const leftPane = html.slice(html.indexOf('<div id="left">'), html.indexOf('<div id="split"'));
+  assert.doesNotMatch(leftPane, /id="system-messages"/);
 
   const listPanel = html.slice(html.indexOf('<aside id="list-panel"'), html.indexOf('</aside>'));
   assert.match(listPanel, /id="list-head"[\s\S]*id="list-new"[\s\S]*id="newdisc"[^>]*>\+ New discussion<\/button>[\s\S]*id="newbrainstorm"[^>]*>\+ New brainstorm<\/button>[\s\S]*id="list-pane"/);

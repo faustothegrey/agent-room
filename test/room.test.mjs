@@ -255,7 +255,7 @@ test('summary: the draft is agreed when the other agent passes on it', async () 
     assert.match(p, /\*\*Later\*\*\n- the remaining actions in order, one short line each, each saying what it waits for/);
     assert.match(p, /Keep each instruction for the worker until the User confirms it was sent, replaced or withdrawn/);
     assert.match(p, /Quote its latest version word for word when it is the Next step; under Later refer to it by name,\nwith its full text kept in the discussion's pending-instructions\.md/);
-    assert.match(p, /At most 8 points in all under Agreed and Not agreed/);
+    assert.match(p, /At most 8 points in all under Agreed, Disputed and Open/);
     assert.doesNotMatch(p, /\*\*Questions for the User\*\*|\*\*Instructions for the Worker\*\*/);
   }
   assert.match(b.prompts[0], /latest message from A above is the current version/);
@@ -274,7 +274,7 @@ test('summary in a brainstorm: the same format and agreement, without the senten
     assert.match(p, /Next step contains exactly one action for the User/);
     assert.match(p, /\*\*Later\*\*\n- the remaining actions in order/);
     assert.match(p, /Quote its latest version word for word when it is the Next step\./);
-    assert.match(p, /At most 8 points in all under Agreed and Not agreed/);
+    assert.match(p, /At most 8 points in all under Agreed, Disputed and Open/);
     assert.doesNotMatch(p, /pending-instructions|refer to it by name/);
   }
   assert.match(b.prompts[0], /latest message from A above is the current version/);

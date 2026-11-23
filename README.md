@@ -48,7 +48,7 @@ hover or focus the room name for the full **root folder** and, when replication 
 replication line. Under the room name is **● Server ▾** (blue, or red when down), whose menu holds
 **Reload**, **Restart** and **Shutdown server**; hover or focus **Server** for its uptime, port and
 the server's version. An amber ⚠ to the right of **Server** means a replication peer is unreachable
-(hover for how many); click it to open **Peers…**. **Busy workers** (green, hidden when no workers are busy): every open discussion whose worker is working is listed, one per line,
+(hover for how many); click it to open **Peers…**. **Activity** (green, always shown): system messages on the left (the latest two lines, with errors in red and the full text on hover, kept across discussion switches), and on the right every open discussion whose worker is working, one per line,
 as `<title> · Worker is working` (the shown discussion included). **Monitoring** (amber): the monitor panel, with the subscription usage gauges
 and a warning per provider (below).
 
@@ -522,8 +522,9 @@ independently of the selected discussion and worker models.
 ## Summaries and usage
 
 **Summarize**, or `/summary`, asks the discussion agents to agree a summary by points under
-**Agreed**, **Not agreed**, **Next step** and **Later**, leaving out empty sections, with at most
-eight points under Agreed and Not agreed. **Next step** holds exactly one action for you: `Answer:`
+**Agreed**, **Disputed**, **Open**, **Next step** and **Later**, leaving out empty sections, with at most
+eight points under Agreed, Disputed and Open. Disagreements go under Disputed only; Open records
+what each point waits for and does not repeat the Next step question. **Next step** holds exactly one action for you: `Answer:`
 a question, `Send to the Worker: "…"` with a one-line instruction word for word (a multi-line
 instruction must instead follow `Send to the Worker:` alone on its line as a `>` block quote; saved
 summaries in the old multi-line inline form still resume), or

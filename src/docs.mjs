@@ -540,7 +540,7 @@ body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((1
 #main-panel.side-closed > #split, #main-panel.side-closed > #right { display: none; }
 #disc-header { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: .4rem .8rem; padding: .3rem .65rem; border-bottom: 1px solid var(--line); background: #88808; min-height: 2.2rem; min-width: 0; }
 #disc-info { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .6rem; min-width: 0; overflow-wrap: anywhere; }
-/* The header: three zones, room (left), busy workers (middle, hidden when none), monitoring (right).
+/* The header: three zones, room (left), activity (middle: system messages and busy workers), monitoring (right).
    Rare room and server actions sit in the ▾ menus; the gauges never shrink. */
 #header { position: relative; grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(0, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
 .zone { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; border: 1.5px solid var(--zone); border-radius: 6px; padding: .3rem .6rem; align-self: stretch; justify-content: center; }
@@ -563,8 +563,9 @@ body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((1
 .menu-items button:hover { background: #8882; }
 .menu-items .danger { color: #ef4444; }
 .menu-items hr { width: 100%; border: 0; border-top: 1px solid var(--line); margin: .25rem 0; }
-#disc-zone { flex-direction: row; align-items: center; gap: .3rem .8rem; justify-content: flex-end; }
-#disc-zone[hidden] { display: none; }
+#disc-zone { flex-direction: row; align-items: center; gap: .3rem .8rem; min-height: 2.8rem; }
+#system-messages { flex: 1 1 0; min-width: 0; font-size: .75rem; line-height: 1.4; }
+#system-messages .status { margin: 0; font-size: inherit; line-height: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #disc-workers { flex: 0 1 auto; display: flex; flex-direction: column; align-items: flex-end; gap: .1rem; font-size: .72rem; color: light-dark(#b45309, #f59e0b); text-align: right; }
 #disc-workers[hidden] { display: none; }
 #disc { min-width: 0; }
@@ -670,7 +671,8 @@ body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((1
 }
 @media (max-width: 600px) {
   #header { grid-template-columns: 1fr; }
-  #disc-zone { grid-row: 2; }
+  #disc-zone { grid-row: 2; flex-direction: column; align-items: stretch; }
+  #system-messages { flex: none; }
   #server-zone { grid-row: 3; }
 }
 .discussion-lines { margin: .4rem 0; min-width: 0; flex: 1; }
@@ -737,8 +739,6 @@ body.resizing iframe, body.resizing-v iframe, body.resizing-list iframe { pointe
 .msg p { margin: .3rem 0; } .msg pre { overflow-x: auto; } .msg img { max-width: 100%; }
 .status { color: var(--dim); font-size: .85rem; margin: .4rem 0 .9rem; white-space: pre-wrap; }
 .status.error { color: #ef4444; }
-#system-messages { flex: none; border-top: 1px solid var(--line); padding: .35rem .6rem; font-size: .75rem; line-height: 1.4; min-height: calc(2.8em + .7rem + 1px); }
-#system-messages .status { margin: 0; font-size: inherit; line-height: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer { border-top: 1px solid var(--line); padding: .6rem; }
 a.mention { text-decoration: underline dotted; cursor: pointer; }
 .mention-offer { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-bottom: .35rem; font-size: .8rem; }
@@ -928,7 +928,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b id="room-name">agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Busy workers" hidden><div id="disc-workers" aria-live="polite" hidden></div></div>
+<div id="disc-zone" class="zone" aria-label="Activity"><div id="system-messages" role="log" aria-label="System messages" aria-live="polite" aria-relevant="additions"></div><div id="disc-workers" aria-live="polite" hidden></div></div>
 <div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 <div id="busy" aria-hidden="true"></div>
 </header>
@@ -1018,7 +1018,6 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
       <div class="tools"><span class="hint" id="whint"></span><span id="wstop" hidden><button id="wstop-after" title="The running instruction finishes and is reported as usual; this discussion's queued instructions are cancelled, and auto dev pauses">Stop after this task</button> <button id="wstop-now" title="The running instruction's programs are stopped at once; this discussion's queued instructions are cancelled, auto dev pauses, and what it left in the worktree is reported">Stop now</button></span></div>
     </div>
   </div>
-  <div id="system-messages" role="log" aria-label="System messages" aria-live="polite" aria-relevant="additions"></div>
 </div>
 <div id="split" role="separator" aria-orientation="vertical" aria-label="Resize the chat and the document" tabindex="0" title="Drag to resize"></div>
 <div id="right">
@@ -2215,11 +2214,10 @@ function talkStatus() {
 function closingPhase(name) { return (name && room?.closingDiscussions?.[name]) || null; }
 function closingLabel(phase) { return phase === 'waiting' ? 'closing · waiting for worker' : phase === 'writing' ? 'closing · writing statement' : ''; }
 function updateDiscWorkers() {
-  const el = $('disc-workers'), zone = $('disc-zone');
+  const el = $('disc-workers');
   if (!el) return;
   const workers = (room?.open ?? []).filter((o) => o.working);
   el.hidden = !workers.length;
-  if (zone) zone.hidden = !workers.length;
   el.replaceChildren(...workers.map((o) => {
     const s = document.createElement('span');
     const dot = document.createElement('span');

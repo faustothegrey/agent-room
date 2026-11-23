@@ -29,7 +29,9 @@ When you have nothing to add, reply exactly PASS.`;
 export function summaryFormat(brainstorm) {
   return [
     'Write it briefly and by points, in this format (leave out a section that would be empty):',
-    '**Agreed**', '- …', '**Not agreed**', '- the point: each side\'s view, by name',
+    '**Agreed**', '- …', '**Disputed**', '- the point: each side\'s view, by name',
+    '**Open**', '- the point: what it waits for: a User decision, a check, a worker report',
+    'Put a disagreement under Disputed only; under Open, don\'t repeat the Next step question.',
     '**Next step**', '- Answer: a question / Send to the Worker: "the instruction, word for word" / Do: an action of the User\'s own',
     'Next step contains exactly one action for the User, labelled Answer, Send to the Worker or Do as appropriate.',
     'Use Send to the Worker: "…" only for a one-line instruction; a multi-line instruction must follow "- Send to the Worker:" alone on its line, as a block quote with every line starting with >.',
@@ -38,14 +40,17 @@ export function summaryFormat(brainstorm) {
     ...(brainstorm ? ['Quote its latest version word for word when it is the Next step.'] : [
       'Quote its latest version word for word when it is the Next step; under Later refer to it by name,',
       'with its full text kept in the discussion\'s pending-instructions.md.']),
-    'At most 8 points in all under Agreed and Not agreed. Reply with the summary only.',
+    'At most 8 points in all under Agreed, Disputed and Open. Reply with the summary only.',
   ].join('\n');
 }
 export const SUMMARY_FORMAT = `Write it briefly and by points, in this format (leave out a section that would be empty):
 **Agreed**
 - …
-**Not agreed**
+**Disputed**
 - the point: each side's view, by name
+**Open**
+- the point: what it waits for: a User decision, a check, a worker report
+Put a disagreement under Disputed only; under Open, don't repeat the Next step question.
 **Next step**
 - Answer: a question / Send to the Worker: "the instruction, word for word" / Do: an action of the User's own
 Next step contains exactly one action for the User, labelled Answer, Send to the Worker or Do as appropriate.
@@ -54,7 +59,7 @@ Use Send to the Worker: "…" only for a one-line instruction; a multi-line inst
 - the remaining actions in order, one short line each, each saying what it waits for
 Keep each instruction for the worker until the User confirms it was sent, replaced or withdrawn.
 {next-step-tail}
-At most 8 points in all under Agreed and Not agreed. Reply with the summary only.`;
+At most 8 points in all under Agreed, Disputed and Open. Reply with the summary only.`;
 
 export function draftTask(brainstorm, extra) {
   return [
@@ -209,7 +214,7 @@ export const instructionSets = [
       { id: 'briefing', intent: 'Whether it is a new or continued discussion or brainstorm, its folder, and where to write; a continued session also gets the closing statement or handoff and the latest summary.', when: 'once, with the first prompt (after the folder exists)', content: BRIEFING },
       { id: 'restored', intent: 'One sentence telling the agent its session was restored from a checkpoint, and that turns it remembers after that are not in the room\'s record.', when: 'once, after Resume or Restart', content: RESTORED },
       { id: 'new-messages', intent: 'The messages the agent has not seen yet, labelled by speaker, followed by the reply prompt.', when: 'every turn', content: NEW_MESSAGES },
-      { id: 'summary-format', intent: 'The agreed summary structure by points: Agreed, Not agreed, Next step, Later.', when: 'during /summary and auto-summaries', content: SUMMARY_FORMAT },
+      { id: 'summary-format', intent: 'The agreed summary structure by points: Agreed, Disputed, Open, Next step, Later.', when: 'during /summary and auto-summaries', content: SUMMARY_FORMAT },
       { id: 'summary-draft', intent: 'Asks one agent to draft the summary.', when: 'during /summary (the drafter)', content: SUMMARY_DRAFT },
       { id: 'summary-review', intent: 'Asks each other agent to accept (PASS) or revise the current summary.', when: 'during /summary (the reviewers)', content: SUMMARY_REVIEW },
     ],
