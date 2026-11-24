@@ -539,7 +539,7 @@ body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((1
 #main-panel.side-closed { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
 #main-panel.side-closed > #split, #main-panel.side-closed > #right { display: none; }
 #cancel-creation { margin-left: auto; }
-#disc-header { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: .4rem .8rem; padding: .3rem .65rem; border-bottom: 1px solid var(--line); background: #88808; min-height: 2.2rem; min-width: 0; }
+#disc-header { grid-column: 1 / -1; display: flex; align-items: center; gap: .4rem .8rem; padding: .3rem .65rem; border-bottom: 1px solid var(--line); background: #88808; min-height: 2.2rem; min-width: 0; }
 #disc-info { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .6rem; min-width: 0; overflow-wrap: anywhere; }
 /* The header: three zones, room (left), activity (middle: system messages and busy workers), monitoring (right).
    Rare room and server actions sit in the ▾ menus; the gauges never shrink. */
@@ -578,7 +578,7 @@ body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((1
 #actions-menu { flex: none; }
 #actions-menu > summary { padding: .2rem .45rem; margin-left: 0; font-size: .82rem; color: var(--dim); border-radius: 4px; }
 #actions-menu > summary:hover, #actions-menu[open] > summary { color: CanvasText; }
-#actions-menu .menu-items { left: auto; right: 0; }
+#actions-menu .menu-items { left: 0; right: auto; }
 #actions-menu[hidden] { display: none; }
 #board-actions { display: contents; }
 #board-actions[hidden] { display: none; }
@@ -790,7 +790,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #files .entry.unviewable { opacity: .5; cursor: default; }
 #files .entry.unviewable:hover { background: none; }
 #files .entry::before, #board-list .entry::before { display: inline-block; width: 1.4em; }
-#files .entry.folder::before, #board-list .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.discussion::before, #board-list .entry.discussion::before { content: '💬'; } #board-list .entry.brainstorm::before { content: '💡'; } #board-list .entry.workbench::before { content: '🔧'; }
+#files .entry.folder::before, #board-list .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.discussion::before, #board-list .entry.discussion::before { content: '💬'; } #board-list .entry.brainstorm::before { content: '💡'; } #board-list .entry.workbench::before { content: '🔧'; } #board-list .entry.research::before { content: '🔬'; }
 #files .entry .tag, #board-list .entry .tag { color: var(--dim); font-size: .8rem; margin-left: .5rem; }
 #files .back, #board-list .back { border: 0; background: none; padding: 0; color: var(--dim); font-size: .85rem; margin: 0 0 .4rem; }
 #files .back:hover, #board-list .back:hover { color: CanvasText; text-decoration: underline; }
@@ -971,12 +971,12 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </section>
 <aside id="list-panel" aria-label="Boards">
   <div id="list-head"><span id="list-title">Boards</span><button type="button" id="list-toggle" aria-expanded="true" aria-label="Collapse boards list" title="Collapse boards list">«</button></div>
-  <div id="list-new" hidden><button type="button" id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">+ New discussion</button><button type="button" id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">+ New brainstorm</button><button type="button" id="newboard-workbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">+ New workbench</button></div>
+  <div id="list-new" hidden><button type="button" id="newdisc" title="End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.">+ New discussion</button><button type="button" id="newbrainstorm" title="A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.">+ New brainstorm</button><button type="button" id="newboard-workbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">+ New workbench</button><button type="button" id="newresearch" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker.">+ New research</button></div>
   <div id="list-pane"></div>
 </aside>
 <div id="list-split" role="separator" aria-orientation="vertical" aria-label="Resize the boards list" tabindex="0" title="Drag to resize"></div>
 <div id="main-panel">
-<div id="disc-header" aria-label="Current discussion"><div id="disc-info"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span><span id="disc-autodev" aria-live="polite" hidden></span></div><button type="button" id="cancel-creation" title="Discard this new board and return to the board you came from" hidden>Cancel</button><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions">Actions</summary><div class="menu-items"><button id="summary">Summarize</button><button id="newworkbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">New workbench</button><span id="board-actions" hidden><hr><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details></div>
+<div id="disc-header" aria-label="Current discussion"><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions">Actions</summary><div class="menu-items"><button id="summary">Summarize</button><button id="newworkbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">New workbench</button><button id="newresearch-menu" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker.">New research</button><span id="board-actions" hidden><hr><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="convert-research" hidden title="Move this brainstorm to discussions/ with a .research marker: the same agents start fresh sessions with the research rulebook, briefed from its transcripts and latest summary.">Turn into research</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details><div id="disc-info"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span><span id="disc-autodev" aria-live="polite" hidden></span></div><button type="button" id="cancel-creation" title="Discard this new board and return to the board you came from" hidden>Cancel</button></div>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><span id="tab-controls"><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></span></div>
   <div class="view" id="talk">
@@ -1208,7 +1208,10 @@ function showTab(name) {
   if (SERVICES[name]) { openService(name); return; }
   const wbView = (typeof viewing === 'undefined' || !viewing)
     && (typeof peeking !== 'undefined' && peeking ? peeking.kind === 'workbench' : typeof room !== 'undefined' && !!room?.workbench);
+  const resView = (typeof viewing === 'undefined' || !viewing)
+    && (typeof peeking !== 'undefined' && peeking ? peeking.kind === 'research' : typeof room !== 'undefined' && !!room?.research);
   if (name === 'talk' && wbView) name = 'work';
+  if (name === 'work' && resView) name = 'talk';
   tab = name;
   $('talk').hidden = name !== 'talk'; $('work').hidden = name !== 'work';
   $('tab-talk').classList.toggle('on', name === 'talk'); $('tab-work').classList.toggle('on', name === 'work');
@@ -2274,17 +2277,17 @@ function configureMergeButton(btn, lane) {
 function updateCloseButton() {
   const b = $('closedisc');
   if (!b) return;
-  const activeLane = !room?.brainstorm && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
-  const label = room?.brainstorm ? 'Close brainstorm' : closeActionLabel(activeLane);
+  const activeLane = !room?.brainstorm && !room?.research && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
+  const label = room?.brainstorm ? 'Close brainstorm' : room?.research ? 'Close' : closeActionLabel(activeLane);
   if (b.dataset.armed) b.dataset.label = label;
   else b.textContent = label;
   const m = $('closemerge');
   if (m) {
-    if (b.hidden || !activeLane || !!room?.brainstorm || !!room?.closedDiscussions?.includes(activeLane)) m.hidden = true;
+    if (b.hidden || !activeLane || !!room?.brainstorm || !!room?.research || !!room?.closedDiscussions?.includes(activeLane)) m.hidden = true;
     else configureMergeButton(m, activeLane);
   }
   const d = $('closediscard');
-  if (d) d.hidden = b.hidden || !activeLane || !!room?.brainstorm || !workerDiscardable?.has(activeLane) || !!room?.closedDiscussions?.includes(activeLane);
+  if (d) d.hidden = b.hidden || !activeLane || !!room?.brainstorm || !!room?.research || !workerDiscardable?.has(activeLane) || !!room?.closedDiscussions?.includes(activeLane);
 }
 async function startCatchUp(name) {
   try {
@@ -2472,11 +2475,13 @@ function updateReplicaView() {
   // Attach and pointing chips: shown in discussions and brainstorms (Attach is disabled until the first message creates the folder).
   $('attach-row').hidden = readOnly || !room;
   if ($('attach-row').hidden && !attaching) pending = [];
-  const kind = room?.brainstorm ? 'brainstorm' : 'discussion';
+  const kind = room?.brainstorm ? 'brainstorm' : room?.research ? 'research board' : 'discussion';
   $('attach').title = room?.active ? 'Attach files to your next message: saved into this ' + kind + "'s files/ folder when you send it (25 MB at most each)" : 'Send a first message to start the ' + kind + '; then you can attach files';
   renderAttachments();
   const wbView = !viewing && (peeking ? peeking.kind === 'workbench' : !!room?.workbench);
+  const resView = !viewing && (peeking ? peeking.kind === 'research' : !!room?.research);
   if ($('tab-talk')) $('tab-talk').hidden = wbView;
+  if ($('tab-work')) $('tab-work').hidden = resView;
   if (wbView && typeof tab !== 'undefined' && tab !== 'work') {
     tab = 'work';
     if ($('talk')) $('talk').hidden = true;
@@ -2485,27 +2490,36 @@ function updateReplicaView() {
     $('tab-work')?.classList.add('on');
     $('tab-work')?.classList.remove('news');
   }
+  if (resView && typeof tab !== 'undefined' && tab === 'work') {
+    tab = 'talk';
+    if ($('talk')) $('talk').hidden = false;
+    if ($('work')) $('work').hidden = true;
+    $('tab-talk')?.classList.add('on');
+    $('tab-work')?.classList.remove('on');
+  }
   $('talk-settings').hidden = readOnly || !!room?.workbench;
   $('summary').hidden = readOnly || !!room?.workbench;
   $('reload').hidden = readOnly;
   const canBoardAct = !!(room && localInput && !readOnly);
-  $('cancel-creation').hidden = !(canBoardAct && room?.multi && !room.active && (room.brainstorm || room.workbench || room.open?.length > 1));
+  $('cancel-creation').hidden = !(canBoardAct && room?.multi && !room.active && (room.brainstorm || room.workbench || room.research || room.open?.length > 1));
   if ($('newworkbench')) $('newworkbench').hidden = !canBoardAct;
+  if ($('newresearch-menu')) $('newresearch-menu').hidden = !canBoardAct;
   // + New discussion and + New brainstorm live at the top of the Boards list panel.
   $('list-new').hidden = !canBoardAct;
-  $('newdisc').hidden = !(room?.active || room?.brainstorm || room?.workbench);
-  // Turn into a discussion: a brainstorm once its first message has named it.
+  $('newdisc').hidden = !(room?.active || room?.brainstorm || room?.workbench || room?.research);
+  // Turn into a discussion / Turn into research: a brainstorm once its first message has named it.
   $('convert').hidden = !(canBoardAct && room?.brainstorm && room.active);
+  if ($('convert-research')) $('convert-research').hidden = !(canBoardAct && room?.brainstorm && room.active);
   // With several discussions open (the screen), New discussion and Resume keep this one open;
   // Close closes it (labelled "Close with pending work" when its branch has pending work).
-  $('closedisc').hidden = !(canBoardAct && room?.multi && (room.active || room.brainstorm || room.workbench || room.open?.length > 1));
+  $('closedisc').hidden = !(canBoardAct && room?.multi && (room.active || room.brainstorm || room.workbench || room.research || room.open?.length > 1));
   updateCloseButton();
-  $('board-actions').hidden = !canBoardAct || ($('convert').hidden && $('closedisc').hidden);
+  $('board-actions').hidden = !canBoardAct || ($('convert').hidden && (!$('convert-research') || $('convert-research').hidden) && $('closedisc').hidden);
   if (room?.multi) {
     $('newdisc').title = 'Open a new discussion beside this one, which stays open (click it in Boards to show it again).';
     $('newbrainstorm').title = 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.';
   }
-  $('actions-menu').hidden = ['summary', 'newworkbench', 'board-actions'].every((id) => !$(id) || $(id).hidden);
+  $('actions-menu').hidden = ['summary', 'newworkbench', 'newresearch-menu', 'board-actions'].every((id) => !$(id) || $(id).hidden);
   if (peeking && !viewing) {
     const noticeText = 'Peeking at ' + displayTitle(peeking.name, peeking.title) + '. Read-only — click Back to return to the active discussion.' + (peeking.doc ? '' : ' No notes to show.');
     const fillPeekBanner = (target) => {
@@ -2690,7 +2704,7 @@ function archiveButton(b, ref) {
   };
 }
 const expandedLines = new Set();
-const expandedSections = new Set(['discussions', 'brainstorms']);
+const expandedSections = new Set(['discussions', 'research', 'brainstorms']);
 let openRowMenu = null; // the board path whose ⋯ menu is open
 let cachedDetail = { files: null, unviewable: new Set(), branch: null }; // files: null until the list loads
 
@@ -2876,9 +2890,14 @@ function renderBoards() {
   };
 
   // --- 1. Discussions (active) ---
-  const inOrder = ordered(discussionsIn('discussions'), 'discussions');
-  const discussions = inOrder ?? discussionsIn('discussions');
-  const unstartedOpen = (room?.open ?? []).filter((x) => !x.current && !x.active);
+  const researchSet = new Set(room?.researches ?? []);
+  const allDiscDirs = discussionsIn('discussions');
+  const discDirs = allDiscDirs.filter((d) => !researchSet.has(d));
+  const resDirs = allDiscDirs.filter((d) => researchSet.has(d));
+  const inOrder = ordered(discDirs, 'discussions');
+  const discussions = inOrder ?? discDirs;
+  const unstartedOpen = (room?.open ?? []).filter((x) => !x.current && !x.active && !x.research);
+  const unstartedResearch = (room?.open ?? []).filter((x) => !x.current && !x.active && !!x.research);
   const discSection = makeSection('discussions', 'Discussions', discussions.length + unstartedOpen.length);
 
   for (const o of unstartedOpen) {
@@ -3048,7 +3067,116 @@ function renderBoards() {
     discSection.append(row);
   }
 
-  // --- 2. Brainstorms ---
+  // --- 2. Research (active) ---
+  const resOrder = ordered(resDirs, 'research');
+  const researches = resOrder ?? resDirs;
+  const resSection = makeSection('research', 'Research', researches.length + unstartedResearch.length);
+  for (const o of unstartedResearch) {
+    const r = el('div', 'row discussion-row');
+    const block = el('div', 'discussion-block');
+    const btn = el('button', 'entry research', o.title);
+    btn.title = 'Show this open research board: it has not started yet';
+    btn.onclick = () => notesGuard(() => { location.href = o.url; });
+    block.append(btn);
+    block.append(el('div', 'local-label', boardState(o)));
+    r.append(block);
+    resSection.append(r);
+  }
+  if (room?.research && !room.active && canAct) resSection.append(el('span', 'hint', 'Your first message names this research board and saves it here.'));
+  else if (!researches.length && !unstartedResearch.length) resSection.append(el('span', 'hint', 'No research boards yet: + New research above starts one.'));
+  const canOrderRes = canAct && !!resOrder && researches.length > 1;
+  for (const [i, d] of researches.entries()) {
+    const path = 'discussions/' + d;
+    const isCurrent = path === room?.active;
+    const isPeeking = (peek?.kind === 'local' && peek.path === path) || (peeking?.path === path);
+    const openEntry = room?.open?.find((o) => o.active === path);
+    const openHere = openEntry?.current ? null : openEntry;
+    const closed = !!room?.closedDiscussions?.includes(d);
+    const row = el('div', 'row discussion-row' + (isCurrent ? ' in-use' : '') + (isPeeking ? ' peeking' : ''));
+    const block = el('div', 'discussion-block');
+    if (canOrderRes) dragRow(row, d, researches, 'research');
+
+    const label = discussionTitle(d, path);
+    const nameBtn = el('button', 'entry research', label);
+    nameBtn.title = path;
+    nameBtn.onclick = () => {
+      if (isCurrent) {
+        if (peeking) { peek = null; send('/peek'); }
+        else peekFiles(null);
+      } else if (openHere) {
+        notesGuard(() => { location.href = openHere.url; });
+      } else if (closed) {
+        enterClosedPeek(d, path, d, label);
+      } else if (canAct) {
+        send('/resume ' + d);
+      } else {
+        peekFiles({ kind: 'local', path, name: d, title: label, readonly: false });
+      }
+    };
+    block.append(nameBtn);
+
+    const closing = closingPhase(d);
+    const state = boardState(openEntry, { closed, isCurrent, closing });
+    let statusText = state;
+    if (closing) statusText += ' · ' + closingLabel(closing);
+    const stateEl = el('div', 'local-label', statusText);
+    if (state === 'waiting for input' && openEntry?.waitingReason) stateEl.title = openEntry.waitingReason;
+    block.append(stateEl);
+    row.append(block);
+
+    if (canAct) {
+      const { menu, items } = makeRowMenu(path);
+      if (isCurrent && peeking) {
+        const back = el('button', '', 'Back to this research board');
+        back.title = 'Return to this research board: leave the peek.';
+        back.onclick = () => { closeMenus(); send('/peek'); };
+        items.append(back);
+      } else if (openHere && !openHere.started) {
+        const b = el('button', '', 'Go to');
+        b.title = 'Show this open research board: it has not started yet';
+        b.onclick = () => { closeMenus(); notesGuard(() => { location.href = openHere.url; }); };
+        items.append(b);
+      } else if (!isCurrent) {
+        const b = el('button', '', closed ? 'Resume' : 'Continue');
+        b.title = resumeTip(d, openHere, null, closed);
+        b.onclick = () => { closeMenus(); if (openHere) notesGuard(() => { location.href = openHere.url; }); else send('/resume ' + d); };
+        items.append(b);
+        const pf = el('button', '', 'Peek files');
+        pf.title = 'Show this research board’s files in Explorer without switching';
+        pf.onclick = () => { closeMenus(); peekFiles({ kind: 'local', path, name: d, title: label, readonly: closed }); };
+        items.append(pf);
+      }
+      if (!closed) {
+        const close = el('button', '', 'Close');
+        close.onclick = () => { closeMenus(); send('/close ' + d); };
+        items.append(close);
+      }
+      for (const [mLabel, target] of [['Archive', 'archive'], ['Defer', 'deferred']]) {
+        const b = el('button', '', mLabel);
+        b.disabled = isCurrent || !closed;
+        b.title = !closed ? 'Close the research board before moving it into ' + target + '/.' : isCurrent ? 'The research board in use cannot be moved' : 'Move the whole research board into ' + target + '/';
+        b.onclick = () => { closeMenus(); send('/move ' + d + ' ' + target); };
+        if (target === 'archive') archiveButton(b, d);
+        items.append(b);
+      }
+      if (!(isCurrent && !room.started)) {
+        const f = el('button', '', 'Start fresh'); freshButton(f, d); items.append(f);
+      }
+      const del = el('button', 'danger', 'Delete');
+      del.disabled = isCurrent || !!openHere || !closed;
+      del.title = del.disabled ? 'Close this research board before deleting it' : 'Delete its folder and checkpoint';
+      confirmed(del, () => { closeMenus(); send('/delete ' + d); }, 'Click again: its folder and checkpoint are removed; uncommitted files are lost for good', () => true);
+      items.append(del);
+      if (resOrder) {
+        items.append(el('hr'));
+        orderButtons(items, d, i, researches, 'research');
+      }
+      row.append(menu);
+    }
+    resSection.append(row);
+  }
+
+  // --- 3. Brainstorms ---
   const brainOrder = ordered(discussionsIn('brainstorms'), 'brainstorms');
   const brainNames = brainOrder ?? discussionsIn('brainstorms');
   const brainSection = makeSection('brainstorms', 'Brainstorms', brainNames.length);
@@ -3127,6 +3255,10 @@ function renderBoards() {
       convert.title = 'Move it to discussions/: its agents keep their sessions and are told the new folder; the worker can then be sent work.';
       confirmed(convert, () => { closeMenus(); send('/convert ' + path); }, 'Click again: it moves to discussions/', () => true);
       items.append(convert);
+      const convertRes = el('button', '', 'Turn into research');
+      convertRes.title = 'Move it to discussions/ with a .research marker: the same agents start fresh sessions with the research rulebook, briefed from its transcripts and latest summary.';
+      confirmed(convertRes, () => { closeMenus(); send('/convert ' + path + ' research'); }, 'Click again: it moves to discussions/ as a research board', () => true);
+      items.append(convertRes);
       const fresh = el('button', '', 'Start fresh');
       fresh.title = 'New agent sessions, briefed from its latest summary or, with none, pointed at its transcripts. Its saved sessions and chat are discarded.';
       confirmed(fresh, () => { closeMenus(); send('/fresh ' + path); }, 'Click again: its saved sessions and chat are discarded', () => true);
@@ -3215,7 +3347,8 @@ function renderBoards() {
     const label = discussionTitle(d, path);
     const closed = !!room?.closedDiscussions?.includes(d);
     const isWb = !!room?.workbenches?.includes(d);
-    const nameBtn = el('button', 'entry ' + (isWb ? 'workbench' : 'discussion'), label);
+    const isRes = researchSet.has(d);
+    const nameBtn = el('button', 'entry ' + (isWb ? 'workbench' : isRes ? 'research' : 'discussion'), label);
     nameBtn.title = path;
     nameBtn.onclick = () => {
       if (closed) enterClosedPeek(s + '/' + d, path, d, label);
@@ -3223,10 +3356,11 @@ function renderBoards() {
     };
     block.append(nameBtn);
     const closing = closingPhase(d);
-    const merged = workerMerged.has(d);
-    block.append(el('div', 'local-label', (s === 'archive' ? 'archived' : 'deferred') + (closed ? ' · closed' : '') + (closing ? ' · ' + closingLabel(closing) : '') + (merged ? ' · merged' : '')));
-    const work = pendingWork.find((p) => p.lane === d);
-    const workerBusy = !!room?.busyWorkers?.includes(d);
+    const merged = !isRes && workerMerged.has(d);
+    const statePrefix = isRes ? (s === 'archive' ? 'archived research' : 'deferred research') : (s === 'archive' ? 'archived' : 'deferred');
+    block.append(el('div', 'local-label', statePrefix + (closed ? ' · closed' : '') + (closing ? ' · ' + closingLabel(closing) : '') + (merged ? ' · merged' : '')));
+    const work = isRes ? null : pendingWork.find((p) => p.lane === d);
+    const workerBusy = !isRes && !!room?.busyWorkers?.includes(d);
     if (work?.conflicts?.length && !workerBusy) block.append(el('div', 'worker-conflict', '⚠ Worker conflict: ' + work.conflicts.join(', ')));
     row.append(block);
 
@@ -3242,10 +3376,10 @@ function renderBoards() {
       b.onclick = () => { closeMenus(); send('/resume ' + s + '/' + d); };
       items.append(b);
       const pf = el('button', '', 'Peek files');
-      pf.title = 'Show this discussion’s files in Explorer without moving it';
+      pf.title = 'Show this ' + (isRes ? 'research board’s' : 'discussion’s') + ' files in Explorer without moving it';
       pf.onclick = () => { closeMenus(); peekFiles({ kind: 'local', path, name: d, title: label, readonly: true }); };
       items.append(pf);
-      if (closed) {
+      if (closed && !isRes) {
         const p = el('button', '', 'Peek chat & files');
         p.title = 'Look at this closed discussion read-only: its conversation and files, without reopening it.';
         p.onclick = () => { closeMenus(); enterClosedPeek(s + '/' + d, path, d, label); };
@@ -3263,7 +3397,7 @@ function renderBoards() {
       const otherSection = s === 'archive' ? 'deferred' : 'archive';
       const moveOther = el('button', '', otherSection === 'archive' ? 'Archive' : 'Defer');
       moveOther.disabled = !closed;
-      if (moveOther.disabled) moveOther.title = 'Close the discussion before moving it into ' + otherSection + '/.';
+      if (moveOther.disabled) moveOther.title = 'Close the ' + (isRes ? 'research board' : 'discussion') + ' before moving it into ' + otherSection + '/.';
       moveOther.onclick = () => { closeMenus(); send('/move ' + s + '/' + d + ' ' + otherSection); };
       if (otherSection === 'archive') archiveButton(moveOther, s + '/' + d);
       items.append(moveOther);
@@ -3272,8 +3406,16 @@ function renderBoards() {
       freshButton(fresh, s + '/' + d);
       items.append(fresh);
 
-      items.append(el('hr'));
-      rollbackButtons(items, block, d, s + '/' + d, false);
+      if (isRes) {
+        const del = el('button', 'danger', 'Delete');
+        del.disabled = !closed;
+        del.title = del.disabled ? 'Close this research board before deleting it' : 'Delete its folder and checkpoint';
+        confirmed(del, () => { closeMenus(); send('/delete ' + s + '/' + d); }, 'Click again: its folder and checkpoint are removed; uncommitted files are lost for good', () => true);
+        items.append(del);
+      } else {
+        items.append(el('hr'));
+        rollbackButtons(items, block, d, s + '/' + d, false);
+      }
       row.append(menu);
     }
     inactiveSection.append(row);
@@ -3490,6 +3632,7 @@ function setRoom(r) {
   const fresh = r?.fresh && !room?.fresh && !r?.workbench; // a new discussion or brainstorm, or a page on one: its members are chosen first
   room = r;
   if (wasWb && !r?.workbench && !peeking && tab === 'work') showTab('talk');
+  if (r?.research && !peeking && tab === 'work') showTab('talk');
   if (typeof syncBoardLayout === 'function') syncBoardLayout();
   tabTitles();
   for (const [target, sessions] of [['talk-sessions', r.cliSessions?.agents ?? []], ['work-sessions', r.cliSessions?.worker ? [r.cliSessions.worker] : []]]) {
@@ -4189,7 +4332,10 @@ confirmed($('newdisc'), () => send('/new'), null, () => !room?.multi && room?.st
 confirmed($('newbrainstorm'), () => send('/brainstorm'), null, () => !room?.multi && room?.started);
 confirmed($('newboard-workbench'), () => send('/workbench'), null, () => !room?.multi && room?.started);
 confirmed($('newworkbench'), () => { closeMenus(); send('/workbench'); }, null, () => !room?.multi && room?.started);
+confirmed($('newresearch'), () => send('/research'), null, () => !room?.multi && room?.started);
+confirmed($('newresearch-menu'), () => { closeMenus(); send('/research'); }, null, () => !room?.multi && room?.started);
 confirmed($('convert'), () => { closeMenus(); send('/convert ' + room.active); }, 'Click again: it moves to discussions/', () => true);
+confirmed($('convert-research'), () => { closeMenus(); send('/convert ' + room.active + ' research'); }, 'Click again: it moves to discussions/ as a research board', () => true);
 confirmed($('closedisc'), () => send('/close'), 'Click again: this discussion closes (its agents stop)', () => !!room?.started);
 $('closemerge').onclick = () => {
   closeMenus();
@@ -4314,7 +4460,9 @@ events.onmessage = (e) => {
   if (ev.type === 'files') { showSub('explorer'); openFiles(); }
   if (ev.type === 'moved') {
     pendingArchives.delete(ev.from);
-    forgetOrder(ev.from?.split('/').pop(), ev.from?.startsWith('brainstorms/') ? 'brainstorms' : 'discussions');
+    const movedName = ev.from?.split('/').pop();
+    if (ev.from?.startsWith('brainstorms/')) forgetOrder(movedName, 'brainstorms');
+    else { forgetOrder(movedName, 'discussions'); forgetOrder(movedName, 'research'); }
     openFiles();
   }
   if (ev.type === 'goto') { location.href = ev.url; return; } // this window switches discussion

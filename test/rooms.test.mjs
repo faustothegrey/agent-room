@@ -4,6 +4,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fetchRunningRooms } from '../src/mcp.mjs';
 
 // One real server process with two rooms (the second brought in as Restart does, with --room), and
 // fake provider CLIs. Each room is reached only at its own address; their state, files and rounds
@@ -99,6 +100,10 @@ process.stdin.on('end', () => {
     const health = await (await fetch(server + '/__health')).json();
     assert.equal(health.app, 'agent-room');
     assert.deepEqual(health.rooms.map((r) => r.root), [alpha, beta]);
+    const live = await fetchRunningRooms(Number(new URL(server).port));
+    assert.equal(live.reachable, true);
+    assert.deepEqual(live.rooms.map((r) => r.root), [alpha, beta]);
+    assert.deepEqual(live.rooms.map((r) => r.discussion), [resetA.room.active ?? null, resetB.room.active ?? null]);
     const first = await fetch(server + '/__room', { redirect: 'manual' });
     assert.equal(first.status, 302);
     assert.equal(new URL(first.headers.get('location'), server).href, baseA + '__room');

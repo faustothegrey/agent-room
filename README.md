@@ -115,12 +115,12 @@ The provider panels' headings name the models in use, such as **Discussion membe
 default, Codex default** and **Worker · Opus**: each enabled discussion agent's model and the
 worker's, as their panels list them ("<provider> default" for CLI default).
 
-- **Discussion header:** spans both the Discussion/Worker pane and the Side pane (side by side or stacked), above their tab bars. On the left, it shows the selected discussion's or brainstorm's title (**New brainstorm** before a brainstorm's first message, or **No discussion started**), its tab status (who is thinking, your turn, closing phase, peeking/read-only, or worker working/idle), and, separately on both tabs, any active **auto dev** status (running cycle and phase, paused with reason, or finished). On the right, **Actions ▾** holds **Summarize**, **New workbench**, **Turn into a discussion** (when a brainstorm is shown), **Close** (**Close with pending work** when the worker branch has unmerged commits or uncommitted edits; **Close brainstorm** for a brainstorm), **Close and Merge** (or **Catch up with `<branch>`**, when the discussion's or workbench's branch has commits not in the room's current branch), and **Close and Discard** (when discarding would lose commits not in the room's current branch, tracked edits, or untracked files).
-- **Discussion / Worker tab bar:** switches between **Discussion** and **Worker**, with **◫ Side pane** on the right when the side pane is closed. On a workbench, only the **Worker** chat is shown (no **Discussion** tab, discussion-members panel, **Summarize**, or Auto dev).
+- **Discussion header:** spans both the Discussion/Worker pane and the Side pane (side by side or stacked), above their tab bars. To the right of **Actions ▾**, it shows the selected board's title (**New brainstorm**, **New workbench**, **New research board**, or **No discussion started** before its first message), its tab status (who is thinking, your turn, closing phase, peeking/read-only, or worker working/idle), and, separately on both tabs, any active **auto dev** status (running cycle and phase, paused with reason, or finished). **Actions ▾** holds **Summarize**, **New workbench**, **New research**, **Turn into a discussion** and **Turn into research** (when a brainstorm is shown), **Close** (**Close with pending work** when the worker branch has unmerged commits or uncommitted edits; **Close brainstorm** for a brainstorm), **Close and Merge** (or **Catch up with `<branch>`**, when the discussion's or workbench's branch has commits not in the room's current branch), and **Close and Discard** (when discarding would lose commits not in the room's current branch, tracked edits, or untracked files).
+- **Discussion / Worker tab bar:** switches between **Discussion** and **Worker**, with **◫ Side pane** on the right when the side pane is closed. On a workbench, only the **Worker** chat is shown (no **Discussion** tab, discussion-members panel, **Summarize**, or Auto dev). On a research board, only the **Discussion** tab is shown (no **Worker** tab or Auto dev).
 - **Discussion:** send messages to the brainstorming agents. Enter sends; Shift+Enter adds
   a line. Start with `@name` to address one agent. Agents take turns in the configured order,
   stopping when everyone passes consecutively, a turn fails, or the lap cap is reached (10 laps in a
-  discussion, 20 in a brainstorm; one lap is each selected agent speaking once).
+  discussion, 20 in a brainstorm or research board; one lap is each selected agent speaking once).
   Passes are hidden in the chat and retained in the transcript. Replies appear when complete.
   **📎 Attach** (under the message box, in discussions and brainstorms; a new one
   allows it after its first message) adds files of any type to your next message; each waits
@@ -166,7 +166,8 @@ worker's, as their panels list them ("<provider> default" for CLI default).
 - **My notes** (Control bar → **My notes**, local pages only: `127.0.0.1` or `localhost`): your own free-text notes for this room's folder (separate from a discussion's `notes.md`). **New**, a list of notes (title and last-saved date), and an editor with **Save** and **Remove**; a note's first line is its title. A note is saved only by **Save**; **Remove** asks inside the panel first. Closing or switching services hides the panel without asking and keeps unsaved edits; unsaved changes are never dropped without asking: the panel opens and asks before switching notes, **New**, or switching board or room in this window; leaving or reloading the page gets the browser's leave-page warning, and the automatic refresh after a code change keeps them and reopens **My notes** in the Services panel. Notes are Markdown files in `~/.local/share/agent-room/notes/<hash of the room folder>/`, one per note, named by time and random letters (never the title): never in the room's folder, never replicated, and the agents are not told about them.
 - **Terminal** (Control bar → **Terminal**, local pages only: `127.0.0.1` or `localhost`; see **Access and limits**): a shell on this computer, in the room's folder, shown with [ghostty-web](https://github.com/coder/ghostty-web). Opening it starts a fresh shell and fits it to the Services panel (and refits on window resize); switching to another service or closing the Services panel hides the terminal while keeping the shell running (shown by a green dot on the **Terminal** Control bar button). Click **End shell** inside the panel to stop it (reloading the page or stopping the server also ends it).
 - **Boards** (left list panel, collapsible to a `«`/`»` strip and resizable by dragging its divider, both remembered per browser):
-  - **+ New discussion**, **+ New brainstorm** and **+ New workbench** sit side by side at the top of the panel (above the sections, always visible while expanded, hidden in the collapsed `»` strip). Before the first message, **Cancel** in the header closes the new board and returns to the board it was opened from (or another open board if that one has closed). In an empty room, Cancel on a new brainstorm or workbench leaves the room empty.
+  - **+ New discussion**, **+ New brainstorm**, **+ New workbench** and **+ New research** sit side by side at the top of the panel (above the sections, always visible while expanded, hidden in the collapsed `»` strip). Before the first message, **Cancel** in the header closes the new board and returns to the board it was opened from (or another open board if that one has closed). In an empty room, Cancel on a new brainstorm, workbench or research board leaves the room empty.
+  - Sections: **Discussions** (active discussions and workbenches), **Research** (active research boards, marked with `.research` in `discussions/<date>-<title>/`, showing 🔬, with row states like a discussion and `⋯` actions **Continue** / **Resume**, **Peek files**, **Close**, **Archive**, **Defer**, **Start fresh**, **Delete**, **Move up** / **Move down** — no worker actions), **Brainstorms** (active brainstorms), **Archived · Deferred** (folded by default; includes archived and deferred discussions, research boards with **Make active** and **Delete**, and brainstorms), and **Received from peers** (when replication is on).
   - Organized into collapsible sections: **Discussions** (active, open by default), **Brainstorms** (open by default), **Archived · Deferred** (folded by default with count), and **Received from peers** (folded by default with count, when peers have discussions).
   - Each row shows its display title (saved title, or the folder name without its leading date and with spaces; hover for the folder path; workbenches show 🔧), its state — the first that applies among `ongoing` (a round or summary is running, a worker task is running or queued, or it is closing), `closed`, `waiting for input` when the worker worktree has unresolved conflicts (hover the state label for `Worker conflict: <files>`), `not started` (no message sent yet), `waiting for input` (in memory only: paused auto dev — even when Restart auto dev is offered — a worker failure offering Retry, an agreed summary instruction that can't be sent, or a latest agreed summary with a non-empty Next step that isn't a usable offer, except a finished auto dev summary with `Outcome: FINISH`; hover the state label for the pause reason, failure or error; shows `idle` after a restart), `ready for auto dev` (in memory only: a usable Start auto dev offer when none of the above apply; shows `idle` after a restart), `work ready` (in memory only: auto dev finished on an agreed `Outcome: FINISH` summary and nothing has happened since except the built-in Catch up task; cleared by a new discussion message or any other worker task; shows `work ready · mergeable`, `work ready · needs catch-up`, or `work ready · merge blocked` with the reason on hover when the worker branch has unmerged commits, or omits the merge suffix when it has none; never shown on workbenches or discussions without auto dev; shows `idle` after a restart), and `idle` (the row on screen is highlighted without a separate label) — plus `· worker working`, the closing phase, `merged` or `no changes`, any amber worker warning (`⚠ Worker: 2 commits not merged into main · uncommitted changes`; `worker/main` or non-active unmerged branches appear above the active list), and a red conflict warning (`⚠ Worker conflict: <files>`) under the row (including closed discussions) whenever the worktree has unresolved conflicts and no worker task is running or queued for that discussion. Worker branch status is rechecked after each worker task, when expanding the **Boards** list panel, when clicking the **Worker** tab, when opening **Actions ▾** or a board row's **`⋯`** menu, when returning to the window (at most once every 5 seconds), and when **Close and Merge**, **Close and Discard** or **Catch up** fails. Active discussions and brainstorms each keep your drag-and-drop / **Move up** / **Move down** order per room in this browser.
   - Clicking an **active** board's row switches to it (like Go to / Continue). Clicking a **closed** discussion or **closed** brainstorm (active, archived or deferred) peeks at it read-only — **chat and files** together, without starting any agent or worker session. Archived and deferred brainstorms appear in **Archived · Deferred** labelled `archived brainstorm` or `deferred brainstorm`. Secondary row actions (**Resume** / **Continue**, **Peek files**, **Close**, **Close and Merge**, **Close and Discard**, **Archive**, **Defer**, **Make active**, **Turn into a discussion**, **Start fresh**, **Delete**, **Move up** / **Move down**, rollback, and peers' **View chat**) live in each row's **`⋯`** menu.
@@ -614,15 +615,17 @@ node src/cli.mjs --help
 | `/new` | On the screen, open a new discussion beside this one (which stays open). In the terminal, end this session; your next message starts a new discussion. Its worker tasks finish in its own worker session; the new discussion's worker starts fresh. |
 | `/close` | Close the discussion shown; `/close <folder-name>` also closes a paused one. Waits for its worker, writes a closing statement (appending a pending-work line if the branch has unmerged commits or uncommitted edits), and keeps the worker branch and worktree intact (refuses immediately if tasks are queued behind an unresolved-edits hold). |
 | `/brainstorm` | Start a brainstorm (on the screen beside this one; in the terminal, ending this session). Its first message names it in `brainstorms/`. |
+| `/research` | Start a research board (on the screen beside this one; in the terminal, ending this session). Its first message names it in `discussions/<date>-<title>/` with a `.research` marker; agents get `citizenship.md` + `group-chat.md` + `researching.md`, up to 20 laps, no worker, no Auto dev, no automatic summary (manual `/summary` works), and Close writes `closing-statement.md`. Can be scheduled in **Schedule**. |
 | `/convert brainstorms/<folder-name>` | Turn into a discussion: the folder moves to `discussions/`, the agents keep their sessions and are told. |
-| `/delete brainstorms/<folder-name>` | Delete a closed brainstorm's folder and checkpoint, for good (also accepts `brainstorms/archive/<folder-name>` and `brainstorms/deferred/<folder-name>`). |
+| `/convert brainstorms/<folder-name> research` | Turn into research: the folder moves to `discussions/` with a `.research` marker, old sessions end, and the same agents start fresh with the research rulebook, reading its `transcripts/` and latest summary. Refused while a round or summary is running. |
+| `/delete <ref>` | Delete a closed brainstorm (`brainstorms/<folder-name>`, `brainstorms/archive/…`, `brainstorms/deferred/…`) or closed research board (`<folder-name>`, `archive/…`, `deferred/…`), removing its folder and checkpoint for good. |
 | `/rollback <folder-name>` | Queue Archive with rollback as a worker task; review its report before archiving. |
 | `/archive-rollback <folder-name>` | Explicitly confirm archive after a successful rollback report (switch away first). |
 | `/move <folder-name> active\|archive\|deferred` | Move a closed discussion or closed brainstorm (`brainstorms/<folder-name>`, `brainstorms/archive/…`, `brainstorms/deferred/…`) into `archive/` or `deferred/`, or move it back to active without reopening it. |
 | `/summary` | Request an agreed summary. |
 | `/autodev` | Start (or restart) auto dev from the latest agreed summary's worker instruction. |
 | `/usage` | Show session tokens and subscription quotas. |
-| `/reload` | Reload source modules and both agent rulebooks; retain conversation and provider sessions. |
+| `/reload` | Reload source modules and all agent rulebooks; retain conversation and provider sessions. |
 | `/restart` | Screen only: a new server process on the same port, with every room, each resuming its discussion in use from its checkpoint. |
 | `/quit` | Quit room: end this room only, closing every discussion open in its folder and stopping its running agent and worker programs. |
 | `/shutdown` | Screen only: Shutdown server, ending every room (the same as `POST /__shutdown`). |
@@ -867,7 +870,7 @@ in `~/.local/state/agent-room/rooms.json` (never removing entries automatically)
 exposes two read-only tools:
 
 - `list_rooms`: lists saved rooms (skipping folders that no longer exist) plus rooms open on the
-  running local server (`GET /__rooms` on `127.0.0.1`, port `5566` by default), with each room's
+  running local server (its `/__health` and per-room health endpoints on `127.0.0.1`, port `5566` by default), with each room's
   running status and active discussion.
 - `list_discussions(root)`: lists open dated folders in `discussions/` and `brainstorms/` (not
   `discussions/archive/` or `discussions/deferred/`) without reading file contents, and marks the
@@ -913,7 +916,7 @@ display, or live app preview. Discussion-to-worker relay exists only as auto dev
 ## Working on the project
 
 Read [AGENT.md](AGENT.md) for contribution rules and [docs/architecture.md](docs/architecture.md)
-for the design. The two agent rulebooks apply only to agents
+for the design. The agent rulebooks apply only to agents
 started by the room in their respective roles; they are not instructions for someone editing
 agent-room's source.
 
@@ -935,7 +938,7 @@ Run `npm test` for the fast suite, `npm run test:slow` for the slow suite, or `n
 settings persistence across CLI restarts, and screen/terminal coordination; they do not establish
 live provider access or browser appearance.
 
-Edits outside `cli.mjs`, `host-shell.mjs` and `notes.mjs` can be loaded with Reload; both rulebooks are reread too. A failed load
+Edits outside `cli.mjs`, `host-shell.mjs` and `notes.mjs` can be loaded with Reload; all rulebooks are reread too. A failed load
 leaves the previous code running. `cli.mjs`, `host-shell.mjs` and `notes.mjs` changes require Restart. Browser assets are embedded
 in `docs.mjs`; after a Reload, open pages refresh by themselves when they changed.
 
@@ -978,9 +981,12 @@ a fresh room on top of the existing `ctx` and returns only the parts that can ch
 merges them back with `Object.assign`. A load that fails throws before anything is merged, so the
 previous code keeps running and the rooms report the error.
 
-The agent rulebooks are not modules. They are `.md` files (`rulebooks/brainstorming.md` and
-`rulebooks/worker.md`) reread from disk with `readFileSync` on every load, so an edit is picked up
-by the same Reload with no cache-busting.
+The agent rulebooks are not modules. They are layered `.md` files (`rulebooks/citizenship.md`,
+`rulebooks/group-chat.md` and `rulebooks/discussing.md` joined for discussion and brainstorm agents;
+`rulebooks/citizenship.md`, `rulebooks/group-chat.md` and `rulebooks/researching.md` joined for
+research board agents; `rulebooks/citizenship.md` and `rulebooks/worker.md` joined for the worker)
+reread from disk with `readFileSync` on every load, so an edit to any layer is picked up by the
+same Reload with no cache-busting.
 
 The prompt templates in `instructions.mjs` need the same freshness, but the turn logic in
 `room.mjs` and `agents.mjs` calls them through a static default import. The two are bridged by a

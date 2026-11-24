@@ -114,9 +114,12 @@ example through `--mcp-config` or a provider's equivalent). agent-room adds none
 
 ### Role instructions and Agent Skills
 
-- **Role instructions** are agent-room's own protocols: `rulebooks/brainstorming.md` for
-  the discussion agents and `rulebooks/worker.md` for the worker, plus the per-turn
-  prompts above. They are always loaded, on every turn.
+- **Role instructions** are agent-room's own protocols, layered from `.md` files:
+  `rulebooks/citizenship.md` + `rulebooks/group-chat.md` + `rulebooks/discussing.md` for
+  the discussion and brainstorm agents, `rulebooks/citizenship.md` + `rulebooks/group-chat.md` +
+  `rulebooks/researching.md` for research board agents, and `rulebooks/citizenship.md` +
+  `rulebooks/worker.md` for the worker, plus the per-turn prompts above. They are always loaded, on
+  every turn.
 - **Skills** are optional [Agent Skills](https://agentskills.io/specification) packages from the
   provider or the User. agent-room ships none; a Claude agent can use the ones its CLI finds
   (the `Skill` tool is allowed). Skills are usually loaded on demand, so rules that must always
@@ -173,9 +176,16 @@ cycles per start (`AUTO_DEV_CYCLES`). Anything unexpected, or the User typing, p
 A discussion's folder, `discussions/<date>-<title>/`, is created at its first message, with its
 transcripts in `transcripts/`. A checkpoint on this computer after every round lets Resume and
 Restart continue the same sessions; Start fresh begins new sessions from the handoff, notes and
-latest summary. Discussions can be moved to `archive/` or `deferred/`. A brainstorm has its own
-folder, `brainstorms/<date>-<title>/` (transcripts, drawings), and checkpoint, sends no worker
-tasks, and can be turned into a discussion, which moves its folder to `discussions/`.
+latest summary. Discussions can be moved to `archive/` or `deferred/`. A **research board**
+(`/research`) also lives in `discussions/<date>-<title>/` with a `.research` marker file: its
+agents receive the researching rulebook, rounds run up to 20 laps with no automatic summary
+(manual `/summary` works), there is no Worker tab or auto dev, Close writes `closing-statement.md`,
+and it can be scheduled in **Schedule** or deleted once closed. A **workbench** (`/workbench`)
+lives in `discussions/<date>-<title>/` with a `.workbench` marker file and runs the worker only.
+A brainstorm has its own folder, `brainstorms/<date>-<title>/` (transcripts, drawings), and
+checkpoint, sends no worker tasks, and can be turned into a discussion (keeping agent sessions) or
+into a research board (`/convert … research`, adding `.research` and starting fresh sessions with
+the researching rulebook), which moves its folder to `discussions/`.
 
 ![Discussion lifecycle: unstarted, open, brainstorm, Resume, Start fresh, and moving to archive or deferred](diagrams/discussion-lifecycle.svg)
 
