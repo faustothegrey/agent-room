@@ -4224,3 +4224,20 @@ test('research board UI: + New research, Research section, exact row menu action
   convertResBtn.onclick();
   assert.deepEqual(bHarness.sent, ['/convert brainstorms/2026-11-24-spark research']);
 });
+
+test('research row displays lap threshold and last and next run dates', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('  const researchInfo = (name) => {'), source.indexOf('  const canAct = room && localInput', source.indexOf('  const researchInfo = (name) => {')));
+  const el = (tag, className, textContent) => ({ tag, className, textContent, children: [], append(...nodes) { this.children.push(...nodes); } });
+  const researchInfo = new Function('room', 'el', 'longDate', code + '\nreturn researchInfo;')({ researchStats: {
+    low: { laps: 30, lastRun: 'last', nextRun: 'next' }, high: { laps: 31, priorUnknown: true },
+  } }, el, (date) => `date(${date})`);
+  const low = researchInfo('low');
+  assert.equal(low.children[0].textContent, 'Laps: 30');
+  assert.equal(low.children[0].className, '');
+  assert.match(low.children[1].textContent, /Last: date\(last\).*Next: date\(next\)/);
+  const high = researchInfo('high');
+  assert.equal(high.children[0].textContent, 'Laps: ≥31');
+  assert.equal(high.children[0].className, 'research-laps-high');
+  assert.match(high.children[1].textContent, /Last: —.*Next: —/);
+});

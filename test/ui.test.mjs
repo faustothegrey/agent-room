@@ -6918,3 +6918,38 @@ test('research scheduler applies the real quota guard before creating a board an
   const transcript = readFileSync(`${board.discussion.dir}/transcripts/${readdirSync(`${board.discussion.dir}/transcripts`)[0]}`, 'utf8');
   assert.match(transcript, /quota guard before lap 2/);
 });
+
+test('research lap totals include manual and scheduled rounds and survive a board restart', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { saveSchedule, getSchedule, runScheduledTask } = await import('../src/ui.mjs');
+  const { hub, first, contexts } = await multiRoom();
+  first.scheduleFile = `${first.cwd}/schedule.json`;
+  first.usage.checkQuotaFloor = () => ({ ok: true });
+  const addRoom = hub.addRoom;
+  hub.addRoom = async (...args) => {
+    const result = await addRoom(...args);
+    result.ctx.usage.checkQuotaFloor = () => ({ ok: true });
+    return result;
+  };
+  const task = saveSchedule(first, { action: 'add', kind: 'recurring', title: 'Lap Quest', prompt: 'Investigate', time: '23:59' }).tasks[0];
+  assert.equal((await runScheduledTask(first, task.id)).status, 'ran');
+  const board = contexts().find((c) => c.state.research);
+  const name = board.discussion.name;
+  assert.equal(first.screen.room.researchStats[name].laps, 1);
+  assert.ok(first.screen.room.researchStats[name].lastRun);
+  assert.ok(first.screen.room.researchStats[name].nextRun);
+  // A manual round requiring two laps increments the same board total.
+  let turns = 0;
+  board.room.agents[0].turn = async () => ++turns === 1 ? 'Finding' : 'PASS';
+  board.room.agents[1].turn = async () => 'PASS';
+  await handleLine('Follow up', board);
+  assert.equal(first.screen.room.researchStats[name].laps, 3);
+  assert.equal(JSON.parse(readFileSync(`${board.discussion.dir}/.research-stats.json`, 'utf8')).laps, 3);
+  saveSchedule(first, { action: 'toggle', id: task.id, enabled: false });
+  assert.equal(getSchedule(first).tasks[0].enabled, false);
+  assert.equal(first.screen.room.researchStats[name].nextRun, null);
+  // Header reconstruction reads the board's persisted count, independently of the live context.
+  board.stopped = true;
+  saveSchedule(first, { action: 'toggle', id: task.id, enabled: false });
+  assert.equal(first.screen.room.researchStats[name].laps, 3);
+});

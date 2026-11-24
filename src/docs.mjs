@@ -821,6 +821,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .list-section { margin: .25rem 0 .45rem; }
 .list-section > summary { cursor: pointer; padding: .25rem .35rem; border-radius: 4px; font-size: .74rem; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; user-select: none; }
 .list-section > summary:hover { background: #8882; color: CanvasText; }
+#board-list .research-laps-high { color: light-dark(#b45309, #fbbf24); font-weight: 700; }
 #board-list .local-label { color: var(--dim); font-size: .74rem; margin: .05rem 0 .1rem .4rem; overflow-wrap: anywhere; }
 #board-list .worker-pending { color: light-dark(#b45309, #f59e0b); font-size: .74rem; margin: .1rem 0 .1rem .4rem; overflow-wrap: anywhere; }
 #board-list .worker-conflict { color: light-dark(#b91c1c, #fca5a5); font-size: .74rem; margin: .1rem 0 .1rem .4rem; overflow-wrap: anywhere; }
@@ -2827,6 +2828,14 @@ function renderBoards() {
   const list = container.firstChild;
   requestAnimationFrame(() => { container.scrollTop = scroll; });
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+  const researchInfo = (name) => {
+    const stats = room?.researchStats?.[name] ?? {};
+    const line = el('div', 'local-label');
+    const count = Number.isSafeInteger(stats.laps) && stats.laps >= 0 ? stats.laps : 0;
+    line.append(el('span', count > 30 ? 'research-laps-high' : '', 'Laps: ' + (stats.priorUnknown ? '≥' : '') + count));
+    line.append(el('span', '', ' · Last: ' + (stats.lastRun ? longDate(stats.lastRun) : '—') + ' · Next: ' + (stats.nextRun ? longDate(stats.nextRun) : '—')));
+    return line;
+  };
   const canAct = room && localInput && !viewing;
   const makeSection = (key, title, count) => {
     const details = el('details', 'list-section');
@@ -3072,6 +3081,7 @@ function renderBoards() {
     btn.onclick = () => notesGuard(() => { location.href = o.url; });
     block.append(btn);
     block.append(el('div', 'local-label', boardState(o)));
+    block.append(researchInfo(null));
     r.append(block);
     resSection.append(r);
   }
@@ -3115,6 +3125,7 @@ function renderBoards() {
     const stateEl = el('div', 'local-label', statusText);
     if (state === 'waiting for input' && openEntry?.waitingReason) stateEl.title = openEntry.waitingReason;
     block.append(stateEl);
+    block.append(researchInfo(d));
     row.append(block);
 
     if (canAct) {
@@ -3352,6 +3363,7 @@ function renderBoards() {
     const merged = !isRes && workerMerged.has(d);
     const statePrefix = isRes ? (s === 'archive' ? 'archived research' : 'deferred research') : (s === 'archive' ? 'archived' : 'deferred');
     block.append(el('div', 'local-label', statePrefix + (closed ? ' · closed' : '') + (closing ? ' · ' + closingLabel(closing) : '') + (merged ? ' · merged' : '')));
+    if (isRes) block.append(researchInfo(d));
     const work = isRes ? null : pendingWork.find((p) => p.lane === d);
     const workerBusy = !isRes && !!room?.busyWorkers?.includes(d);
     if (work?.conflicts?.length && !workerBusy) block.append(el('div', 'worker-conflict', '⚠ Worker conflict: ' + work.conflicts.join(', ')));

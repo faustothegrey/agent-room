@@ -465,7 +465,7 @@ function header(ctx) {
     workbench: !!ctx.state.workbench, // a worker-only board, in discussions/<name>/ with .workbench marker
     research: !!ctx.state.research, // a research board, in discussions/<name>/ with .research marker
     workbenches: workbenchNames(ctx),
-    researches: researchNames(ctx),
+    researches: researchNames(ctx), researchStats: researchStats(ctx),
     // The agents this discussion started with, for the members panel once it has started.
     members: ctx.room.agents.map((a) => ({ provider: a.provider, name: a.name,
       model: specs.find((s) => s.name === a.name)?.model ?? '',
@@ -579,6 +579,54 @@ function researchNames(ctx) {
     }
   }
   return names;
+}
+// Lap data belongs to the board, so it survives fresh sessions, close, and archive moves.
+const RESEARCH_STATS = '.research-stats.json';
+function readResearchStats(dir) {
+  try {
+    const data = JSON.parse(readFileSync(join(dir, RESEARCH_STATS), 'utf8'));
+    return { laps: Number.isSafeInteger(data.laps) && data.laps >= 0 ? data.laps : 0,
+      lastRun: typeof data.lastRun === 'string' ? data.lastRun : null, priorUnknown: !!data.priorUnknown };
+  } catch {
+    const transcripts = join(dir, 'transcripts');
+    return { laps: 0, lastRun: null, priorUnknown: existsSync(transcripts) && readdirSync(transcripts).some((name) => name.endsWith('.md')) };
+  }
+}
+function recordResearchLap(ctx, lap) {
+  const dir = ctx.discussion.dir, file = join(dir, RESEARCH_STATS), stats = readResearchStats(dir);
+  if (!existsSync(file) && !ctx.discussion.continued) stats.priorUnknown = false;
+  stats.laps++;
+  if (lap === 0) stats.lastRun = new Date().toISOString();
+  const temp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(stats) + '\n');
+    renameSync(temp, file);
+  } catch (err) {
+    note(ctx, `✗ Couldn't save research lap count: ${err.message}`, true);
+  } finally { if (existsSync(temp)) unlinkSync(temp); }
+  showHeader(ctx);
+}
+function researchStats(ctx, now = new Date()) {
+  const parent = join(ctx.cwd, 'discussions'), result = {};
+  const tasks = readSchedule(ctx).tasks;
+  for (const section of [null, ...SECTIONS]) {
+    const dir = section ? join(parent, section) : parent;
+    if (!existsSync(dir)) continue;
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isDirectory() || !DATED.test(e.name) || !isResearchDir(join(dir, e.name))) continue;
+      const stats = readResearchStats(join(dir, e.name));
+      const next = tasks.filter((t) => t.kind === 'recurring' && t.board === e.name && t.enabled && SCHEDULE_TIME_RE.test(t.time))
+        .map((t) => {
+          const [hours, minutes] = t.time.split(':').map(Number);
+          const candidate = new Date(now); candidate.setHours(hours, minutes, 0, 0);
+          const trigger = `${day(candidate)} ${t.time}`;
+          if (candidate.getTime() + 60_000 <= now.getTime() || (candidate <= now && t.lastTriggerKey === trigger)) candidate.setDate(candidate.getDate() + 1);
+          return candidate;
+        }).sort((a, b) => a - b)[0];
+      result[e.name] = { ...stats, nextRun: next?.toISOString() ?? null };
+    }
+  }
+  return result;
 }
 const brainstormRef = (ref) => /^brainstorms\/([^/\\]+)$/.exec(ref ?? '')?.[1] ?? null;
 function brainstormDirRef(parent, ref) {
@@ -4081,6 +4129,7 @@ async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = n
     showHeader(ctx);
     workNotice(ctx);
     const roundRes = await ctx.room.round(line, { speaker, beforeLap,
+      onLapStart(lap) { if (ctx.state.research && ctx.discussion) recordResearchLap(ctx, lap); },
       onTurnStart(agent) {
         started = Date.now();
         startThinking(ctx, agent.name);
@@ -5431,6 +5480,7 @@ function writeSchedule(ctx, data) {
 
 function broadcastSchedule(ctx) {
   for (const c of siblings(ctx)) if (!c.stopped && c.screen) toScreen(c, { type: 'schedule' });
+  showHeader(ctx);
 }
 
 function listScheduleDiscussions(ctx) {
