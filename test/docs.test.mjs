@@ -4187,4 +4187,40 @@ test('research board UI: + New research, Research section, exact row menu action
   assert.deepEqual(menuLabelsFor(resSec, '2026-11-24-quest-b'), ['Resume', 'Peek files', 'Archive', 'Defer', 'Start fresh', 'Delete', 'Move up', 'Move down']);
   // Archived research row menu: Resume, Peek files, Make active, Defer, Start fresh, Delete (no worker actions).
   assert.deepEqual(menuLabelsFor(archSec, '2026-11-23-old-quest'), ['Resume', 'Peek files', 'Make active', 'Defer', 'Start fresh', 'Delete']);
+
+  // Turn into research sits next to Turn into a discussion in Actions ▾ and in a brainstorm row's ⋯ menu.
+  assert.match(discHeader, /id="convert"[^>]*>Turn into a discussion<\/button><button id="convert-research"[^>]*>Turn into research<\/button>/);
+  const bHarness = new Function('$', 'document', 'box', 'requestAnimationFrame',
+    'let room = null, viewing = null, peeking = null, peek = null, localInput = true, attaching = false, pending = [], viewExpired = false, viewNotice = null, localThinking = null, localWorking = null, replica = null, tab = "talk", dragging = false, renderAfterDrag = false, openRowMenu = null, explorerMode = "discussion";\n' +
+    'const expandedSections = new Set(["discussions", "research", "brainstorms", "archived-deferred"]);\n' +
+    'let cachedDetail = { files: ["brainstorms/2026-11-24-spark/transcripts/s.md"] };\n' +
+    'const isDiscussion = (n) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(n);\n' +
+    'const sent = [];\n' +
+    'const ordered = (list) => list, discussionTitle = (n) => n, brainstormTitle = (n) => n, displayTitle = (n, t) => t || n || "", closingPhase = () => null, closingLabel = () => "", resumeTip = () => "", freshButton = () => {}, archiveButton = () => {}, rollbackButtons = () => {}, closeMenus = () => {}, send = (cmd) => sent.push(cmd), showSub = () => {}, updateTabs = () => {}, renderExplorer = () => {}, notesGuard = (fn) => fn(), startMerge = () => {}, startDiscard = () => {}, dragRow = () => {}, orderButtons = () => {}, confirmed = (b, fn) => { b.onclick = fn; };\n' +
+    'const updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, renderAutoDev = () => {}, renderAttachments = () => {}, talkStatus = () => "", receivedTime = () => "", currentTitle = () => "", updateTabTitle = () => {};\n' +
+    closeCode + '\n' + viewCode + '\n' + boardsCode + '\n' +
+    'return { setRoom: (r) => { room = r; workerMergeable = {}; workerDiscardable = new Set(); workerPending = []; updateReplicaView(); renderBoards(); }, sent };'
+  )($, { createElement: node }, node('textarea'), () => {});
+  bHarness.setRoom({
+    active: 'brainstorms/2026-11-24-spark',
+    started: true,
+    brainstorm: true,
+    workbench: false,
+    research: false,
+    researches: [],
+    closedDiscussions: [],
+    multi: true,
+    open: [{ current: true, active: 'brainstorms/2026-11-24-spark', brainstorm: true, started: true }],
+  });
+  assert.equal($('convert').hidden, false);
+  assert.equal($('convert-research').hidden, false);
+  const bSec = $('list-pane').firstChild.children.find((sec) => sec.dataset.section === 'brainstorms');
+  const bLabels = menuLabelsFor(bSec, '2026-11-24-spark');
+  assert.ok(bLabels.includes('Turn into a discussion'));
+  assert.ok(bLabels.includes('Turn into research'));
+  assert.equal(bLabels.indexOf('Turn into research'), bLabels.indexOf('Turn into a discussion') + 1);
+  const bRow = bSec.children.find((r) => buttonsIn(r).some((b) => b.textContent === '2026-11-24-spark'));
+  const convertResBtn = buttonsIn(bRow).find((b) => b.textContent === 'Turn into research');
+  convertResBtn.onclick();
+  assert.deepEqual(bHarness.sent, ['/convert brainstorms/2026-11-24-spark research']);
 });

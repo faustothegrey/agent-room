@@ -976,7 +976,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </aside>
 <div id="list-split" role="separator" aria-orientation="vertical" aria-label="Resize the boards list" tabindex="0" title="Drag to resize"></div>
 <div id="main-panel">
-<div id="disc-header" aria-label="Current discussion"><div id="disc-info"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span><span id="disc-autodev" aria-live="polite" hidden></span></div><button type="button" id="cancel-creation" title="Discard this new board and return to the board you came from" hidden>Cancel</button><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions">Actions</summary><div class="menu-items"><button id="summary">Summarize</button><button id="newworkbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">New workbench</button><button id="newresearch-menu" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker.">New research</button><span id="board-actions" hidden><hr><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details></div>
+<div id="disc-header" aria-label="Current discussion"><div id="disc-info"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span><span id="disc-autodev" aria-live="polite" hidden></span></div><button type="button" id="cancel-creation" title="Discard this new board and return to the board you came from" hidden>Cancel</button><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions">Actions</summary><div class="menu-items"><button id="summary">Summarize</button><button id="newworkbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">New workbench</button><button id="newresearch-menu" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker.">New research</button><span id="board-actions" hidden><hr><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="convert-research" hidden title="Move this brainstorm to discussions/ with a .research marker: the same agents start fresh sessions with the research rulebook, briefed from its transcripts and latest summary.">Turn into research</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details></div>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><span id="tab-controls"><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></span></div>
   <div class="view" id="talk">
@@ -2507,13 +2507,14 @@ function updateReplicaView() {
   // + New discussion and + New brainstorm live at the top of the Boards list panel.
   $('list-new').hidden = !canBoardAct;
   $('newdisc').hidden = !(room?.active || room?.brainstorm || room?.workbench || room?.research);
-  // Turn into a discussion: a brainstorm once its first message has named it.
+  // Turn into a discussion / Turn into research: a brainstorm once its first message has named it.
   $('convert').hidden = !(canBoardAct && room?.brainstorm && room.active);
+  if ($('convert-research')) $('convert-research').hidden = !(canBoardAct && room?.brainstorm && room.active);
   // With several discussions open (the screen), New discussion and Resume keep this one open;
   // Close closes it (labelled "Close with pending work" when its branch has pending work).
   $('closedisc').hidden = !(canBoardAct && room?.multi && (room.active || room.brainstorm || room.workbench || room.research || room.open?.length > 1));
   updateCloseButton();
-  $('board-actions').hidden = !canBoardAct || ($('convert').hidden && $('closedisc').hidden);
+  $('board-actions').hidden = !canBoardAct || ($('convert').hidden && (!$('convert-research') || $('convert-research').hidden) && $('closedisc').hidden);
   if (room?.multi) {
     $('newdisc').title = 'Open a new discussion beside this one, which stays open (click it in Boards to show it again).';
     $('newbrainstorm').title = 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.';
@@ -3254,6 +3255,10 @@ function renderBoards() {
       convert.title = 'Move it to discussions/: its agents keep their sessions and are told the new folder; the worker can then be sent work.';
       confirmed(convert, () => { closeMenus(); send('/convert ' + path); }, 'Click again: it moves to discussions/', () => true);
       items.append(convert);
+      const convertRes = el('button', '', 'Turn into research');
+      convertRes.title = 'Move it to discussions/ with a .research marker: the same agents start fresh sessions with the research rulebook, briefed from its transcripts and latest summary.';
+      confirmed(convertRes, () => { closeMenus(); send('/convert ' + path + ' research'); }, 'Click again: it moves to discussions/ as a research board', () => true);
+      items.append(convertRes);
       const fresh = el('button', '', 'Start fresh');
       fresh.title = 'New agent sessions, briefed from its latest summary or, with none, pointed at its transcripts. Its saved sessions and chat are discarded.';
       confirmed(fresh, () => { closeMenus(); send('/fresh ' + path); }, 'Click again: its saved sessions and chat are discarded', () => true);
@@ -4330,6 +4335,7 @@ confirmed($('newworkbench'), () => { closeMenus(); send('/workbench'); }, null, 
 confirmed($('newresearch'), () => send('/research'), null, () => !room?.multi && room?.started);
 confirmed($('newresearch-menu'), () => { closeMenus(); send('/research'); }, null, () => !room?.multi && room?.started);
 confirmed($('convert'), () => { closeMenus(); send('/convert ' + room.active); }, 'Click again: it moves to discussions/', () => true);
+confirmed($('convert-research'), () => { closeMenus(); send('/convert ' + room.active + ' research'); }, 'Click again: it moves to discussions/ as a research board', () => true);
 confirmed($('closedisc'), () => send('/close'), 'Click again: this discussion closes (its agents stop)', () => !!room?.started);
 $('closemerge').onclick = () => {
   closeMenus();

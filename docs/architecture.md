@@ -183,8 +183,9 @@ agents receive the researching rulebook, rounds run up to 20 laps with no automa
 and it can be scheduled in **Schedule** or deleted once closed. A **workbench** (`/workbench`)
 lives in `discussions/<date>-<title>/` with a `.workbench` marker file and runs the worker only.
 A brainstorm has its own folder, `brainstorms/<date>-<title>/` (transcripts, drawings), and
-checkpoint, sends no worker tasks, and can be turned into a discussion, which moves its folder to
-`discussions/`.
+checkpoint, sends no worker tasks, and can be turned into a discussion (keeping agent sessions) or
+into a research board (`/convert … research`, adding `.research` and starting fresh sessions with
+the researching rulebook), which moves its folder to `discussions/`.
 
 ![Discussion lifecycle: unstarted, open, brainstorm, Resume, Start fresh, and moving to archive or deferred](diagrams/discussion-lifecycle.svg)
 

@@ -58,7 +58,7 @@ browser), /new (end this session; your next message starts a new discussion; the
 carries on), /brainstorm (New brainstorm: its first message names it, in DIR/brainstorms/<date>-<title>/,
 saved like a discussion but sending no work; /resume brainstorms/<name> and /fresh brainstorms/<name> as
 for discussions), /workbench (New workbench: a worker-only board in DIR/discussions/<date>-<title>/; its first
-message names it and goes straight to the worker), /research (New research: a research board in DIR/discussions/<date>-<title>/ with a .research marker and no worker), /convert brainstorms/<name> (Turn into a discussion: its folder moves to discussions/,
+message names it and goes straight to the worker), /research (New research: a research board in DIR/discussions/<date>-<title>/ with a .research marker and no worker), /convert brainstorms/<name> [research] (Turn into a discussion or, with research, into a research board: its folder moves to discussions/,
 its agents keep their sessions), /delete brainstorms/<name> (delete a closed brainstorm's folder and
 checkpoint for good), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
 /rollback <name> (queue archive with rollback), /archive-rollback <name> (confirm archive after reviewing its report),
@@ -890,6 +890,13 @@ function briefing(ctx) {
   }
   if (ctx.state.research) {
     if (continued) {
+      if (ctx.discussion.fromBrainstorm) {
+        const transcripts = `${join(dir, 'transcripts')}/`;
+        return `This research board was turned from a brainstorm. Its folder is ${dir}: create, read and write this board's documents (quest.md, learnings.md, drawings) there. `
+          + `The room's root, ${ctx.cwd}, holds the work itself. `
+          + `Before replying, read its earlier brainstorm transcripts in ${transcripts}`
+          + (s ? ` (the transcripts are the source; this summary of them may omit details):${summary}` : '.');
+      }
       if (existsSync(join(dir, 'closing-statement.md'))) {
         const text = readFileSync(join(dir, 'closing-statement.md'), 'utf8');
         return `This session continues the research board in ${dir}: create, read and write this board's documents (quest.md, learnings.md, drawings) there. Start from its closing statement:\n\n${text}${summary}`;
@@ -1399,7 +1406,7 @@ async function resumeDiscussion(ctx, ref) {
   }
   if (isRes) ctx.state.research = true;
   if (isRes) await defaultsForNew(ctx, { reloadAgents: true });
-  switchTo(ctx, { name, dir, title: saved?.discussion?.title ?? name, continued: true });
+  switchTo(ctx, { name, dir, title: saved?.discussion?.title ?? name, continued: true, ...(saved?.fromBrainstorm && { fromBrainstorm: true }) });
   setClosed(ctx, name, false);
   showHeader(ctx);
   ctx.freshSummary = isWb ? null : checkpointSummary(saved);
@@ -1519,6 +1526,143 @@ async function freshBrainstorm(ctx, ref) {
   writeCheckpoint(ctx, key, saved);
   enterBrainstorm(ctx, name, saved);
   note(ctx, `Started the brainstorm ${name} afresh: your next message starts a new session there, ${summary ? `with its latest summary${summary.outcome === 'agreed' ? '' : ' (not agreed)'}` : 'pointing the agents to its transcripts'}. Its saved sessions and chat were discarded.`);
+}
+
+// /convert brainstorms/<name> research (Turn into research): moves brainstorms/<name>/ to
+// discussions/<name>/, writes .research, ends old sessions, and starts fresh sessions with the
+// researching rulebook (briefed from its transcripts/ and latest summary).
+async function convertBrainstormToResearch(ctx, ref) {
+  const b = brainstormDirRef(join(ctx.cwd, BRAINSTORMS), ref);
+  if (!b) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}. Nothing was changed.`, true);
+  if (b.section) return note(ctx, `✗ ${b.name} is in ${b.section}/: make it active before turning it into a research board. Nothing was moved.`, true);
+  const name = b.name, from = join(ctx.cwd, BRAINSTORMS, name);
+  const open = siblings(ctx).find((c) => isBrainstorm(c, name));
+  if (ctx.busy || open?.busy) {
+    return note(ctx, `✗ ${name} can't become a research board while a round or summary is running. Try again when it finishes; nothing was moved.`, true);
+  }
+  if (open && open !== ctx) { open.say?.(`/convert ${ref} research`); return goto(ctx, open); }
+  const parent = join(ctx.cwd, 'discussions'), dest = join(parent, name);
+  const clash = [dest, ...SECTIONS.map((s) => join(parent, s, name)), ...SECTIONS.map((s) => join(ctx.cwd, BRAINSTORMS, s, name))].find((p) => existsSync(p));
+  if (clash) return note(ctx, `✗ ${name} can't become a research board: ${relative(ctx.cwd, clash)} already exists. Nothing was moved.`, true);
+
+  const saved = readCheckpoint(ctx, ref);
+  const title = open?.discussion?.title ?? (typeof saved?.discussion?.title === 'string' ? saved.discussion.title : name);
+  const agentSpecs = open?.agentSpecs ?? saved?.agentSpecs ?? ctx.agentSpecs;
+  const workerSpec = open?.workerSpec ?? saved?.workerSpec ?? ctx.workerSpec ?? roomDefaults(ctx).worker;
+  const openSummary = open
+    ? (() => {
+        const s = (open.state?.transcript ?? []).findLast((m) => m.speaker === 'Summary' && m.outcome);
+        return s ? { text: s.text, outcome: s.outcome, by: s.by } : null;
+      })()
+    : null;
+  const summary = openSummary ?? checkpointSummary(saved);
+
+  // Build fresh research sessions BEFORE moving files or ending the brainstorm's sessions, so a
+  // failure here leaves the brainstorm's files, sessions and checkpoint untouched.
+  let loaded = null, nextState = null, nextSessions = null;
+  if (open) {
+    nextState = { transcript: [], seen: new Map(), research: true };
+    nextSessions = new Map();
+    const next = { ...open, discussion: null, agentSpecs, workerSpec, sessions: nextSessions, state: nextState };
+    try {
+      loaded = await load(next, `?convert-research=${Date.now()}`);
+    } catch (err) {
+      return note(ctx, `✗ Couldn't start fresh research sessions for ${name}: ${err.message}. Nothing was moved; the brainstorm's files, sessions and checkpoint are untouched.`, true);
+    }
+  }
+
+  try { mkdirSync(parent, { recursive: true }); } catch (err) {
+    return note(ctx, `✗ Couldn't prepare discussions/ for ${name}: ${err.message}. Nothing was moved.`, true);
+  }
+  try { mkdirSync(dest); } catch (err) {
+    return note(ctx, `✗ ${name} can't become a research board: ${err.code === 'EEXIST' ? `discussions/${name} already exists` : err.message}. Nothing was moved.`, true);
+  }
+  try { renameSync(from, dest); } catch (err) {
+    try { rmdirSync(dest); } catch {}
+    return note(ctx, `✗ Couldn't move ${name} to discussions/: ${err.message}. Nothing was moved; the brainstorm's files and checkpoint are untouched.`, true);
+  }
+  const markerPath = join(dest, RESEARCH_MARKER);
+  try {
+    writeFileSync(markerPath, 'research\n');
+  } catch (err) {
+    try {
+      renameSync(dest, from);
+      return note(ctx, `✗ Couldn't write .research in discussions/${name}: ${err.message}. Moved the folder back to brainstorms/${name}; the brainstorm's files and checkpoint are intact.`, true);
+    } catch (rbErr) {
+      return note(ctx, `✗ Couldn't write .research in discussions/${name}: ${err.message}. The folder was moved to discussions/${name} and moving it back failed (${rbErr.message}); its old checkpoint is still under ${ref}.`, true);
+    }
+  }
+
+  const freshSaved = {
+    version: 1,
+    root: realpathSync(ctx.cwd),
+    at: new Date().toISOString(),
+    discussion: { name, title },
+    research: true,
+    fromBrainstorm: true,
+    fresh: true,
+    summary,
+    agentSpecs,
+    workerSpec,
+  };
+  try {
+    writeCheckpoint(ctx, name, freshSaved);
+  } catch (err) {
+    try {
+      try { unlinkSync(markerPath); } catch {}
+      renameSync(dest, from);
+      return note(ctx, `✗ Couldn't save the research board checkpoint for ${name}: ${err.message}. Removed .research and moved the folder back to brainstorms/${name}; the brainstorm's files and checkpoint are intact.`, true);
+    } catch (rbErr) {
+      return note(ctx, `✗ Couldn't save the research board checkpoint for ${name}: ${err.message}. The folder is at discussions/${name} with .research and moving it back failed (${rbErr.message}); the old checkpoint is still under ${ref}.`, true);
+    }
+  }
+
+  const moveFile = (p) => (typeof p === 'string' && p.startsWith(from + sep) ? dest + p.slice(from.length) : p);
+  if (open) {
+    if (open.logPath) {
+      open.logPath = moveFile(open.logPath);
+      try { appendFileSync(open.logPath, `_(turned into a research board: ${dest})_\n\n`); } catch {}
+    }
+    for (const a of open.room.agents) if (a.reset) a.reset();
+    detachWorker(open);
+    Object.assign(open, loaded, {
+      state: nextState,
+      sessions: nextSessions,
+      agentSpecs,
+      workerSpec,
+      logPath: null,
+      pendingLog: '',
+      lastRound: null,
+      freshSummary: summary,
+      agentsStarted: false,
+      retryFailure: null,
+      autoDev: null,
+      autoDevSent: [],
+      workDispatchedLen: 0,
+      workReady: false,
+    });
+    open.screen.transcript = nextState.transcript;
+    Object.assign(open.screen, { doc: null, thinking: null, status: null, peek: null });
+    wire(open);
+    switchTo(open, { name, dir: dest, title, continued: true, fromBrainstorm: true });
+    open.freshSummary = summary;
+  }
+
+  let cleanupWarning = '';
+  try { unlinkSync(checkpointFile(ctx, ref)); } catch (err) {
+    if (err.code !== 'ENOENT') cleanupWarning = ` (Warning: couldn't remove the old brainstorm checkpoint ${ref}: ${err.message}.)`;
+  }
+  listedCheckpoints.clear();
+  for (const c of siblings(ctx)) {
+    if (!c.screen) continue;
+    if (c.screen.doc?.startsWith(`${BRAINSTORMS}/${name}/`)) {
+      c.screen.doc = `discussions/${name}/` + c.screen.doc.slice(`${BRAINSTORMS}/${name}/`.length);
+      toScreen(c, { type: 'doc', file: c.screen.doc });
+    }
+    toScreen(c, { type: 'moved', from: `${BRAINSTORMS}/${name}`, to: `discussions/${name}` });
+  }
+  showHeader(ctx);
+  note(ctx, `Turned the brainstorm ${name} into the research board ${name}, in discussions/: old sessions ended; the same agents start fresh with the research rulebook, reading its transcripts/${summary ? ` and latest summary${summary.outcome === 'agreed' ? '' : ' (not agreed)'}` : ''}.${cleanupWarning}`);
 }
 
 // /convert brainstorms/<name> (Turn into a discussion): its folder moves to discussions/<name>/
@@ -3798,8 +3942,8 @@ export async function handleLine(line, ctx) {
     if (!target) return note(ctx, `✗ ${closeRef[1]} is not open.`, true);
     return target === ctx ? closeDiscussion(ctx) : void target.say?.('/close');
   }
-  const convert = /^\/convert\s+(\S+)$/.exec(line);
-  if (convert) return convertBrainstorm(ctx, convert[1]);
+  const convert = /^\/convert\s+(\S+)(?:\s+(research))?$/.exec(line);
+  if (convert) return convert[2] === 'research' ? convertBrainstormToResearch(ctx, convert[1]) : convertBrainstorm(ctx, convert[1]);
   const remove = /^\/delete\s+(\S+)$/.exec(line);
   if (remove) return remove[1].startsWith(`${BRAINSTORMS}/`) ? deleteBrainstorm(ctx, remove[1]) : deleteResearch(ctx, remove[1]);
   if (line === '/autodev') return startAutoDev(ctx);

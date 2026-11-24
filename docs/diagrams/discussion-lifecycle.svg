@@ -32,7 +32,7 @@
   <text x="762" y="120" font-size="10.5" fill="#444">(<tspan font-family="monospace">transcripts/</tspan>, <tspan font-family="monospace">drawings/</tspan>, <tspan font-family="monospace">files/</tspan> attachments)</text>
   <text x="752" y="136" font-size="11">• Checkpoint under <tspan font-family="monospace">brainstorms/&lt;name&gt;</tspan> (no worker)</text>
   <text x="752" y="152" font-size="11">• Resume, Close, Restart, Start fresh &amp; Delete work</text>
-  <text x="752" y="168" font-size="11">• Turn into a discussion (<tspan font-family="monospace">/convert</tspan>) → <tspan font-family="monospace">discussions/</tspan></text>
+  <text x="752" y="168" font-size="11">• <tspan font-family="monospace">/convert</tspan> → discussion or research (<tspan font-family="monospace">.research</tspan>, fresh)</text>
   <text x="752" y="184" font-size="11">• No worker, auto dev or automatic summary</text>
   <text x="752" y="200" font-size="10.5" fill="#b07a1f">• Agents write only drawings (may read root &amp; <tspan font-family="monospace">files/</tspan>)</text>
 
