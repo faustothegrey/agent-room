@@ -6908,3 +6908,55 @@ test('convert brainstorm to research: move, .research marker, fresh sessions wit
   assert.match(resumedPrompts[0], /This research board was turned from a brainstorm\./);
   assert.match(resumedPrompts[0], /transcripts\//);
 });
+
+test('scheduler: one-shot research creates an open board, respects quota and never catches up', async () => {
+  const { existsSync, readdirSync, readFileSync, mkdirSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { getSchedule, saveSchedule, checkSchedule } = await import('../src/ui.mjs');
+  const { createRoom } = await import('../src/room.mjs');
+  const usage = await import('../src/usage.mjs');
+  const docs = await import('../src/docs.mjs');
+  const cwd = await tmp('one-shot-research-');
+  const now = new Date(2026, 10, 21, 3, 0);
+  let quotaOK = true, drop = false, loaded;
+  const state = { transcript: [], seen: new Map() };
+  const ctx = { cwd, scheduleFile: join(cwd, 'schedule.json'), agentSpecs: 'claude:A', workerSpec: 'claude:Worker',
+    state, sessions: new Map(), screen: { clients: new Set(), transcript: state.transcript, worker: [] }, docs,
+    usage: { ...usage, fetchQuota: async () => ({}), checkQuotaFloor: () => quotaOK ? { ok: true } : { ok: false, reason: 'low quota' } },
+    room: { agents: [{ name: 'A', provider: 'claude' }] }, worker: { name: 'Worker' }, totals: {}, noScreen: true, out: () => {} };
+  const prompts = [];
+  const loadRoom = async (next) => {
+    loaded = next;
+    const agent = { name: 'A', provider: 'claude', turn: async (p) => { prompts.push(p); if (drop) { quotaOK = false; return 'Finding'; } return 'PASS'; } };
+    return { room: createRoom([agent], next.state), worker: { name: 'Worker' }, docs, usage: ctx.usage };
+  };
+  const input = { kind: 'research', title: 'Sample Research', prompt: 'Investigate this', date: '2026-11-21', time: '03:00' };
+  assert.throws(() => saveSchedule(ctx, { action: 'add', ...input, date: '2026-02-30' }), /valid local date/);
+  const id = saveSchedule(ctx, { action: 'add', ...input }).tasks[0].id;
+  assert.deepEqual(await checkSchedule(ctx, new Date(2026, 10, 21, 3, 1), { loadRoom }), []);
+  assert.equal(getSchedule(ctx).tasks[0].lastRun, null);
+  quotaOK = false;
+  assert.equal((await checkSchedule(ctx, now, { loadRoom }))[0].status, 'skipped');
+  assert.equal(existsSync(join(cwd, 'discussions')), false);
+  assert.deepEqual(await checkSchedule(ctx, now, { loadRoom }), []);
+  saveSchedule(ctx, { action: 'edit', id, ...input, prompt: 'Changed' });
+  assert.deepEqual(await checkSchedule(ctx, now, { loadRoom }), []);
+  saveSchedule(ctx, { action: 'edit', id, ...input, time: '03:01' });
+  quotaOK = true;
+  mkdirSync(join(cwd, 'discussions'), { recursive: true });
+  const result = await checkSchedule(ctx, new Date(2026, 10, 21, 3, 1), { loadRoom });
+  assert.equal(result[0].status, 'ran');
+  assert.ok(loaded.discussion && existsSync(join(loaded.discussion.dir, '.research')));
+  assert.equal(existsSync(join(loaded.discussion.dir, 'closing-statement.md')), false);
+  assert.match(prompts[0], /\[Scheduler\]: Investigate this/);
+  assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'ran');
+  const firstName = loaded.discussion.name;
+  saveSchedule(ctx, { action: 'edit', id, ...input, time: '03:02' });
+  drop = true;
+  const stopped = await checkSchedule(ctx, new Date(2026, 10, 21, 3, 2), { loadRoom });
+  assert.equal(stopped[0].status, 'stopped');
+  assert.notEqual(loaded.discussion.name, firstName);
+  const transcript = readFileSync(join(loaded.discussion.dir, 'transcripts', readdirSync(join(loaded.discussion.dir, 'transcripts'))[0]), 'utf8');
+  assert.match(transcript, /quota guard before lap 2/);
+  assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'stopped');
+});

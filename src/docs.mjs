@@ -937,7 +937,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
   <button type="button" class="ctrl-btn on" id="ctrl-boards" aria-pressed="true" title="Boards and conversation"><span class="ctrl-ico">💬</span><span class="ctrl-lbl">Boards</span></button>
   <button type="button" class="ctrl-btn" id="ctrl-providers" aria-pressed="false" title="Default providers and models for new discussions, and provider health"><span class="ctrl-ico">⚙</span><span class="ctrl-lbl">Providers</span></button>
   <button type="button" class="ctrl-btn" id="ctrl-instructions" aria-pressed="false" title="The prompts and rulebooks sent to each agent, and when"><span class="ctrl-ico">📜</span><span class="ctrl-lbl">Instructions</span></button>
-  <button type="button" class="ctrl-btn" id="ctrl-schedule" aria-pressed="false" title="Scheduled recurring discussions and quota guard"><span class="ctrl-ico">⏰</span><span class="ctrl-lbl">Schedule</span></button>
+  <button type="button" class="ctrl-btn" id="ctrl-schedule" aria-pressed="false" title="Scheduled tasks and quota guard"><span class="ctrl-ico">⏰</span><span class="ctrl-lbl">Schedule</span></button>
   <button type="button" class="ctrl-btn" id="ctrl-notes" aria-pressed="false" hidden title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder."><span class="ctrl-ico">📝</span><span class="ctrl-lbl">My notes</span></button>
   <button type="button" class="ctrl-btn" id="ctrl-terminal" aria-pressed="false" hidden title="A shell on this computer, in the room's folder. Only from this computer, not from other devices."><span class="ctrl-ico">⌨</span><span class="ctrl-lbl">Terminal</span></button>
 </nav>
@@ -1310,13 +1310,14 @@ function drawSchedule(data, notice = '', isError = false) {
       const card = document.createElement('div'); card.className = 'sched-card'; card.dataset.enabled = task.enabled ? 'true' : 'false';
       const head = document.createElement('div'); head.className = 'sched-head';
       const toggle = document.createElement('input'); toggle.type = 'checkbox'; toggle.checked = !!task.enabled;
+      if (task.kind === 'research') toggle.hidden = true;
       toggle.setAttribute('aria-label', 'Enable scheduled task for ' + task.discussion);
       toggle.onchange = () => mutate({ action: 'toggle', id: task.id, enabled: toggle.checked }, toggle.checked ? 'Task enabled.' : 'Task disabled.');
-      const time = document.createElement('span'); time.className = 'sched-time'; time.textContent = task.time + ' daily';
+      const time = document.createElement('span'); time.className = 'sched-time'; time.textContent = task.kind === 'research' ? task.date + ' ' + task.time : task.time + ' daily';
       const d = discByRef.get(task.discussion);
       const disc = document.createElement('span'); disc.className = 'sched-disc';
-      disc.textContent = d ? d.title + (d.section ? ' (' + d.section + ')' : '') : task.discussion;
-      disc.title = 'discussions/' + task.discussion;
+      disc.textContent = task.kind === 'research' ? task.title + ' (research)' : d ? d.title + (d.section ? ' (' + d.section + ')' : '') : task.discussion;
+      if (task.kind !== 'research') disc.title = 'discussions/' + task.discussion;
       const actions = document.createElement('span'); actions.className = 'sched-actions';
       const editBtn = document.createElement('button'); editBtn.type = 'button'; editBtn.textContent = 'Edit';
       editBtn.onclick = () => { scheduleEditingId = task.id; drawSchedule(data); };
@@ -1347,6 +1348,12 @@ function drawSchedule(data, notice = '', isError = false) {
   const formSec = document.createElement('section'); formSec.className = 'sched-section';
   const formH = document.createElement('h3'); formH.textContent = editing ? 'Edit scheduled task' : 'Add scheduled task'; formSec.append(formH);
   const form = document.createElement('form'); form.className = 'sched-form'; form.id = 'sched-form';
+  const kindLbl = document.createElement('label'); kindLbl.textContent = 'Task type';
+  const kindSel = document.createElement('select'); kindSel.id = 'sched-kind';
+  for (const [value, label] of [['research', 'One-shot research'], ['discussion', 'Daily discussion']]) {
+    const opt = document.createElement('option'); opt.value = value; opt.textContent = label; kindSel.append(opt);
+  }
+  kindSel.value = editing ? editing.kind : 'research'; kindSel.disabled = !!editing; kindLbl.append(kindSel);
   const row = document.createElement('div'); row.className = 'sched-form-row';
 
   const discLbl = document.createElement('label'); discLbl.className = 'grow'; discLbl.textContent = 'Discussion';
@@ -1374,7 +1381,11 @@ function drawSchedule(data, notice = '', isError = false) {
   const timeIn = document.createElement('input'); timeIn.type = 'time'; timeIn.id = 'sched-time'; timeIn.required = true;
   timeIn.value = editing ? editing.time : '03:00';
   timeLbl.append(timeIn);
-  row.append(discLbl, timeLbl);
+  const titleLbl = document.createElement('label'); titleLbl.className = 'grow'; titleLbl.textContent = 'Research title';
+  const titleIn = document.createElement('input'); titleIn.id = 'sched-title'; titleIn.value = editing?.title || ''; titleLbl.append(titleIn);
+  const dateLbl = document.createElement('label'); dateLbl.textContent = 'Date (local)';
+  const dateIn = document.createElement('input'); dateIn.type = 'date'; dateIn.id = 'sched-date'; dateIn.value = editing?.date || ''; dateLbl.append(dateIn);
+  row.append(discLbl, titleLbl, dateLbl, timeLbl);
 
   const promptLbl = document.createElement('label'); promptLbl.textContent = 'Saved prompt (posted as Scheduler)';
   const promptIn = document.createElement('textarea'); promptIn.id = 'sched-prompt'; promptIn.rows = 4; promptIn.required = true;
@@ -1390,7 +1401,15 @@ function drawSchedule(data, notice = '', isError = false) {
   const btns = document.createElement('div'); btns.className = 'sched-form-buttons';
   const submitBtn = document.createElement('button'); submitBtn.type = 'submit';
   submitBtn.textContent = editing ? 'Save changes' : 'Add task';
-  submitBtn.disabled = !discussions.length && !editing;
+  function updateKind() {
+    const research = kindSel.value === 'research';
+    discLbl.hidden = research; discSel.required = !research;
+    titleLbl.hidden = !research; titleIn.required = research;
+    dateLbl.hidden = !research; dateIn.required = research;
+    enLbl.hidden = research; timeLbl.firstChild.textContent = research ? 'Time (local)' : 'Daily time (local)';
+    submitBtn.disabled = !research && !discussions.length && !editing;
+  }
+  kindSel.onchange = updateKind; updateKind();
   btns.append(submitBtn);
   if (editing) {
     const cancelBtn = document.createElement('button'); cancelBtn.type = 'button'; cancelBtn.textContent = 'Cancel';
@@ -1400,13 +1419,14 @@ function drawSchedule(data, notice = '', isError = false) {
 
   form.onsubmit = (e) => {
     e.preventDefault();
-    const payload = editing
-      ? { action: 'edit', id: editing.id, discussion: discSel.value, time: timeIn.value, prompt: promptIn.value, enabled: enIn.checked }
-      : { action: 'add', discussion: discSel.value, time: timeIn.value, prompt: promptIn.value, enabled: enIn.checked };
+    const fields = kindSel.value === 'research'
+      ? { kind: 'research', title: titleIn.value, date: dateIn.value, time: timeIn.value, prompt: promptIn.value }
+      : { discussion: discSel.value, time: timeIn.value, prompt: promptIn.value, enabled: enIn.checked };
+    const payload = editing ? { action: 'edit', id: editing.id, ...fields } : { action: 'add', ...fields };
     scheduleEditingId = null;
     mutate(payload, editing ? 'Task updated.' : 'Task added.');
   };
-  form.append(row, promptLbl, enLbl, btns);
+  form.append(kindLbl, row, promptLbl, enLbl, btns);
   formSec.append(form, statusEl);
   pane.append(formSec);
 }

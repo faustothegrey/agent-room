@@ -5458,6 +5458,8 @@ export function getSchedule(ctx) {
     quotaFloor: data.quotaFloor,
     tasks: data.tasks.map((t) => ({
       id: t.id,
+      kind: t.kind ?? 'discussion',
+      title: t.title, date: t.date,
       discussion: t.discussion,
       prompt: t.prompt,
       time: t.time,
@@ -5470,6 +5472,18 @@ export function getSchedule(ctx) {
 }
 
 function validateTaskInput(ctx, body) {
+  if (body?.kind === 'research') {
+    const title = String(body.title ?? '').trim();
+    const prompt = String(body.prompt ?? '').trim();
+    const date = String(body.date ?? '').trim();
+    const time = String(body.time ?? '').trim();
+    if (!title) throw new Error('Enter a title for the research board.');
+    if (!prompt) throw new Error('Enter a prompt for the scheduled run.');
+    const parsed = new Date(`${date}T12:00:00`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsed.getTime()) || day(parsed) !== date) throw new Error('Enter a valid local date.');
+    if (!SCHEDULE_TIME_RE.test(time)) throw new Error('Enter a local time in 24-hour HH:MM format.');
+    return { kind: 'research', title, prompt, date, time, enabled: true };
+  }
   const discussion = String(body?.discussion ?? '').trim();
   const d = discussion ? discussionRef(join(ctx.cwd, 'discussions'), discussion) : null;
   if (!d) {
@@ -5500,10 +5514,11 @@ export function saveSchedule(ctx, body) {
   } else if (action === 'edit') {
     const task = data.tasks.find((t) => t.id === body.id);
     if (!task) throw new Error('Scheduled task not found.');
+    if ((task.kind ?? 'discussion') !== (body.kind ?? 'discussion')) throw new Error('Cannot change task type.');
     const fields = validateTaskInput(ctx, body);
-    const timeChanged = task.time !== fields.time;
+    const timeChanged = task.time !== fields.time || task.date !== fields.date;
     Object.assign(task, fields);
-    if (timeChanged) task.lastTriggerKey = null;
+    if (timeChanged) { task.lastTriggerKey = null; if (task.kind === 'research') task.lastRun = null; }
   } else if (action === 'toggle') {
     const task = data.tasks.find((t) => t.id === body.id);
     if (!task) throw new Error('Scheduled task not found.');
@@ -5520,10 +5535,10 @@ export function saveSchedule(ctx, body) {
   return getSchedule(ctx);
 }
 
-function recordTaskRun(ctx, taskId, status, reason, at) {
+function recordTaskRun(ctx, taskId, status, reason, at, triggerKey = undefined) {
   const data = readSchedule(ctx);
   const task = data.tasks.find((t) => t.id === taskId);
-  if (!task) return;
+  if (!task || (triggerKey !== undefined && task.lastTriggerKey !== triggerKey)) return;
   task.lastRun = { at, status, reason: reason ?? null };
   writeSchedule(ctx, data);
   broadcastSchedule(ctx);
@@ -5536,6 +5551,7 @@ export async function runScheduledTask(ctx, taskId, { now = null, loadRoom = loa
   const data = readSchedule(ctx);
   const task = data.tasks.find((t) => t.id === taskId);
   if (!task) return null;
+  if (task.kind === 'research') return runScheduledResearch(ctx, task, data, { now, loadRoom });
   const parent = join(ctx.cwd, 'discussions');
   const d = discussionRef(parent, task.discussion);
   if (!d) {
@@ -5682,6 +5698,71 @@ export async function runScheduledTask(ctx, taskId, { now = null, loadRoom = loa
   }
 }
 
+async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
+  const at = (now ?? new Date()).toISOString();
+  const clockMs = () => now ? now.getTime() : Date.now();
+  const shop = shopOf(ctx);
+  shop.schedulerRunningTasks ??= new Set();
+  if (shop.schedulerRunningTasks.has(task.id)) return null;
+  shop.schedulerRunningTasks.add(task.id);
+  broadcastSchedule(ctx);
+  let runCtx = null;
+  let createdBeside = false;
+  try {
+    const specs = roomDefaults(ctx).agents ?? ctx.agentSpecs ?? '';
+    const providers = [...new Set(specs.split(',').filter(Boolean).map((s) => parseSpec(s).provider))];
+    const quota = await ctx.usage.fetchQuota();
+    refreshQuota(ctx, quota).catch(() => {});
+    const check = ctx.usage.checkQuotaFloor(quota, providers, data.quotaFloor, { now: clockMs() });
+    if (!check.ok) {
+      recordTaskRun(ctx, task.id, 'skipped', check.reason, at, task.lastTriggerKey);
+      return { status: 'skipped', reason: check.reason };
+    }
+    if (ctx.hub?.addRoom) {
+      runCtx = await openBeside(ctx);
+      createdBeside = true;
+    } else {
+      const state = { transcript: [], seen: new Map(), research: true }, sessions = new Map();
+      runCtx = { ...ctx, state, sessions, discussion: null, programs: { running: new Set(), stopping: false },
+        screen: { clients: new Set(), transcript: state.transcript, worker: shop.log }, lastRound: null, logPath: null,
+        checkpointError: null, hub: null, noScreen: true };
+      Object.assign(runCtx, await loadRoom(runCtx, `?sched=${Date.now()}`), { state, sessions, usage: ctx.usage });
+      wire(runCtx);
+    }
+    if (createdBeside) await newResearch(runCtx);
+    runCtx.state.research = true;
+    // Supply the chosen title through the same folder-creation path as New research.
+    const suggestTitle = runCtx.suggestTitle;
+    runCtx.suggestTitle = async () => ({ title: task.title });
+    let opened;
+    try { opened = await openDiscussion(runCtx, task.prompt); } finally { runCtx.suggestTitle = suggestTitle; }
+    if (!opened) throw new Error('Could not create the research board or transcript.');
+    const result = await runRound(task.prompt, runCtx, {
+      speaker: 'Scheduler',
+      beforeLap: async (lap) => {
+        const q = await runCtx.usage.fetchQuota();
+        refreshQuota(runCtx, q).catch(() => {});
+        const active = [...new Set(runCtx.room.agents.filter((a) => !(runCtx.state.disabledAgents ?? []).includes(a.name)).map((a) => a.provider))];
+        const next = runCtx.usage.checkQuotaFloor(q, active, readSchedule(ctx).quotaFloor, { now: clockMs() });
+        return next.ok ? null : `Scheduled run stopped early by quota guard before lap ${lap + 1}: ${next.reason}`;
+      },
+    });
+    const status = result?.stoppedReason ? 'stopped' : result?.failedError ? 'failed' : 'ran';
+    const reason = result?.stoppedReason ?? result?.failedError ?? null;
+    saveCheckpoint(runCtx);
+    recordTaskRun(ctx, task.id, status, reason, at, task.lastTriggerKey);
+    return { status, reason };
+  } catch (err) {
+    recordTaskRun(ctx, task.id, 'failed', err.message, at, task.lastTriggerKey);
+    if (createdBeside && runCtx && !runCtx.stopped && fresh(runCtx)) closeContext(runCtx);
+    return { status: 'failed', reason: err.message };
+  } finally {
+    shop.schedulerRunningTasks.delete(task.id);
+    broadcastSchedule(ctx);
+    showHeader(ctx);
+  }
+}
+
 export async function checkSchedule(ctx, now = null, opts = {}) {
   const data = readSchedule(ctx);
   if (!data.tasks.length) return [];
@@ -5694,6 +5775,7 @@ export async function checkSchedule(ctx, now = null, opts = {}) {
   for (const task of data.tasks) {
     if (!task.enabled) continue;
     if (task.time !== nowTime) continue;
+    if (task.kind === 'research' && (task.date !== today || task.lastTriggerKey || shopOf(ctx).schedulerRunningTasks?.has(task.id))) continue;
     if (task.lastTriggerKey === triggerKey) continue;
     task.lastTriggerKey = triggerKey;
     changed = true;
