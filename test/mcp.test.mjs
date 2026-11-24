@@ -13,9 +13,17 @@ const MCP_BIN = fileURLToPath(new URL('../src/mcp.mjs', import.meta.url));
 
 async function withMockServer(roomsProvider, fn) {
   const server = createServer((req, res) => {
-    if (req.url === '/__rooms' && req.method === 'GET') {
+    const rooms = typeof roomsProvider === 'function' ? roomsProvider() : roomsProvider;
+    if (req.url === '/__health' && req.method === 'GET') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(typeof roomsProvider === 'function' ? roomsProvider() : roomsProvider));
+      res.end(JSON.stringify({ app: 'agent-room', rooms: rooms.map(({ id, root, pages }) => ({ id, root, pages })) }));
+      return;
+    }
+    const match = /^\/r\/([^/]+)\/__health$/.exec(req.url);
+    const room = match && rooms.find((r) => r.id === decodeURIComponent(match[1]));
+    if (room && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ app: 'agent-room', root: room.root, discussion: room.discussion }));
       return;
     }
     res.writeHead(404);
