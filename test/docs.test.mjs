@@ -2757,8 +2757,8 @@ test('Schedule Control bar button, page view, and /__schedule GET/POST endpoints
   const calls = [];
   const screen = {
     clients: new Set(), transcript: [], worker: [],
-    getSchedule: () => ({ quotaFloor: 50, tasks: [], discussions: [{ ref: '2026-11-21-review', name: '2026-11-21-review', title: 'Review', section: null }] }),
-    saveSchedule: (body) => { calls.push(body); return { quotaFloor: body.quotaFloor ?? 50, tasks: [], discussions: [] }; },
+    getSchedule: () => ({ quotaFloor: 50, tasks: [] }),
+    saveSchedule: (body) => { calls.push(body); return { quotaFloor: body.quotaFloor ?? 50, tasks: [] }; },
   };
   const s = await serve(dir, screen);
   try {
