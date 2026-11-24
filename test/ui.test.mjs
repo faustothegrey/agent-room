@@ -2432,6 +2432,36 @@ test('on the screen, New discussion keeps the discussion open with its sessions;
   assert.equal(hub.rooms.size, 5);
 });
 
+test('screen Cancel returns to its creation origin, including after a type switch, or another board', async () => {
+  const { hub, first, settle, gotoOf, pageOf, contexts } = await multiRoom();
+  await handleLine('first', first);
+  await handleLine('/new', first);
+  const second = contexts()[1];
+  await handleLine('second', second);
+  await handleLine('/brainstorm', second); await settle();
+  const created = contexts()[2];
+  await handleLine('/new', created);
+  await handleLine('/cancel', created);
+  assert.equal(gotoOf(created), pageOf(second));
+  assert.deepEqual(created.queued, ['/quit']);
+  await handleLine('/workbench', second); await settle();
+  const another = contexts()[3];
+  hub.rooms.delete(second.key);
+  await handleLine('/cancel', another);
+  assert.equal(gotoOf(another), pageOf(first));
+});
+
+test('screen Cancel leaves an initially empty room empty for brainstorm and workbench', async () => {
+  for (const command of ['/brainstorm', '/workbench']) {
+    const { first } = await multiRoom();
+    await handleLine(command, first);
+    await handleLine('/cancel', first);
+    assert.ok(!first.state.brainstorm);
+    assert.ok(!first.state.workbench);
+    assert.equal(first.discussion, null);
+  }
+});
+
 test('one workshop per folder: tasks labelled by origin, one worker session, lane and queue each, reports back there; Close discussion; Quit room closes them all', async () => {
   const { readFileSync, realpathSync } = await import('node:fs');
   const { queueWork, reloaded } = await import('../src/ui.mjs');

@@ -975,7 +975,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </aside>
 <div id="list-split" role="separator" aria-orientation="vertical" aria-label="Resize the boards list" tabindex="0" title="Drag to resize"></div>
 <div id="main-panel">
-<div id="disc-header" aria-label="Current discussion"><div id="disc-info"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span><span id="disc-autodev" aria-live="polite" hidden></span></div><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions">Actions</summary><div class="menu-items"><button id="summary">Summarize</button><button id="newworkbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">New workbench</button><span id="board-actions" hidden><hr><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details></div>
+<div id="disc-header" aria-label="Current discussion"><div id="disc-info"><span id="disc" title="The active discussion"></span><span id="disc-status" aria-live="polite"></span><span id="disc-autodev" aria-live="polite" hidden></span></div><button id="cancel-creation" hidden>Cancel</button><details class="menu" id="actions-menu"><summary aria-label="Discussion actions" title="Actions">Actions</summary><div class="menu-items"><button id="summary">Summarize</button><button id="newworkbench" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker.">New workbench</button><span id="board-actions" hidden><hr><button id="convert" hidden title="Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder; the discussion rules apply, and the worker can be sent work.">Turn into a discussion</button><button id="closedisc" hidden title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions.">Close</button><button id="closemerge" hidden title="Merge this discussion's worker branch into the room's current branch, clean up its worktree and branch, and close.">Close and Merge</button><button id="closediscard" class="danger" hidden title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost).">Close and Discard</button></span></div></details></div>
 <div id="left">
   <div id="tabs" role="tablist"><button class="tab on" id="tab-talk" role="tab">Discussion</button><button class="tab" id="tab-work" role="tab">Worker</button><span id="tab-controls"><button type="button" id="side-open" class="pane-ctrl" hidden title="Show side pane" aria-label="Show side pane">◫ Side pane</button></span></div>
   <div class="view" id="talk">
@@ -2488,6 +2488,7 @@ function updateReplicaView() {
   $('summary').hidden = readOnly || !!room?.workbench;
   $('reload').hidden = readOnly;
   const canBoardAct = !!(room && localInput && !readOnly);
+  $('cancel-creation').hidden = !(canBoardAct && room?.multi && !room.active && (room.brainstorm || room.workbench || room.open?.length > 1));
   if ($('newworkbench')) $('newworkbench').hidden = !canBoardAct;
   // + New discussion and + New brainstorm live at the top of the Boards list panel.
   $('list-new').hidden = !canBoardAct;
@@ -4182,6 +4183,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus
 for (const id of ['switchroom', 'newroom', 'reload', 'summary']) $(id).addEventListener('click', closeMenus);
 // On the screen with several discussions, New discussion and New brainstorm open beside the others,
 // ending nothing, so one click is enough; in the terminal they end the session in use.
+$('cancel-creation').onclick = () => send('/cancel');
 confirmed($('newdisc'), () => send('/new'), null, () => !room?.multi && room?.started);
 confirmed($('newbrainstorm'), () => send('/brainstorm'), null, () => !room?.multi && room?.started);
 confirmed($('newboard-workbench'), () => send('/workbench'), null, () => !room?.multi && room?.started);
