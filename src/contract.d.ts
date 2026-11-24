@@ -109,3 +109,10 @@ export interface EventsReply extends HttpReply { write(data: string): unknown }
 export interface SayAttachment { name: string; data: string }
 export interface SayRequest { text: string; files?: SayAttachment[]; confirmed?: boolean }
 export type SayReplyStatus = 204 | 400 | 403 | 409 | 413;
+
+// File mentions and the read-only board view use these room-relative routes.
+export interface FilesRequest { detail?: '1' }
+export type FilesResponse = string[];
+export interface FileDetailsResponse { files: string[]; unviewable: string[]; branch: string | null }
+export interface ShowRequest { file: string }
+export type ShowReplyStatus = 204 | 403 | 404;
