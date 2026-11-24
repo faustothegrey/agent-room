@@ -90,7 +90,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
     const usage = usageLine?.(agent);
     if (usage) parts.push(usage);
     // state.briefing (set by ui.mjs once the discussion folder exists): where to write, and so on.
-    if (seen.get(agent.name) === 0) parts.push(intro(agent, activeAgents()), ...(state.briefing ? [state.briefing] : []));
+    if (seen.get(agent.name) === 0) parts.push(intro(agent, activeAgents(), !!state.research), ...(state.briefing ? [state.briefing] : []));
     // After a Resume or Restart (ui.mjs): one sentence, in each agent's next prompt only.
     if (state.restored?.pending?.includes(agent.name)) parts.push(state.restored.text);
     parts.push('New messages since your last turn:', formatMessages(unseenFor(agent)));
@@ -139,7 +139,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
       const user = { speaker, text: userText };
       transcript.push(user);
       onMessage?.(user);
-      const maxTurns = (state.brainstorm ? BRAINSTORM_MAX_LAPS : MAX_LAPS) * selected.length;
+      const maxTurns = (state.brainstorm || state.research ? BRAINSTORM_MAX_LAPS : MAX_LAPS) * selected.length;
       let passes = 0;
       for (let turn = 0; turn < maxTurns; turn++) {
         if (turn > 0 && turn % selected.length === 0 && beforeLap) {
@@ -184,7 +184,8 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
       for (let turn = 0; turn < maxTurns; turn++) {
         const agent = order[turn % n];
         onTurnStart?.(agent, { turn: turn + 1, of: maxTurns });
-        const task = version === null ? draftTask(state.brainstorm, extra) : reviewTask(author.name, state.brainstorm, extra);
+        const noWorker = !!state.brainstorm || !!state.research;
+        const task = version === null ? draftTask(noWorker, extra) : reviewTask(author.name, noWorker, extra);
         const prompt = promptFor(agent, task);
         let firstEntry = null, secondEntry = null, turnResult;
         try {
