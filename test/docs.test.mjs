@@ -3420,7 +3420,7 @@ test('discussion area header: #disc-header spans #main-panel with title, status,
   // #disc-header sits at top of #main-panel, spanning both panes (side-by-side and stacked).
   const mainPanel = html.slice(html.indexOf('<div id="main-panel">'), html.indexOf('<script>'));
   const discHeader = mainPanel.slice(mainPanel.indexOf('<div id="disc-header"'), mainPanel.indexOf('<div id="left">'));
-  assert.match(discHeader, /id="disc"[\s\S]*id="disc-status"[\s\S]*id="disc-autodev"[\s\S]*id="actions-menu"[\s\S]*>Actions<\/summary>[\s\S]*id="summary"[\s\S]*id="board-actions"[\s\S]*id="convert"[\s\S]*id="closedisc"[\s\S]*id="closemerge"[\s\S]*id="closediscard"/);
+  assert.match(discHeader, /id="actions-menu"[\s\S]*>Actions<\/summary>[\s\S]*id="summary"[\s\S]*id="board-actions"[\s\S]*id="convert"[\s\S]*id="closedisc"[\s\S]*id="closemerge"[\s\S]*id="closediscard"[\s\S]*id="disc"[\s\S]*id="disc-status"[\s\S]*id="disc-autodev"/);
   assert.match(html, /#disc-header \{ grid-column: 1 \/ -1;/);
   assert.match(html, /#main-panel \{[^}]*grid-template-rows: auto 1fr;/);
   assert.match(html, /#main-panel\.stacked \{[^}]*grid-template-rows: auto var\(--top, 55%\) 7px 1fr;/);
