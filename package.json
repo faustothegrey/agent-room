@@ -26,5 +26,8 @@
     "vega-embed": "7.3.0",
     "vega-lite": "6.5.0",
     "ws": "^8.22.2"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
   }
 }
