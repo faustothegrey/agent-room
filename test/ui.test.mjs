@@ -6686,8 +6686,8 @@ test('research board: .research marker, briefing, researching instructions on cr
   assert.equal(ctx.rulebooks.active, expectedResearchRules);
 
   const prompts = [];
-  ctx.room.agents[0].turn = async (p) => { prompts.push(p); return prompts.length === 1 ? 'Let us frame the quest.' : 'PASS'; };
-  ctx.room.agents[1].turn = async () => 'PASS';
+  ctx.room.agents[0].turn = async (p) => { Object.assign(ctx.sessions.get('A'), { started: true }); prompts.push(p); return prompts.length === 1 ? 'Let us frame the quest.' : 'PASS'; };
+  ctx.room.agents[1].turn = async () => { Object.assign(ctx.sessions.get('B'), { threadId: 't-b' }); return 'PASS'; };
   await handleLine('Should we adopt a framework?', ctx);
 
   const name = ctx.discussion.name;
