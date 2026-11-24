@@ -2501,8 +2501,9 @@ function updateReplicaView() {
   // + New discussion and + New brainstorm live at the top of the Boards list panel.
   $('list-new').hidden = !canBoardAct;
   $('newdisc').hidden = !(room?.active || room?.brainstorm || room?.workbench || room?.research);
-  // Turn into a discussion / Turn into research: a brainstorm once its first message has named it.
-  $('convert').hidden = !(canBoardAct && room?.brainstorm && room.active);
+  // A named brainstorm or research board can become a discussion.
+  $('convert').hidden = !(canBoardAct && (room?.brainstorm || room?.research) && room.active);
+  $('convert').title = room?.research ? 'Keep the folder and start fresh discussion sessions; linked recurring tasks are turned off.' : 'Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder.';
   if ($('convert-research')) $('convert-research').hidden = !(canBoardAct && room?.brainstorm && room.active);
   // With several discussions open (the screen), New discussion and Resume keep this one open;
   // Close closes it (labelled "Close with pending work" when its branch has pending work).
@@ -2648,7 +2649,7 @@ function confirmed(b, run, warning, ask = () => room?.started || warning) {
     e.stopPropagation();
     if (ask() && !b.dataset.armed) {
       b.dataset.armed = '1'; b.dataset.label = b.textContent;
-      b.textContent = warning || 'Click again: this session ends and the chat clears';
+      b.textContent = (typeof warning === 'function' ? warning() : warning) || 'Click again: this session ends and the chat clears';
       return setTimeout(() => { delete b.dataset.armed; b.textContent = b.dataset.label; }, 4000);
     }
     run();
@@ -3163,6 +3164,10 @@ function renderBoards() {
         if (target === 'archive') archiveButton(b, d);
         items.append(b);
       }
+      const convert = el('button', '', 'Turn into a discussion');
+      convert.title = 'Keep the folder and start fresh discussion sessions; linked recurring tasks are turned off.';
+      confirmed(convert, () => { closeMenus(); send('/convert ' + path); }, 'Click again: research sessions end and scheduled tasks turn off', () => true);
+      items.append(convert);
       if (!(isCurrent && !room.started)) {
         const f = el('button', '', 'Start fresh'); freshButton(f, d); items.append(f);
       }
@@ -4339,7 +4344,7 @@ confirmed($('newboard-workbench'), () => send('/workbench'), null, () => !room?.
 confirmed($('newworkbench'), () => { closeMenus(); send('/workbench'); }, null, () => !room?.multi && room?.started);
 confirmed($('newresearch'), () => send('/research'), null, () => !room?.multi && room?.started);
 confirmed($('newresearch-menu'), () => { closeMenus(); send('/research'); }, null, () => !room?.multi && room?.started);
-confirmed($('convert'), () => { closeMenus(); send('/convert ' + room.active); }, 'Click again: it moves to discussions/', () => true);
+confirmed($('convert'), () => { closeMenus(); send('/convert ' + room.active); }, () => room?.research ? 'Click again: research sessions end and scheduled tasks turn off' : 'Click again: it moves to discussions/', () => true);
 confirmed($('convert-research'), () => { closeMenus(); send('/convert ' + room.active + ' research'); }, 'Click again: it moves to discussions/ as a research board', () => true);
 confirmed($('closedisc'), () => send('/close'), 'Click again: this discussion closes (its agents stop)', () => !!room?.started);
 $('closemerge').onclick = () => {

@@ -4181,10 +4181,10 @@ test('research board UI: + New research, Research section, exact row menu action
     const menu = row?.children?.find((c) => c.tag === 'details');
     return buttonsIn(menu).map((b) => b.textContent);
   };
-  // Active open current research row menu: Close, Archive, Defer, Start fresh, Delete, Move up, Move down (no worker actions).
-  assert.deepEqual(menuLabelsFor(resSec, '2026-11-24-quest-a'), ['Close', 'Archive', 'Defer', 'Start fresh', 'Delete', 'Move up', 'Move down']);
-  // Active closed non-current research row menu: Resume, Peek files, Archive, Defer, Start fresh, Delete, Move up, Move down (no worker actions).
-  assert.deepEqual(menuLabelsFor(resSec, '2026-11-24-quest-b'), ['Resume', 'Peek files', 'Archive', 'Defer', 'Start fresh', 'Delete', 'Move up', 'Move down']);
+  // Active open current research row menu includes conversion (no worker actions).
+  assert.deepEqual(menuLabelsFor(resSec, '2026-11-24-quest-a'), ['Close', 'Archive', 'Defer', 'Turn into a discussion', 'Start fresh', 'Delete', 'Move up', 'Move down']);
+  // Active closed non-current research row menu includes conversion (no worker actions).
+  assert.deepEqual(menuLabelsFor(resSec, '2026-11-24-quest-b'), ['Resume', 'Peek files', 'Archive', 'Defer', 'Turn into a discussion', 'Start fresh', 'Delete', 'Move up', 'Move down']);
   // Archived research row menu: Resume, Peek files, Make active, Defer, Start fresh, Delete (no worker actions).
   assert.deepEqual(menuLabelsFor(archSec, '2026-11-23-old-quest'), ['Resume', 'Peek files', 'Make active', 'Defer', 'Start fresh', 'Delete']);
 
@@ -4240,4 +4240,21 @@ test('research row displays lap threshold and last and next run dates', () => {
   assert.equal(high.children[0].textContent, 'Laps: ≥31');
   assert.equal(high.children[0].className, 'research-laps-high');
   assert.match(high.children[1].textContent, /Last: —.*Next: —/);
+});
+
+test('research conversion appears in both menus and asks for two clicks', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  assert.match(source, /\$\('convert'\)\.hidden = !\(canBoardAct && \(room\?\.brainstorm \|\| room\?\.research\) && room\.active\)/);
+  const researchRows = source.slice(source.indexOf('// --- 2. Research (active) ---'), source.indexOf('// --- 3. Brainstorms ---'));
+  assert.match(researchRows, /Turn into a discussion[\s\S]*confirmed\(convert,[\s\S]*send\('\/convert ' \+ path\)/);
+  const confirmedCode = source.slice(source.indexOf('function confirmed('), source.indexOf('// Rollback queues work;'));
+  const confirmed = new Function('room', 'setTimeout', confirmedCode + '\nreturn confirmed;')({ started: true }, () => {});
+  const button = { dataset: {}, textContent: 'Turn into a discussion' };
+  let sent = 0;
+  confirmed(button, () => { sent++; }, 'Click again: research sessions end', () => true);
+  button.onclick({ stopPropagation() {} });
+  assert.equal(sent, 0);
+  assert.match(button.textContent, /Click again/);
+  button.onclick({ stopPropagation() {} });
+  assert.equal(sent, 1);
 });

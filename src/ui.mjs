@@ -955,6 +955,10 @@ function briefing(ctx) {
       + `The room's root, ${ctx.cwd}, holds the work itself.`;
   }
   if (continued) {
+    if (ctx.discussion.fromResearch) {
+      return `This discussion was turned from a research board. Its folder is ${dir}: create, read and write this discussion's documents there. `
+        + `Before replying, read its research notes and earlier transcripts in ${join(dir, 'transcripts')}/${s ? ` (the transcripts are the source; this summary may omit details):${summary}` : '.'}`;
+    }
     if (existsSync(join(dir, 'closing-statement.md'))) {
       const text = readFileSync(join(dir, 'closing-statement.md'), 'utf8');
       return `This session continues the discussion in ${dir}: create, read and write this discussion's documents (notes, drawings) there. Start from its closing statement:\n\n${text}${summary}`;
@@ -1411,6 +1415,7 @@ async function resumeDiscussion(ctx, ref, { loadRoom = load } = {}) {
     const freshSaved = { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(), discussion: { name, title: saved?.discussion?.title ?? name },
       ...(isWb && { workbench: true, worker: savedWorker }),
       ...(isRes && { research: true }),
+      ...(saved?.fromResearch && { fromResearch: true, summary: checkpointSummary(saved) }),
       fresh: true, fromClosed: true, agentSpecs: next.agentSpecs, workerSpec: next.workerSpec, work: saved?.work ?? workOf(shopOf(ctx), name) };
     writeCheckpoint(ctx, name, freshSaved);
     setClosed(ctx, name, false);
@@ -1422,7 +1427,8 @@ async function resumeDiscussion(ctx, ref, { loadRoom = load } = {}) {
       const shop = shopOf(ctx);
       if (!shop.log.some((m) => m.origin === name)) shop.log.push(...savedWorker.map((m) => ({ ...m, owner: name })));
     }
-    switchTo(ctx, { name, dir, title: freshSaved.discussion.title, continued: true });
+    switchTo(ctx, { name, dir, title: freshSaved.discussion.title, continued: true, ...(freshSaved.fromResearch && { fromResearch: true }) });
+    ctx.freshSummary = checkpointSummary(freshSaved);
     ctx.closedBriefing = !isWb;
     wire(ctx);
     await reportWork(ctx, name, freshSaved.work);
@@ -1454,7 +1460,7 @@ async function resumeDiscussion(ctx, ref, { loadRoom = load } = {}) {
   }
   if (isRes) ctx.state.research = true;
   if (isRes) await defaultsForNew(ctx, { reloadAgents: true });
-  switchTo(ctx, { name, dir, title: saved?.discussion?.title ?? name, continued: true, ...(saved?.fromBrainstorm && { fromBrainstorm: true }) });
+  switchTo(ctx, { name, dir, title: saved?.discussion?.title ?? name, continued: true, ...(saved?.fromBrainstorm && { fromBrainstorm: true }), ...(saved?.fromResearch && { fromResearch: true }) });
   setClosed(ctx, name, false);
   showHeader(ctx);
   ctx.freshSummary = isWb ? null : checkpointSummary(saved);
@@ -1711,6 +1717,68 @@ async function convertBrainstormToResearch(ctx, ref) {
   }
   showHeader(ctx);
   note(ctx, `Turned the brainstorm ${name} into the research board ${name}, in discussions/: old sessions ended; the same agents start fresh with the research rulebook, reading its transcripts/${summary ? ` and latest summary${summary.outcome === 'agreed' ? '' : ' (not agreed)'}` : ''}.${cleanupWarning}`);
+}
+
+// Turn an active research board into a discussion in the same folder, with fresh sessions.
+async function convertResearchToDiscussion(ctx, ref) {
+  const parent = join(ctx.cwd, 'discussions');
+  const normalized = ref.startsWith('discussions/') ? ref.slice('discussions/'.length) : ref;
+  const d = discussionRef(parent, normalized);
+  if (!d || !isResearchDir(join(parent, d.section ?? '', d.name))) return note(ctx, `✗ No research board "${ref}". Nothing was changed.`, true);
+  if (d.section) return note(ctx, `✗ ${d.name} is in ${d.section}/: make it active before turning it into a discussion.`, true);
+  const name = d.name, dir = join(parent, name), marker = join(dir, RESEARCH_MARKER);
+  const open = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, name));
+  if (open?.busy) return note(ctx, `✗ ${name} can't become a discussion while a round or summary is running. Nothing was changed.`, true);
+  if (open && open !== ctx) { open.say?.(`/convert discussions/${name}`); return goto(ctx, open); }
+  const saved = readCheckpoint(ctx, name);
+  if (saved?.invalid) return note(ctx, `✗ The checkpoint of ${name} is invalid. Nothing was changed.`, true);
+  const title = open?.discussion?.title ?? saved?.discussion?.title ?? name;
+  const agentSpecs = open?.agentSpecs ?? saved?.agentSpecs ?? ctx.agentSpecs;
+  const workerSpec = open?.workerSpec ?? saved?.workerSpec ?? ctx.workerSpec ?? roomDefaults(ctx).worker;
+  const latest = open?.state?.transcript?.findLast((m) => m.speaker === 'Summary' && m.outcome);
+  const summary = latest ? { text: latest.text, outcome: latest.outcome, by: latest.by } : checkpointSummary(saved);
+  let loaded = null, state = null, sessions = null;
+  if (open) {
+    state = { transcript: [], seen: new Map() }; sessions = new Map();
+    try { loaded = await load({ ...open, discussion: null, agentSpecs, workerSpec, sessions, state }, `?convert-discussion=${Date.now()}`); }
+    catch (err) { return note(ctx, `✗ Couldn't start fresh discussion sessions for ${name}: ${err.message}. Nothing was changed.`, true); }
+    if (open.busy) return note(ctx, `✗ ${name} can't become a discussion while a round or summary is running. Nothing was changed.`, true);
+  }
+  const freshSaved = { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
+    discussion: { name, title }, fresh: true, fromResearch: true, summary, agentSpecs, workerSpec };
+  const schedule = readSchedule(ctx), linked = schedule.tasks.filter((t) => t.kind === 'recurring' && t.board === name);
+  const cp = checkpointFile(ctx, name);
+  let oldMarker, oldCheckpoint;
+  try { oldMarker = readFileSync(marker); oldCheckpoint = existsSync(cp) ? readFileSync(cp) : null; }
+  catch (err) { return note(ctx, `✗ Couldn't inspect ${name} before conversion: ${err.message}. Nothing was changed.`, true); }
+  try {
+    unlinkSync(marker);
+    writeCheckpoint(ctx, name, freshSaved);
+    if (linked.length) { for (const task of linked) task.enabled = false; writeSchedule(ctx, schedule); }
+  } catch (err) {
+    try {
+      if (!existsSync(marker)) writeFileSync(marker, oldMarker, { flag: 'wx' });
+      if (oldCheckpoint) writeFileSync(cp, oldCheckpoint); else if (existsSync(cp)) unlinkSync(cp);
+    } catch (rollback) { return note(ctx, `✗ Conversion failed (${err.message}); restoring the research board also failed (${rollback.message}). Check ${dir} and its checkpoint.`, true); }
+    return note(ctx, `✗ Couldn't convert ${name}: ${err.message}. The research board was restored.`, true);
+  }
+  if (open) {
+    if (open.logPath) { try { appendFileSync(open.logPath, '_(turned into a discussion)_\n\n'); } catch {} }
+    for (const agent of open.room.agents) agent.reset?.();
+    detachWorker(open);
+    Object.assign(open, loaded, { state, sessions, agentSpecs, workerSpec, logPath: null, pendingLog: '', lastRound: null,
+      freshSummary: summary, agentsStarted: false, retryFailure: null, autoDev: null, autoDevSent: [], workDispatchedLen: 0, workReady: false });
+    open.screen.transcript = state.transcript;
+    Object.assign(open.screen, { doc: null, thinking: null, status: null, peek: null });
+    wire(open);
+    switchTo(open, { name, dir, title, continued: true, fromResearch: true });
+    open.freshSummary = summary;
+    refreshWorker(open).catch(() => {});
+  }
+  listedCheckpoints.clear();
+  if (linked.length) broadcastSchedule(ctx);
+  showHeader(ctx);
+  note(ctx, `Turned research board ${name} into a discussion: the same agents start fresh with discussion rules, reading the research notes, transcripts and latest summary.${linked.length ? ` Turned off ${linked.length} recurring scheduled task${linked.length === 1 ? '' : 's'} linked to this board.` : ''}`);
 }
 
 // /convert brainstorms/<name> (Turn into a discussion): its folder moves to discussions/<name>/
@@ -3992,7 +4060,7 @@ export async function handleLine(line, ctx) {
     return target === ctx ? closeDiscussion(ctx) : void target.say?.('/close');
   }
   const convert = /^\/convert\s+(\S+)(?:\s+(research))?$/.exec(line);
-  if (convert) return convert[2] === 'research' ? convertBrainstormToResearch(ctx, convert[1]) : convertBrainstorm(ctx, convert[1]);
+  if (convert) return convert[2] === 'research' ? convertBrainstormToResearch(ctx, convert[1]) : convert[1].startsWith('brainstorms/') ? convertBrainstorm(ctx, convert[1]) : convertResearchToDiscussion(ctx, convert[1]);
   const remove = /^\/delete\s+(\S+)$/.exec(line);
   if (remove) return remove[1].startsWith(`${BRAINSTORMS}/`) ? deleteBrainstorm(ctx, remove[1]) : deleteResearch(ctx, remove[1]);
   if (line === '/autodev') return startAutoDev(ctx);
@@ -5610,7 +5678,7 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
     const parent = join(ctx.cwd, 'discussions');
     const ref = task.board && [task.board, ...SECTIONS.map((section) => `${section}/${task.board}`)]
       .find((candidate) => discussionRef(parent, candidate));
-    if (task.board && !ref) throw new Error(`Research board ${task.board} was not found.`);
+    if (task.board && (!ref || !isResearchDir(join(parent, ref)))) throw new Error(`Research board ${task.board} was not found.`);
     let open = task.board && siblings(ctx).find((c) => !c.stopped && isDiscussion(c, task.board));
     if (open?.busy) {
       const reason = `${task.board} has a round or summary in progress`;
@@ -5629,6 +5697,7 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
       recordTaskRun(ctx, task.id, 'skipped', check.reason, at, task.lastTriggerKey);
       return { status: 'skipped', reason: check.reason };
     }
+    if (task.board && !isResearchDir(join(parent, ref))) throw new Error(`Research board ${task.board} is no longer research.`);
     // Another round may have started while quota was being fetched.
     open = task.board && siblings(ctx).find((c) => !c.stopped && isDiscussion(c, task.board));
     if (open?.busy) {
