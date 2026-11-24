@@ -2382,7 +2382,8 @@ async function closeNamedDiscussion(ctx, name, { extraLine = null, rethrow = fal
       writer = `${spec.provider[0].toUpperCase() + spec.provider.slice(1)} (${modelLabel(spec.provider, spec.model)})`;
       note(ctx, `Closing ${d.name}: ${writer} is writing the closing statement…`);
       const onFormatNote = (text, err) => { log(target, `_(${text})_\n\n`); note(ctx, text, err); };
-      statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports, onFormatNote }, target.closingAgent?.());
+      try { statement = await target.closingStatement({ dir: target.discussion.dir, workerReports: reports, onFormatNote }, target.closingAgent?.()); }
+      catch (err) { toScreen(ctx, { type: 'agent-failure', agent: writer, error: err.message }); throw err; }
     }
     const cleanupLine = extraLine ? null : await cleanupMergedOnClose(target, d.name).catch((err) => {
       const msg = `Worker worktree/branch cleanup failed (${err.message}): nothing removed.`;
@@ -4158,7 +4159,10 @@ async function runSummary(ctx, auto = false, extra) {
         used = ctx.usage.addUsage(used, m.usage);
         ctx.totals[m.speaker] = ctx.usage.addUsage(ctx.totals[m.speaker], m.usage);
       }
-      if (m.error) note(ctx, `✗ ${m.speaker} failed: ${m.text}`, true);
+      if (m.error) {
+        note(ctx, `✗ ${m.speaker} failed: ${m.text}`, true);
+        toScreen(ctx, { type: 'agent-failure', agent: m.speaker, error: m.text });
+      }
     },
   }).finally(() => { ctx.busy = false; showHeader(ctx); });
   if (result) {
