@@ -1962,7 +1962,8 @@ function waitingState(ctx) {
   }
   const t = ctx.state?.transcript ?? [];
   const last = t.at(-1);
-  if (t.length > (ctx.workDispatchedLen ?? 0) && last?.outcome === 'agreed' && summaryHasNextStep(last.text) && !offer?.text) {
+  if (t.length > (ctx.workDispatchedLen ?? 0) && last?.outcome === 'agreed' && summaryHasNextStep(last.text) && !offer?.text
+      && !(workReady && summaryOutcome(last.text) === 'FINISH')) {
     return { waitingForInput: true, waitingReason: null, readyForAutoDev: false, workReady };
   }
   if (offer?.text) {

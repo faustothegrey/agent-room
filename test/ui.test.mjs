@@ -6427,6 +6427,23 @@ test('worktreeStatus and workerInfo report unquoted conflict paths and clear the
   assert.deepEqual(entry2?.conflicts ?? [], []);
 });
 
+test('finished auto dev summary with a merge next step leaves work ready', async () => {
+  const { first } = await multiRoom({ worker: async () => 'done' });
+  let reply = '**Agreed**\n- Done\n\n**Next step**\n- Do: merge the work\n\nOutcome: FINISH';
+  first.room.agents[0].turn = async (prompt) => /summary/i.test(prompt) ? reply : 'PASS';
+  first.room.agents[1].turn = async () => 'PASS';
+  await handleLine('start', first);
+  first.workReady = true;
+  await handleLine('/summary', first);
+  const entry = () => first.screen.room.open.find((o) => o.current);
+  assert.equal(entry().workReady, true);
+  assert.equal(entry().waitingForInput, false);
+  assert.equal(entry().readyForAutoDev, false);
+
+  assert.equal(first.state.transcript.at(-1).outcome, 'agreed');
+  assert.match(first.state.transcript.at(-1).text, /Outcome: FINISH/);
+});
+
 test('workReady: set on finishAutoDev, kept across catchUpWithBranch, cleared by new message or other worker task, never on workbench', async () => {
   const { writeFileSync } = await import('node:fs');
   const { execFileSync } = await import('node:child_process');
@@ -6483,11 +6500,13 @@ test('workReady: set on finishAutoDev, kept across catchUpWithBranch, cleared by
   assert.equal(entry().readyForAutoDev, true);
 
   // Start auto dev -> worker implements -> report round summarizes with Outcome: FINISH -> workReady is true.
-  replies = ['Looks good.', 'PASS', '**Agreed**\n- Feature complete\n\nOutcome: FINISH'];
+  replies = ['Looks good.', 'PASS', '**Agreed**\n- Feature complete\n\n**Next step**\n- Do: merge the work\n\nOutcome: FINISH'];
   await handleLine('/autodev', first);
   await until(() => first.autoDev?.status === 'finished' && !pumping);
   await first.workQueue;
   assert.equal(entry().workReady, true);
+  assert.equal(entry().waitingForInput, false);
+  assert.equal(entry().readyForAutoDev, false);
   assert.equal(entry().ongoing, false);
 
   // Advance main so Catch up is needed; refreshWorker reports catchUp: true.
