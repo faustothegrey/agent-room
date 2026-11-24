@@ -4159,7 +4159,10 @@ async function runSummary(ctx, auto = false, extra) {
         used = ctx.usage.addUsage(used, m.usage);
         ctx.totals[m.speaker] = ctx.usage.addUsage(ctx.totals[m.speaker], m.usage);
       }
-      if (m.error) note(ctx, `✗ ${m.speaker} failed: ${m.text}`, true);
+      if (m.error) {
+        note(ctx, `✗ ${m.speaker} failed: ${m.text}`, true);
+        toScreen(ctx, { type: 'agent-failure', agent: m.speaker, error: m.text });
+      }
     },
   }).finally(() => { ctx.busy = false; showHeader(ctx); });
   if (result) {

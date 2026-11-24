@@ -78,6 +78,18 @@ test('auto-summarize: on by default, a summary follows a round in which an agent
   assert.deepEqual([result.speaker, result.outcome, result.text], ['Summary', 'agreed', '- the idea']);
 });
 
+test('a live summary-turn failure sends the agent and full error to the screen', async () => {
+  const ctx = await scriptedCtx([]);
+  const events = [];
+  ctx.docs = { ...ctx.docs, broadcast: (screen, event) => events.push(event) };
+  ctx.state.transcript.push({ speaker: 'User', text: 'Discuss this' });
+  ctx.room.agents[0].turn = async () => { throw new Error('summary failed\nfull detail'); };
+  await handleLine('/summary', ctx);
+  assert.deepEqual(events.filter((event) => event.type === 'agent-failure'), [
+    { type: 'agent-failure', agent: 'A', error: 'summary failed\nfull detail' },
+  ]);
+});
+
 test('auto-summarize: no summary after a round of passes', async () => {
   const quiet = await scriptedCtx([]);
   await handleLine('hello', quiet);
