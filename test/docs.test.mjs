@@ -2059,8 +2059,8 @@ test('Brainstorms tab: rows by title with their actions, and an order of their o
   assert.equal(sent.at(-1), '/resume brainstorms/2026-11-12-closed');
   click(action('Open idea', 'Go to'));
   assert.equal(location.href, '/r/x-d2/__room');
-  // The actions menu: Resume, Peek files, Close, Archive, Defer, Turn into a discussion, Start fresh, Delete, Move up / Move down.
-  assert.deepEqual(menuLabels('Closed idea'), ['Resume', 'Peek files', 'Close', 'Archive', 'Defer', 'Turn into a discussion', 'Start fresh', 'Delete', 'Move up', 'Move down']);
+  // The actions menu: Resume, Peek files, Close, Archive, Defer, Turn into a discussion, Turn into research, Start fresh, Delete, Move up / Move down.
+  assert.deepEqual(menuLabels('Closed idea'), ['Resume', 'Peek files', 'Close', 'Archive', 'Defer', 'Turn into a discussion', 'Turn into research', 'Start fresh', 'Delete', 'Move up', 'Move down']);
   assert.equal(action('Current idea', 'Archive').disabled, true);
   assert.equal(action('Open idea', 'Defer').disabled, true);
   assert.equal(action('Closed idea', 'Archive').disabled, false);
@@ -4068,4 +4068,159 @@ test('Boards rows show work ready with ranking, merge suffixes, no-suffix cases,
   });
   harness.renderDiscussions();
   assert.deepEqual(infoFor('discussions/2026-11-23-ongoing-wins'), { label: 'work ready · mergeable', labelTitle: '' });
+});
+
+test('research board UI: + New research, Research section, exact row menu actions, absent Worker tab, and Archived · Deferred', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'research-ui-'));
+  const s = await serve(root, { clients: new Set(), transcript: [], say: () => {} });
+  const html = await (await s.get('/__room')).text();
+  s.close();
+
+  const listPanel = html.slice(html.indexOf('<aside id="list-panel"'), html.indexOf('</aside>'));
+  assert.match(listPanel, /id="list-new"[\s\S]*id="newresearch"[^>]*>\+ New research<\/button>/);
+  const discHeader = html.slice(html.indexOf('<div id="disc-header"'), html.indexOf('<div id="left">'));
+  assert.match(discHeader, /id="actions-menu"[\s\S]*id="newresearch-menu"[^>]*>New research<\/button>/);
+  assert.match(html, /#board-list \.entry\.research::before \{ content: '🔬'; \}/);
+
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const closeCode = source.slice(source.indexOf('function closeActionLabel('), source.indexOf('async function startCatchUp('));
+  const viewCode = source.slice(source.indexOf('function updateReplicaView()'), source.indexOf('async function remoteFiles()'));
+  const boardsCode = source.slice(source.indexOf('function discussionsIn('), source.indexOf('const renderDiscussions = renderBoards'));
+  const node = (tag = 'div') => {
+    const classes = new Set();
+    return {
+      tag, hidden: false, disabled: false, title: '', textContent: '', dataset: {}, style: {}, children: [],
+      get className() { return [...classes].join(' '); },
+      set className(v) { classes.clear(); for (const c of String(v).split(/\s+/).filter(Boolean)) classes.add(c); },
+      classList: {
+        add: (...cs) => cs.forEach((c) => classes.add(c)),
+        remove: (...cs) => cs.forEach((c) => classes.delete(c)),
+        toggle: (c, on) => (on === undefined ? (classes.has(c) ? classes.delete(c) : classes.add(c)) : (on ? classes.add(c) : classes.delete(c))),
+        contains: (c) => classes.has(c),
+      },
+      setAttribute() {},
+      addEventListener() {},
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      set innerHTML(v) { this.children = v === '<div id="board-list"></div>' ? [node('div')] : []; },
+      get firstChild() { return this.children[0] ?? null; },
+    };
+  };
+  const els = {};
+  const $ = (id) => els[id] || (els[id] = node(id));
+  const harness = new Function('$', 'document', 'box', 'requestAnimationFrame',
+    'let room = null, viewing = null, peeking = null, peek = null, localInput = true, attaching = false, pending = [], viewExpired = false, viewNotice = null, localThinking = null, localWorking = null, replica = null, tab = "work", dragging = false, renderAfterDrag = false, openRowMenu = null, explorerMode = "discussion";\n' +
+    'const expandedSections = new Set(["discussions", "research", "brainstorms", "archived-deferred"]);\n' +
+    'let cachedDetail = { files: [\n' +
+    '  "discussions/2026-11-24-quest-a/transcripts/s.md",\n' +
+    '  "discussions/2026-11-24-quest-b/transcripts/s.md",\n' +
+    '  "discussions/2026-11-24-regular/transcripts/s.md",\n' +
+    '  "discussions/archive/2026-11-23-old-quest/transcripts/s.md",\n' +
+    '] };\n' +
+    'const isDiscussion = (n) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(n);\n' +
+    'const ordered = (list) => list, discussionTitle = (n) => n, brainstormTitle = (n) => n, displayTitle = (n, t) => t || n || "", closingPhase = () => null, closingLabel = () => "", resumeTip = () => "", freshButton = () => {}, archiveButton = () => {}, rollbackButtons = () => {}, closeMenus = () => {}, send = () => {}, showSub = () => {}, updateTabs = () => {}, renderExplorer = () => {}, notesGuard = (fn) => fn(), startMerge = () => {}, startDiscard = () => {}, dragRow = () => {}, confirmed = (b, fn) => { b.onclick = fn; };\n' +
+    'const orderButtons = (items, name, i, list) => { const up = document.createElement("button"); up.textContent = "Move up"; const dn = document.createElement("button"); dn.textContent = "Move down"; items.append(up, dn); };\n' +
+    'const updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, renderAutoDev = () => {}, renderAttachments = () => {}, talkStatus = () => "", receivedTime = () => "", currentTitle = () => "", updateTabTitle = () => {};\n' +
+    closeCode + '\n' + viewCode + '\n' + boardsCode + '\n' +
+    'return { setState: ({ r, mergeable, discardable }) => { room = r; workerMergeable = mergeable || {}; workerDiscardable = new Set(discardable || []); workerPending = []; updateReplicaView(); renderBoards(); }, getTab: () => tab };'
+  )($, { createElement: node }, node('textarea'), () => {});
+
+  const resRoom = {
+    active: 'discussions/2026-11-24-quest-a',
+    started: true,
+    brainstorm: false,
+    workbench: false,
+    research: true,
+    researches: ['2026-11-24-quest-a', '2026-11-24-quest-b', '2026-11-23-old-quest'],
+    closedDiscussions: ['2026-11-24-quest-b', '2026-11-23-old-quest'],
+    multi: true,
+    open: [{ current: true, active: 'discussions/2026-11-24-quest-a', research: true, started: true }],
+  };
+  const mergeInfo = { canMerge: true, targetBranch: 'main' };
+  harness.setState({
+    r: resRoom,
+    mergeable: { '2026-11-24-quest-a': mergeInfo, '2026-11-24-quest-b': mergeInfo },
+    discardable: ['2026-11-24-quest-a', '2026-11-24-quest-b'],
+  });
+
+  // Absent Worker tab: hidden, tab forced back from work to talk, Close and Merge / Discard hidden.
+  assert.equal($('tab-work').hidden, true);
+  assert.equal($('tab-talk').hidden, false);
+  assert.equal(harness.getTab(), 'talk');
+  assert.equal($('talk').hidden, false);
+  assert.equal($('work').hidden, true);
+  assert.equal($('summary').hidden, false);
+  assert.equal($('newresearch-menu').hidden, false);
+  assert.equal($('closedisc').hidden, false);
+  assert.equal($('closemerge').hidden, true);
+  assert.equal($('closediscard').hidden, true);
+
+  // Boards sections: Research section has quest-a and quest-b; Discussions has regular; Archived · Deferred has old-quest.
+  const sections = $('list-pane').firstChild.children;
+  const findSection = (key) => sections.find((sec) => sec.dataset.section === key);
+  const discSec = findSection('discussions');
+  const resSec = findSection('research');
+  const archSec = findSection('archived-deferred');
+  assert.ok(discSec && resSec && archSec);
+  assert.match(resSec.children[0].textContent, /^Research \(2\)$/);
+
+  const buttonsIn = (rootNode) => {
+    const out = [];
+    const walk = (n) => { if (n.tag === 'button') out.push(n); for (const c of n.children || []) walk(c); };
+    walk(rootNode);
+    return out;
+  };
+  assert.ok(buttonsIn(discSec).some((b) => b.textContent === '2026-11-24-regular'));
+  assert.ok(!buttonsIn(discSec).some((b) => b.textContent === '2026-11-24-quest-a'));
+  assert.ok(buttonsIn(resSec).some((b) => b.textContent === '2026-11-24-quest-a' && b.classList.contains('research')));
+  assert.ok(buttonsIn(resSec).some((b) => b.textContent === '2026-11-24-quest-b' && b.classList.contains('research')));
+  assert.ok(buttonsIn(archSec).some((b) => b.textContent === '2026-11-23-old-quest' && b.classList.contains('research')));
+
+  const menuLabelsFor = (sec, name) => {
+    const row = sec.children.find((r) => buttonsIn(r).some((b) => b.textContent === name));
+    const menu = row?.children?.find((c) => c.tag === 'details');
+    return buttonsIn(menu).map((b) => b.textContent);
+  };
+  // Active open current research row menu: Close, Archive, Defer, Start fresh, Delete, Move up, Move down (no worker actions).
+  assert.deepEqual(menuLabelsFor(resSec, '2026-11-24-quest-a'), ['Close', 'Archive', 'Defer', 'Start fresh', 'Delete', 'Move up', 'Move down']);
+  // Active closed non-current research row menu: Resume, Peek files, Archive, Defer, Start fresh, Delete, Move up, Move down (no worker actions).
+  assert.deepEqual(menuLabelsFor(resSec, '2026-11-24-quest-b'), ['Resume', 'Peek files', 'Archive', 'Defer', 'Start fresh', 'Delete', 'Move up', 'Move down']);
+  // Archived research row menu: Resume, Peek files, Make active, Defer, Start fresh, Delete (no worker actions).
+  assert.deepEqual(menuLabelsFor(archSec, '2026-11-23-old-quest'), ['Resume', 'Peek files', 'Make active', 'Defer', 'Start fresh', 'Delete']);
+
+  // Turn into research sits next to Turn into a discussion in Actions ▾ and in a brainstorm row's ⋯ menu.
+  assert.match(discHeader, /id="convert"[^>]*>Turn into a discussion<\/button><button id="convert-research"[^>]*>Turn into research<\/button>/);
+  const bHarness = new Function('$', 'document', 'box', 'requestAnimationFrame',
+    'let room = null, viewing = null, peeking = null, peek = null, localInput = true, attaching = false, pending = [], viewExpired = false, viewNotice = null, localThinking = null, localWorking = null, replica = null, tab = "talk", dragging = false, renderAfterDrag = false, openRowMenu = null, explorerMode = "discussion";\n' +
+    'const expandedSections = new Set(["discussions", "research", "brainstorms", "archived-deferred"]);\n' +
+    'let cachedDetail = { files: ["brainstorms/2026-11-24-spark/transcripts/s.md"] };\n' +
+    'const isDiscussion = (n) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(n);\n' +
+    'const sent = [];\n' +
+    'const ordered = (list) => list, discussionTitle = (n) => n, brainstormTitle = (n) => n, displayTitle = (n, t) => t || n || "", closingPhase = () => null, closingLabel = () => "", resumeTip = () => "", freshButton = () => {}, archiveButton = () => {}, rollbackButtons = () => {}, closeMenus = () => {}, send = (cmd) => sent.push(cmd), showSub = () => {}, updateTabs = () => {}, renderExplorer = () => {}, notesGuard = (fn) => fn(), startMerge = () => {}, startDiscard = () => {}, dragRow = () => {}, orderButtons = () => {}, confirmed = (b, fn) => { b.onclick = fn; };\n' +
+    'const updateDiscWorkers = () => {}, renderWorkerStop = () => {}, updateReplicaHeader = () => {}, renderAutoDev = () => {}, renderAttachments = () => {}, talkStatus = () => "", receivedTime = () => "", currentTitle = () => "", updateTabTitle = () => {};\n' +
+    closeCode + '\n' + viewCode + '\n' + boardsCode + '\n' +
+    'return { setRoom: (r) => { room = r; workerMergeable = {}; workerDiscardable = new Set(); workerPending = []; updateReplicaView(); renderBoards(); }, sent };'
+  )($, { createElement: node }, node('textarea'), () => {});
+  bHarness.setRoom({
+    active: 'brainstorms/2026-11-24-spark',
+    started: true,
+    brainstorm: true,
+    workbench: false,
+    research: false,
+    researches: [],
+    closedDiscussions: [],
+    multi: true,
+    open: [{ current: true, active: 'brainstorms/2026-11-24-spark', brainstorm: true, started: true }],
+  });
+  assert.equal($('convert').hidden, false);
+  assert.equal($('convert-research').hidden, false);
+  const bSec = $('list-pane').firstChild.children.find((sec) => sec.dataset.section === 'brainstorms');
+  const bLabels = menuLabelsFor(bSec, '2026-11-24-spark');
+  assert.ok(bLabels.includes('Turn into a discussion'));
+  assert.ok(bLabels.includes('Turn into research'));
+  assert.equal(bLabels.indexOf('Turn into research'), bLabels.indexOf('Turn into a discussion') + 1);
+  const bRow = bSec.children.find((r) => buttonsIn(r).some((b) => b.textContent === '2026-11-24-spark'));
+  const convertResBtn = buttonsIn(bRow).find((b) => b.textContent === 'Turn into research');
+  convertResBtn.onclick();
+  assert.deepEqual(bHarness.sent, ['/convert brainstorms/2026-11-24-spark research']);
 });

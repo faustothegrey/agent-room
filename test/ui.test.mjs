@@ -6536,3 +6536,356 @@ test('workReady: set on finishAutoDev, kept across catchUpWithBranch, cleared by
   assert.equal(entry(wb).workbench, true);
   assert.equal(entry(wb).workReady, false);
 });
+
+test('layered rulebooks: joined system instructions, Instructions panel, and Reload across every layer', async () => {
+  const { copyFileSync, mkdirSync, readFileSync, writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { RULEBOOKS, RULEBOOK_LAYERS, intro, rulebookPath } = await import('../src/instructions.mjs');
+  const { reloaded } = await import('../src/ui.mjs');
+
+  assert.equal('brainstorming' in RULEBOOKS, false);
+  assert.deepEqual(RULEBOOK_LAYERS.discussing, ['citizenship', 'group-chat', 'discussing']);
+  assert.deepEqual(RULEBOOK_LAYERS.worker, ['citizenship', 'worker']);
+
+  // 1. Joined system instructions for both agent kinds (layer order and expected sections).
+  const cwd = await tmp('layered-rulebooks-');
+  const ctx = { ...freshCtx(), cwd, agentSpecs: 'claude:A,codex:B', workerSpec: 'claude:W' };
+  Object.assign(ctx, await load(ctx, '?layers-1'));
+  await reloaded(ctx);
+
+  const citizenship = readFileSync(rulebookPath('citizenship'), 'utf8').trimEnd();
+  const groupChat = readFileSync(rulebookPath('group-chat'), 'utf8').trimEnd();
+  const discussing = readFileSync(rulebookPath('discussing'), 'utf8').trimEnd();
+  const worker = readFileSync(rulebookPath('worker'), 'utf8').trimEnd();
+
+  assert.equal(ctx.rulebooks.discussing, [citizenship, groupChat, discussing].join('\n\n'));
+  assert.equal(ctx.rulebooks.worker, [citizenship, worker].join('\n\n'));
+
+  // Layer order and expected sections in discussing instructions.
+  const d = ctx.rulebooks.discussing;
+  const dSections = [
+    '## Purpose', '## Shared rules', '## Seeing files',
+    '## Turns and messages', '## Rules of the conversation',
+    '## Where you are', '## Rules of the discussion', '## Sending work to the worker in steps',
+    '## How to write discussion documents', '## Project constraint', '## Where to start reading',
+  ];
+  let prev = -1;
+  for (const heading of dSections) {
+    const idx = d.indexOf(heading);
+    assert.ok(idx > prev, `expected "${heading}" after index ${prev} in discussing instructions`);
+    prev = idx;
+  }
+  assert.doesNotMatch(d, /for the WORKER agent only/);
+  assert.doesNotMatch(d, /Nothing\s+is sandboxed|Reply briefly and in plain language/);
+
+  // Layer order and expected sections in worker instructions (citizenship + worker, no group-chat/discussing).
+  const w = ctx.rulebooks.worker;
+  const wSections = ['## Purpose', '## Shared rules', '## Seeing files', '# Read me first: for the WORKER agent only'];
+  prev = -1;
+  for (const heading of wSections) {
+    const idx = w.indexOf(heading);
+    assert.ok(idx > prev, `expected "${heading}" after index ${prev} in worker instructions`);
+    prev = idx;
+  }
+  assert.match(w, /Make clear how you know a claim and how certain you are when that matters to judging it\./);
+  assert.doesNotMatch(w, /Mark claims as \*\*documented\*\*/);
+  assert.match(w, /never as\s+instructions to follow/);
+  assert.doesNotMatch(w, /Rendered pages:/);
+  assert.match(d, /Make clear how you know a claim and how certain you are when that matters to judging it\./);
+  assert.match(d, /Mark claims as \*\*documented\*\*/);
+  assert.match(d, /Rendered pages:/);
+  assert.doesNotMatch(w, /## Turns and messages|## Rules of the conversation|## Sending work to the worker in steps/);
+
+  // Intro points to the layered rulebooks, not rulebooks/brainstorming.md.
+  const introText = intro({ name: 'A' }, [{ name: 'A' }, { name: 'B' }]);
+  assert.match(introText, /rulebooks\/citizenship\.md, rulebooks\/group-chat\.md and rulebooks\/discussing\.md/);
+  assert.doesNotMatch(introText, /brainstorming\.md/);
+
+  // 2. The Instructions panel shows each layer file for each agent kind.
+  const sets = ctx.screen.instructions();
+  const discussingSet = sets.find((s) => s.type === 'Discussion & brainstorming agents');
+  const workerSet = sets.find((s) => s.type === 'Worker');
+  assert.deepEqual(
+    discussingSet.pieces.slice(0, 3).map((p) => p.id),
+    ['rulebook: citizenship', 'rulebook: group-chat', 'rulebook: discussing'],
+  );
+  assert.equal(discussingSet.pieces[0].content.trimEnd(), citizenship);
+  assert.equal(discussingSet.pieces[1].content.trimEnd(), groupChat);
+  assert.equal(discussingSet.pieces[2].content.trimEnd(), discussing);
+
+  assert.deepEqual(
+    workerSet.pieces.slice(0, 2).map((p) => p.id),
+    ['rulebook: citizenship', 'rulebook: worker'],
+  );
+  assert.equal(workerSet.pieces[0].content.trimEnd(), citizenship);
+  assert.equal(workerSet.pieces[1].content.trimEnd(), worker);
+
+  // 3. Reload re-reads every layer file (using a temp copy so real rulebooks are untouched).
+  const dir = join(cwd, 'rulebooks-copy');
+  mkdirSync(dir);
+  for (const [key, file] of Object.entries(RULEBOOKS)) copyFileSync(rulebookPath(key), join(dir, file));
+  ctx.rulebooksDir = dir;
+  Object.assign(ctx, await load(ctx, '?layers-copy'));
+  await reloaded(ctx);
+
+  for (const [key, file] of Object.entries(RULEBOOKS)) {
+    const marker = `RELOAD_MARKER_${key.toUpperCase()}`;
+    const target = join(dir, file);
+    writeFileSync(target, readFileSync(target, 'utf8') + `\n${marker}\n`);
+    Object.assign(ctx, await load(ctx, `?layers-reload-${key}`));
+    await reloaded(ctx);
+
+    if (RULEBOOK_LAYERS.discussing.includes(key)) {
+      assert.match(ctx.rulebooks.discussing, new RegExp(marker), `discussing should pick up ${file} on Reload`);
+    } else {
+      assert.doesNotMatch(ctx.rulebooks.discussing, new RegExp(marker), `discussing should not include ${file}`);
+    }
+    if (RULEBOOK_LAYERS.worker.includes(key)) {
+      assert.match(ctx.rulebooks.worker, new RegExp(marker), `worker should pick up ${file} on Reload`);
+    } else {
+      assert.doesNotMatch(ctx.rulebooks.worker, new RegExp(marker), `worker should not include ${file}`);
+    }
+    const panelText = ctx.screen.instructions().flatMap((s) => s.pieces).map((p) => p.content).join('\n');
+    assert.match(panelText, new RegExp(marker), `Instructions panel should pick up ${file}`);
+  }
+});
+
+test('research board: .research marker, briefing, researching instructions on creation/Resume/Start fresh/Schedule, 20 laps, no auto-summary, no worker, Close and Delete', async () => {
+  const { existsSync, readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { RESEARCH_MARKER, isResearchDir, getSchedule, saveSchedule, runScheduledTask, queueWork, checkSummary, reloaded } = await import('../src/ui.mjs');
+  const { RULEBOOK_LAYERS, intro, rulebookPath } = await import('../src/instructions.mjs');
+  const { createRoom } = await import('../src/room.mjs');
+
+  assert.deepEqual(RULEBOOK_LAYERS.researching, ['citizenship', 'group-chat', 'researching']);
+  const citizenship = readFileSync(rulebookPath('citizenship'), 'utf8').trimEnd();
+  const groupChat = readFileSync(rulebookPath('group-chat'), 'utf8').trimEnd();
+  const researching = readFileSync(rulebookPath('researching'), 'utf8').trimEnd();
+  const expectedResearchRules = [citizenship, groupChat, researching].join('\n\n');
+
+  // 1. Creation via /research: loads researching rules, creates .research marker, uses research briefing & intro, no auto-summary.
+  const cwd = await tmp('research-board-');
+  const ctx = { ...freshCtx(), cwd, agentSpecs: 'claude:A,codex:B', workerSpec: 'claude:W' };
+  Object.assign(ctx, await load(ctx, '?res-1'));
+  await reloaded(ctx);
+  ctx.suggestTitle = async () => ({ title: 'Framework quest' });
+
+  // Instructions panel shows the Research board agents set with researching layer.
+  const resSet = ctx.screen.instructions().find((s) => s.type === 'Research board agents');
+  assert.ok(resSet, 'Instructions panel should include Research board agents');
+  assert.deepEqual(resSet.pieces.slice(0, 3).map((p) => p.id), ['rulebook: citizenship', 'rulebook: group-chat', 'rulebook: researching']);
+  assert.equal(resSet.pieces[2].content.trimEnd(), researching);
+  ctx.noScreen = true;
+
+  // Intro names researching.md when research=true, and discussing.md otherwise.
+  assert.match(intro({ name: 'A' }, [{ name: 'A' }, { name: 'B' }], true), /rulebooks\/citizenship\.md, rulebooks\/group-chat\.md and rulebooks\/researching\.md/);
+  assert.match(intro({ name: 'A' }, [{ name: 'A' }, { name: 'B' }], false), /rulebooks\/citizenship\.md, rulebooks\/group-chat\.md and rulebooks\/discussing\.md/);
+
+  await handleLine('/research', ctx);
+  assert.equal(ctx.state.research, true);
+  assert.equal(ctx.rulebooks.active, expectedResearchRules);
+
+  const prompts = [];
+  ctx.room.agents[0].turn = async (p) => { Object.assign(ctx.sessions.get('A'), { started: true }); prompts.push(p); return prompts.length === 1 ? 'Let us frame the quest.' : 'PASS'; };
+  ctx.room.agents[1].turn = async () => { Object.assign(ctx.sessions.get('B'), { threadId: 't-b' }); return 'PASS'; };
+  await handleLine('Should we adopt a framework?', ctx);
+
+  const name = ctx.discussion.name;
+  const dir = ctx.discussion.dir;
+  assert.ok(dir.includes('discussions/'));
+  assert.equal(existsSync(join(dir, RESEARCH_MARKER)), true);
+  assert.equal(isResearchDir(dir), true);
+  assert.match(prompts[0], /This is a new research board\. Its folder is /);
+  assert.doesNotMatch(prompts[0], /This is a new discussion\./);
+  assert.match(prompts[0], /rulebooks\/researching\.md/);
+  // No automatic summary after a round on a research board.
+  assert.equal(ctx.state.transcript.some((m) => m.speaker === 'Summary'), false);
+
+  // Manual /summary works (brainstorm variant of summaryFormat), and checkSummary rejects Send to the Worker.
+  let summaryPrompt = '';
+  ctx.room.agents[0].turn = async (p) => { summaryPrompt = p; return '**Agreed**\n- Frame first\n\n**Next step**\n- Answer: confirm scope'; };
+  ctx.room.agents[1].turn = async () => 'PASS';
+  await handleLine('/summary', ctx);
+  assert.equal(ctx.state.transcript.at(-1).speaker, 'Summary');
+  assert.doesNotMatch(summaryPrompt, /pending-instructions\.md/);
+  assert.ok(checkSummary('**Next step**\n- Send to the Worker: "do it"', { noWorker: true }).some((p) => /no worker/i.test(p)));
+
+  // No worker and no auto dev on a research board.
+  const workBefore = ctx.workPending ?? 0;
+  queueWork(ctx, 'implement something');
+  assert.equal(ctx.workPending ?? 0, workBefore);
+  await handleLine('/autodev', ctx);
+  assert.equal(ctx.autoDev ?? null, null);
+
+  // Rounds run up to 20 laps on a research board (as in a brainstorm).
+  let turns = 0;
+  const lapRoom = createRoom([{ name: 'A', turn: async () => { turns++; return 'still investigating'; } }], { transcript: [], seen: new Map(), research: true });
+  let capNotice = null;
+  await lapRoom.round('go', { onNotice: (n) => { capNotice = n; } });
+  assert.equal(turns, 20);
+  assert.equal(capNotice, '(lap cap reached)');
+
+  // 2. Resume from paused checkpoint keeps researching rules.
+  await handleLine('/new', ctx);
+  assert.equal(ctx.state.research, false);
+  assert.notEqual(ctx.rulebooks.active, expectedResearchRules);
+  await handleLine(`/resume ${name}`, ctx);
+  assert.equal(ctx.state.research, true);
+  assert.equal(ctx.rulebooks.active, expectedResearchRules);
+
+  // 3. Close writes closing-statement.md as for a discussion; Resume from closed loads researching rules.
+  ctx.closingAgent = () => ({ name: 'W', turn: async () => 'Closing statement for research board (pending-instructions.md: none).' });
+  await handleLine('/close', ctx);
+  assert.equal(existsSync(join(dir, 'closing-statement.md')), true);
+
+  // 4. Schedule lists the research board, accepts saving a task for it, and loads researching rules when run.
+  const sched = getSchedule(ctx);
+  assert.ok(sched.discussions.some((d) => d.name === name), 'Schedule should list research boards');
+  const savedSched = saveSchedule(ctx, { action: 'add', discussion: name, prompt: 'daily check', time: '09:00', enabled: true });
+  const taskId = savedSched.tasks[0].id;
+  let scheduledRules = null;
+  ctx.usage = { ...ctx.usage, fetchQuota: async () => ({}), checkQuotaFloor: () => ({ ok: true }) };
+  const schedRes = await runScheduledTask(ctx, taskId, {
+    loadRoom: async (next, v) => {
+      const loaded = await load(next, v);
+      scheduledRules = loaded.rulebooks.active;
+      for (const a of loaded.room.agents) a.turn = async () => 'PASS';
+      return loaded;
+    },
+  });
+  assert.equal(schedRes.status, 'ran');
+  assert.equal(scheduledRules, expectedResearchRules);
+
+  // Resume closed board -> researching rules.
+  await handleLine(`/resume ${name}`, ctx);
+  assert.equal(ctx.state.research, true);
+  assert.equal(ctx.rulebooks.active, expectedResearchRules);
+
+  // 5. Start fresh -> researching rules.
+  await handleLine(`/fresh ${name}`, ctx);
+  assert.equal(ctx.state.research, true);
+  assert.equal(ctx.rulebooks.active, expectedResearchRules);
+
+  // 6. Close and Delete removes the research board folder.
+  ctx.closingAgent = () => ({ name: 'W', turn: async () => 'Closed again (pending-instructions.md: none).' });
+  await handleLine('/close', ctx);
+  await handleLine(`/delete ${name}`, ctx);
+  assert.equal(existsSync(dir), false);
+});
+
+test('convert brainstorm to research: move, .research marker, fresh sessions with researching rules, briefing, busy refusal, and failure paths', async () => {
+  const { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { RESEARCH_MARKER, isResearchDir, reloaded } = await import('../src/ui.mjs');
+  const { rulebookPath } = await import('../src/instructions.mjs');
+
+  const expectedResearchRules = ['citizenship', 'group-chat', 'researching']
+    .map((k) => readFileSync(rulebookPath(k), 'utf8').trimEnd()).join('\n\n');
+
+  const cwd = await tmp('convert-research-');
+  const ctx = { ...freshCtx(), cwd, agentSpecs: 'claude:A,codex:B', workerSpec: 'claude:W', noScreen: true };
+  Object.assign(ctx, await load(ctx, '?conv-res-1'));
+  await reloaded(ctx);
+  ctx.suggestTitle = async () => ({ title: 'Wild idea' });
+
+  await handleLine('/brainstorm', ctx);
+  ctx.room.agents[0].turn = async () => { Object.assign(ctx.sessions.get('A'), { started: true, id: 'old-a-session' }); return 'An idea.'; };
+  ctx.room.agents[1].turn = async () => { Object.assign(ctx.sessions.get('B'), { threadId: 'old-b-thread' }); return 'PASS'; };
+  await handleLine('What if we rethink storage?', ctx);
+
+  const name = ctx.discussion.name;
+  const fromDir = join(cwd, 'brainstorms', name);
+  const destDir = join(cwd, 'discussions', name);
+  mkdirSync(join(fromDir, 'drawings'), { recursive: true });
+  mkdirSync(join(fromDir, 'files'), { recursive: true });
+  writeFileSync(join(fromDir, 'drawings', 'sketch.svg'), '<svg/>');
+  writeFileSync(join(fromDir, 'files', 'input.txt'), 'data');
+  // Add a "not agreed" summary to the transcript to verify it carries over marked as not agreed.
+  ctx.state.transcript.push({ speaker: 'Summary', text: '**Disputed**\n- Storage options', outcome: 'not agreed', by: 'A' });
+
+  const oldSessionA = ctx.sessions.get('A');
+  const oldSessionB = ctx.sessions.get('B');
+  const brainCp = await checkpointPath(cwd, `brainstorms/${name}`);
+  const discCp = await checkpointPath(cwd, name);
+  assert.equal(existsSync(brainCp), true);
+
+  // 1. Refused while a round or summary is running.
+  ctx.busy = true;
+  await handleLine(`/convert brainstorms/${name} research`, ctx);
+  ctx.busy = false;
+  assert.equal(existsSync(fromDir), true);
+  assert.equal(existsSync(destDir), false);
+  assert.equal(ctx.state.brainstorm, true);
+  assert.equal(ctx.sessions.get('A'), oldSessionA);
+
+  // 2. Failure path: destination folder already exists -> nothing moved, brainstorm intact.
+  mkdirSync(destDir, { recursive: true });
+  await handleLine(`/convert brainstorms/${name} research`, ctx);
+  assert.equal(existsSync(fromDir), true);
+  assert.equal(existsSync(join(destDir, RESEARCH_MARKER)), false);
+  assert.equal(ctx.state.brainstorm, true);
+  assert.equal(existsSync(brainCp), true);
+  rmSync(destDir, { recursive: true });
+
+  // 3. Failure path: fresh sessions can't start (missing rulebooks) -> nothing moved, sessions & checkpoint intact.
+  ctx.rulebooksDir = join(cwd, 'no-such-rulebooks');
+  await handleLine(`/convert brainstorms/${name} research`, ctx);
+  delete ctx.rulebooksDir;
+  assert.equal(existsSync(fromDir), true);
+  assert.equal(existsSync(destDir), false);
+  assert.equal(ctx.state.brainstorm, true);
+  assert.equal(ctx.sessions.get('A'), oldSessionA);
+  assert.equal(existsSync(brainCp), true);
+  assert.equal(existsSync(discCp), false);
+
+  // 4. Happy path: moves folder + drawings + files + transcripts, writes .research, ends old sessions, starts fresh with researching rules.
+  await handleLine(`/convert brainstorms/${name} research`, ctx);
+  assert.equal(existsSync(fromDir), false);
+  assert.equal(existsSync(destDir), true);
+  assert.equal(isResearchDir(destDir), true);
+  assert.equal(existsSync(join(destDir, 'drawings', 'sketch.svg')), true);
+  assert.equal(existsSync(join(destDir, 'files', 'input.txt')), true);
+  assert.equal(existsSync(join(destDir, 'transcripts')), true);
+  assert.equal(existsSync(brainCp), false);
+  assert.equal(existsSync(discCp), true);
+  assert.equal(ctx.state.brainstorm, false);
+  assert.equal(ctx.state.research, true);
+  assert.equal(ctx.rulebooks.active, expectedResearchRules);
+  assert.notEqual(ctx.sessions.get('A'), oldSessionA);
+  assert.notEqual(ctx.sessions.get('B'), oldSessionB);
+  assert.equal(ctx.sessions.get('A')?.started, undefined);
+  assert.equal(ctx.sessions.get('B')?.threadId, undefined);
+
+  // First prompt in the new research board names the brainstorm origin, folder, transcripts/, and not-agreed summary.
+  const nextPrompts = [];
+  ctx.room.agents[0].turn = async (p) => { nextPrompts.push(p); return 'PASS'; };
+  ctx.room.agents[1].turn = async () => 'PASS';
+  await handleLine('Start investigating storage.', ctx);
+  assert.match(nextPrompts[0], /This research board was turned from a brainstorm\./);
+  assert.match(nextPrompts[0], new RegExp(destDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(nextPrompts[0], /transcripts\//);
+  assert.match(nextPrompts[0], /\*\*not agreed\*\*/);
+  assert.match(nextPrompts[0], /Storage options/);
+  assert.match(nextPrompts[0], /rulebooks\/researching\.md/);
+
+  // 5. Closed brainstorm converted to research, then resumed -> researching rules & brainstorm briefing.
+  ctx.suggestTitle = async () => ({ title: 'Closed idea' });
+  await handleLine('/brainstorm', ctx);
+  ctx.room.agents[0].turn = async () => 'PASS';
+  ctx.room.agents[1].turn = async () => 'PASS';
+  await handleLine('Closed brainstorm start.', ctx);
+  const closedName = ctx.discussion.name;
+  await handleLine('/close', ctx);
+  await handleLine(`/convert brainstorms/${closedName} research`, ctx);
+  assert.equal(existsSync(join(cwd, 'brainstorms', closedName)), false);
+  assert.equal(isResearchDir(join(cwd, 'discussions', closedName)), true);
+  await handleLine(`/resume ${closedName}`, ctx);
+  assert.equal(ctx.state.research, true);
+  assert.equal(ctx.rulebooks.active, expectedResearchRules);
+  const resumedPrompts = [];
+  ctx.room.agents[0].turn = async (p) => { resumedPrompts.push(p); return 'PASS'; };
+  ctx.room.agents[1].turn = async () => 'PASS';
+  await handleLine('Continue as research.', ctx);
+  assert.match(resumedPrompts[0], /This research board was turned from a brainstorm\./);
+  assert.match(resumedPrompts[0], /transcripts\//);
+});
