@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MessageView, Room, ScreenEvent } from '../../src/contract';
+import type { MessageView, Room, SayRequest, ScreenEvent } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void };
 type StatusLine = { text: string; error: boolean };
 type Failure = { agent: string; error: string; time: string; earlier: number };
+const ATTACH_LIMIT = 25 * 1024 * 1024, ATTACH_TOTAL = 250 * 1024 * 1024;
+const sizeText = (n: number) => n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+const base64 = (file: File) => new Promise<string>((ok, fail) => {
+  const reader = new FileReader();
+  reader.onload = () => { const value = String(reader.result); ok(value.slice(value.indexOf(',') + 1)); };
+  reader.onerror = () => fail(reader.error || new Error(`could not read ${file.name}`));
+  reader.readAsDataURL(file);
+});
 
 export function App({ version, refresh }: Props) {
   const [room, setRoom] = useState<Room | null>(null);
@@ -14,27 +22,67 @@ export function App({ version, refresh }: Props) {
   const [status, setStatus] = useState<StatusLine[]>([]);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState<'on' | 'failed' | null>(null);
-  const busyState = useRef({ command: false, ended: 0, show: undefined as ReturnType<typeof setTimeout> | undefined, fail: undefined as ReturnType<typeof setTimeout> | undefined });
+  const [input, setInput] = useState(false);
+  const [ended, setEnded] = useState(false);
+  const [text, setText] = useState(() => { try { const saved = sessionStorage.getItem('next-composer-draft') ?? ''; sessionStorage.removeItem('next-composer-draft'); return saved; } catch { return ''; } });
+  const draft = useRef(text); draft.current = text;
+  const [files, setFiles] = useState<File[]>([]);
+  const [sending, setSending] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const client = useRef(globalThis.crypto.randomUUID?.() ?? Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join(''));
+  const busyState = useRef({ command: false, posting: 0, ended: 0, show: undefined as ReturnType<typeof setTimeout> | undefined, fail: undefined as ReturnType<typeof setTimeout> | undefined });
+
+  const updateBusy = () => {
+    const state = busyState.current, on = state.command || state.posting > 0;
+    if (on) {
+      if (!state.show) state.show = setTimeout(() => { state.show = undefined; if (!state.fail && (state.command || state.posting > 0)) setBusy('on'); }, 300);
+    } else {
+      state.ended = Date.now(); clearTimeout(state.show); state.show = undefined;
+      if (!state.fail) setBusy(null);
+    }
+  };
+  const addStatus = (text: string, error = false) => {
+    if (!text) return;
+    setStatus((lines) => [...lines, { text, error }].slice(-2));
+    const state = busyState.current;
+    if (error && (state.command || state.posting > 0 || Date.now() - state.ended <= 1500)) {
+      setBusy('failed'); clearTimeout(state.fail);
+      state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command || state.posting > 0 ? 'on' : null); }, 1500);
+    }
+  };
+  const post = async (body: SayRequest) => {
+    const state = busyState.current; state.posting++; updateBusy();
+    try {
+      return await fetch('__say', { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': client.current }, body: JSON.stringify(body) });
+    } finally { state.posting--; updateBusy(); }
+  };
+  const send = async () => {
+    const value = text.trim();
+    if (sending || ended || (!value && !files.length) || (peeking && (!value.startsWith('/') || files.length > 0))) return;
+    const fail = (reason: string) => addStatus(`✗ ${reason} Nothing was sent.`, true);
+    if (value === '/docs' && !files.length) { addStatus('Explorer is not available on this page yet.', true); return; }
+    if (files.length && value.startsWith('/')) return fail('Attachments go with a message, not a command.');
+    const tooBig = files.find((file) => file.size > ATTACH_LIMIT);
+    if (tooBig) return fail(`${tooBig.name} is over 25 MB.`);
+    if (files.reduce((total, file) => total + file.size, 0) > ATTACH_TOTAL) return fail('Over 250 MB at once: attach fewer files per message.');
+    setSending(true);
+    try {
+      const body: SayRequest = { text: value };
+      if (files.length) body.files = await Promise.all(files.map(async (file) => ({ name: file.name, data: await base64(file) })));
+      let response = await post(body);
+      if (response.status === 409 && !files.length && (value === '/restart' || value === '/shutdown')) {
+        if (!window.confirm(await response.text())) return;
+        response = await post({ text: value, confirmed: true });
+      }
+      if (!response.ok) { const error = await response.text(); addStatus(files.length ? `✗ ${error}` : error, true); return; }
+      setText((current) => current === text ? '' : current); setFiles([]);
+    } catch (error) {
+      fail(`Couldn't send${files.length ? ' the attachments' : ' the message'}: ${error instanceof Error ? error.message : String(error)}.`);
+    } finally { setSending(false); }
+  };
 
   useEffect(() => {
     const state = busyState.current;
-    const updateBusy = (on: boolean) => {
-      state.command = on;
-      if (on) {
-        if (!state.show) state.show = setTimeout(() => { state.show = undefined; if (!state.fail && state.command) setBusy('on'); }, 300);
-      } else {
-        state.ended = Date.now(); clearTimeout(state.show); state.show = undefined;
-        if (!state.fail) setBusy(null);
-      }
-    };
-    const addStatus = (text: string, error = false) => {
-      if (!text) return;
-      setStatus((lines) => [...lines, { text, error }].slice(-2));
-      if (error && (state.command || Date.now() - state.ended <= 1500)) {
-        setBusy('failed'); clearTimeout(state.fail);
-        state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command ? 'on' : null); }, 1500);
-      }
-    };
     const pin = (agent: string, error: string) => {
       const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
       setFailure((previous) => ({ agent, error, time, earlier: previous ? previous.earlier + 1 : 0 }));
@@ -43,14 +91,15 @@ export function App({ version, refresh }: Props) {
     events.onmessage = ({ data }) => {
       const event = JSON.parse(data) as ScreenEvent;
       if ('webVersion' in event && event.webVersion && version && event.webVersion !== version) {
+        try { sessionStorage.setItem('next-composer-draft', draft.current); } catch {}
         refresh(); return;
       }
       if (event.type === 'reset') {
-        setRoom(event.room); setPeeking(!!event.peek);
+        setRoom(event.room); setPeeking(!!event.peek); setInput(event.input);
         setMessages(event.messages.filter((m) => !m.pass && !m.hidden));
         setThinking(event.thinking ?? null); setYourTurn(!event.thinking);
         if (event.status) addStatus(event.status);
-        updateBusy(!!event.busy);
+        state.command = !!event.busy; updateBusy();
       } else if (event.type === 'message') {
         if (event.message.speaker === 'User') setYourTurn(false);
         if (event.message.error) pin(event.message.speaker, event.message.errorText ?? '');
@@ -64,13 +113,13 @@ export function App({ version, refresh }: Props) {
       } else if (event.type === 'note') {
         addStatus(event.text, !!event.error);
       } else if (event.type === 'busy') {
-        updateBusy(event.on);
+        state.command = event.on; updateBusy();
       } else if (event.type === 'room') {
         setRoom(event.room);
       } else if (event.type === 'ended') {
-        addStatus('This room has ended. You can close this window.'); events.close();
+        setEnded(true); addStatus('This room has ended. You can close this window.'); events.close();
       } else if (event.type === 'restarting') {
-        updateBusy(true); addStatus('Restarting the server: this page reloads when the new one answers.'); events.close();
+        setEnded(true); state.command = true; updateBusy(); addStatus('Restarting the server: this page reloads when the new one answers.'); events.close();
       }
     };
     return () => { events.close(); clearTimeout(state.show); clearTimeout(state.fail); state.show = undefined; state.fail = undefined; };
@@ -92,5 +141,15 @@ export function App({ version, refresh }: Props) {
       <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong><div dangerouslySetInnerHTML={{ __html: message.html }} />
     </article>)}</section>
     {thinking && <p>{thinking} is thinking…</p>}
+    {input && <div className="composer">
+      <textarea aria-label="Message to the agents" value={text} disabled={ended} onChange={(event) => setText(event.target.value)}
+        placeholder="Message to the agents… (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown"
+        onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
+      <div><button type="button" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)" disabled={sending || ended || !room?.active} onClick={() => fileInput.current?.click()}>📎 Attach</button>
+        <input ref={fileInput} type="file" aria-label="Attach files" multiple hidden onChange={(event) => { const chosen = Array.from(event.target.files ?? []); setFiles((previous) => [...previous, ...chosen]); event.target.value = ''; }} />
+        {files.map((file, index) => <span key={index}>{file.name} · {sizeText(file.size)} <button type="button" title="Remove this attachment" aria-label={`Remove ${file.name}`} disabled={sending} onClick={() => setFiles((previous) => previous.filter((_, i) => i !== index))}>✕</button></span>)}
+        {sending && files.length > 0 && <span>Saving the attachments…</span>}
+      </div>
+    </div>}
   </main>;
 }
