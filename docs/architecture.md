@@ -30,7 +30,7 @@ worktree, below) and for replication between servers.
 
 ![Containers and components: the room harness's modules, the provider CLIs, storage and external systems](diagrams/c4-containers.svg)
 
-One Node process serves several rooms, one per folder. Its nine source modules:
+One Node process serves several rooms, one per folder. Its source modules:
 
 | Module | Role |
 |---|---|
@@ -42,6 +42,8 @@ One Node process serves several rooms, one per folder. Its nine source modules:
 | `src/host-shell.mjs` | The Terminal pane's shell (this computer only). |
 | `src/replicate.mjs` | Optional replication of discussions to peer servers (`--node`, `--peer`). |
 | `src/usage.mjs` | Token totals and the optional quota meter. |
+| `src/instructions.mjs` | Prompt builders and the instruction catalog displayed in the Instructions panel. |
+| `src/mcp.mjs` | Read-only MCP stdio service for listing rooms and discussions. |
 | `src/notes.mjs` | The Notes pane: the User's own notes, kept on this computer only, never replicated nor shown to agents. |
 
 ## The main loop

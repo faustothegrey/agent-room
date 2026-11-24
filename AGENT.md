@@ -2,8 +2,9 @@
 
 **The goal: agent-room helps a human and multiple AI agents discuss and revise
 ideas around a shared document or drawing, keeping the conversation and its subject visible
-together. Keep it small enough to read in one sitting.** Before adding a module, a dependency, a
-config system or a process, ask the owner whether the problem actually needs it.
+together. As simple as possible, but not simpler: complexity is fine when its gains justify it.**
+Before adding a module, a dependency, a config system or a process, ask the owner whether its gains
+justify the complexity it adds.
 
 The owner (and User in agent-room) is Fausto; agents may address Fausto by name.
 
