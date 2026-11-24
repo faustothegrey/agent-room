@@ -60,6 +60,8 @@ export function App({ version, refresh }: Props) {
   const [offers, setOffers] = useState<string[]>([]);
   const [doc, setDoc] = useState<string | null>(null);
   const docRef = useRef<string | null>(null);
+  const frame = useRef<HTMLIFrameElement>(null);
+  const viewing = useRef<unknown>(null);
   const offerEpoch = useRef(0);
   const [follow, setFollow] = useState(() => { try { return localStorage.getItem('agent-room.followMentions') === '1'; } catch { return false; } });
   const followRef = useRef(follow); followRef.current = follow;
@@ -158,6 +160,21 @@ export function App({ version, refresh }: Props) {
   };
 
   useEffect(() => {
+    let stamp: { file: string; time: string } | null = null;
+    let mounted = true;
+    const timer = setInterval(async () => {
+      const shown = docRef.current;
+      if (!shown || viewing.current || shown.startsWith('__received/') || /\.md$/i.test(shown)) return;
+      let time: string;
+      try { time = await (await fetch('__mtime?f=' + encodeURIComponent(shown), { cache: 'no-store' })).text(); } catch { return; }
+      if (!mounted || shown !== docRef.current || time === 'false') return;
+      if (stamp?.file === shown && stamp.time !== time) frame.current?.contentWindow?.location.reload();
+      stamp = { file: shown, time };
+    }, 2000);
+    return () => { mounted = false; clearInterval(timer); };
+  }, []);
+
+  useEffect(() => {
     const state = busyState.current;
     const pin = (agent: string, error: string) => {
       const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -171,6 +188,7 @@ export function App({ version, refresh }: Props) {
         refresh(); return;
       }
       if (event.type === 'reset') {
+        viewing.current = event.viewing;
         roomRef.current = event.room; peekRef.current = event.peek ?? null;
         setRoom(event.room); setPeek(event.peek ?? null); setInput(event.input); setPeekFiles(null);
         if (!preservePeekDoc.current || event.peek) { docRef.current = event.doc ?? null; setDoc(event.doc ?? null); }
@@ -240,7 +258,7 @@ export function App({ version, refresh }: Props) {
       {boardFiles.map((file) => <button key={file} type="button" disabled={peekFiles?.unviewable?.includes(file) || binary.test(file)} aria-current={doc === file ? 'true' : undefined} onClick={() => { docRef.current = file; setDoc(file); }}>{file.slice(peek.path.length + 1)}</button>)}
       {peekFiles && boardFiles.length === 0 && <p>No files yet.</p>}
     </section>}
-    {doc && <p>Selected file: {doc}</p>}
+    {doc && <section aria-label="Document"><p>Selected file: {doc}</p><iframe ref={frame} title="Document viewer" src={doc.split('/').map(encodeURIComponent).join('/')} /></section>}
     {turnVisible && <p aria-label="Turn status">your turn</p>}
     <section aria-label="Activity" aria-live="polite">
       {failure && <div><span title={failure.error}>✗ {failure.agent} failed {failure.time}: {failure.error.split(/\r?\n/)[0]}{failure.earlier ? ` (+${failure.earlier} earlier)` : ''}</span> <button type="button" title="Dismiss" aria-label="Dismiss pinned error" onClick={() => setFailure(null)}>✕</button></div>}

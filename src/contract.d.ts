@@ -116,3 +116,8 @@ export type FilesResponse = string[];
 export interface FileDetailsResponse { files: string[]; unviewable: string[]; branch: string | null }
 export interface ShowRequest { file: string }
 export type ShowReplyStatus = 204 | 403 | 404;
+
+// GET /__mtime?f=<room-relative file>: decimal mtime, "false" when unavailable,
+// or "fixed" for an immutable received snapshot. Without f it lists room files.
+export interface MtimeRequest { f?: string }
+export type MtimeResponse = string;
