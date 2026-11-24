@@ -1700,7 +1700,7 @@ async function defaultsForNew(ctx, { reloadAgents = false } = {}) {
   const sessions = new Map();
   if (worker) sessions.set(`worker:${worker.name}`, workerSpec === ctx.workerSpec ? ctx.sessions.get(`worker:${worker.name}`) ?? {} : {});
   const state = { ...ctx.state, seen: new Map() };
-  const next = { ...ctx, agentSpecs, workerSpec, sessions, state };
+  const next = { ...ctx, discussion: null, agentSpecs, workerSpec, sessions, state };
   const loaded = await load(next, '');
   Object.assign(ctx, { room: loaded.room, worker: loaded.worker, makeWorker: loaded.makeWorker, closingStatement: loaded.closingStatement, rulebooks: loaded.rulebooks, agentSpecs, workerSpec, sessions, state });
   wire(ctx);
