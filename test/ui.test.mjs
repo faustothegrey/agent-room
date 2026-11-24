@@ -6649,3 +6649,126 @@ test('layered rulebooks: joined system instructions, Instructions panel, and Rel
     assert.match(panelText, new RegExp(marker), `Instructions panel should pick up ${file}`);
   }
 });
+
+test('research board: .research marker, briefing, researching instructions on creation/Resume/Start fresh/Schedule, 20 laps, no auto-summary, no worker, Close and Delete', async () => {
+  const { existsSync, readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { RESEARCH_MARKER, isResearchDir, getSchedule, saveSchedule, runScheduledTask, queueWork, checkSummary, reloaded } = await import('../src/ui.mjs');
+  const { RULEBOOK_LAYERS, intro, rulebookPath } = await import('../src/instructions.mjs');
+  const { createRoom } = await import('../src/room.mjs');
+
+  assert.deepEqual(RULEBOOK_LAYERS.researching, ['citizenship', 'group-chat', 'researching']);
+  const citizenship = readFileSync(rulebookPath('citizenship'), 'utf8').trimEnd();
+  const groupChat = readFileSync(rulebookPath('group-chat'), 'utf8').trimEnd();
+  const researching = readFileSync(rulebookPath('researching'), 'utf8').trimEnd();
+  const expectedResearchRules = [citizenship, groupChat, researching].join('\n\n');
+
+  // 1. Creation via /research: loads researching rules, creates .research marker, uses research briefing & intro, no auto-summary.
+  const cwd = await tmp('research-board-');
+  const ctx = { ...freshCtx(), cwd, agentSpecs: 'claude:A,codex:B', workerSpec: 'claude:W' };
+  Object.assign(ctx, await load(ctx, '?res-1'));
+  await reloaded(ctx);
+  ctx.suggestTitle = async () => ({ title: 'Framework quest' });
+
+  // Instructions panel shows the Research board agents set with researching layer.
+  const resSet = ctx.screen.instructions().find((s) => s.type === 'Research board agents');
+  assert.ok(resSet, 'Instructions panel should include Research board agents');
+  assert.deepEqual(resSet.pieces.slice(0, 3).map((p) => p.id), ['rulebook: citizenship', 'rulebook: group-chat', 'rulebook: researching']);
+  assert.equal(resSet.pieces[2].content.trimEnd(), researching);
+  ctx.noScreen = true;
+
+  // Intro names researching.md when research=true, and discussing.md otherwise.
+  assert.match(intro({ name: 'A' }, [{ name: 'A' }, { name: 'B' }], true), /rulebooks\/citizenship\.md, rulebooks\/group-chat\.md and rulebooks\/researching\.md/);
+  assert.match(intro({ name: 'A' }, [{ name: 'A' }, { name: 'B' }], false), /rulebooks\/citizenship\.md, rulebooks\/group-chat\.md and rulebooks\/discussing\.md/);
+
+  await handleLine('/research', ctx);
+  assert.equal(ctx.state.research, true);
+  assert.equal(ctx.rulebooks.active, expectedResearchRules);
+
+  const prompts = [];
+  ctx.room.agents[0].turn = async (p) => { prompts.push(p); return prompts.length === 1 ? 'Let us frame the quest.' : 'PASS'; };
+  ctx.room.agents[1].turn = async () => 'PASS';
+  await handleLine('Should we adopt a framework?', ctx);
+
+  const name = ctx.discussion.name;
+  const dir = ctx.discussion.dir;
+  assert.ok(dir.includes('discussions/'));
+  assert.equal(existsSync(join(dir, RESEARCH_MARKER)), true);
+  assert.equal(isResearchDir(dir), true);
+  assert.match(prompts[0], /This is a new research board\. Its folder is /);
+  assert.doesNotMatch(prompts[0], /This is a new discussion\./);
+  assert.match(prompts[0], /rulebooks\/researching\.md/);
+  // No automatic summary after a round on a research board.
+  assert.equal(ctx.state.transcript.some((m) => m.speaker === 'Summary'), false);
+
+  // Manual /summary works (brainstorm variant of summaryFormat), and checkSummary rejects Send to the Worker.
+  let summaryPrompt = '';
+  ctx.room.agents[0].turn = async (p) => { summaryPrompt = p; return '**Agreed**\n- Frame first\n\n**Next step**\n- Answer: confirm scope'; };
+  ctx.room.agents[1].turn = async () => 'PASS';
+  await handleLine('/summary', ctx);
+  assert.equal(ctx.state.transcript.at(-1).speaker, 'Summary');
+  assert.doesNotMatch(summaryPrompt, /pending-instructions\.md/);
+  assert.ok(checkSummary('**Next step**\n- Send to the Worker: "do it"', { noWorker: true }).some((p) => /no worker/i.test(p)));
+
+  // No worker and no auto dev on a research board.
+  const workBefore = ctx.workPending ?? 0;
+  queueWork(ctx, 'implement something');
+  assert.equal(ctx.workPending ?? 0, workBefore);
+  await handleLine('/autodev', ctx);
+  assert.equal(ctx.autoDev ?? null, null);
+
+  // Rounds run up to 20 laps on a research board (as in a brainstorm).
+  let turns = 0;
+  const lapRoom = createRoom([{ name: 'A', turn: async () => { turns++; return 'still investigating'; } }], { transcript: [], seen: new Map(), research: true });
+  let capNotice = null;
+  await lapRoom.round('go', { onNotice: (n) => { capNotice = n; } });
+  assert.equal(turns, 20);
+  assert.equal(capNotice, '(lap cap reached)');
+
+  // 2. Resume from paused checkpoint keeps researching rules.
+  await handleLine('/new', ctx);
+  assert.equal(ctx.state.research, false);
+  assert.notEqual(ctx.rulebooks.active, expectedResearchRules);
+  await handleLine(`/resume ${name}`, ctx);
+  assert.equal(ctx.state.research, true);
+  assert.equal(ctx.rulebooks.active, expectedResearchRules);
+
+  // 3. Close writes closing-statement.md as for a discussion; Resume from closed loads researching rules.
+  ctx.closingAgent = () => ({ name: 'W', turn: async () => 'Closing statement for research board (pending-instructions.md: none).' });
+  await handleLine('/close', ctx);
+  assert.equal(existsSync(join(dir, 'closing-statement.md')), true);
+
+  // 4. Schedule lists the research board, accepts saving a task for it, and loads researching rules when run.
+  const sched = getSchedule(ctx);
+  assert.ok(sched.discussions.some((d) => d.name === name), 'Schedule should list research boards');
+  const savedSched = saveSchedule(ctx, { action: 'add', discussion: name, prompt: 'daily check', time: '09:00', enabled: true });
+  const taskId = savedSched.tasks[0].id;
+  let scheduledRules = null;
+  ctx.usage = { ...ctx.usage, fetchQuota: async () => ({}), checkQuotaFloor: () => ({ ok: true }) };
+  const schedRes = await runScheduledTask(ctx, taskId, {
+    loadRoom: async (next, v) => {
+      const loaded = await load(next, v);
+      scheduledRules = loaded.rulebooks.active;
+      for (const a of loaded.room.agents) a.turn = async () => 'PASS';
+      return loaded;
+    },
+  });
+  assert.equal(schedRes.status, 'ran');
+  assert.equal(scheduledRules, expectedResearchRules);
+
+  // Resume closed board -> researching rules.
+  await handleLine(`/resume ${name}`, ctx);
+  assert.equal(ctx.state.research, true);
+  assert.equal(ctx.rulebooks.active, expectedResearchRules);
+
+  // 5. Start fresh -> researching rules.
+  await handleLine(`/fresh ${name}`, ctx);
+  assert.equal(ctx.state.research, true);
+  assert.equal(ctx.rulebooks.active, expectedResearchRules);
+
+  // 6. Close and Delete removes the research board folder.
+  ctx.closingAgent = () => ({ name: 'W', turn: async () => 'Closed again (pending-instructions.md: none).' });
+  await handleLine('/close', ctx);
+  await handleLine(`/delete ${name}`, ctx);
+  assert.equal(existsSync(dir), false);
+});

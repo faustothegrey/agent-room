@@ -12,10 +12,12 @@ historical material are in `discussions/` (start at `discussions/README.md`).
 
 **Discussion and brainstorm agents** (the agents agent-room starts in a room) follow
 `rulebooks/citizenship.md`, `rulebooks/group-chat.md` and `rulebooks/discussing.md`, joined in
-that order and sent to them as system instructions by the harness. They are **not** your rulebook:
-if you are working on agent-room's code, edit those files like any other source and follow these
-instructions instead. The separate worker receives `rulebooks/citizenship.md` followed by
-`rulebooks/worker.md`; those rulebooks are also source, not your rulebook.
+that order and sent to them as system instructions by the harness; **research board agents**
+receive `rulebooks/citizenship.md`, `rulebooks/group-chat.md` and `rulebooks/researching.md`.
+They are **not** your rulebook: if you are working on agent-room's code, edit those files like any
+other source and follow these instructions instead. The separate worker receives
+`rulebooks/citizenship.md` followed by `rulebooks/worker.md`; those rulebooks are also source, not
+your rulebook.
 
 1. **Report real output.** Never say something passed without running it and reading the result.
 2. **Small diffs.** Change only what the task needs.

@@ -6,7 +6,7 @@
   </defs>
   <rect width="1080" height="800" fill="#fff"/>
   <text x="20" y="28" font-size="17" font-weight="bold">Discussion lifecycle: states, checkpoints, Resume, Start fresh, Archive &amp; Defer — src/ui.mjs (2026-11-20)</text>
-  <text x="20" y="46" font-size="12" fill="#555">On the browser screen, several discussions and brainstorms can be open at once in a folder (each in its own context #d1, #d2…).</text>
+  <text x="20" y="46" font-size="12" fill="#555">On the browser screen, discussions, research boards (.research), workbenches (.workbench) and brainstorms can be open at once (#d1, #d2…).</text>
 
   <!-- Row 1 Left: Empty / New discussion (x=20..340, y=64..210) -->
   <rect x="20" y="64" width="320" height="146" rx="6" fill="#f3f7fb" stroke="#1168bd" stroke-width="1.5"/>

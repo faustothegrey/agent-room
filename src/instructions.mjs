@@ -9,23 +9,27 @@ export const RULEBOOKS = {
   citizenship: 'citizenship.md',
   'group-chat': 'group-chat.md',
   discussing: 'discussing.md',
+  researching: 'researching.md',
   worker: 'worker.md',
 };
 export const RULEBOOK_LAYERS = {
   discussing: ['citizenship', 'group-chat', 'discussing'],
+  researching: ['citizenship', 'group-chat', 'researching'],
   worker: ['citizenship', 'worker'],
 };
 export const rulebookPath = (name) => new URL(`../rulebooks/${RULEBOOKS[name]}`, import.meta.url);
 
-// ── Discussion / brainstorming agents ──────────────────────────────────────────────────────
+// ── Discussion / brainstorming / research agents ───────────────────────────────────────────
 
-export function intro(agent, agents) {
+export function intro(agent, agents, research = false) {
   const order = agents.map((a) => a.name).join(', then ');
   return [
     `You are ${agent.name}, one of several AI agents in a group conversation with a human user.`,
     `Participants: the User, ${agents.map((a) => a.name).join(', ')}.`,
     `After each User message, agents take turns in this order: ${order}, until all of them pass in a row.`,
-    'You are a brainstorming agent started by agent-room: your rulebooks are rulebooks/citizenship.md, rulebooks/group-chat.md and rulebooks/discussing.md, in your system instructions.',
+    research
+      ? 'You are a researching agent started by agent-room: your rulebooks are rulebooks/citizenship.md, rulebooks/group-chat.md and rulebooks/researching.md, in your system instructions.'
+      : 'You are a brainstorming agent started by agent-room: your rulebooks are rulebooks/citizenship.md, rulebooks/group-chat.md and rulebooks/discussing.md, in your system instructions.',
     'When you have nothing to add, reply exactly PASS.',
   ].join('\n');
 }
@@ -33,6 +37,11 @@ export const INTRO = `You are {name}, one of several AI agents in a group conver
 Participants: the User, {participants}.
 After each User message, agents take turns in this order: {order}, until all of them pass in a row.
 You are a brainstorming agent started by agent-room: your rulebooks are rulebooks/citizenship.md, rulebooks/group-chat.md and rulebooks/discussing.md, in your system instructions.
+When you have nothing to add, reply exactly PASS.`;
+export const RESEARCH_INTRO = `You are {name}, one of several AI agents in a group conversation with a human user.
+Participants: the User, {participants}.
+After each User message, agents take turns in this order: {order}, until all of them pass in a row.
+You are a researching agent started by agent-room: your rulebooks are rulebooks/citizenship.md, rulebooks/group-chat.md and rulebooks/researching.md, in your system instructions.
 When you have nothing to add, reply exactly PASS.`;
 
 export function summaryFormat(brainstorm) {
@@ -103,6 +112,7 @@ export const RESTORED = `agent-room restored this {what} from its checkpoint of 
 
 // Given to each agent with its first prompt, once the discussion's folder exists (ui.mjs briefing).
 export const BRIEFING = `This is a new discussion. Its folder is {dir}: create, read and write this discussion's documents (notes, drawings) there. The room's root, {root}, holds the work itself.`;
+export const RESEARCH_BRIEFING = `This is a new research board. Its folder is {dir}: create, read and write this board's documents (quest.md, learnings.md, drawings) there. The room's root, {root}, holds the work itself.`;
 
 // The closing statement: a one-off agent with the worker's provider and model (room.mjs).
 export function closingTask({ dir, workerReports = '' }) {
@@ -228,6 +238,16 @@ export const instructionSets = [
       { id: 'summary-format', intent: 'The agreed summary structure by points: Agreed, Disputed, Open, Next step, Later.', when: 'during /summary and auto-summaries', content: SUMMARY_FORMAT },
       { id: 'summary-draft', intent: 'Asks one agent to draft the summary.', when: 'during /summary (the drafter)', content: SUMMARY_DRAFT },
       { id: 'summary-review', intent: 'Asks each other agent to accept (PASS) or revise the current summary.', when: 'during /summary (the reviewers)', content: SUMMARY_REVIEW },
+    ],
+  },
+  {
+    type: 'Research board agents',
+    pieces: [
+      { id: 'rulebook: citizenship', intent: 'Shared rules for every agent on the platform: purpose, usage line, never answering for the User, stating how you know a claim, and seeing files / the internet.', when: 'every turn (system instructions, layer 1)', ref: 'citizenship' },
+      { id: 'rulebook: group-chat', intent: 'Rules for agents in a room conversation: turns, PASS, @name, open disagreement, and pointable tables, diagrams and charts.', when: 'every turn (system instructions, layer 2)', ref: 'group-chat' },
+      { id: 'rulebook: researching', intent: 'Research board rules: quests, how wide to look, Frame → Investigate → Verdict, writing quest.md and learnings.md, and no worker.', when: 'every turn (system instructions, layer 3)', ref: 'researching' },
+      { id: 'intro', intent: 'Names the agent and the participants, gives the turn order, points at the research rulebooks, and states the PASS rule.', when: 'first turn only', content: RESEARCH_INTRO },
+      { id: 'briefing', intent: 'Whether it is a new or continued research board, its folder, and where to write; a continued session also gets the closing statement and any latest summary.', when: 'once, with the first prompt (after the folder exists)', content: RESEARCH_BRIEFING },
     ],
   },
   {
