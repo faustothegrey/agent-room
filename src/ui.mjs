@@ -1863,6 +1863,7 @@ function closeDiscussion(ctx) {
 function cancelCreation(ctx) {
   if (!fresh(ctx)) return;
   const others = siblings(ctx).filter((c) => c !== ctx && !c.stopped);
+  if (others.length && ctx.replicaOwner) return note(ctx, '✗ This discussion holds the room\'s replication (its peers and storage): it stays open while others are. Close them first, or Quit room.', true);
   if (others.length) return closeContext(ctx, others.includes(ctx.creationOrigin) ? ctx.creationOrigin : others[0]);
   if (ctx.state.brainstorm || ctx.state.workbench) return closeDiscussion(ctx);
 }

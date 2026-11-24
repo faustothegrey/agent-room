@@ -2451,6 +2451,18 @@ test('screen Cancel returns to its creation origin, including after a type switc
   assert.equal(gotoOf(another), pageOf(first));
 });
 
+test('screen Cancel keeps the replication owner open while other boards are open', async () => {
+  const { first, contexts, gotoOf } = await multiRoom();
+  await handleLine('first', first);
+  await handleLine('/new', first);
+  const created = contexts()[1];
+  created.replicaOwner = true;
+  await handleLine('/cancel', created);
+  assert.deepEqual(created.queued, []);
+  assert.equal(gotoOf(created), undefined);
+  assert.match(created.notes.at(-1), /holds the room's replication/);
+});
+
 test('screen Cancel leaves an initially empty room empty for brainstorm and workbench', async () => {
   for (const command of ['/brainstorm', '/workbench']) {
     const { first } = await multiRoom();
