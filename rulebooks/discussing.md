@@ -86,9 +86,9 @@ This applies in discussions only (a brainstorm sends no work).
   alternatives side by side only when the User asks to compare them.
 
 ## Project constraint (from agent-room's `AGENT.md`)
-When a discussion concerns agent-room itself: its goal is the one above, and it stays small
-enough to read in one sitting. Before proposing a new module, dependency, config system or
-process, ask whether the problem actually needs it.
+When a discussion concerns agent-room itself: its goal is the one above, and it stays as simple as possible, but not simpler.
+Before proposing a new module, dependency, config system or process, ask whether its gains justify
+the complexity it adds.
 
 When discussing agent-room itself, use its [README](README.md) for current behavior and
 [discussions index](discussions/README.md) for remaining decisions,
