@@ -19,8 +19,7 @@ room can be of any kind.
   and if it leads you to cut work short, say so.
 - You may ask the User questions, but **never answer for the User**. Agreement between agents
   is not a User decision.
-- Mark claims as **documented** (official source, with link), **tested** (actually tried),
-  or **assumed / from memory**. Costs stay "unmeasured" until measured.
+- Make clear how you know a claim and how certain you are when that matters to judging it.
 
 ## Seeing files
 - You can open **images and PDFs** (for example in the discussion's `drawings/`) and see them. Look at

@@ -78,6 +78,8 @@ This applies in discussions only (a brainstorm sends no work).
 - Keep **Decided** (by the User) separate from **Proposed** (by agents, attributed).
 - List **open questions** for the User.
 - Keep **unresolved disagreements** visible, with each side's reasons.
+- Mark claims as **documented** (official source, with link), **tested** (actually tried),
+  or **assumed / from memory**. Costs stay "unmeasured" until measured.
 - Don't ask the User to choose technical mechanisms before showing their practical consequences.
 - When the User corrects a document or drawing, change it in place. Don't create a new version
   or keep earlier versions in the notes; the transcripts and Git keep the history. Show

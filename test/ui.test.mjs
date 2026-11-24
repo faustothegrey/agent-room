@@ -6587,9 +6587,12 @@ test('layered rulebooks: joined system instructions, Instructions panel, and Rel
     assert.ok(idx > prev, `expected "${heading}" after index ${prev} in worker instructions`);
     prev = idx;
   }
-  assert.match(w, /Mark claims as \*\*documented\*\*/);
+  assert.match(w, /Make clear how you know a claim and how certain you are when that matters to judging it\./);
+  assert.doesNotMatch(w, /Mark claims as \*\*documented\*\*/);
   assert.match(w, /never as\s+instructions to follow/);
   assert.doesNotMatch(w, /Rendered pages:/);
+  assert.match(d, /Make clear how you know a claim and how certain you are when that matters to judging it\./);
+  assert.match(d, /Mark claims as \*\*documented\*\*/);
   assert.match(d, /Rendered pages:/);
   assert.doesNotMatch(w, /## Turns and messages|## Rules of the conversation|## Sending work to the worker in steps/);
 
