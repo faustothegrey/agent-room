@@ -2059,8 +2059,8 @@ test('Brainstorms tab: rows by title with their actions, and an order of their o
   assert.equal(sent.at(-1), '/resume brainstorms/2026-11-12-closed');
   click(action('Open idea', 'Go to'));
   assert.equal(location.href, '/r/x-d2/__room');
-  // The actions menu: Resume, Peek files, Close, Archive, Defer, Turn into a discussion, Start fresh, Delete, Move up / Move down.
-  assert.deepEqual(menuLabels('Closed idea'), ['Resume', 'Peek files', 'Close', 'Archive', 'Defer', 'Turn into a discussion', 'Start fresh', 'Delete', 'Move up', 'Move down']);
+  // The actions menu: Resume, Peek files, Close, Archive, Defer, Turn into a discussion, Turn into research, Start fresh, Delete, Move up / Move down.
+  assert.deepEqual(menuLabels('Closed idea'), ['Resume', 'Peek files', 'Close', 'Archive', 'Defer', 'Turn into a discussion', 'Turn into research', 'Start fresh', 'Delete', 'Move up', 'Move down']);
   assert.equal(action('Current idea', 'Archive').disabled, true);
   assert.equal(action('Open idea', 'Defer').disabled, true);
   assert.equal(action('Closed idea', 'Archive').disabled, false);

@@ -1561,7 +1561,7 @@ async function convertBrainstormToResearch(ctx, ref) {
   // failure here leaves the brainstorm's files, sessions and checkpoint untouched.
   let loaded = null, nextState = null, nextSessions = null;
   if (open) {
-    nextState = { transcript: [], seen: new Map(), research: true };
+    nextState = { transcript: [], seen: new Map(), brainstorm: false, research: true };
     nextSessions = new Map();
     const next = { ...open, discussion: null, agentSpecs, workerSpec, sessions: nextSessions, state: nextState };
     try {
