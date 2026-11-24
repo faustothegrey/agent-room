@@ -479,36 +479,9 @@ document.addEventListener('click', (e) => {
 //   say: (line) => void, work: (text) => void and newRoom: () => Promise,
 //   set only when the page is the input (UI mode) }.
 
-// A transcript entry as the page shows it: the text rendered as Markdown. Summary turns are
-// hidden (only the summary's result is shown); the result carries its label.
-export function messageView(m) {
-  const view = { speaker: m.speaker, html: md.parse(m.text ?? ''), error: !!m.error, pass: !!m.pass };
-  if (m.error) view.errorText = m.text ?? '';
-  if (m.summary) view.hidden = true;
-  if (m.outcome) {
-    view.outcome = m.outcome;
-    view.speaker = m.outcome === 'agreed' ? `Summary — agreed, by ${m.by}` : `Summary — not agreed: the last version, by ${m.by}`;
-  }
-  return view;
-}
-
-// Sends one event ({ type, ... }) to every open screen. The last round's end line is remembered
-// until the User speaks again, so a page opened later still shows that it is the User's turn.
-export function broadcast(screen, event) {
-  if (event.type === 'turn') screen.status = event.text;
-  if (event.type === 'message' && event.message.speaker === 'User') screen.status = null;
-  for (const res of screen.clients) res.write(`data: ${JSON.stringify(event)}\n\n`);
-}
-
-// Sends a last event to every open screen and closes their streams; resolves once it has gone out
-// (or after a second), so the process can exit without dropping it.
-export function endAll(screen, event) {
-  const sent = [...screen.clients].map((res) => new Promise((done) => {
-    res.end(`data: ${JSON.stringify(event)}\n\n`, done);
-  }));
-  screen.clients.clear();
-  return Promise.race([Promise.all(sent), new Promise((done) => setTimeout(done, 1000))]);
-}
+// Forward the version tag: static imports would keep the old helpers across Reload.
+const { createScreenEvents } = await import(`./screen-events.mjs${new URL(import.meta.url).search}`);
+export const { messageView, broadcast, endAll, resetEvent } = createScreenEvents(md, () => PAGE);
 
 // The conversation's wallpaper: one doodle tile (black strokes), faint, behind the message lists.
 const DOODLE = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(30 30)"><circle r="9"/><path d="M0-15v-5M0 15v5M-15 0h-5M15 0h5M-11-11l-3-3M11 11l3 3M-11 11l-3 3M11-11l3-3"/></g><path d="M90 42h34a9 9 0 0 0 0-18 13 13 0 0 0-25-3 10 10 0 0 0-9 21z"/><g transform="translate(175 22)"><path d="M0 14L40 0 26 34 18 20z"/><path d="M18 20L40 0"/></g><path d="M60 95c-6-8-20-4-16 8 3 7 16 16 16 16s13-9 16-16c4-12-10-16-16-8z"/><g transform="translate(120 78)"><path d="M0 0h26v18a8 8 0 0 1-8 8h-10a8 8 0 0 1-8-8z"/><path d="M26 5h4a5 5 0 0 1 0 10h-4"/><path d="M7-6c-2-3 2-4 0-8M15-6c-2-3 2-4 0-8"/></g><g transform="translate(195 85)"><path d="M8 0v24M8 0l14 4v18"/><ellipse cx="4" cy="25" rx="5" ry="4"/><ellipse cx="18" cy="23" rx="5" ry="4"/></g><g transform="translate(20 150)"><path d="M0 30C0 10 15 0 35 0c0 20-15 30-35 30z"/><path d="M0 30L22 10"/></g><g transform="translate(100 165)"><circle r="16"/><circle cx="-6" cy="-4" r="1.2"/><circle cx="6" cy="-4" r="1.2"/><path d="M-7 5c4 5 10 5 14 0"/></g><g transform="translate(170 140)"><path d="M-22 0a22 22 0 0 1 44 0c-5-4-10-4-14 0-5-4-11-4-16 0-4-4-9-4-14 0z"/><path d="M0 0v22a5 5 0 0 1-10 0"/></g><path d="M215 195l3 7 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z"/><path d="M60 220a12 12 0 1 1 14-15 9 9 0 1 0-14 15z"/><g transform="translate(150 200)"><ellipse rx="10" ry="13"/><path d="M0 13l-3 4h6zM0 17c-3 6 3 9 0 16"/></g><circle cx="70" cy="60" r="3"/><circle cx="155" cy="60" r="2"/><circle cx="225" cy="60" r="3"/><circle cx="95" cy="125" r="2"/><circle cx="215" cy="135" r="2"/><circle cx="30" cy="110" r="3"/><circle cx="60" cy="175" r="2"/><circle cx="125" cy="225" r="3"/><circle cx="200" cy="230" r="2"/><path d="M120 130h12M140 130h4M10 205h10M228 165h6"/></svg>')}")`;
@@ -4966,18 +4939,6 @@ function handleScreen(req, res, url, dir, screen) {
   // A page that (re)connects first gets everything so far, so it never shows a partial room.
   res.write(`data: ${JSON.stringify(resetEvent(screen))}\n\n`);
   return true;
-}
-
-// Everything a page shows, to start over from: sent to a page that (re)connects, and to every open
-// page when a discussion is resumed or started afresh.
-export function resetEvent(screen) {
-  const peek = screen.peek ?? null;
-  return { type: 'reset', messages: peek ? peek.messages : screen.transcript.map(messageView),
-    doc: peek ? peek.doc : screen.doc,
-    thinking: screen.thinking, status: screen.status, busy: !!screen.busy, input: !!screen.say,
-    room: screen.room ?? null, worker: peek?.kind === 'workbench' ? (peek.worker ?? []) : (screen.workerForPage?.() ?? screen.worker ?? []), working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
-    quota: screen.quota, quotaAt: screen.quotaAt ?? null, monitor: screen.monitor ?? null, newRoom: !!screen.newRoom, page: PAGE,
-    replica: screen.replica ?? null, replicaOff: screen.replicaOff ?? null, viewing: screen.viewing ?? null, peek };
 }
 
 // What the page can still send while viewing another node's line.

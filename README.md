@@ -928,14 +928,15 @@ agent-room's source.
 | `src/instructions.mjs` | The prompt catalog: every instruction sent to the discussion agents, the worker, the closing-statement agent and the title-generation call; the one source the runtime and the Instructions page (on the Control bar) both read. |
 | `src/room.mjs` | Discussion turns, unseen messages, passes and summary agreement. |
 | `src/ui.mjs` | Room setup, persistent defaults, commands, discussions, worker queue, logging and launch integration. |
-| `src/docs.mjs` | Local HTTP server handlers, document rendering, browser UI and live events. |
+| `src/docs.mjs` | Local HTTP server handlers, document rendering and browser UI. |
+| `src/screen-events.mjs`, `src/contract.d.ts` | Live event helpers and the page’s SSE contract. |
 | `src/host-shell.mjs` | The Terminal service's shell: token endpoint, WebSocket, host-only checks and shell lifetime. |
 | `src/notes.mjs` | The My notes service's storage and endpoints: list, read, create, save and remove, with the Terminal's host-only checks. |
 | `src/replicate.mjs` | Separate discussion Git storage, pairing, background transfer and immutable received snapshots. |
 | `src/usage.mjs` | Token accounting, optional quota-meter data and the providers' login status. |
 | `src/mcp.mjs` | Read-only MCP stdio service (`list_rooms`, `list_discussions`) for local clients such as Hermes. |
 
-Run `npm test` for the fast suite, `npm run test:slow` for the slow suite, or `npm run test:all` for both. Tests exercise provider arguments with fake runners, round logic, HTTP endpoints,
+Run `npm test` for the fast suite and the TypeScript check of opted-in JavaScript, `npm run test:slow` for the slow suite, or `npm run test:all` for both. Tests exercise provider arguments with fake runners, round logic, HTTP endpoints,
 settings persistence across CLI restarts, and screen/terminal coordination; they do not establish
 live provider access or browser appearance.
 
@@ -965,7 +966,7 @@ import that carries a fresh query string, `await import('./ui.mjs?v=<millis>')`:
 each load a different module to the loader. The tag is `Date.now()` at every Reload (and each
 room's first load), so each reload is a fresh module. `ui.mjs`'s `load()` then imports the other
 modules with the same tag — `instructions.mjs`, `agents.mjs`, `room.mjs`, `docs.mjs`, `usage.mjs`,
-and `replicate.mjs` under `--node` — so the whole set comes in fresh together. The runtime path
+and `replicate.mjs` under `--node` — so the whole set comes in fresh together. `docs.mjs` forwards its tag to `screen-events.mjs`, so those event helpers reload too. The runtime path
 never uses a static import for these, because a static import of a local module stays cached and a
 reload would silently miss it.
 

@@ -10,9 +10,10 @@
   "scripts": {
     "start": "node src/cli.mjs --dev",
     "terminal": "node src/cli.mjs --no-screen",
-    "test": "node test/helpers/run-tests.mjs fast",
+    "test": "npm run typecheck && node test/helpers/run-tests.mjs fast",
     "test:slow": "node test/helpers/run-tests.mjs slow",
-    "test:all": "node test/helpers/run-tests.mjs all"
+    "test:all": "node test/helpers/run-tests.mjs all",
+    "typecheck": "tsc --noEmit"
   },
   "engines": {
     "node": ">=20"
