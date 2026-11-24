@@ -1,9 +1,26 @@
-import { useEffect, useRef, useState } from 'react';
+/// <reference types="vite/client" />
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import './layout.css';
 import type { FileDetailsResponse, FilesResponse, HighlightMessage, MessageView, Peek, PointMessage, Room, SayRequest, ScreenEvent, ShowRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void };
 type StatusLine = { text: string; error: boolean };
 type Failure = { agent: string; error: string; time: string; earlier: number };
+type Layout = { stacked: boolean; sideClosed: boolean; left: number | null; top: number | null };
+const layoutKey = (folder: string, board: string) => 'agent-room:board-layout:' + JSON.stringify([folder, board]);
+const boardName = (path: string | null | undefined) => path?.replace(/\/+$/, '').split('/').at(-1) || null;
+function initialLayout(): Layout {
+  try { return { stacked: localStorage.getItem('agent-room:split-orient') === 'stacked', sideClosed: localStorage.getItem('agent-room:side-closed') === '1', left: Number(localStorage.getItem('agent-room:left')) || null, top: Number(localStorage.getItem('agent-room:top')) || null }; }
+  catch { return { stacked: false, sideClosed: false, left: null, top: null }; }
+}
+function readLayout(folder: string, board: string): Layout | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(layoutKey(folder, board)) || 'null');
+    if (!value || typeof value !== 'object') return null;
+    const size = (v: unknown) => typeof v === 'number' && v > 0 ? Math.round(v) : null;
+    return { stacked: !!value.stacked, sideClosed: !!value.sideClosed, left: size(value.left), top: size(value.top) };
+  } catch { return null; }
+}
 const ATTACH_LIMIT = 25 * 1024 * 1024, ATTACH_TOTAL = 250 * 1024 * 1024;
 const sizeText = (n: number) => n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
 const base64 = (file: File) => new Promise<string>((ok, fail) => {
@@ -63,6 +80,54 @@ export function App({ version, refresh }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [pointed, setPointed] = useState<Pick<PointMessage, 'label' | 'text'>[]>([]);
   const viewing = useRef<unknown>(null);
+  const [viewLayout, setViewLayout] = useState<{ name?: string; discussion?: string } | null>(null);
+  const [layout, setLayout] = useState<Layout>(initialLayout);
+  const layoutRef = useRef(layout); layoutRef.current = layout;
+  const layoutContext = useRef<{ id: string; readonly: boolean; folder: string; board: string | null } | null>(null);
+  const beforeReadOnly = useRef<Layout | null>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const conversation = useRef<HTMLDivElement>(null);
+  const divider = useRef<HTMLDivElement>(null);
+  const applyLayout = (next: Layout, save = true, key?: string) => {
+    layoutRef.current = next; setLayout(next);
+    const context = layoutContext.current;
+    if (!save || context?.readonly) return;
+    try {
+      if (key) localStorage.setItem('agent-room:' + key, key === 'split-orient' ? (next.stacked ? 'stacked' : 'side') : key === 'side-closed' ? (next.sideClosed ? '1' : '0') : String(key === 'left' ? next.left : next.top));
+      if (context?.folder && context.board) localStorage.setItem(layoutKey(context.folder, context.board), JSON.stringify(next));
+    } catch {}
+  };
+  useLayoutEffect(() => {
+    const folder = room?.folder;
+    if (!folder) return;
+    const readonly = !!peek || !!viewLayout;
+    const board = boardName(viewLayout ? viewLayout.name || viewLayout.discussion : peek ? peek.path || peek.name : room?.active);
+    const id = JSON.stringify([readonly, folder, board || '']);
+    const previous = layoutContext.current;
+    if (previous?.id === id) return;
+    if (readonly && !previous?.readonly) beforeReadOnly.current = { ...layoutRef.current };
+    layoutContext.current = { id, readonly, folder, board };
+    const saved = board ? readLayout(folder, board) : null;
+    if (readonly) { if (saved) applyLayout(saved, false); return; }
+    if (previous?.readonly) {
+      const restore = saved || beforeReadOnly.current;
+      beforeReadOnly.current = null;
+      if (restore) applyLayout(restore, false);
+      if (board && !saved) applyLayout(layoutRef.current);
+    } else if (board) {
+      if (saved) applyLayout(saved, false); else applyLayout(layoutRef.current);
+    }
+  }, [room?.folder, room?.active, peek, viewLayout]);
+  const openDocument = () => { if (layoutRef.current.sideClosed) applyLayout({ ...layoutRef.current, sideClosed: false }, true, 'side-closed'); };
+  const resize = (position: number, stacked: boolean, save: boolean) => {
+    const bounds = panel.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const available = (stacked ? bounds.height - (divider.current?.offsetHeight || 7) : bounds.width - (divider.current?.offsetWidth || 7));
+    const minimum = stacked ? 140 : available > 0 && available < 520 ? Math.max(120, Math.floor(available / 2)) : 260;
+    const size = Math.round(Math.max(minimum, Math.min(Math.max(minimum, available - minimum), position)));
+    const next = { ...layoutRef.current, [stacked ? 'top' : 'left']: size };
+    applyLayout(next, save, stacked ? 'top' : 'left');
+  };
   const offerEpoch = useRef(0);
   const [follow, setFollow] = useState(() => { try { return localStorage.getItem('agent-room.followMentions') === '1'; } catch { return false; } });
   const followRef = useRef(follow); followRef.current = follow;
@@ -149,6 +214,7 @@ export function App({ version, refresh }: Props) {
       if (!(target instanceof Element)) return;
       const ref = target.closest<HTMLElement>('.ref[data-ref]');
       if (!ref || !frame.current?.contentWindow) return;
+      if (event.type === 'click') openDocument();
       const message: HighlightMessage = { type: 'agent-room:highlight', ref: ref.dataset.ref ?? '', on: event.type !== 'mouseout' };
       frame.current.contentWindow.postMessage(message, location.origin);
     };
@@ -222,6 +288,7 @@ export function App({ version, refresh }: Props) {
       }
       if (event.type === 'reset') {
         viewing.current = event.viewing;
+        setViewLayout(event.viewing && typeof event.viewing === 'object' ? event.viewing as { name?: string; discussion?: string } : null);
         roomRef.current = event.room; peekRef.current = event.peek ?? null;
         setRoom(event.room); setPeek(event.peek ?? null); setInput(event.input); setPeekFiles(null);
         if (!preservePeekDoc.current || event.peek) { docRef.current = event.doc ?? null; setDoc(event.doc ?? null); }
@@ -263,7 +330,7 @@ export function App({ version, refresh }: Props) {
       } else if (event.type === 'busy') {
         state.command = event.on; updateBusy();
       } else if (event.type === 'doc') {
-        docRef.current = event.file; setDoc(event.file);
+        docRef.current = event.file; setDoc(event.file); if (event.file) openDocument();
       } else if (event.type === 'room') {
         const changed = roomRef.current && roomRef.current.active !== event.room.active;
         if (changed && peekRef.current) {
@@ -284,14 +351,16 @@ export function App({ version, refresh }: Props) {
   const boardFiles = peek && peekFiles ? peekFiles.files.filter((file) => file.startsWith(`${peek.path}/`)).sort() : [];
   return <main>
     <h1>{title}</h1>
+    <div ref={panel} className={'next-layout' + (layout.stacked ? ' stacked' : '') + (layout.sideClosed ? ' closed' : '')} style={{ '--left': layout.left ? layout.left + 'px' : '55%', '--top': layout.top ? layout.top + 'px' : '55%' } as React.CSSProperties}>
+    <div ref={conversation} className="next-conversation">
+    {layout.sideClosed && <button type="button" title="Open side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: false }, true, 'side-closed')}>Open side pane</button>}
     {peek && <div aria-label="Explorer tab" data-peeking="true">Explorer · peeking</div>}
     {peek && <section aria-label="Peeked board files">
       <p>Looking at <b>{displayTitle(peek.name, peek.title)}</b> <button type="button" onClick={() => void backToCurrent()}>Back to current</button></p>
       <p>peeking at {displayTitle(peek.name, peek.title)} · read-only</p>
-      {boardFiles.map((file) => <button key={file} type="button" disabled={peekFiles?.unviewable?.includes(file) || binary.test(file)} aria-current={doc === file ? 'true' : undefined} onClick={() => { docRef.current = file; setDoc(file); }}>{file.slice(peek.path.length + 1)}</button>)}
+      {boardFiles.map((file) => <button key={file} type="button" disabled={peekFiles?.unviewable?.includes(file) || binary.test(file)} aria-current={doc === file ? 'true' : undefined} onClick={() => { docRef.current = file; setDoc(file); openDocument(); }}>{file.slice(peek.path.length + 1)}</button>)}
       {peekFiles && boardFiles.length === 0 && <p>No files yet.</p>}
     </section>}
-    {doc && <section aria-label="Document"><p>Selected file: {doc}</p><iframe ref={frame} title="Document viewer" src={doc.split('/').map(encodeURIComponent).join('/')} /></section>}
     {turnVisible && <p aria-label="Turn status">your turn</p>}
     <section aria-label="Activity" aria-live="polite">
       {failure && <div><span title={failure.error}>✗ {failure.agent} failed {failure.time}: {failure.error.split(/\r?\n/)[0]}{failure.earlier ? ` (+${failure.earlier} earlier)` : ''}</span> <button type="button" title="Dismiss" aria-label="Dismiss pinned error" onClick={() => setFailure(null)}>✕</button></div>}
@@ -315,5 +384,23 @@ export function App({ version, refresh }: Props) {
         {sending && files.length > 0 && <span>Saving the attachments…</span>}
       </div>
     </div>}
+    </div>
+    <div ref={divider} role="separator" tabIndex={0} aria-label="Resize conversation and side pane" aria-orientation={layout.stacked ? 'horizontal' : 'vertical'} className="next-divider"
+      onKeyDown={(event) => {
+        const stacked = layoutRef.current.stacked;
+        if (!(stacked ? ['ArrowUp', 'ArrowDown'] : ['ArrowLeft', 'ArrowRight']).includes(event.key)) return;
+        event.preventDefault(); const rect = conversation.current?.getBoundingClientRect();
+        const size = stacked ? rect?.height : rect?.width;
+        resize((size || (stacked ? layoutRef.current.top : layoutRef.current.left) || 0) + (event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -24 : 24), stacked, true);
+      }}
+      onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); }}
+      onPointerMove={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = panel.current?.getBoundingClientRect(); if (bounds) resize((layoutRef.current.stacked ? event.clientY - bounds.top : event.clientX - bounds.left) - 3, layoutRef.current.stacked, false); }}
+      onPointerCancel={(event) => { const bounds = panel.current?.getBoundingClientRect(); if (bounds) resize((layoutRef.current.stacked ? event.clientY - bounds.top : event.clientX - bounds.left) - 3, layoutRef.current.stacked, true); }}
+      onPointerUp={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = panel.current?.getBoundingClientRect(); if (bounds) resize((layoutRef.current.stacked ? event.clientY - bounds.top : event.clientX - bounds.left) - 3, layoutRef.current.stacked, true); event.currentTarget.releasePointerCapture(event.pointerId); }} />
+    <div className="next-side" hidden={layout.sideClosed}>
+      <div><button type="button" title={layout.stacked ? 'Place conversation and side pane side by side' : 'Stack conversation above side pane'} onClick={() => applyLayout({ ...layoutRef.current, stacked: !layoutRef.current.stacked }, true, 'split-orient')}>{layout.stacked ? '⇆' : '⇅'}</button> <button type="button" title="Close side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: true }, true, 'side-closed')}>✕</button></div>
+      {doc && <section className="next-document" aria-label="Document"><p>Selected file: {doc}</p><iframe ref={frame} title="Document viewer" src={doc.split('/').map(encodeURIComponent).join('/')} /></section>}
+    </div>
+    </div>
   </main>;
 }
