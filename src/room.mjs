@@ -134,7 +134,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
     // first message is from (auto dev's "Worker report", or "Scheduler", sent to every agent), the User by default.
     // `beforeLap`: optional async hook called with the 0-based lap number before each lap after the first;
     // returning a truthy string stops the round early and passes it to onNotice.
-    async round(userText, { onTurnStart, onMessage, onNotice, speaker = 'User', beforeLap } = {}) {
+    async round(userText, { onTurnStart, onMessage, onNotice, speaker = 'User', beforeLap, onLapStart } = {}) {
       const selected = speaker === 'User' ? selectFor(userText) : activeAgents();
       const user = { speaker, text: userText };
       transcript.push(user);
@@ -149,6 +149,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
             return { stopped: true, reason: typeof stop === 'string' ? stop : 'stopped early' };
           }
         }
+        if (turn % selected.length === 0) onLapStart?.(Math.floor(turn / selected.length));
         const agent = selected[turn % selected.length];
         onTurnStart?.(agent);
         const entry = await takeTurn(agent);

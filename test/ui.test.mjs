@@ -5538,154 +5538,6 @@ test('checkSummary: inline-form rule, Outcome and Steps left rules while running
   assert.ok(ctx.notes.some((n) => n.startsWith('Format check: still wrong:')));
 });
 
-test('scheduler: CRUD in local state, skips open/closing/low-quota/stale runs, runs as Scheduler and closes, and stops early on mid-round quota drop', async () => {
-  const { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } = await import('node:fs');
-  const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
-  const { getSchedule, saveSchedule, checkSchedule, runScheduledTask } = await import('../src/ui.mjs');
-  const { createRoom, closingStatement } = await import('../src/room.mjs');
-  const usageMod = await import('../src/usage.mjs');
-  const docsMod = await import('../src/docs.mjs');
-
-  const dir = mkdtempSync(join(tmpdir(), 'agent-room-sched-room-'));
-  const stateDir = mkdtempSync(join(tmpdir(), 'agent-room-sched-state-'));
-  const schedPath = join(stateDir, 'schedule.json');
-  const discName = '2026-11-21-nightly-review';
-  const discDir = join(dir, 'discussions', discName);
-  mkdirSync(join(discDir, 'transcripts'), { recursive: true });
-  writeFileSync(join(discDir, 'closing-statement.md'), 'Previous closing statement. See pending-instructions.md.\n');
-
-  const now = new Date(2026, 10, 21, 3, 0, 0); // 2026-11-21 03:00 local
-  const freshStamp = '2026-11-21 02:58:00';
-  let currentQuota = {
-    claude: { ok: true, parsed: { current_session: { used_percent: 20 }, current_week_all_models: { used_percent: 10 } } },
-    codex: { ok: true, parsed: { five_hour_limit: { used_percent: 15 }, weekly_limit: { used_percent: 5 } } },
-    last_update: freshStamp,
-  };
-
-  const makeCtx = () => {
-    const state = { transcript: [], seen: new Map() };
-    const screen = { clients: new Set(), transcript: state.transcript, worker: [] };
-    return {
-      cwd: dir,
-      scheduleFile: schedPath,
-      agentSpecs: 'claude:Claude,codex:Codex',
-      workerSpec: 'claude:Worker',
-      state,
-      sessions: new Map(),
-      screen,
-      docs: docsMod,
-      usage: { ...usageMod, fetchQuota: async () => currentQuota },
-      room: { agents: [{ name: 'Claude', provider: 'claude' }, { name: 'Codex', provider: 'codex' }] },
-      worker: { name: 'Worker', provider: 'claude' },
-      totals: {},
-      noScreen: true,
-      out: () => {},
-      closingAgent: () => ({ name: 'Worker', provider: 'claude', turn: async () => 'Updated closing statement. See pending-instructions.md.' }),
-    };
-  };
-
-  const ctx = makeCtx();
-  // 1. CRUD stored outside project dir
-  assert.equal(getSchedule(ctx).quotaFloor, 50);
-  const added = saveSchedule(ctx, { action: 'add', discussion: discName, prompt: 'Run nightly code review.', time: '03:00', enabled: true });
-  assert.equal(added.tasks.length, 1);
-  assert.ok(existsSync(schedPath), 'schedule stored in local state file outside room folder');
-  const taskId = added.tasks[0].id;
-  assert.equal(saveSchedule(ctx, { action: 'floor', quotaFloor: 60 }).quotaFloor, 60);
-  assert.equal(saveSchedule(ctx, { action: 'floor', quotaFloor: 50 }).quotaFloor, 50);
-  assert.equal(saveSchedule(ctx, { action: 'edit', id: taskId, discussion: discName, prompt: 'Review code for refactoring.', time: '03:00', enabled: true }).tasks[0].prompt, 'Review code for refactoring.');
-
-  // 2. Skip when discussion is open in a board
-  ctx.discussion = { name: discName, dir: discDir, title: 'Nightly review' };
-  const skipOpen = await runScheduledTask(ctx, taskId, { now });
-  assert.equal(skipOpen.status, 'skipped');
-  assert.match(skipOpen.reason, /open in a board/);
-  ctx.discussion = null;
-
-  // 3. Skip when quota is below floor or stale
-  currentQuota = { ...currentQuota, claude: { ok: true, parsed: { current_session: { used_percent: 55 }, current_week_all_models: { used_percent: 10 } } } };
-  const skipLow = await runScheduledTask(ctx, taskId, { now });
-  assert.equal(skipLow.status, 'skipped');
-  assert.match(skipLow.reason, /claude 5h has 45% remaining/);
-
-  currentQuota = { ...currentQuota, claude: { ok: true, parsed: { current_session: { used_percent: 20 }, current_week_all_models: { used_percent: 10 } } }, last_update: '2026-11-21 02:00:00' };
-  const skipStale = await runScheduledTask(ctx, taskId, { now });
-  assert.equal(skipStale.status, 'skipped');
-  assert.match(skipStale.reason, /stale/);
-
-  // 4. Happy path via checkSchedule at 03:00 (and no double-fire at 03:00, no catch-up at 03:05)
-  currentQuota = { ...currentQuota, last_update: freshStamp };
-  const seenPrompts = [];
-  const fakeLoad = (replies) => async (next) => {
-    let i = 0;
-    const makeAgent = (name, provider) => ({
-      name, provider,
-      turn: async (p) => { seenPrompts.push([name, p]); return replies[i++] ?? 'PASS'; },
-    });
-    const agents = [makeAgent('Claude', 'claude'), makeAgent('Codex', 'codex')];
-    const room = createRoom(agents, next.state);
-    const worker = { name: 'Worker', provider: 'claude', turn: async () => 'PASS' };
-    return {
-      room, worker, docs: docsMod, usage: ctx.usage,
-      closingStatement: (opts, ag) => closingStatement(ag ?? worker, opts),
-    };
-  };
-
-  // Wrong time (03:05) does nothing (no catch-up)
-  assert.deepEqual(await checkSchedule(ctx, new Date(2026, 10, 21, 3, 5, 0), { loadRoom: fakeLoad(['PASS', 'PASS']) }), []);
-  // Exact time (03:00) runs once, posts as Scheduler, reads closing statement, and closes
-  const ran = await checkSchedule(ctx, now, { loadRoom: fakeLoad(['Found 1 item.', 'PASS', 'PASS', '**Agreed**\n- 1 item', 'PASS']) });
-  assert.equal(ran.length, 1);
-  assert.equal(ran[0].status, 'ran');
-  assert.match(seenPrompts[0][1], /Previous closing statement/);
-  assert.match(seenPrompts[0][1], /\[Scheduler\]: Review code for refactoring\./);
-  assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'ran');
-  // Second tick in the same minute does not re-run
-  assert.deepEqual(await checkSchedule(ctx, new Date(2026, 10, 21, 3, 0, 30), { loadRoom: fakeLoad(['PASS', 'PASS']) }), []);
-
-  // 5. Mid-round quota drop before lap 2 stops early, writes reason in discussion and closing statement, records 'stopped'
-  let lapTurns = 0;
-  const dropLoad = async (next) => {
-    const makeAgent = (name, provider) => ({
-      name, provider,
-      turn: async () => {
-        lapTurns++;
-        // Drop quota below 50% during lap 1 so beforeLap(1) trips before lap 2
-        currentQuota = {
-          claude: { ok: true, parsed: { current_session: { used_percent: 65 }, current_week_all_models: { used_percent: 10 } } },
-          codex: { ok: true, parsed: { five_hour_limit: { used_percent: 15 }, weekly_limit: { used_percent: 5 } } },
-          last_update: freshStamp,
-        };
-        return `${name} lap 1 reply`;
-      },
-    });
-    const agents = [makeAgent('Claude', 'claude'), makeAgent('Codex', 'codex')];
-    const room = createRoom(agents, next.state);
-    const worker = { name: 'Worker', provider: 'claude', turn: async () => 'PASS' };
-    return {
-      room, worker, docs: docsMod, usage: ctx.usage,
-      closingStatement: (opts, ag) => closingStatement(ag ?? worker, opts),
-    };
-  };
-  currentQuota = {
-    claude: { ok: true, parsed: { current_session: { used_percent: 20 }, current_week_all_models: { used_percent: 10 } } },
-    codex: { ok: true, parsed: { five_hour_limit: { used_percent: 15 }, weekly_limit: { used_percent: 5 } } },
-    last_update: freshStamp,
-  };
-  const stopped = await runScheduledTask(ctx, taskId, { now, loadRoom: dropLoad });
-  assert.equal(stopped.status, 'stopped');
-  assert.match(stopped.reason, /quota guard before lap 2/);
-  assert.equal(lapTurns, 2, 'stopped before lap 2 without running lap 2 or auto-summary');
-  const closingText = readFileSync(join(discDir, 'closing-statement.md'), 'utf8');
-  assert.match(closingText, /stopped early and is not a completed review/i);
-  assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'stopped');
-
-  // 6. Toggle and delete
-  assert.equal(saveSchedule(ctx, { action: 'toggle', id: taskId, enabled: false }).tasks[0].enabled, false);
-  assert.equal(saveSchedule(ctx, { action: 'delete', id: taskId }).tasks.length, 0);
-});
-
 test('openList reports ongoing and waitingForInput for discussions and brainstorms (in memory only)', async () => {
   const { summaryHasNextStep, queueWork } = await import('../src/ui.mjs');
 
@@ -6757,24 +6609,6 @@ test('research board: .research marker, briefing, researching instructions on cr
   await handleLine('/close', ctx);
   assert.equal(existsSync(join(dir, 'closing-statement.md')), true);
 
-  // 4. Schedule lists the research board, accepts saving a task for it, and loads researching rules when run.
-  const sched = getSchedule(ctx);
-  assert.ok(sched.discussions.some((d) => d.name === name), 'Schedule should list research boards');
-  const savedSched = saveSchedule(ctx, { action: 'add', discussion: name, prompt: 'daily check', time: '09:00', enabled: true });
-  const taskId = savedSched.tasks[0].id;
-  let scheduledRules = null;
-  ctx.usage = { ...ctx.usage, fetchQuota: async () => ({}), checkQuotaFloor: () => ({ ok: true }) };
-  const schedRes = await runScheduledTask(ctx, taskId, {
-    loadRoom: async (next, v) => {
-      const loaded = await load(next, v);
-      scheduledRules = loaded.rulebooks.active;
-      for (const a of loaded.room.agents) a.turn = async () => 'PASS';
-      return loaded;
-    },
-  });
-  assert.equal(schedRes.status, 'ran');
-  assert.equal(scheduledRules, expectedResearchRules);
-
   // Resume closed board -> researching rules.
   await handleLine(`/resume ${name}`, ctx);
   assert.equal(ctx.state.research, true);
@@ -6907,4 +6741,284 @@ test('convert brainstorm to research: move, .research marker, fresh sessions wit
   await handleLine('Continue as research.', ctx);
   assert.match(resumedPrompts[0], /This research board was turned from a brainstorm\./);
   assert.match(resumedPrompts[0], /transcripts\//);
+});
+
+test('scheduler: one-shot research creates an open board, respects quota and never catches up', async () => {
+  const { existsSync, readdirSync, readFileSync, mkdirSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { getSchedule, saveSchedule, checkSchedule } = await import('../src/ui.mjs');
+  const { createRoom } = await import('../src/room.mjs');
+  const usage = await import('../src/usage.mjs');
+  const docs = await import('../src/docs.mjs');
+  const cwd = await tmp('one-shot-research-');
+  const now = new Date(2026, 10, 21, 3, 0);
+  let quotaOK = true, drop = false, loaded;
+  const state = { transcript: [], seen: new Map() };
+  const ctx = { cwd, scheduleFile: join(cwd, 'schedule.json'), agentSpecs: 'claude:A', workerSpec: 'claude:Worker',
+    state, sessions: new Map(), screen: { clients: new Set(), transcript: state.transcript, worker: [] }, docs,
+    usage: { ...usage, fetchQuota: async () => ({}), checkQuotaFloor: () => quotaOK ? { ok: true } : { ok: false, reason: 'low quota' } },
+    room: { agents: [{ name: 'A', provider: 'claude' }] }, worker: { name: 'Worker' }, totals: {}, noScreen: true, out: () => {} };
+  const prompts = [];
+  const loadRoom = async (next) => {
+    loaded = next;
+    const agent = { name: 'A', provider: 'claude', turn: async (p) => { prompts.push(p); if (drop) { quotaOK = false; return 'Finding'; } return 'PASS'; } };
+    return { room: createRoom([agent], next.state), worker: { name: 'Worker' }, docs, usage: ctx.usage };
+  };
+  const input = { kind: 'research', title: 'Sample Research', prompt: 'Investigate this', date: '2026-11-21', time: '03:00' };
+  assert.throws(() => saveSchedule(ctx, { action: 'add', ...input, date: '2026-02-30' }), /valid local date/);
+  const id = saveSchedule(ctx, { action: 'add', ...input }).tasks[0].id;
+  assert.deepEqual(await checkSchedule(ctx, new Date(2026, 10, 21, 3, 1), { loadRoom }), []);
+  assert.equal(getSchedule(ctx).tasks[0].lastRun, null);
+  quotaOK = false;
+  assert.equal((await checkSchedule(ctx, now, { loadRoom }))[0].status, 'skipped');
+  assert.equal(existsSync(join(cwd, 'discussions')), false);
+  assert.deepEqual(await checkSchedule(ctx, now, { loadRoom }), []);
+  saveSchedule(ctx, { action: 'edit', id, ...input, prompt: 'Changed' });
+  assert.deepEqual(await checkSchedule(ctx, now, { loadRoom }), []);
+  saveSchedule(ctx, { action: 'edit', id, ...input, time: '03:01' });
+  quotaOK = true;
+  mkdirSync(join(cwd, 'discussions'), { recursive: true });
+  const result = await checkSchedule(ctx, new Date(2026, 10, 21, 3, 1), { loadRoom });
+  assert.equal(result[0].status, 'ran');
+  assert.ok(loaded.discussion && existsSync(join(loaded.discussion.dir, '.research')));
+  assert.equal(existsSync(join(loaded.discussion.dir, 'closing-statement.md')), false);
+  assert.match(prompts[0], /\[Scheduler\]: Investigate this/);
+  assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'ran');
+  const firstName = loaded.discussion.name;
+  saveSchedule(ctx, { action: 'edit', id, ...input, time: '03:02' });
+  drop = true;
+  const stopped = await checkSchedule(ctx, new Date(2026, 10, 21, 3, 2), { loadRoom });
+  assert.equal(stopped[0].status, 'stopped');
+  assert.notEqual(loaded.discussion.name, firstName);
+  const transcript = readFileSync(join(loaded.discussion.dir, 'transcripts', readdirSync(join(loaded.discussion.dir, 'transcripts'))[0]), 'utf8');
+  assert.match(transcript, /quota guard before lap 2/);
+  assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'stopped');
+});
+
+test('recurring research schedules a board and reuses its live session, skipping only busy rounds', async () => {
+  const { saveSchedule, getSchedule, checkSchedule } = await import('../src/ui.mjs');
+  const { hub, first, contexts } = await multiRoom();
+  first.scheduleFile = `${first.cwd}/schedule.json`;
+  first.usage.checkQuotaFloor = () => ({ ok: true });
+  const addRoom = hub.addRoom;
+  hub.addRoom = async (...args) => {
+    const result = await addRoom(...args);
+    result.ctx.usage.checkQuotaFloor = () => ({ ok: true });
+    return result;
+  };
+  const input = { kind: 'recurring', title: '', prompt: 'Named from prompt', time: '03:00', enabled: true };
+  const id = saveSchedule(first, { action: 'add', ...input }).tasks[0].id;
+  assert.deepEqual(await checkSchedule(first, new Date(2026, 10, 21, 3, 1)), []);
+  assert.equal((await checkSchedule(first, new Date(2026, 10, 21, 3, 0)))[0].status, 'ran');
+  const board = contexts().find((c) => c.state.research);
+  const name = board.discussion.name;
+  assert.match(name, /named-from-prompt/);
+  assert.equal(getSchedule(first).tasks[0].board, name);
+  const state = board.state, agents = board.room.agents;
+  assert.equal((await checkSchedule(first, new Date(2026, 10, 22, 3, 0)))[0].status, 'ran');
+  assert.equal(board.state, state);
+  assert.equal(board.room.agents, agents);
+  assert.equal(board.state.transcript.filter((m) => m.speaker === 'Scheduler').length, 2);
+  board.busy = true;
+  const skipped = await checkSchedule(first, new Date(2026, 10, 23, 3, 0));
+  assert.equal(skipped[0].status, 'skipped');
+  assert.match(skipped[0].reason, /round or summary/);
+  board.busy = false;
+  saveSchedule(first, { action: 'toggle', id, enabled: false });
+  assert.deepEqual(await checkSchedule(first, new Date(2026, 10, 24, 3, 0)), []);
+  saveSchedule(first, { action: 'add', kind: 'research', title: '', prompt: 'One shot prompt title', date: '2026-11-24', time: '03:01' });
+  assert.equal((await checkSchedule(first, new Date(2026, 10, 24, 3, 1)))[0].status, 'ran');
+  assert.ok(contexts().some((c) => c.discussion?.name.endsWith('one-shot-prompt-title')));
+});
+
+test('recurring research restores unloaded sessions and resumes a closed board fresh', async () => {
+  const { saveSchedule, getSchedule, checkSchedule, reloaded } = await import('../src/ui.mjs');
+  const { readFileSync } = await import('node:fs');
+  const cwd = await tmp('recurring-restore-');
+  await gitRoom(cwd);
+  const state = { transcript: [], seen: new Map() };
+  const ctx = { cwd, scheduleFile: `${cwd}/schedule.json`, agentSpecs: 'claude:A', workerSpec: 'claude:Worker', state, sessions: new Map(), noScreen: true };
+  Object.assign(ctx, await load(ctx, ''));
+  ctx.say = () => {};
+  await reloaded(ctx);
+  ctx.usage = { ...ctx.usage, fetchQuota: async () => ({}), checkQuotaFloor: () => ({ ok: true }) };
+  ctx.suggestTitle = async () => ({ title: 'Generated Title' });
+  let lastLoaded, prompts = [];
+  const loadRoom = async (next, v) => {
+    const loaded = await load(next, v);
+    loaded.usage = ctx.usage;
+    for (const agent of loaded.room.agents) agent.turn = async (p) => {
+      prompts.push(p); Object.assign(next.sessions.get(agent.name), { started: true }); return 'PASS';
+    };
+    lastLoaded = next;
+    return loaded;
+  };
+  const fields = { kind: 'recurring', title: 'Persistent', prompt: 'Study this', time: '03:00' };
+  saveSchedule(ctx, { action: 'add', ...fields });
+  assert.equal((await checkSchedule(ctx, new Date(2026, 10, 21, 3, 0), { loadRoom }))[0].status, 'ran');
+  const boardName = getSchedule(ctx).tasks[0].board;
+  const firstSession = lastLoaded.sessions.get('A').id;
+  assert.equal((await checkSchedule(ctx, new Date(2026, 10, 22, 3, 0), { loadRoom }))[0].status, 'ran');
+  assert.equal(lastLoaded.sessions.get('A').id, firstSession);
+  assert.match(prompts.at(-1), /\[Scheduler\]: Study this/);
+  // Close the saved open board through the normal UI path, then the next run must start fresh.
+  await handleLine(`/resume ${boardName}`, ctx);
+  ctx.closingAgent = () => ({ name: 'Worker', turn: async () => 'Closing statement: research findings. See pending-instructions.md.' });
+  await handleLine('/close', ctx);
+  assert.match(readFileSync(`${cwd}/discussions/${boardName}/closing-statement.md`, 'utf8'), /research findings/);
+  assert.equal((await checkSchedule(ctx, new Date(2026, 10, 23, 3, 0), { loadRoom }))[0].status, 'ran');
+  assert.notEqual(lastLoaded.sessions.get('A').id, firstSession);
+  assert.match(prompts.at(-1), /Closing statement: research findings/);
+});
+
+test('research scheduler applies the real quota guard before creating a board and between laps', async () => {
+  const { existsSync, readdirSync, readFileSync } = await import('node:fs');
+  const { getSchedule, saveSchedule, runScheduledTask } = await import('../src/ui.mjs');
+  const { createRoom } = await import('../src/room.mjs');
+  const usage = await import('../src/usage.mjs');
+  const docs = await import('../src/docs.mjs');
+  const cwd = await tmp('research-quota-');
+  const now = new Date(2026, 10, 21, 3, 0);
+  const healthy = { claude: { ok: true, parsed: { current_session: { used_percent: 20 }, current_week_all_models: { used_percent: 10 } } }, last_update: '2026-11-21 02:58:00' };
+  let quota = null, turns = 0, board;
+  const state = { transcript: [], seen: new Map() };
+  const ctx = { cwd, scheduleFile: `${cwd}/schedule.json`, agentSpecs: 'claude:A', workerSpec: 'claude:Worker', state,
+    sessions: new Map(), screen: { clients: new Set(), transcript: state.transcript, worker: [] }, docs,
+    usage: { ...usage, fetchQuota: async () => quota }, room: { agents: [{ name: 'A', provider: 'claude' }] },
+    worker: { name: 'Worker' }, totals: {}, noScreen: true, out: () => {} };
+  const id = saveSchedule(ctx, { action: 'add', kind: 'recurring', title: 'Quota research', prompt: 'Investigate', time: '03:00' }).tasks[0].id;
+  const loadRoom = async (next) => {
+    board = next;
+    const agent = { name: 'A', provider: 'claude', turn: async () => {
+      turns++;
+      quota = { ...healthy, claude: { ok: true, parsed: { current_session: { used_percent: 65 }, current_week_all_models: { used_percent: 10 } } } };
+      return 'A finding';
+    } };
+    return { room: createRoom([agent], next.state), worker: { name: 'Worker' }, docs, usage: ctx.usage };
+  };
+  for (const [reading, reason] of [
+    [null, /unavailable|missing|reachable/i],
+    [{ ...healthy, last_update: '2026-11-21 02:00:00' }, /stale/i],
+    [{ ...healthy, claude: { ok: true, parsed: { current_session: { used_percent: 55 }, current_week_all_models: { used_percent: 10 } } } }, /45% remaining/i],
+  ]) {
+    quota = reading;
+    const skipped = await runScheduledTask(ctx, id, { now, loadRoom });
+    assert.equal(skipped.status, 'skipped');
+    assert.match(skipped.reason, reason);
+    assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'skipped');
+    assert.equal(existsSync(`${cwd}/discussions`), false);
+  }
+  quota = healthy;
+  const stopped = await runScheduledTask(ctx, id, { now, loadRoom });
+  assert.equal(stopped.status, 'stopped');
+  assert.match(stopped.reason, /quota guard before lap 2/);
+  assert.equal(turns, 1);
+  assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'stopped');
+  assert.equal(existsSync(`${board.discussion.dir}/closing-statement.md`), false);
+  const transcript = readFileSync(`${board.discussion.dir}/transcripts/${readdirSync(`${board.discussion.dir}/transcripts`)[0]}`, 'utf8');
+  assert.match(transcript, /quota guard before lap 2/);
+});
+
+test('research lap totals include manual and scheduled rounds and survive a board restart', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { saveSchedule, getSchedule, runScheduledTask } = await import('../src/ui.mjs');
+  const { hub, first, contexts } = await multiRoom();
+  first.scheduleFile = `${first.cwd}/schedule.json`;
+  first.usage.checkQuotaFloor = () => ({ ok: true });
+  const addRoom = hub.addRoom;
+  hub.addRoom = async (...args) => {
+    const result = await addRoom(...args);
+    result.ctx.usage.checkQuotaFloor = () => ({ ok: true });
+    return result;
+  };
+  const task = saveSchedule(first, { action: 'add', kind: 'recurring', title: 'Lap Quest', prompt: 'Investigate', time: '23:59' }).tasks[0];
+  assert.equal((await runScheduledTask(first, task.id)).status, 'ran');
+  const board = contexts().find((c) => c.state.research);
+  const name = board.discussion.name;
+  assert.equal(first.screen.room.researchStats[name].laps, 1);
+  assert.ok(first.screen.room.researchStats[name].lastRun);
+  assert.ok(first.screen.room.researchStats[name].nextRun);
+  // A manual round requiring two laps increments the same board total.
+  let turns = 0;
+  board.room.agents[0].turn = async () => ++turns === 1 ? 'Finding' : 'PASS';
+  board.room.agents[1].turn = async () => 'PASS';
+  await handleLine('Follow up', board);
+  assert.equal(first.screen.room.researchStats[name].laps, 3);
+  assert.equal(JSON.parse(readFileSync(`${board.discussion.dir}/.research-stats.json`, 'utf8')).laps, 3);
+  saveSchedule(first, { action: 'toggle', id: task.id, enabled: false });
+  assert.equal(getSchedule(first).tasks[0].enabled, false);
+  assert.equal(first.screen.room.researchStats[name].nextRun, null);
+  // Header reconstruction reads the board's persisted count, independently of the live context.
+  board.stopped = true;
+  saveSchedule(first, { action: 'toggle', id: task.id, enabled: false });
+  assert.equal(first.screen.room.researchStats[name].laps, 3);
+});
+
+test('turn research into discussion preserves its folder, starts fresh agents and disables its schedule', async () => {
+  const { existsSync, readFileSync, writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { saveSchedule, getSchedule, reloaded } = await import('../src/ui.mjs');
+  const { rulebookPath } = await import('../src/instructions.mjs');
+  const cwd = await tmp('convert-research-discussion-');
+  const ctx = { ...freshCtx(), cwd, scheduleFile: join(cwd, 'schedule.json'), agentSpecs: 'claude:A,codex:B', workerSpec: 'claude:W', noScreen: true };
+  Object.assign(ctx, await load(ctx, '?conv-disc'));
+  await reloaded(ctx);
+  ctx.suggestTitle = async () => ({ title: 'Research Conversion' });
+  await handleLine('/research', ctx);
+  ctx.room.agents[0].turn = async () => { Object.assign(ctx.sessions.get('A'), { started: true }); return 'Finding'; };
+  ctx.room.agents[1].turn = async () => { Object.assign(ctx.sessions.get('B'), { threadId: 'test-thread' }); return 'PASS'; };
+  // Finish after the first response, then retain a not-agreed summary.
+  let first = true;
+  ctx.room.agents[0].turn = async () => { Object.assign(ctx.sessions.get('A'), { started: true }); if (first) { first = false; return 'Finding'; } return 'PASS'; };
+  await handleLine('Research this', ctx);
+  const name = ctx.discussion.name, dir = ctx.discussion.dir, oldA = ctx.sessions.get('A');
+  writeFileSync(join(dir, 'quest.md'), 'Original quest');
+  ctx.state.transcript.push({ speaker: 'Summary', text: 'Disputed finding', outcome: 'not agreed', by: 'A' });
+  const task = saveSchedule(ctx, { action: 'add', kind: 'recurring', title: 'Task', prompt: 'Again', time: '03:00' }).tasks[0];
+  // Associate the task with this board as the scheduler does after its first run.
+  const schedule = JSON.parse(readFileSync(ctx.scheduleFile, 'utf8'));
+  schedule.tasks[0].board = name;
+  writeFileSync(ctx.scheduleFile, JSON.stringify(schedule));
+  ctx.busy = true;
+  await handleLine(`/convert discussions/${name}`, ctx);
+  ctx.busy = false;
+  assert.equal(existsSync(join(dir, '.research')), true);
+  assert.equal(getSchedule(ctx).tasks[0].enabled, true);
+  ctx.rulebooksDir = join(cwd, 'missing-rulebooks');
+  await handleLine(`/convert discussions/${name}`, ctx);
+  delete ctx.rulebooksDir;
+  assert.equal(existsSync(join(dir, '.research')), true);
+  assert.equal(ctx.sessions.get('A'), oldA);
+  assert.equal(getSchedule(ctx).tasks[0].enabled, true);
+  await handleLine(`/convert discussions/${name}`, ctx);
+  assert.equal(existsSync(join(dir, '.research')), false);
+  assert.equal(readFileSync(join(dir, 'quest.md'), 'utf8'), 'Original quest');
+  assert.equal(ctx.discussion.dir, dir);
+  assert.equal(ctx.state.research, undefined);
+  assert.notEqual(ctx.sessions.get('A'), oldA);
+  assert.equal(getSchedule(ctx).tasks.find((t) => t.id === task.id).enabled, false);
+  assert.ok(ctx.rulebooks.active.includes(readFileSync(rulebookPath('discussing'), 'utf8').trimEnd()));
+  const prompts = [];
+  for (const agent of ctx.room.agents) agent.turn = async (p) => { prompts.push(p); return 'PASS'; };
+  await handleLine('Continue as discussion', ctx);
+  assert.match(prompts[0], /turned from a research board/);
+  assert.match(prompts[0], /research notes.*transcripts\//);
+  assert.match(prompts[0], /\*\*not agreed\*\*[\s\S]*Disputed finding/);
+  // A closed board stays closed until resumed, with the research briefing still available.
+  ctx.suggestTitle = async () => ({ title: 'Closed Research' });
+  await handleLine('/research', ctx);
+  for (const agent of ctx.room.agents) agent.turn = async () => 'PASS';
+  await handleLine('A closed research board', ctx);
+  const closedName = ctx.discussion.name;
+  ctx.closingAgent = () => ({ name: 'W', turn: async () => 'Closed research. See pending-instructions.md.' });
+  await handleLine('/close', ctx);
+  await handleLine(`/convert discussions/${closedName}`, ctx);
+  assert.equal(existsSync(join(cwd, 'discussions', closedName, '.research')), false);
+  await handleLine(`/resume ${closedName}`, ctx);
+  assert.equal(ctx.state.research, undefined);
+  const resumedPrompts = [];
+  for (const agent of ctx.room.agents) agent.turn = async (p) => { resumedPrompts.push(p); return 'PASS'; };
+  await handleLine('Resume discussion', ctx);
+  assert.match(resumedPrompts[0], /turned from a research board/);
+  assert.match(resumedPrompts[0], /research notes.*transcripts\//);
 });

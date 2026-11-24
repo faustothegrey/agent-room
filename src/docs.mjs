@@ -821,6 +821,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 .list-section { margin: .25rem 0 .45rem; }
 .list-section > summary { cursor: pointer; padding: .25rem .35rem; border-radius: 4px; font-size: .74rem; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; user-select: none; }
 .list-section > summary:hover { background: #8882; color: CanvasText; }
+#board-list .research-laps-high { color: light-dark(#b45309, #fbbf24); font-weight: 700; }
 #board-list .local-label { color: var(--dim); font-size: .74rem; margin: .05rem 0 .1rem .4rem; overflow-wrap: anywhere; }
 #board-list .worker-pending { color: light-dark(#b45309, #f59e0b); font-size: .74rem; margin: .1rem 0 .1rem .4rem; overflow-wrap: anywhere; }
 #board-list .worker-conflict { color: light-dark(#b91c1c, #fca5a5); font-size: .74rem; margin: .1rem 0 .1rem .4rem; overflow-wrap: anywhere; }
@@ -937,7 +938,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
   <button type="button" class="ctrl-btn on" id="ctrl-boards" aria-pressed="true" title="Boards and conversation"><span class="ctrl-ico">💬</span><span class="ctrl-lbl">Boards</span></button>
   <button type="button" class="ctrl-btn" id="ctrl-providers" aria-pressed="false" title="Default providers and models for new discussions, and provider health"><span class="ctrl-ico">⚙</span><span class="ctrl-lbl">Providers</span></button>
   <button type="button" class="ctrl-btn" id="ctrl-instructions" aria-pressed="false" title="The prompts and rulebooks sent to each agent, and when"><span class="ctrl-ico">📜</span><span class="ctrl-lbl">Instructions</span></button>
-  <button type="button" class="ctrl-btn" id="ctrl-schedule" aria-pressed="false" title="Scheduled recurring discussions and quota guard"><span class="ctrl-ico">⏰</span><span class="ctrl-lbl">Schedule</span></button>
+  <button type="button" class="ctrl-btn" id="ctrl-schedule" aria-pressed="false" title="Scheduled tasks and quota guard"><span class="ctrl-ico">⏰</span><span class="ctrl-lbl">Schedule</span></button>
   <button type="button" class="ctrl-btn" id="ctrl-notes" aria-pressed="false" hidden title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder."><span class="ctrl-ico">📝</span><span class="ctrl-lbl">My notes</span></button>
   <button type="button" class="ctrl-btn" id="ctrl-terminal" aria-pressed="false" hidden title="A shell on this computer, in the room's folder. Only from this computer, not from other devices."><span class="ctrl-ico">⌨</span><span class="ctrl-lbl">Terminal</span></button>
 </nav>
@@ -1236,7 +1237,7 @@ for (const key of Object.keys(SERVICES)) {
 if ($('services-close')) $('services-close').onclick = () => openService(null);
 if ($('providers-done')) $('providers-done').onclick = () => openService(null);
 
-// The Schedule page: quota floor, recurring discussion tasks, and last-run results.
+// The Schedule page: quota floor, research tasks, and last-run results.
 let scheduleEditingId = null;
 function formatScheduleRun(task) {
   if (task.running) return { text: 'Running now…', cls: 'warn' };
@@ -1300,7 +1301,6 @@ function drawSchedule(data, notice = '', isError = false) {
   // 2. Task list
   const listSec = document.createElement('section'); listSec.className = 'sched-section';
   const listH = document.createElement('h3'); listH.textContent = 'Scheduled tasks (' + data.tasks.length + ')'; listSec.append(listH);
-  const discByRef = new Map((data.discussions || []).map((d) => [d.ref, d]));
   if (!data.tasks.length) {
     const empty = document.createElement('p'); empty.className = 'settings-hint';
     empty.textContent = 'No scheduled tasks for this room yet.';
@@ -1310,13 +1310,12 @@ function drawSchedule(data, notice = '', isError = false) {
       const card = document.createElement('div'); card.className = 'sched-card'; card.dataset.enabled = task.enabled ? 'true' : 'false';
       const head = document.createElement('div'); head.className = 'sched-head';
       const toggle = document.createElement('input'); toggle.type = 'checkbox'; toggle.checked = !!task.enabled;
-      toggle.setAttribute('aria-label', 'Enable scheduled task for ' + task.discussion);
+      if (task.kind === 'research') toggle.hidden = true;
+      toggle.setAttribute('aria-label', 'Enable scheduled task for ' + (task.title || 'research'));
       toggle.onchange = () => mutate({ action: 'toggle', id: task.id, enabled: toggle.checked }, toggle.checked ? 'Task enabled.' : 'Task disabled.');
-      const time = document.createElement('span'); time.className = 'sched-time'; time.textContent = task.time + ' daily';
-      const d = discByRef.get(task.discussion);
+      const time = document.createElement('span'); time.className = 'sched-time'; time.textContent = task.kind === 'research' ? task.date + ' ' + task.time : task.time + ' daily';
       const disc = document.createElement('span'); disc.className = 'sched-disc';
-      disc.textContent = d ? d.title + (d.section ? ' (' + d.section + ')' : '') : task.discussion;
-      disc.title = 'discussions/' + task.discussion;
+      disc.textContent = (task.title || 'Untitled research') + (task.board ? ' · ' + task.board : '');
       const actions = document.createElement('span'); actions.className = 'sched-actions';
       const editBtn = document.createElement('button'); editBtn.type = 'button'; editBtn.textContent = 'Edit';
       editBtn.onclick = () => { scheduleEditingId = task.id; drawSchedule(data); };
@@ -1347,38 +1346,27 @@ function drawSchedule(data, notice = '', isError = false) {
   const formSec = document.createElement('section'); formSec.className = 'sched-section';
   const formH = document.createElement('h3'); formH.textContent = editing ? 'Edit scheduled task' : 'Add scheduled task'; formSec.append(formH);
   const form = document.createElement('form'); form.className = 'sched-form'; form.id = 'sched-form';
-  const row = document.createElement('div'); row.className = 'sched-form-row';
-
-  const discLbl = document.createElement('label'); discLbl.className = 'grow'; discLbl.textContent = 'Discussion';
-  const discSel = document.createElement('select'); discSel.id = 'sched-discussion'; discSel.required = true;
-  const discussions = data.discussions || [];
-  if (!discussions.length) {
-    const opt = document.createElement('option'); opt.value = ''; opt.textContent = 'No discussions in this room yet';
-    discSel.append(opt);
-  } else {
-    for (const d of discussions) {
-      const opt = document.createElement('option'); opt.value = d.ref;
-      opt.textContent = d.title + ' (' + d.ref + ')';
-      discSel.append(opt);
-    }
-    if (editing && !discByRef.has(editing.discussion)) {
-      const opt = document.createElement('option'); opt.value = editing.discussion;
-      opt.textContent = editing.discussion + ' (missing)';
-      discSel.append(opt);
-    }
-    if (editing) discSel.value = editing.discussion;
+  const kindLbl = document.createElement('label'); kindLbl.textContent = 'Task type';
+  const kindSel = document.createElement('select'); kindSel.id = 'sched-kind';
+  for (const [value, label] of [['research', 'One-shot research'], ['recurring', 'Daily research']]) {
+    const opt = document.createElement('option'); opt.value = value; opt.textContent = label; kindSel.append(opt);
   }
-  discLbl.append(discSel);
+  kindSel.value = editing ? editing.kind : 'research'; kindSel.disabled = !!editing; kindLbl.append(kindSel);
+  const row = document.createElement('div'); row.className = 'sched-form-row';
 
   const timeLbl = document.createElement('label'); timeLbl.textContent = 'Daily time (local)';
   const timeIn = document.createElement('input'); timeIn.type = 'time'; timeIn.id = 'sched-time'; timeIn.required = true;
   timeIn.value = editing ? editing.time : '03:00';
   timeLbl.append(timeIn);
-  row.append(discLbl, timeLbl);
+  const titleLbl = document.createElement('label'); titleLbl.className = 'grow'; titleLbl.textContent = 'Research title (optional)';
+  const titleIn = document.createElement('input'); titleIn.id = 'sched-title'; titleIn.value = editing?.title || ''; titleLbl.append(titleIn);
+  const dateLbl = document.createElement('label'); dateLbl.textContent = 'Date (local)';
+  const dateIn = document.createElement('input'); dateIn.type = 'date'; dateIn.id = 'sched-date'; dateIn.value = editing?.date || ''; dateLbl.append(dateIn);
+  row.append(titleLbl, dateLbl, timeLbl);
 
   const promptLbl = document.createElement('label'); promptLbl.textContent = 'Saved prompt (posted as Scheduler)';
   const promptIn = document.createElement('textarea'); promptIn.id = 'sched-prompt'; promptIn.rows = 4; promptIn.required = true;
-  promptIn.placeholder = 'Write the prompt the Scheduler should post to this discussion…';
+  promptIn.placeholder = 'Write the prompt the Scheduler should post to the research board…';
   promptIn.value = editing ? editing.prompt : '';
   promptLbl.append(promptIn);
 
@@ -1390,7 +1378,12 @@ function drawSchedule(data, notice = '', isError = false) {
   const btns = document.createElement('div'); btns.className = 'sched-form-buttons';
   const submitBtn = document.createElement('button'); submitBtn.type = 'submit';
   submitBtn.textContent = editing ? 'Save changes' : 'Add task';
-  submitBtn.disabled = !discussions.length && !editing;
+  function updateKind() {
+    const research = kindSel.value === 'research';
+    dateLbl.hidden = !research; dateIn.required = research;
+    enLbl.hidden = research; timeLbl.firstChild.textContent = research ? 'Time (local)' : 'Daily time (local)';
+  }
+  kindSel.onchange = updateKind; updateKind();
   btns.append(submitBtn);
   if (editing) {
     const cancelBtn = document.createElement('button'); cancelBtn.type = 'button'; cancelBtn.textContent = 'Cancel';
@@ -1400,13 +1393,14 @@ function drawSchedule(data, notice = '', isError = false) {
 
   form.onsubmit = (e) => {
     e.preventDefault();
-    const payload = editing
-      ? { action: 'edit', id: editing.id, discussion: discSel.value, time: timeIn.value, prompt: promptIn.value, enabled: enIn.checked }
-      : { action: 'add', discussion: discSel.value, time: timeIn.value, prompt: promptIn.value, enabled: enIn.checked };
+    const fields = kindSel.value === 'research'
+      ? { kind: 'research', title: titleIn.value, date: dateIn.value, time: timeIn.value, prompt: promptIn.value }
+      : { kind: 'recurring', title: titleIn.value, time: timeIn.value, prompt: promptIn.value, enabled: enIn.checked };
+    const payload = editing ? { action: 'edit', id: editing.id, ...fields } : { action: 'add', ...fields };
     scheduleEditingId = null;
     mutate(payload, editing ? 'Task updated.' : 'Task added.');
   };
-  form.append(row, promptLbl, enLbl, btns);
+  form.append(kindLbl, row, promptLbl, enLbl, btns);
   formSec.append(form, statusEl);
   pane.append(formSec);
 }
@@ -2507,8 +2501,9 @@ function updateReplicaView() {
   // + New discussion and + New brainstorm live at the top of the Boards list panel.
   $('list-new').hidden = !canBoardAct;
   $('newdisc').hidden = !(room?.active || room?.brainstorm || room?.workbench || room?.research);
-  // Turn into a discussion / Turn into research: a brainstorm once its first message has named it.
-  $('convert').hidden = !(canBoardAct && room?.brainstorm && room.active);
+  // A named brainstorm or research board can become a discussion.
+  $('convert').hidden = !(canBoardAct && (room?.brainstorm || room?.research) && room.active);
+  $('convert').title = room?.research ? 'Keep the folder and start fresh discussion sessions; linked recurring tasks are turned off.' : 'Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder.';
   if ($('convert-research')) $('convert-research').hidden = !(canBoardAct && room?.brainstorm && room.active);
   // With several discussions open (the screen), New discussion and Resume keep this one open;
   // Close closes it (labelled "Close with pending work" when its branch has pending work).
@@ -2654,7 +2649,7 @@ function confirmed(b, run, warning, ask = () => room?.started || warning) {
     e.stopPropagation();
     if (ask() && !b.dataset.armed) {
       b.dataset.armed = '1'; b.dataset.label = b.textContent;
-      b.textContent = warning || 'Click again: this session ends and the chat clears';
+      b.textContent = (typeof warning === 'function' ? warning() : warning) || 'Click again: this session ends and the chat clears';
       return setTimeout(() => { delete b.dataset.armed; b.textContent = b.dataset.label; }, 4000);
     }
     run();
@@ -2834,6 +2829,14 @@ function renderBoards() {
   const list = container.firstChild;
   requestAnimationFrame(() => { container.scrollTop = scroll; });
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+  const researchInfo = (name) => {
+    const stats = room?.researchStats?.[name] ?? {};
+    const line = el('div', 'local-label');
+    const count = Number.isSafeInteger(stats.laps) && stats.laps >= 0 ? stats.laps : 0;
+    line.append(el('span', count > 30 ? 'research-laps-high' : '', 'Laps: ' + (stats.priorUnknown ? '≥' : '') + count));
+    line.append(el('span', '', ' · Last: ' + (stats.lastRun ? longDate(stats.lastRun) : '—') + ' · Next: ' + (stats.nextRun ? longDate(stats.nextRun) : '—')));
+    return line;
+  };
   const canAct = room && localInput && !viewing;
   const makeSection = (key, title, count) => {
     const details = el('details', 'list-section');
@@ -3079,6 +3082,7 @@ function renderBoards() {
     btn.onclick = () => notesGuard(() => { location.href = o.url; });
     block.append(btn);
     block.append(el('div', 'local-label', boardState(o)));
+    block.append(researchInfo(null));
     r.append(block);
     resSection.append(r);
   }
@@ -3122,6 +3126,7 @@ function renderBoards() {
     const stateEl = el('div', 'local-label', statusText);
     if (state === 'waiting for input' && openEntry?.waitingReason) stateEl.title = openEntry.waitingReason;
     block.append(stateEl);
+    block.append(researchInfo(d));
     row.append(block);
 
     if (canAct) {
@@ -3159,6 +3164,10 @@ function renderBoards() {
         if (target === 'archive') archiveButton(b, d);
         items.append(b);
       }
+      const convert = el('button', '', 'Turn into a discussion');
+      convert.title = 'Keep the folder and start fresh discussion sessions; linked recurring tasks are turned off.';
+      confirmed(convert, () => { closeMenus(); send('/convert ' + path); }, 'Click again: research sessions end and scheduled tasks turn off', () => true);
+      items.append(convert);
       if (!(isCurrent && !room.started)) {
         const f = el('button', '', 'Start fresh'); freshButton(f, d); items.append(f);
       }
@@ -3359,6 +3368,7 @@ function renderBoards() {
     const merged = !isRes && workerMerged.has(d);
     const statePrefix = isRes ? (s === 'archive' ? 'archived research' : 'deferred research') : (s === 'archive' ? 'archived' : 'deferred');
     block.append(el('div', 'local-label', statePrefix + (closed ? ' · closed' : '') + (closing ? ' · ' + closingLabel(closing) : '') + (merged ? ' · merged' : '')));
+    if (isRes) block.append(researchInfo(d));
     const work = isRes ? null : pendingWork.find((p) => p.lane === d);
     const workerBusy = !isRes && !!room?.busyWorkers?.includes(d);
     if (work?.conflicts?.length && !workerBusy) block.append(el('div', 'worker-conflict', '⚠ Worker conflict: ' + work.conflicts.join(', ')));
@@ -4334,7 +4344,7 @@ confirmed($('newboard-workbench'), () => send('/workbench'), null, () => !room?.
 confirmed($('newworkbench'), () => { closeMenus(); send('/workbench'); }, null, () => !room?.multi && room?.started);
 confirmed($('newresearch'), () => send('/research'), null, () => !room?.multi && room?.started);
 confirmed($('newresearch-menu'), () => { closeMenus(); send('/research'); }, null, () => !room?.multi && room?.started);
-confirmed($('convert'), () => { closeMenus(); send('/convert ' + room.active); }, 'Click again: it moves to discussions/', () => true);
+confirmed($('convert'), () => { closeMenus(); send('/convert ' + room.active); }, () => room?.research ? 'Click again: research sessions end and scheduled tasks turn off' : 'Click again: it moves to discussions/', () => true);
 confirmed($('convert-research'), () => { closeMenus(); send('/convert ' + room.active + ' research'); }, 'Click again: it moves to discussions/ as a research board', () => true);
 confirmed($('closedisc'), () => send('/close'), 'Click again: this discussion closes (its agents stop)', () => !!room?.started);
 $('closemerge').onclick = () => {

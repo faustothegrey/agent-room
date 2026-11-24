@@ -465,7 +465,7 @@ function header(ctx) {
     workbench: !!ctx.state.workbench, // a worker-only board, in discussions/<name>/ with .workbench marker
     research: !!ctx.state.research, // a research board, in discussions/<name>/ with .research marker
     workbenches: workbenchNames(ctx),
-    researches: researchNames(ctx),
+    researches: researchNames(ctx), researchStats: researchStats(ctx),
     // The agents this discussion started with, for the members panel once it has started.
     members: ctx.room.agents.map((a) => ({ provider: a.provider, name: a.name,
       model: specs.find((s) => s.name === a.name)?.model ?? '',
@@ -579,6 +579,54 @@ function researchNames(ctx) {
     }
   }
   return names;
+}
+// Lap data belongs to the board, so it survives fresh sessions, close, and archive moves.
+const RESEARCH_STATS = '.research-stats.json';
+function readResearchStats(dir) {
+  try {
+    const data = JSON.parse(readFileSync(join(dir, RESEARCH_STATS), 'utf8'));
+    return { laps: Number.isSafeInteger(data.laps) && data.laps >= 0 ? data.laps : 0,
+      lastRun: typeof data.lastRun === 'string' ? data.lastRun : null, priorUnknown: !!data.priorUnknown };
+  } catch {
+    const transcripts = join(dir, 'transcripts');
+    return { laps: 0, lastRun: null, priorUnknown: existsSync(transcripts) && readdirSync(transcripts).some((name) => name.endsWith('.md')) };
+  }
+}
+function recordResearchLap(ctx, lap) {
+  const dir = ctx.discussion.dir, file = join(dir, RESEARCH_STATS), stats = readResearchStats(dir);
+  if (!existsSync(file) && !ctx.discussion.continued) stats.priorUnknown = false;
+  stats.laps++;
+  if (lap === 0) stats.lastRun = new Date().toISOString();
+  const temp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(stats) + '\n');
+    renameSync(temp, file);
+  } catch (err) {
+    note(ctx, `✗ Couldn't save research lap count: ${err.message}`, true);
+  } finally { if (existsSync(temp)) unlinkSync(temp); }
+  showHeader(ctx);
+}
+function researchStats(ctx, now = new Date()) {
+  const parent = join(ctx.cwd, 'discussions'), result = {};
+  const tasks = readSchedule(ctx).tasks;
+  for (const section of [null, ...SECTIONS]) {
+    const dir = section ? join(parent, section) : parent;
+    if (!existsSync(dir)) continue;
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isDirectory() || !DATED.test(e.name) || !isResearchDir(join(dir, e.name))) continue;
+      const stats = readResearchStats(join(dir, e.name));
+      const next = tasks.filter((t) => t.kind === 'recurring' && t.board === e.name && t.enabled && SCHEDULE_TIME_RE.test(t.time))
+        .map((t) => {
+          const [hours, minutes] = t.time.split(':').map(Number);
+          const candidate = new Date(now); candidate.setHours(hours, minutes, 0, 0);
+          const trigger = `${day(candidate)} ${t.time}`;
+          if (candidate.getTime() + 60_000 <= now.getTime() || (candidate <= now && t.lastTriggerKey === trigger)) candidate.setDate(candidate.getDate() + 1);
+          return candidate;
+        }).sort((a, b) => a - b)[0];
+      result[e.name] = { ...stats, nextRun: next?.toISOString() ?? null };
+    }
+  }
+  return result;
 }
 const brainstormRef = (ref) => /^brainstorms\/([^/\\]+)$/.exec(ref ?? '')?.[1] ?? null;
 function brainstormDirRef(parent, ref) {
@@ -907,6 +955,10 @@ function briefing(ctx) {
       + `The room's root, ${ctx.cwd}, holds the work itself.`;
   }
   if (continued) {
+    if (ctx.discussion.fromResearch) {
+      return `This discussion was turned from a research board. Its folder is ${dir}: create, read and write this discussion's documents there. `
+        + `Before replying, read its research notes and earlier transcripts in ${join(dir, 'transcripts')}/${s ? ` (the transcripts are the source; this summary may omit details):${summary}` : '.'}`;
+    }
     if (existsSync(join(dir, 'closing-statement.md'))) {
       const text = readFileSync(join(dir, 'closing-statement.md'), 'utf8');
       return `This session continues the discussion in ${dir}: create, read and write this discussion's documents (notes, drawings) there. Start from its closing statement:\n\n${text}${summary}`;
@@ -1142,7 +1194,7 @@ function checkpointSummary(saved) {
 // Checks a full checkpoint and builds its room, changing nothing; resolves to the function that
 // puts it in ctx. A checkpoint that can't be used is kept, and the room stays as it is. A
 // brainstorm's (brainstorm: true) has no worker part: its context keeps its own worker settings.
-async function loadCheckpoint(ctx, saved, name, brainstorm = false, directory = null) {
+async function loadCheckpoint(ctx, saved, name, brainstorm = false, directory = null, loadRoom = load) {
   const what = brainstorm ? 'brainstorm' : 'discussion';
   const fallback = brainstorm ? 'Start fresh starts the brainstorm from its latest summary or transcripts instead' : 'Start fresh starts the discussion from its handoff instead';
   const invalid = () => new Error(`The checkpoint of ${name} is invalid. It was kept; ${fallback}.`);
@@ -1176,7 +1228,7 @@ async function loadCheckpoint(ctx, saved, name, brainstorm = false, directory = 
   const state = { ...saved.state, ...(saved.workbench || isWorkbenchDir(dir) ? { workbench: true } : {}), ...(saved.research || isResearchDir(dir) ? { research: true } : {}), seen, restored: { text: waiting ? `${waiting}\n\n${restored}` : restored,
     pending: saved.agentSpecs.split(',').map((spec) => parseSpec(spec).name) } };
   const next = { ...ctx, agentSpecs: saved.agentSpecs, workerSpec, sessions, state };
-  const loaded = await load(next, `?resume=${Date.now()}`);
+  const loaded = await loadRoom(next, `?resume=${Date.now()}`);
   return () => {
     const label = name, shop = shopOf(ctx);
     Object.assign(ctx, loaded, {
@@ -1332,7 +1384,7 @@ function peekDiscussion(ctx, ref) {
 // next message. One in archive/ or deferred/ is made active first. On the screen it opens beside
 // the open discussions (in this context, if it is still empty); in the terminal the session in use
 // ends first. It runs between rounds (commands are queued).
-async function resumeDiscussion(ctx, ref) {
+async function resumeDiscussion(ctx, ref, { loadRoom = load } = {}) {
   const parent = join(ctx.cwd, 'discussions');
   if (!ref) return note(ctx, '✗ Name the discussion to resume: /resume <name> (its folder\'s name).', true);
   if (ref.startsWith(`${BRAINSTORMS}/`)) return resumeBrainstorm(ctx, ref);
@@ -1343,7 +1395,7 @@ async function resumeDiscussion(ctx, ref) {
   const open = siblings(ctx).find((c) => c !== ctx && isDiscussion(c, d.name));
   if (open) return goto(ctx, open);
   if (isDiscussion(ctx, d.name)) return note(ctx, `${d.name} is the discussion in use here.`);
-  if (multi(ctx) && !fresh(ctx)) return besideWith(ctx, (next) => resumeDiscussion(next, ref));
+  if (multi(ctx) && !fresh(ctx)) return besideWith(ctx, (next) => resumeDiscussion(next, ref, { loadRoom }));
   if (d.section && !await moveDiscussion(ctx, ref, 'active')) return;
   const name = d.name, dir = join(parent, name), saved = readCheckpoint(ctx, name);
   const isWb = isWorkbenchDir(dir) || !!saved?.workbench;
@@ -1357,12 +1409,13 @@ async function resumeDiscussion(ctx, ref) {
       throw new Error(`The checkpoint of ${name} is invalid. It was kept; Start fresh starts the ${kindLabel} from its handoff instead.`);
     const state = { transcript: [], seen: new Map(), ...(isWb && { workbench: true }), ...(isRes && { research: true }) }, sessions = new Map();
     const next = { ...ctx, state, sessions, agentSpecs: saved?.agentSpecs ?? ctx.agentSpecs, workerSpec: saved?.workerSpec ?? ctx.workerSpec };
-    const loaded = await load(next, `?reopen=${Date.now()}`);
+    const loaded = await loadRoom(next, `?reopen=${Date.now()}`);
     await leaveSession(ctx, `resuming the ${kindLabel} ${name}`);
     const savedWorker = isWb && Array.isArray(saved?.worker) ? saved.worker : [];
     const freshSaved = { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(), discussion: { name, title: saved?.discussion?.title ?? name },
       ...(isWb && { workbench: true, worker: savedWorker }),
       ...(isRes && { research: true }),
+      ...(saved?.fromResearch && { fromResearch: true, summary: checkpointSummary(saved) }),
       fresh: true, fromClosed: true, agentSpecs: next.agentSpecs, workerSpec: next.workerSpec, work: saved?.work ?? workOf(shopOf(ctx), name) };
     writeCheckpoint(ctx, name, freshSaved);
     setClosed(ctx, name, false);
@@ -1374,7 +1427,8 @@ async function resumeDiscussion(ctx, ref) {
       const shop = shopOf(ctx);
       if (!shop.log.some((m) => m.origin === name)) shop.log.push(...savedWorker.map((m) => ({ ...m, owner: name })));
     }
-    switchTo(ctx, { name, dir, title: freshSaved.discussion.title, continued: true });
+    switchTo(ctx, { name, dir, title: freshSaved.discussion.title, continued: true, ...(freshSaved.fromResearch && { fromResearch: true }) });
+    ctx.freshSummary = checkpointSummary(freshSaved);
     ctx.closedBriefing = !isWb;
     wire(ctx);
     await reportWork(ctx, name, freshSaved.work);
@@ -1386,7 +1440,7 @@ async function resumeDiscussion(ctx, ref) {
     return;
   }
   if (saved && !saved.fresh) {
-    await continueFrom(ctx, saved, name, false);
+    await continueFrom(ctx, saved, name, false, loadRoom);
     setClosed(ctx, name, false);
     showHeader(ctx);
     await reportWork(ctx, name, saved.work);
@@ -1406,7 +1460,7 @@ async function resumeDiscussion(ctx, ref) {
   }
   if (isRes) ctx.state.research = true;
   if (isRes) await defaultsForNew(ctx, { reloadAgents: true });
-  switchTo(ctx, { name, dir, title: saved?.discussion?.title ?? name, continued: true, ...(saved?.fromBrainstorm && { fromBrainstorm: true }) });
+  switchTo(ctx, { name, dir, title: saved?.discussion?.title ?? name, continued: true, ...(saved?.fromBrainstorm && { fromBrainstorm: true }), ...(saved?.fromResearch && { fromResearch: true }) });
   setClosed(ctx, name, false);
   showHeader(ctx);
   ctx.freshSummary = isWb ? null : checkpointSummary(saved);
@@ -1416,8 +1470,8 @@ async function resumeDiscussion(ctx, ref) {
 
 // Resume from a full checkpoint (a discussion's or a brainstorm's): built first, then the session in
 // use ends and the saved one takes its place.
-async function continueFrom(ctx, saved, name, brainstorm) {
-  const apply = await loadCheckpoint(ctx, saved, name, brainstorm); // built before anything changes
+async function continueFrom(ctx, saved, name, brainstorm, loadRoom = load) {
+  const apply = await loadCheckpoint(ctx, saved, name, brainstorm, null, loadRoom); // built before anything changes
   const was = ctx.discussion && { name: refOf(ctx), title: ctx.discussion.title };
   const ref = brainstorm ? `${BRAINSTORMS}/${name}` : name;
   await leaveSession(ctx, `resuming the ${brainstorm ? 'brainstorm' : 'discussion'} ${name}`);
@@ -1663,6 +1717,68 @@ async function convertBrainstormToResearch(ctx, ref) {
   }
   showHeader(ctx);
   note(ctx, `Turned the brainstorm ${name} into the research board ${name}, in discussions/: old sessions ended; the same agents start fresh with the research rulebook, reading its transcripts/${summary ? ` and latest summary${summary.outcome === 'agreed' ? '' : ' (not agreed)'}` : ''}.${cleanupWarning}`);
+}
+
+// Turn an active research board into a discussion in the same folder, with fresh sessions.
+async function convertResearchToDiscussion(ctx, ref) {
+  const parent = join(ctx.cwd, 'discussions');
+  const normalized = ref.startsWith('discussions/') ? ref.slice('discussions/'.length) : ref;
+  const d = discussionRef(parent, normalized);
+  if (!d || !isResearchDir(join(parent, d.section ?? '', d.name))) return note(ctx, `✗ No research board "${ref}". Nothing was changed.`, true);
+  if (d.section) return note(ctx, `✗ ${d.name} is in ${d.section}/: make it active before turning it into a discussion.`, true);
+  const name = d.name, dir = join(parent, name), marker = join(dir, RESEARCH_MARKER);
+  const open = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, name));
+  if (open?.busy) return note(ctx, `✗ ${name} can't become a discussion while a round or summary is running. Nothing was changed.`, true);
+  if (open && open !== ctx) { open.say?.(`/convert discussions/${name}`); return goto(ctx, open); }
+  const saved = readCheckpoint(ctx, name);
+  if (saved?.invalid) return note(ctx, `✗ The checkpoint of ${name} is invalid. Nothing was changed.`, true);
+  const title = open?.discussion?.title ?? saved?.discussion?.title ?? name;
+  const agentSpecs = open?.agentSpecs ?? saved?.agentSpecs ?? ctx.agentSpecs;
+  const workerSpec = open?.workerSpec ?? saved?.workerSpec ?? ctx.workerSpec ?? roomDefaults(ctx).worker;
+  const latest = open?.state?.transcript?.findLast((m) => m.speaker === 'Summary' && m.outcome);
+  const summary = latest ? { text: latest.text, outcome: latest.outcome, by: latest.by } : checkpointSummary(saved);
+  let loaded = null, state = null, sessions = null;
+  if (open) {
+    state = { transcript: [], seen: new Map() }; sessions = new Map();
+    try { loaded = await load({ ...open, discussion: null, agentSpecs, workerSpec, sessions, state }, `?convert-discussion=${Date.now()}`); }
+    catch (err) { return note(ctx, `✗ Couldn't start fresh discussion sessions for ${name}: ${err.message}. Nothing was changed.`, true); }
+    if (open.busy) return note(ctx, `✗ ${name} can't become a discussion while a round or summary is running. Nothing was changed.`, true);
+  }
+  const freshSaved = { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
+    discussion: { name, title }, fresh: true, fromResearch: true, summary, agentSpecs, workerSpec };
+  const schedule = readSchedule(ctx), linked = schedule.tasks.filter((t) => t.kind === 'recurring' && t.board === name);
+  const cp = checkpointFile(ctx, name);
+  let oldMarker, oldCheckpoint;
+  try { oldMarker = readFileSync(marker); oldCheckpoint = existsSync(cp) ? readFileSync(cp) : null; }
+  catch (err) { return note(ctx, `✗ Couldn't inspect ${name} before conversion: ${err.message}. Nothing was changed.`, true); }
+  try {
+    unlinkSync(marker);
+    writeCheckpoint(ctx, name, freshSaved);
+    if (linked.length) { for (const task of linked) task.enabled = false; writeSchedule(ctx, schedule); }
+  } catch (err) {
+    try {
+      if (!existsSync(marker)) writeFileSync(marker, oldMarker, { flag: 'wx' });
+      if (oldCheckpoint) writeFileSync(cp, oldCheckpoint); else if (existsSync(cp)) unlinkSync(cp);
+    } catch (rollback) { return note(ctx, `✗ Conversion failed (${err.message}); restoring the research board also failed (${rollback.message}). Check ${dir} and its checkpoint.`, true); }
+    return note(ctx, `✗ Couldn't convert ${name}: ${err.message}. The research board was restored.`, true);
+  }
+  if (open) {
+    if (open.logPath) { try { appendFileSync(open.logPath, '_(turned into a discussion)_\n\n'); } catch {} }
+    for (const agent of open.room.agents) agent.reset?.();
+    detachWorker(open);
+    Object.assign(open, loaded, { state, sessions, agentSpecs, workerSpec, logPath: null, pendingLog: '', lastRound: null,
+      freshSummary: summary, agentsStarted: false, retryFailure: null, autoDev: null, autoDevSent: [], workDispatchedLen: 0, workReady: false });
+    open.screen.transcript = state.transcript;
+    Object.assign(open.screen, { doc: null, thinking: null, status: null, peek: null });
+    wire(open);
+    switchTo(open, { name, dir, title, continued: true, fromResearch: true });
+    open.freshSummary = summary;
+    refreshWorker(open).catch(() => {});
+  }
+  listedCheckpoints.clear();
+  if (linked.length) broadcastSchedule(ctx);
+  showHeader(ctx);
+  note(ctx, `Turned research board ${name} into a discussion: the same agents start fresh with discussion rules, reading the research notes, transcripts and latest summary.${linked.length ? ` Turned off ${linked.length} recurring scheduled task${linked.length === 1 ? '' : 's'} linked to this board.` : ''}`);
 }
 
 // /convert brainstorms/<name> (Turn into a discussion): its folder moves to discussions/<name>/
@@ -3944,7 +4060,7 @@ export async function handleLine(line, ctx) {
     return target === ctx ? closeDiscussion(ctx) : void target.say?.('/close');
   }
   const convert = /^\/convert\s+(\S+)(?:\s+(research))?$/.exec(line);
-  if (convert) return convert[2] === 'research' ? convertBrainstormToResearch(ctx, convert[1]) : convertBrainstorm(ctx, convert[1]);
+  if (convert) return convert[2] === 'research' ? convertBrainstormToResearch(ctx, convert[1]) : convert[1].startsWith('brainstorms/') ? convertBrainstorm(ctx, convert[1]) : convertResearchToDiscussion(ctx, convert[1]);
   const remove = /^\/delete\s+(\S+)$/.exec(line);
   if (remove) return remove[1].startsWith(`${BRAINSTORMS}/`) ? deleteBrainstorm(ctx, remove[1]) : deleteResearch(ctx, remove[1]);
   if (line === '/autodev') return startAutoDev(ctx);
@@ -4081,6 +4197,7 @@ async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = n
     showHeader(ctx);
     workNotice(ctx);
     const roundRes = await ctx.room.round(line, { speaker, beforeLap,
+      onLapStart(lap) { if (ctx.state.research && ctx.discussion) recordResearchLap(ctx, lap); },
       onTurnStart(agent) {
         started = Date.now();
         startThinking(ctx, agent.name);
@@ -5389,7 +5506,7 @@ async function pairWith(ctx, peer, confirm) {
   return result;
 }
 
-// ── Scheduler (recurring discussions) ─────────────────────────────────
+// ── Scheduler (research tasks) ─────────────────────────────────
 // Per-room schedule stored in agent-room's local state, outside the project's working tree:
 // ~/.local/state/agent-room/schedules/<sha256 of realpath(room folder)>.json
 const DEFAULT_QUOTA_FLOOR = 50;
@@ -5431,6 +5548,7 @@ function writeSchedule(ctx, data) {
 
 function broadcastSchedule(ctx) {
   for (const c of siblings(ctx)) if (!c.stopped && c.screen) toScreen(c, { type: 'schedule' });
+  showHeader(ctx);
 }
 
 function listScheduleDiscussions(ctx) {
@@ -5456,34 +5574,39 @@ export function getSchedule(ctx) {
   const running = shopOf(ctx).schedulerRunningTasks ?? new Set();
   return {
     quotaFloor: data.quotaFloor,
+    discussions: listScheduleDiscussions(ctx),
     tasks: data.tasks.map((t) => ({
       id: t.id,
-      discussion: t.discussion,
+      kind: t.kind,
+      title: t.title, date: t.date, board: t.board ?? null,
       prompt: t.prompt,
       time: t.time,
       enabled: !!t.enabled,
       lastRun: t.lastRun ?? null,
       running: running.has(t.id),
     })),
-    discussions: listScheduleDiscussions(ctx),
   };
 }
 
 function validateTaskInput(ctx, body) {
-  const discussion = String(body?.discussion ?? '').trim();
-  const d = discussion ? discussionRef(join(ctx.cwd, 'discussions'), discussion) : null;
-  if (!d) {
-    throw new Error('Choose an existing discussion from this room.');
+  const kind = body?.kind;
+  if (kind !== 'research' && kind !== 'recurring') {
+    const d = body?.discussion && discussionRef(join(ctx.cwd, 'discussions'), body.discussion);
+    if (d && isWorkbenchDir(join(ctx.cwd, 'discussions', d.section ?? '', d.name))) throw new Error('Workbenches cannot be scheduled.');
+    throw new Error('Choose a research task type.');
   }
-  if (isWorkbenchDir(join(ctx.cwd, 'discussions', d.section ?? '', d.name))) {
-    throw new Error('Workbenches cannot be scheduled.');
-  }
-  const prompt = String(body?.prompt ?? '').trim();
+  const title = String(body.title ?? '').trim();
+  const prompt = String(body.prompt ?? '').trim();
+  const time = String(body.time ?? '').trim();
   if (!prompt) throw new Error('Enter a prompt for the scheduled run.');
-  const time = String(body?.time ?? '').trim();
-  if (!SCHEDULE_TIME_RE.test(time)) throw new Error('Enter a daily time in 24-hour HH:MM format.');
-  const enabled = body?.enabled === undefined ? true : !!body.enabled;
-  return { discussion, prompt, time, enabled };
+  if (!SCHEDULE_TIME_RE.test(time)) throw new Error('Enter a local time in 24-hour HH:MM format.');
+  if (kind === 'research') {
+    const date = String(body.date ?? '').trim();
+    const parsed = new Date(`${date}T12:00:00`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsed.getTime()) || day(parsed) !== date) throw new Error('Enter a valid local date.');
+    return { kind, title, prompt, date, time, enabled: true };
+  }
+  return { kind, title, prompt, time, enabled: body.enabled === undefined ? true : !!body.enabled };
 }
 
 export function saveSchedule(ctx, body) {
@@ -5500,10 +5623,11 @@ export function saveSchedule(ctx, body) {
   } else if (action === 'edit') {
     const task = data.tasks.find((t) => t.id === body.id);
     if (!task) throw new Error('Scheduled task not found.');
+    if (task.kind !== body.kind) throw new Error('Cannot change task type.');
     const fields = validateTaskInput(ctx, body);
-    const timeChanged = task.time !== fields.time;
+    const timeChanged = task.time !== fields.time || task.date !== fields.date;
     Object.assign(task, fields);
-    if (timeChanged) task.lastTriggerKey = null;
+    if (timeChanged) { task.lastTriggerKey = null; if (task.kind === 'research') task.lastRun = null; }
   } else if (action === 'toggle') {
     const task = data.tasks.find((t) => t.id === body.id);
     if (!task) throw new Error('Scheduled task not found.');
@@ -5520,162 +5644,124 @@ export function saveSchedule(ctx, body) {
   return getSchedule(ctx);
 }
 
-function recordTaskRun(ctx, taskId, status, reason, at) {
+function recordTaskRun(ctx, taskId, status, reason, at, triggerKey = undefined) {
   const data = readSchedule(ctx);
   const task = data.tasks.find((t) => t.id === taskId);
-  if (!task) return;
+  if (!task || (triggerKey !== undefined && task.lastTriggerKey !== triggerKey)) return;
   task.lastRun = { at, status, reason: reason ?? null };
   writeSchedule(ctx, data);
   broadcastSchedule(ctx);
 }
 
 export async function runScheduledTask(ctx, taskId, { now = null, loadRoom = load } = {}) {
-  const startedAt = now ?? new Date();
-  const clockMs = () => (now ? now.getTime() : Date.now());
-  const at = startedAt.toISOString();
   const data = readSchedule(ctx);
   const task = data.tasks.find((t) => t.id === taskId);
   if (!task) return null;
-  const parent = join(ctx.cwd, 'discussions');
-  const d = discussionRef(parent, task.discussion);
-  if (!d) {
-    recordTaskRun(ctx, taskId, 'skipped', `discussion "${task.discussion}" was not found`, at);
-    return { status: 'skipped', reason: `discussion "${task.discussion}" was not found` };
-  }
+  return runScheduledResearch(ctx, task, data, { now, loadRoom });
+}
+
+async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
+  const at = (now ?? new Date()).toISOString();
+  const clockMs = () => now ? now.getTime() : Date.now();
   const shop = shopOf(ctx);
-  if (shop.closing?.has(d.name)) {
-    const reason = `${d.name} is closing`;
-    recordTaskRun(ctx, taskId, 'skipped', reason, at);
-    return { status: 'skipped', reason };
-  }
-  if (siblings(ctx).some((c) => !c.stopped && isDiscussion(c, d.name))) {
-    const reason = `${d.name} is open in a board`;
-    recordTaskRun(ctx, taskId, 'skipped', reason, at);
-    return { status: 'skipped', reason };
-  }
-  if ([...runningTasks(shop), ...queuedTasks(shop)].some((t) => (t.owner ?? ownerOf(t.origin)) === d.name)) {
-    const reason = `${d.name} is busy with a worker task`;
-    recordTaskRun(ctx, taskId, 'skipped', reason, at);
-    return { status: 'skipped', reason };
-  }
-  shop.schedulerRunning ??= new Set();
   shop.schedulerRunningTasks ??= new Set();
-  if (shop.schedulerRunning.has(d.name)) {
-    const reason = `${d.name} already has a scheduled run in progress`;
-    recordTaskRun(ctx, taskId, 'skipped', reason, at);
+  if (shop.schedulerRunningTasks.has(task.id)) {
+    const reason = 'A round or summary is already in progress for this task';
+    recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
     return { status: 'skipped', reason };
   }
-
-  // Determine the discussion's saved agents and check the quota floor before resuming.
-  const saved = readCheckpoint(ctx, d.name);
-  const agentSpecs = saved?.agentSpecs ?? roomDefaults(ctx).agents ?? ctx.agentSpecs ?? '';
-  const providers = [...new Set(agentSpecs.split(',').filter(Boolean).map((s) => parseSpec(s).provider))];
-  const quota = await ctx.usage.fetchQuota();
-  refreshQuota(ctx, quota).catch(() => {});
-  const preCheck = ctx.usage.checkQuotaFloor(quota, providers, data.quotaFloor, { now: clockMs() });
-  if (!preCheck.ok) {
-    recordTaskRun(ctx, taskId, 'skipped', preCheck.reason, at);
-    return { status: 'skipped', reason: preCheck.reason };
-  }
-
-  shop.schedulerRunning.add(d.name);
   shop.schedulerRunningTasks.add(task.id);
   broadcastSchedule(ctx);
-
   let runCtx = null;
   let createdBeside = false;
   try {
-    if (ctx.hub?.addRoom) {
+    const parent = join(ctx.cwd, 'discussions');
+    const ref = task.board && [task.board, ...SECTIONS.map((section) => `${section}/${task.board}`)]
+      .find((candidate) => discussionRef(parent, candidate));
+    if (task.board && (!ref || !isResearchDir(join(parent, ref)))) throw new Error(`Research board ${task.board} was not found.`);
+    let open = task.board && siblings(ctx).find((c) => !c.stopped && isDiscussion(c, task.board));
+    if (open?.busy) {
+      const reason = `${task.board} has a round or summary in progress`;
+      recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
+      return { status: 'skipped', reason };
+    }
+    const saved = task.board && readCheckpoint(ctx, task.board);
+    const specs = open?.agentSpecs ?? saved?.agentSpecs ?? roomDefaults(ctx).agents ?? ctx.agentSpecs ?? '';
+    const providers = open
+      ? [...new Set(open.room.agents.filter((a) => !(open.state.disabledAgents ?? []).includes(a.name)).map((a) => a.provider))]
+      : [...new Set(specs.split(',').filter(Boolean).map((s) => parseSpec(s)).filter((a) => !(saved?.state?.disabledAgents ?? []).includes(a.name)).map((a) => a.provider))];
+    const quota = await ctx.usage.fetchQuota();
+    refreshQuota(ctx, quota).catch(() => {});
+    const check = ctx.usage.checkQuotaFloor(quota, providers, data.quotaFloor, { now: clockMs() });
+    if (!check.ok) {
+      recordTaskRun(ctx, task.id, 'skipped', check.reason, at, task.lastTriggerKey);
+      return { status: 'skipped', reason: check.reason };
+    }
+    if (task.board && !isResearchDir(join(parent, ref))) throw new Error(`Research board ${task.board} is no longer research.`);
+    // Another round may have started while quota was being fetched.
+    open = task.board && siblings(ctx).find((c) => !c.stopped && isDiscussion(c, task.board));
+    if (open?.busy) {
+      const reason = `${task.board} has a round or summary in progress`;
+      recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
+      return { status: 'skipped', reason };
+    }
+    if (open) {
+      runCtx = open;
+    } else if (ctx.hub?.addRoom) {
       runCtx = await openBeside(ctx);
       createdBeside = true;
+      if (task.board) {
+        await resumeDiscussion(runCtx, ref, { loadRoom });
+        if (!isDiscussion(runCtx, task.board)) throw new Error(`Could not resume research board ${task.board}.`);
+      } else await newResearch(runCtx);
     } else {
-      const state = { transcript: [], seen: new Map() };
-      runCtx = { ...ctx, state, discussion: null, sessions: new Map(), programs: { running: new Set(), stopping: false },
+      const state = { transcript: [], seen: new Map(), research: true }, sessions = new Map();
+      runCtx = { ...ctx, state, sessions, discussion: null, programs: { running: new Set(), stopping: false },
         screen: { clients: new Set(), transcript: state.transcript, worker: shop.log }, lastRound: null, logPath: null,
         checkpointError: null, hub: null, noScreen: true };
-    }
-    if (ctx.closingAgent) runCtx.closingAgent = ctx.closingAgent;
-    if (d.section && !await moveDiscussion(runCtx, task.discussion, 'active')) {
-      throw new Error(`Could not move ${task.discussion} to active discussions.`);
-    }
-
-    // Resume the way a closed discussion is resumed: fresh sessions, its saved agents, its closing statement.
-    const release = await suspendTransfers(runCtx, d.name);
-    try {
-      if (saved && (saved.invalid || saved.version !== 1 || saved.root !== realpathSync(ctx.cwd) || saved.discussion?.name !== d.name)) {
-        throw new Error(`The checkpoint of ${d.name} is invalid.`);
-      }
-      const dir = join(parent, d.name);
-      const isRes = isResearchDir(dir) || !!saved?.research;
-      const state = { transcript: [], seen: new Map(), ...(isRes && { research: true }) }, sessions = new Map();
-      const next = { ...runCtx, state, sessions, agentSpecs: saved?.agentSpecs ?? runCtx.agentSpecs, workerSpec: saved?.workerSpec ?? runCtx.workerSpec };
-      const loaded = await loadRoom(next, `?sched=${Date.now()}`);
-      const freshSaved = {
-        version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
-        discussion: { name: d.name, title: saved?.discussion?.title ?? d.name },
-        ...(isRes && { research: true }),
-        fresh: true, fromClosed: true, agentSpecs: next.agentSpecs, workerSpec: next.workerSpec,
-        work: saved?.work ?? workOf(shop, d.name),
-      };
-      writeCheckpoint(runCtx, d.name, freshSaved);
-      setClosed(runCtx, d.name, false);
-      Object.assign(runCtx, loaded, {
-        usage: ctx.usage ?? loaded.usage,
-        state, sessions, agentSpecs: next.agentSpecs, workerSpec: next.workerSpec,
-        freshSummary: null, lastRound: null, agentsStarted: false, workerBriefed: null,
-        workerTree: null, workerLabel: null, workerHandoff: false, workerSeat: randomBytes(6).toString('hex'),
-      });
-      runCtx.screen.transcript = state.transcript;
-      switchTo(runCtx, { name: d.name, dir: join(parent, d.name), title: freshSaved.discussion.title, continued: true });
-      runCtx.closedBriefing = true;
+      Object.assign(runCtx, await loadRoom(runCtx, `?sched=${Date.now()}`), { state, sessions, usage: ctx.usage });
       wire(runCtx);
-    } finally {
-      release();
+      if (task.board) {
+        await resumeDiscussion(runCtx, ref, { loadRoom });
+        if (!isDiscussion(runCtx, task.board)) throw new Error(`Could not resume research board ${task.board}.`);
+      }
     }
-
-    if (!await openDiscussion(runCtx, task.prompt)) {
-      throw new Error(`Could not open transcript for ${d.name}.`);
+    if (runCtx.busy) {
+      const reason = `${task.board} has a round or summary in progress`;
+      recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
+      return { status: 'skipped', reason };
     }
-
-    const activeProviders = () => [...new Set(runCtx.room.agents
-      .filter((a) => !(runCtx.state.disabledAgents ?? []).includes(a.name))
-      .map((a) => a.provider))];
-
-    const roundRes = await runRound(task.prompt, runCtx, {
+    if (!runCtx.logPath) {
+      const suggestTitle = runCtx.suggestTitle;
+      if (!task.board && task.title) runCtx.suggestTitle = async () => ({ title: task.title });
+      let opened;
+      try { opened = await openDiscussion(runCtx, task.prompt); } finally { runCtx.suggestTitle = suggestTitle; }
+      if (!opened) throw new Error('Could not create the research board or transcript.');
+    }
+    if (task.kind === 'recurring' && !task.board) {
+      const current = readSchedule(ctx), stored = current.tasks.find((t) => t.id === task.id);
+      if (stored) { stored.board = runCtx.discussion.name; writeSchedule(ctx, current); broadcastSchedule(ctx); }
+    }
+    const result = await runRound(task.prompt, runCtx, {
       speaker: 'Scheduler',
       beforeLap: async (lap) => {
         const q = await runCtx.usage.fetchQuota();
         refreshQuota(runCtx, q).catch(() => {});
-        const check = runCtx.usage.checkQuotaFloor(q, activeProviders(), readSchedule(ctx).quotaFloor, { now: clockMs() });
-        if (check.ok) return null;
-        return `Scheduled run stopped early by quota guard before lap ${lap + 1}: ${check.reason}`;
+        const active = [...new Set(runCtx.room.agents.filter((a) => !(runCtx.state.disabledAgents ?? []).includes(a.name)).map((a) => a.provider))];
+        const next = runCtx.usage.checkQuotaFloor(q, active, readSchedule(ctx).quotaFloor, { now: clockMs() });
+        return next.ok ? null : `Scheduled run stopped early by quota guard before lap ${lap + 1}: ${next.reason}`;
       },
     });
-
-    const extraLine = roundRes?.stoppedReason
-      ? `${roundRes.stoppedReason}. This run stopped early and is not a completed review.`
-      : roundRes?.failedError
-        ? `Scheduled run failed (${roundRes.failedError}). This run is not a completed review.`
-        : null;
-
-    await closeNamedDiscussion(runCtx, d.name, { extraLine, rethrow: true });
-
-    if (roundRes?.stoppedReason) {
-      recordTaskRun(ctx, taskId, 'stopped', roundRes.stoppedReason, at);
-      return { status: 'stopped', reason: roundRes.stoppedReason };
-    }
-    if (roundRes?.failedError) {
-      recordTaskRun(ctx, taskId, 'failed', roundRes.failedError, at);
-      return { status: 'failed', reason: roundRes.failedError };
-    }
-    recordTaskRun(ctx, taskId, 'ran', null, at);
-    return { status: 'ran', reason: null };
+    const status = result?.stoppedReason ? 'stopped' : result?.failedError ? 'failed' : 'ran';
+    const reason = result?.stoppedReason ?? result?.failedError ?? null;
+    saveCheckpoint(runCtx);
+    recordTaskRun(ctx, task.id, status, reason, at, task.lastTriggerKey);
+    return { status, reason };
   } catch (err) {
-    recordTaskRun(ctx, taskId, 'failed', err.message, at);
+    recordTaskRun(ctx, task.id, 'failed', err.message, at, task.lastTriggerKey);
     if (createdBeside && runCtx && !runCtx.stopped && fresh(runCtx)) closeContext(runCtx);
     return { status: 'failed', reason: err.message };
   } finally {
-    shop.schedulerRunning.delete(d.name);
     shop.schedulerRunningTasks.delete(task.id);
     broadcastSchedule(ctx);
     showHeader(ctx);
@@ -5694,6 +5780,7 @@ export async function checkSchedule(ctx, now = null, opts = {}) {
   for (const task of data.tasks) {
     if (!task.enabled) continue;
     if (task.time !== nowTime) continue;
+    if (task.kind === 'research' && (task.date !== today || task.lastTriggerKey || shopOf(ctx).schedulerRunningTasks?.has(task.id))) continue;
     if (task.lastTriggerKey === triggerKey) continue;
     task.lastTriggerKey = triggerKey;
     changed = true;
