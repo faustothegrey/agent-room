@@ -5193,20 +5193,20 @@ test('discussion and brainstorm prompts (including summary turns) start with eac
   await handleLine('hello', ctx);
   assert.equal(meterCallsDuringRound, 0);
   // First turn of each agent: none yet + own provider's cached quota only.
-  assert.match(aPrompts[0], /^\[your reported usage this session: none yet · claude quota 70% 5h \/ 31% week, meter at 09:42\]\n\nYou are A/);
+  assert.match(aPrompts[0], /^\[your reported usage this session: none yet · claude quota 70% used 5h \/ 31% used week, meter at 09:42\]\n\nYou are A/);
   assert.doesNotMatch(aPrompts[0].split('\n')[0], /codex/);
-  assert.match(bPrompts[0], /^\[your reported usage this session: none yet · codex quota 20% 5h \/ 3% week, meter at 09:42\]\n\nYou are B/);
+  assert.match(bPrompts[0], /^\[your reported usage this session: none yet · codex quota 20% used 5h \/ 3% used week, meter at 09:42\]\n\nYou are B/);
   assert.doesNotMatch(bPrompts[0].split('\n')[0], /claude/);
   // Second turn within the same round: reads updated ctx.totals, never the other agent's figures.
-  assert.match(aPrompts[1], /^\[your reported usage this session: 1 turn, 1\.2k in \(800 cached\) \/ 150 out · claude quota 70% 5h \/ 31% week, meter at 09:42\]\n\n/);
-  assert.match(bPrompts[1], /^\[your reported usage this session: 1 turn, 900 in \(100 cached\) \/ 50 out · codex quota 20% 5h \/ 3% week, meter at 09:42\]\n\n/);
+  assert.match(aPrompts[1], /^\[your reported usage this session: 1 turn, 1\.2k in \(800 cached\) \/ 150 out · claude quota 70% used 5h \/ 31% used week, meter at 09:42\]\n\n/);
+  assert.match(bPrompts[1], /^\[your reported usage this session: 1 turn, 900 in \(100 cached\) \/ 50 out · codex quota 20% used 5h \/ 3% used week, meter at 09:42\]\n\n/);
   // Summary turn (auto-summarize) also carries the updated line.
-  assert.match(aPrompts[2], /^\[your reported usage this session: 2 turns, 2\.4k in \(1\.6k cached\) \/ 300 out · claude quota 70% 5h \/ 31% week, meter at 09:42\]\n\n/);
+  assert.match(aPrompts[2], /^\[your reported usage this session: 2 turns, 2\.4k in \(1\.6k cached\) \/ 300 out · claude quota 70% used 5h \/ 31% used week, meter at 09:42\]\n\n/);
   assert.match(aPrompts[2], /asked for a summary/);
 
   // Brainstorm prompt also carries the line at the top.
   ctx.state.brainstorm = true;
-  assert.match(ctx.room.promptFor(a), /^\[your reported usage this session: 3 turns, 3\.6k in \(2\.4k cached\) \/ 450 out · claude quota 70% 5h \/ 31% week, meter at 09:42\]\n\n/);
+  assert.match(ctx.room.promptFor(a), /^\[your reported usage this session: 3 turns, 3\.6k in \(2\.4k cached\) \/ 450 out · claude quota 70% used 5h \/ 31% used week, meter at 09:42\]\n\n/);
 });
 
 test('worker prompt starts with only the worker\'s own usage line from ctx.totals and cached quota', async () => {
@@ -5238,7 +5238,7 @@ test('worker prompt starts with only the worker\'s own usage line from ctx.total
   queueWork(ctx, 'first work');
   await ctx.workQueue;
   assert.equal(meterCallsBeforeTurn, 0);
-  assert.match(got[0], /^\[your reported usage this session: none yet · codex quota 20% 5h \/ 3% week, meter at 09:42\]\n\n/);
+  assert.match(got[0], /^\[your reported usage this session: none yet · codex quota 20% used 5h \/ 3% used week, meter at 09:42\]\n\n/);
   assert.doesNotMatch(got[0].split('\n')[0], /claude|99\.0k/);
 
   // Restore cached quota (refreshQuota after turn 1 overwrote it with null because our stub returned null) and run turn 2.
@@ -5246,7 +5246,7 @@ test('worker prompt starts with only the worker\'s own usage line from ctx.total
   ctx.screen.quotaAt = { measured: `${today} 09:43:00`, checked: now.toISOString() };
   queueWork(ctx, 'second work');
   await ctx.workQueue;
-  assert.match(got[1], /^\[your reported usage this session: 1 turn, 5\.0k in \(3\.0k cached\) \/ 400 out · codex quota 21% 5h \/ 4% week, meter at 09:43\]\n\nsecond work$/);
+  assert.match(got[1], /^\[your reported usage this session: 1 turn, 5\.0k in \(3\.0k cached\) \/ 400 out · codex quota 21% used 5h \/ 4% used week, meter at 09:43\]\n\nsecond work$/);
 });
 
 test('a detached worker from another discussion reports usage unavailable instead of none yet or the new discussion\'s totals', async () => {
@@ -5283,7 +5283,7 @@ test('a detached worker from another discussion reports usage unavailable instea
   releaseFirst('first done');
   await ctx.workQueue;
   assert.equal(got.length, 2);
-  assert.match(got[1], /^\[your reported usage this session: usage unavailable · codex quota 20% 5h \/ 3% week, meter at 09:42\]\n\nqueued from old discussion$/);
+  assert.match(got[1], /^\[your reported usage this session: usage unavailable · codex quota 20% used 5h \/ 3% used week, meter at 09:42\]\n\nqueued from old discussion$/);
   assert.doesNotMatch(got[1].split('\n')[0], /none yet|77\.0k/);
 });
 

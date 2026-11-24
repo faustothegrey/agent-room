@@ -172,7 +172,7 @@ function formatProviderGauges(gauges, provider) {
   for (const g of mine) {
     const key = g.group ?? '';
     if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key).push(`${g.used}% ${g.label}`);
+    grouped.get(key).push(`${g.used}% used ${g.label}`);
   }
   const parts = [...grouped.entries()].map(([group, items]) => (group ? `${group} ` : '') + items.join(' / '));
   return `${provider} quota ${parts.join(', ')}`;

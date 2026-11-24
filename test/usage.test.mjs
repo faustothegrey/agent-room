@@ -162,19 +162,19 @@ test('agentUsageLine formats only the agent\'s own totals and provider quota, wi
     total: { turns: 12, input: 1400000, cached: 1200000, output: 18000, cost: 1.5 },
     provider: 'claude', gauges, measured: QUOTA.last_update, now: sameDay,
   });
-  assert.equal(line, '[your reported usage this session: 12 turns, 1400.0k in (1200.0k cached) / 18.0k out · claude quota 70% 5h / 31% week, meter at 13:44]');
+  assert.equal(line, '[your reported usage this session: 12 turns, 1400.0k in (1200.0k cached) / 18.0k out · claude quota 70% used 5h / 31% used week, meter at 13:44]');
   assert.doesNotMatch(line, /codex|\$/);
 
   // Singular turn, small counts, and previous-day meter time includes the date.
   assert.equal(
     agentUsageLine({ total: { turns: 1, input: 500, cached: 0, output: 120 }, provider: 'codex', gauges, measured: QUOTA.last_update, now: nextDay }),
-    '[your reported usage this session: 1 turn, 500 in (0 cached) / 120 out · codex quota 20% 5h / 3% week, meter at 2026-10-20 13:44]',
+    '[your reported usage this session: 1 turn, 500 in (0 cached) / 120 out · codex quota 20% used 5h / 3% used week, meter at 2026-10-20 13:44]',
   );
 
   // Missing usage and/or missing quota: never show zeros for missing data.
   assert.equal(
     agentUsageLine({ total: undefined, provider: 'claude', gauges, measured: null, now: sameDay }),
-    '[your reported usage this session: none yet · claude quota 70% 5h / 31% week]',
+    '[your reported usage this session: none yet · claude quota 70% used 5h / 31% used week]',
   );
   assert.equal(
     agentUsageLine({ total: { turns: 0, input: 0, cached: 0, output: 0 }, provider: 'agy', gauges, measured: QUOTA.last_update, now: sameDay }),
@@ -188,7 +188,7 @@ test('agentUsageLine formats only the agent\'s own totals and provider quota, wi
   // Unavailable session usage (e.g. a detached worker from another discussion) says "usage unavailable", not "none yet".
   assert.equal(
     agentUsageLine({ total: undefined, usageUnavailable: true, provider: 'claude', gauges, measured: QUOTA.last_update, now: sameDay }),
-    '[your reported usage this session: usage unavailable · claude quota 70% 5h / 31% week, meter at 13:44]',
+    '[your reported usage this session: usage unavailable · claude quota 70% used 5h / 31% used week, meter at 13:44]',
   );
   assert.equal(
     agentUsageLine({ usageUnavailable: true, provider: 'agy', gauges: null, measured: null }),
@@ -204,7 +204,7 @@ test('agentUsageLine formats only the agent\'s own totals and provider quota, wi
   } } };
   assert.equal(
     agentUsageLine({ total: null, provider: 'agy', gauges: quotaGauges(agyQuota, ['agy']), measured: agyQuota.last_update, now: new Date(2026, 10, 14, 11, 0) }),
-    '[your reported usage this session: none yet · agy quota gemini 3% 5h / 10% week, argon 20% week, meter at 10:30]',
+    '[your reported usage this session: none yet · agy quota gemini 3% used 5h / 10% used week, argon 20% used week, meter at 10:30]',
   );
 });
 
