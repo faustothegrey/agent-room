@@ -10,9 +10,10 @@
 // cli.mjs loads this module in load(), so /reload swaps it too.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { extname, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Marked } from 'marked';
 import { handleShell } from './host-shell.mjs';
 export { handleUpgrade } from './host-shell.mjs'; // the terminal pane's WebSocket (ui.mjs)
@@ -4724,11 +4725,74 @@ function readJson(req, limit = 100_000) {
   });
 }
 
+// Hash exactly the files the new page can serve. Symlinks are never followed.
+const nextDir = new URL('../web/dist/', import.meta.url);
+export function nextVersion(dir = fileURLToPath(nextDir)) {
+  try {
+    const hash = createHash('sha256');
+    const walk = (dir, prefix = '') => {
+      for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        const name = prefix + entry.name, path = join(dir, entry.name);
+        if (entry.isSymbolicLink()) continue;
+        if (entry.isDirectory()) walk(path, name + '/');
+        else if (entry.isFile()) { const bytes = readFileSync(path); hash.update(name + '\0' + bytes.length + '\0'); hash.update(bytes); }
+      }
+    };
+    if (!lstatSync(dir).isDirectory() || !lstatSync(join(dir, 'index.html')).isFile()) return null;
+    walk(dir);
+    return hash.digest('hex');
+  } catch { return null; }
+}
+export function notifyNext(screen) {
+  if (!screen?.nextClients?.size) return;
+  const data = `data: ${JSON.stringify({ version: nextVersion(screen.nextDist) })}\n\n`;
+  for (const res of screen.nextClients) res.write(data);
+}
+function handleNext(req, res, url, screen) {
+  const send = (status, type, body) => { res.writeHead(status, { 'content-type': type, 'cache-control': 'no-cache' }); res.end(body); };
+  if (url.pathname === '/__next/events') {
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+    (screen.nextClients ??= new Set()).add(res);
+    req.on('close', () => screen.nextClients.delete(res));
+    res.write(`data: ${JSON.stringify({ version: nextVersion(screen.nextDist) })}\n\n`);
+    return true;
+  }
+  if (url.pathname !== '/__next' && !url.pathname.startsWith('/__next/')) return false;
+  if (req.method !== 'GET') { send(405, 'text/plain; charset=utf-8', 'Use GET.'); return true; }
+  const isPage = url.pathname === '/__next';
+  let name;
+  try { name = isPage ? 'index.html' : decodeURIComponent(url.pathname.slice('/__next/'.length)); }
+  catch { send(404, 'text/plain; charset=utf-8', 'Not found'); return true; }
+  if (!name || name.split(/[\\/]/).some((p) => !p || p === '.' || p === '..') || name.includes('\\')) {
+    send(404, 'text/plain; charset=utf-8', 'Not found'); return true;
+  }
+  const root = screen.nextDist ?? fileURLToPath(nextDir), path = join(root, name);
+  try {
+    // Reject every symlink component, including ones that point back inside the build.
+    if (!lstatSync(root).isDirectory()) throw new Error('invalid build root');
+    let current = root;
+    for (const part of name.split('/')) { current = join(current, part); if (lstatSync(current).isSymbolicLink()) throw new Error('symlink'); }
+    if (!lstatSync(path).isFile()) throw new Error('not a file');
+    const bytes = readFileSync(path);
+    if (isPage) {
+      const version = nextVersion(root);
+      if (!version) throw new Error('missing build');
+      const html = bytes.toString('utf8').replace(/(src|href)="\.\//g, '$1="./__next/').replace('</head>', `<meta name="agent-room-next-version" content="${version}"></head>`);
+      send(200, 'text/html; charset=utf-8', html);
+    } else {
+      const types = { '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml' };
+      send(200, types[extname(name)] ?? 'application/octet-stream', bytes);
+    }
+  } catch { send(404, 'text/plain; charset=utf-8', isPage ? 'Web build missing. Run npm run build:web.' : 'Not found'); }
+  return true;
+}
+
 // Serves the page, its event stream, the file list and the two inputs (say, show); returns false
 // for any other path.
 function handleScreen(req, res, url, dir, screen) {
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
   if (url.pathname === '/__room') { send(200, 'text/html; charset=utf-8', SCREEN); return true; }
+  if (handleNext(req, res, url, screen)) return true;
   if (handleShell(req, res, url)) return true; // the terminal pane (host-shell.mjs)
   if (handleNotes(req, res, url, dir)) return true; // the Notes pane (notes.mjs)
   // The heartbeat: the page and the Dock app ask every few seconds; a new pid means a new process.
@@ -4949,6 +5013,10 @@ export const PAGE = createHash('sha1').update(SCREEN).digest('hex').slice(0, 12)
 
 // dir: the room's folder; base: its address on the server (/r/<id>/), for the links in its pages.
 export function handle(req, res, dir, screen, base = '/') {
+  if (/^\/__next\//.test(req.url)) {
+    try { if (decodeURIComponent(req.url.split('?')[0]).split('/').includes('..')) { res.writeHead(404); return res.end('Not found'); } }
+    catch { res.writeHead(404); return res.end('Not found'); }
+  }
   const url = new URL(req.url, 'http://localhost');
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
   // Other nodes' rooms (replicate.mjs), with --node only.

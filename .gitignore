@@ -3,3 +3,4 @@ transcripts/
 .worker-notes/
 test/.timings.json
 web/dist/
+web/.dist-stage-*/

@@ -3910,6 +3910,7 @@ export async function reloaded(ctx) {
   const run = ctx.autoDev;
   if (run?.status === 'running' && run.waiting && !runningTasks(shopOf(ctx)).some((t) => t.origin === ctx) && !ctx.workPending) pauseAutoDev(ctx, 'the worker\'s result was lost in the Reload');
   note(ctx, 'Reloaded the code and the agents\' rulebooks; the conversation continues.\n');
+  ctx.docs.notifyNext?.(ctx.screen);
   toScreen(ctx, { type: 'reloaded', page: ctx.docs.PAGE }); // pages refresh if their code changed
   // The header's version: the checkout as it is at this Reload (the start's snapshot is kept).
   const at = new Date().toISOString();
@@ -5297,6 +5298,10 @@ export function upgrade(hub, req, socket, head) {
 }
 
 export function route(hub, req, res) {
+  if (/^\/(?:r\/[^/]+\/)?__next\//.test(req.url)) {
+    try { if (decodeURIComponent(req.url.split('?')[0]).split('/').includes('..')) { res.writeHead(404); return res.end('Not found'); } }
+    catch { res.writeHead(404); return res.end('Not found'); }
+  }
   const url = new URL(req.url, 'http://localhost');
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
   const rooms = [...hub.rooms.values()].filter((r) => r.id && r.docs && r.screen);
@@ -5311,6 +5316,10 @@ export function route(hub, req, res) {
   if (url.pathname === '/__health') {
     return send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, startedAt: hub.startedAt ?? null,
       rooms: rooms.map((r) => ({ id: r.id, root: r.cwd, pages: r.screen.clients.size })) }));
+  }
+  if (url.pathname === '/__next' || url.pathname.startsWith('/__next/')) {
+    if (!rooms.length) return send(404, 'text/plain; charset=utf-8', 'This server has no room open.');
+    return rooms[0].docs.handle(req, res, rooms[0].cwd, rooms[0].screen);
   }
   if (url.pathname === '/__room' || url.pathname === '/') {
     if (!rooms.length) return send(404, 'text/plain; charset=utf-8', 'This server has no room open.');
