@@ -1794,6 +1794,7 @@ async function openBeside(ctx) {
   do tag = `d${++shop.contexts}`; while (ctx.hub.rooms.has(`${baseKey(ctx)}#${tag}`));
   const launch = roomDefaults(ctx);
   const { ctx: next } = await ctx.hub.addRoom(ctx.cwd, { agents: launch.agents, worker: launch.worker, context: tag });
+  next.creationOrigin = ctx;
   showHeader(ctx);
   return next;
 }
@@ -1857,6 +1858,14 @@ function closeDiscussion(ctx) {
     return note(ctx, was ? `Closed ${was.name}; its checkpoint is kept. To go back, Resume it in ${brain ? 'Brainstorms' : 'Explorer'}.` : wb ? 'Closed the workbench.' : 'Closed the brainstorm.');
   }
   closeContext(ctx, others[0]);
+}
+
+function cancelCreation(ctx) {
+  if (!fresh(ctx)) return;
+  const others = siblings(ctx).filter((c) => c !== ctx && !c.stopped);
+  if (others.length && ctx.replicaOwner) return note(ctx, '✗ This discussion holds the room\'s replication (its peers and storage): it stays open while others are. Close them first, or Quit room.', true);
+  if (others.length) return closeContext(ctx, others.includes(ctx.creationOrigin) ? ctx.creationOrigin : others[0]);
+  if (ctx.state.brainstorm || ctx.state.workbench) return closeDiscussion(ctx);
 }
 
 export function cancelClose(ctx, name) {
@@ -3677,6 +3686,7 @@ export async function handleLine(line, ctx) {
   if (line === '/new') return multi(ctx) ? newDiscussionBeside(ctx) : newDiscussion(ctx);
   if (line === '/brainstorm') return multi(ctx) ? newBrainstormBeside(ctx) : newBrainstorm(ctx);
   if (line === '/workbench') return multi(ctx) ? newWorkbenchBeside(ctx) : newWorkbench(ctx);
+  if (line === '/cancel' && multi(ctx)) return cancelCreation(ctx);
   if (line === '/close') return closeDiscussion(ctx);
   // /close <ref> (a row's Close in Brainstorms): that open discussion or brainstorm closes, between its own rounds.
   const closeRef = /^\/close\s+(\S+)$/.exec(line);

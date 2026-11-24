@@ -3452,6 +3452,14 @@ test('discussion area header: #disc-header spans #main-panel with title, status,
 
   // Fresh unstarted single discussion: + New brainstorm shown, + New discussion hidden, Actions shows only Summarize (no board-actions).
   harness.update({ active: null, brainstorm: false, multi: true, open: [{ current: true }] });
+  assert.equal($('cancel-creation').hidden, true);
+  for (const kind of ['brainstorm', 'workbench']) {
+    harness.update({ active: null, multi: true, [kind]: true, open: [{ current: true }] });
+    assert.equal($('cancel-creation').hidden, false);
+  }
+  harness.update({ active: null, multi: true, open: [{ current: true }, {}] });
+  assert.equal($('cancel-creation').hidden, false);
+  harness.update({ active: null, multi: true, open: [{ current: true }] });
   assert.equal($('list-new').hidden, false);
   assert.equal($('newdisc').hidden, true);
   assert.equal($('board-actions').hidden, true);
