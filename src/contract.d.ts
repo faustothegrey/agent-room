@@ -87,3 +87,18 @@ export interface Screen {
   quota?: Gauge[] | null; quotaAt?: QuotaAt | null; monitor?: Monitor | null; newRoom?: unknown;
   replica?: Replica | null; replicaOff?: string | null; viewing?: unknown; peek?: Peek | null;
 }
+
+// First routes used by the React page. Event-stream bodies consist of ScreenEvent JSON frames.
+export interface NextPageRequest { method?: string; url?: string }
+export type NextAssetRequest = NextPageRequest;
+export interface EventsRequest { method?: string; url?: string }
+// Successful page and asset responses have a 200 status; missing assets/builds return plain text 404,
+// and unsupported methods return plain text 405. The SSE endpoint writes ScreenEvent frames.
+export type NextRouteStatus = 200 | 404 | 405;
+export type NextRouteBody = string | Uint8Array;
+export type EventStreamFrame = ScreenEvent;
+export interface HttpReply {
+  writeHead(status: number, headers: Record<string, string>): unknown;
+  end(body?: string | Uint8Array): unknown;
+}
+export interface EventsReply extends HttpReply { write(data: string): unknown }

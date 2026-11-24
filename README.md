@@ -928,7 +928,11 @@ agent-room's source.
 | `src/instructions.mjs` | The prompt catalog: every instruction sent to the discussion agents, the worker, the closing-statement agent and the title-generation call; the one source the runtime and the Instructions page (on the Control bar) both read. |
 | `src/room.mjs` | Discussion turns, unseen messages, passes and summary agreement. |
 | `src/ui.mjs` | Room setup, persistent defaults, commands, discussions, worker queue, logging and launch integration. |
-| `src/docs.mjs` | Local HTTP server handlers, document rendering and browser UI. |
+| `src/docs.mjs` | Legacy room page and reloadable server facade. |
+| `src/docs-files.mjs` | Document rendering, viewer page and room file helpers. |
+| `src/docs-routes.mjs` | Room screen and input HTTP routes. |
+| `src/docs-http.mjs` | Document, file and library HTTP routes and terminal picker. |
+| `src/docs-next.mjs` | React page and asset serving and build version. |
 | `src/screen-events.mjs`, `src/contract.d.ts` | Live event helpers and the page’s SSE contract. |
 | `src/host-shell.mjs` | The Terminal service's shell: token endpoint, WebSocket, host-only checks and shell lifetime. |
 | `src/notes.mjs` | The My notes service's storage and endpoints: list, read, create, save and remove, with the Terminal's host-only checks. |
@@ -946,7 +950,7 @@ in `docs.mjs`; after a Reload, open pages refresh by themselves when they change
 
 **Dev mode** (`--dev`, part of `npm start` and so of the Dock app) reloads by itself whenever a
 module in `src/` or a rulebook is saved, as if you had pressed Reload: the conversation continues,
-and the page refreshes only when its own code changed. Dev mode also builds the placeholder React page in the background at startup and rebuilds it when files under `web/` change. `npm run build:web` builds it manually; direct `node src/cli.mjs` does not build it. The in-progress React shell is served at `__next` beside `__room` in each room, and its assets use room-relative `__next/` addresses. It shows the room title, messages, thinking and turn status from the room event stream. Builds write a staging directory first and swap it into `web/dist/` only on success; a build failure is reported without stopping the existing room. During the two-rename swap, an external build can briefly leave the directory absent and a request can receive a missing-build response. Old assets are not kept: an open page can receive a 404 for an old asset after a rebuild. A separate web-version field on the room event stream refreshes it after a dev rebuild or Reload when the build changed; if that signal is missed before the page connects, reload manually. Saving `cli.mjs` shows a reminder to
+and the page refreshes only when its own code changed. Dev mode also builds the React shell in the background at startup and rebuilds it when files under `web/` change. `npm run build:web` builds it manually; direct `node src/cli.mjs` does not build it. The in-progress React shell is served at `__next` beside `__room` in each room, and its assets use room-relative `__next/` addresses. It shows the room title, messages, thinking and turn status from the room event stream. Builds write a staging directory first and swap it into `web/dist/` only on success; a build failure is reported without stopping the existing room. During the two-rename swap, an external build can briefly leave the directory absent and a request can receive a missing-build response. Old assets are not kept: an open page can receive a 404 for an old asset after a rebuild. A separate web-version field on the room event stream refreshes it after a dev rebuild or Reload when the build changed; if that signal is missed before the page connects, reload manually. Saving `cli.mjs` shows a reminder to
 Restart instead. Saving `host-shell.mjs` or `notes.mjs` also needs Restart, but the save fires a
 reload that silently leaves those two modules unchanged, with no reminder. Restart keeps dev mode. Saves by anyone count, including the worker's or another
 agent's edits to agent-room itself, and a `git merge` into the checkout the server runs from; a
@@ -966,12 +970,12 @@ import that carries a fresh query string, `await import('./ui.mjs?v=<millis>')`:
 each load a different module to the loader. The tag is `Date.now()` at every Reload (and each
 room's first load), so each reload is a fresh module. `ui.mjs`'s `load()` then imports the other
 modules with the same tag — `instructions.mjs`, `agents.mjs`, `room.mjs`, `docs.mjs`, `usage.mjs`,
-and `replicate.mjs` under `--node` — so the whole set comes in fresh together. `docs.mjs` forwards its tag to `screen-events.mjs`, so those event helpers reload too. The runtime path
+and `replicate.mjs` under `--node` — so the whole set comes in fresh together. `docs.mjs` forwards its tag to `screen-events.mjs`, `docs-files.mjs`, `docs-routes.mjs`, `docs-http.mjs` and `docs-next.mjs`, so those helpers and routes reload too. The runtime path
 never uses a static import for these, because a static import of a local module stays cached and a
 reload would silently miss it.
 
 Two modules are excluded by that rule and need Restart like `cli.mjs`: `host-shell.mjs` and
-`notes.mjs`, the Terminal and My notes services. They are statically imported by `docs.mjs` without a
+`notes.mjs`, the Terminal and My notes services. They are statically imported by `docs-routes.mjs` (and the upgrade export by `docs.mjs`) without a
 version tag, so a reloaded `docs.mjs` still resolves them to their cached instances: the tag
 applies only to the module it is written on, never to that module's own static imports.
 

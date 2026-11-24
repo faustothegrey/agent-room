@@ -65,3 +65,50 @@ test('dev rebuild and Reload notify the new page after publishing the build', { 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('Reload loads each extracted document module again', { timeout: 30000 }, async () => {
+  const { cpSync, readFileSync } = await import('node:fs');
+  const { spawn, execFileSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const source = fileURLToPath(new URL('../', import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), 'docs-reload-'));
+  for (const name of ['src', 'rulebooks', 'web']) cpSync(join(source, name), join(root, name), { recursive: true, filter: (p) => !p.includes('/web/dist') });
+  symlinkSync(join(source, 'node_modules'), join(root, 'node_modules'), 'dir');
+  execFileSync(process.execPath, [join(root, 'src/cli.mjs'), '--build-web'], { cwd: root });
+  const cli = spawn(process.execPath, [join(root, 'src/cli.mjs'), '--cwd', root, '--port', '0'], { env: { ...process.env, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  cli.stdout.on('data', (d) => { output += d; }); cli.stderr.on('data', (d) => { output += d; });
+  const until = async (fn) => {
+    const end = Date.now() + 20000;
+    while (Date.now() < end) { const value = await fn(); if (value) return value; await new Promise((ok) => setTimeout(ok, 50)); }
+    throw new Error('Timed out: ' + output);
+  };
+  try {
+    const origin = await until(() => output.match(/Discussion screen: (http:\/\/[^/]+)/)?.[1]);
+    const room = `/r/${(await (await fetch(origin + '/__health')).json()).rooms[0].id}/`;
+    const before = await (await fetch(origin + room + '__room')).text();
+    const change = (file, from, to) => {
+      const path = join(root, 'src', file), text = readFileSync(path, 'utf8');
+      assert.ok(text.includes(from), file); writeFileSync(path, text.replace(from, to));
+    };
+    change('docs-files.mjs', 'export function roomBranch(dir) {', "export function roomBranch(dir) { return 'reload-files';");
+    change('docs-routes.mjs', "send(405, 'text/plain', 'Use GET.')", "send(405, 'text/plain', 'reload-routes')");
+    change('docs-next.mjs', '<meta name="agent-room-next-version"', '<meta name="reload-next" content="yes"><meta name="agent-room-next-version"');
+    change('docs-http.mjs', '`Not found: ${rel}`', '`reload-http: ${rel}`');
+    change('screen-events.mjs', 'input: !!screen.say,', 'input: false,');
+    const command = await fetch(origin + room + '__say', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: '/reload' }) });
+    assert.equal(command.status, 204);
+    await until(async () => (await (await fetch(origin + room + '__files?detail=1')).json()).branch === 'reload-files');
+    assert.equal(await (await fetch(origin + room + '__rooms', { method: 'POST' })).text(), 'reload-routes');
+    assert.match(await (await fetch(origin + room + '__next')).text(), /reload-next/);
+    assert.equal(await (await fetch(origin + room + 'missing-file')).text(), 'reload-http: missing-file');
+    const response = await fetch(origin + room + '__events');
+    const reader = response.body.getReader();
+    const reset = JSON.parse(new TextDecoder().decode((await reader.read()).value).trim().slice(6));
+    assert.equal(reset.input, false); await reader.cancel();
+    assert.equal(await (await fetch(origin + room + '__room')).text(), before);
+  } finally {
+    cli.kill('SIGTERM'); await new Promise((ok) => cli.exitCode !== null ? ok() : cli.once('exit', ok));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
