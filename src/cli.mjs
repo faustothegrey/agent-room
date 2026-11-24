@@ -6,6 +6,8 @@
 // conversation lives in its own `ctx`, with its own input queue, so it carries over a reload and a
 // round in one room never waits for another. Keep this file small: changes here need a restart.
 import { realpathSync, watch } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { basename, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -227,7 +229,41 @@ for (const r of restored) {
   try { await addRoom(r.cwd, { agents: r.agents, worker: r.worker, reopen: r.reopen, context: r.context }); }
   catch (err) { console.error(`✗ The room in ${r.cwd} could not be restored: ${err.message}`); }
 }
-if (values.dev && !noScreen) watchSource();
+if (values.dev) {
+  watchWeb();
+  if (!noScreen) watchSource();
+}
+
+// Build in the background: the existing room must start even if Vite is absent or the build fails.
+// Coalesce edits, and serialize builds so an older result cannot overwrite a newer one.
+function watchWeb() {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const vite = fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url));
+  let running = false, pending = false, timer;
+  const build = () => {
+    if (running) { pending = true; return; }
+    running = true;
+    execFile(process.execPath, [vite, 'build', '--config', 'web/vite.config.ts'], { cwd: root }, (err, stdout, stderr) => {
+      running = false;
+      if (err) {
+        const detail = (stderr || stdout || err.message).trim();
+        for (const ctx of hub.rooms.values()) report(ctx, `Web build failed; the existing room is still available: ${detail}`);
+      } else console.log('Web build complete.');
+      if (pending) { pending = false; build(); }
+    });
+  };
+  try {
+    const watcher = watch(new URL('../web/', import.meta.url), { recursive: true }, (_, file) => {
+      if (!file || file === 'dist' || file.startsWith(`dist/`) || file.startsWith(`dist\\`)) return;
+      clearTimeout(timer);
+      timer = setTimeout(build, 300);
+    });
+    watcher.on('error', (err) => { for (const ctx of hub.rooms.values()) report(ctx, `Web watcher failed: ${err.message}`); });
+  } catch (err) {
+    for (const ctx of hub.rooms.values()) report(ctx, `Web watcher failed: ${err.message}`);
+  }
+  build();
+}
 
 // --dev: saving a module in src/ or a rulebook reloads every room (after a round in progress, like
 // the button); an editor's burst of events makes one reload. This file can't reload: it asks for Restart.

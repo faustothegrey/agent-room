@@ -13,7 +13,8 @@
     "test": "npm run typecheck && node test/helpers/run-tests.mjs fast",
     "test:slow": "node test/helpers/run-tests.mjs slow",
     "test:all": "node test/helpers/run-tests.mjs all",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:web": "vite build --config web/vite.config.ts"
   },
   "engines": {
     "node": ">=20"
