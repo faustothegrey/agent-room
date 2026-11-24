@@ -483,6 +483,7 @@ document.addEventListener('click', (e) => {
 // hidden (only the summary's result is shown); the result carries its label.
 export function messageView(m) {
   const view = { speaker: m.speaker, html: md.parse(m.text ?? ''), error: !!m.error, pass: !!m.pass };
+  if (m.error) view.errorText = m.text ?? '';
   if (m.summary) view.hidden = true;
   if (m.outcome) {
     view.outcome = m.outcome;
@@ -567,6 +568,10 @@ body.service-open.list-collapsed { grid-template-columns: 62px minmax(0, calc((1
 #disc-zone { flex-direction: row; align-items: center; gap: .3rem .8rem; min-height: 2.8rem; }
 #system-messages { flex: 1 1 0; min-width: 0; font-size: .75rem; line-height: 1.4; }
 #system-messages .status { margin: 0; font-size: inherit; line-height: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pinned-error { display: flex; min-width: 0; color: #ef4444; }
+#pinned-error[hidden] { display: none; }
+#pinned-error span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pinned-error button { flex: none; padding: 0 .25rem; }
 #disc-workers { flex: 0 1 auto; display: flex; flex-direction: column; align-items: flex-end; gap: .1rem; font-size: .72rem; color: light-dark(#b45309, #f59e0b); text-align: right; }
 #disc-workers[hidden] { display: none; }
 #disc { min-width: 0; }
@@ -930,7 +935,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 </style></head><body>
 <header id="header">
 <div id="room-zone" class="zone" aria-label="Room"><div class="zone-line"><details class="menu" id="room-menu"><summary><b id="room-name">agent-room</b></summary><div class="menu-items"><button id="switchroom">Switch room…</button><button id="newroom" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running.">Open room in folder…</button><button id="peers-open" hidden title="Replication peers: reachability and pairing">Peers…</button><hr><button id="quit" class="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running.">Quit room</button></div></details><span id="replica-header" class="hover-detail" role="tooltip"></span></div><div id="server-box"><span id="server-head"><details class="menu" id="server-menu"><summary><span id="server"><i id="beat"></i>Server</span></summary><div class="menu-items"><button id="reload">Reload</button><button id="restart" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear.">Restart</button><hr><button id="shutdown" class="danger" title="End every room on this server, then the server.">Shutdown server</button></div></details><span id="server-details" class="hover-detail" role="tooltip"><span id="server-text">Connecting to the server…</span><span id="code"></span></span></span><button id="peer-warning" hidden>⚠</button></div><select id="rooms" aria-label="Running rooms" hidden></select><dialog id="ask"><p id="ask-text"></p><div id="ask-buttons"></div></dialog><dialog id="peers"><div id="peers-list"></div><div id="peers-buttons"><button id="peers-close">Close</button></div></dialog></div>
-<div id="disc-zone" class="zone" aria-label="Activity"><div id="system-messages" role="log" aria-label="System messages" aria-live="polite" aria-relevant="additions"></div><div id="disc-workers" aria-live="polite" hidden></div></div>
+<div id="disc-zone" class="zone" aria-label="Activity"><div id="system-messages" role="log" aria-label="System messages" aria-live="polite" aria-relevant="additions"><div id="pinned-error" hidden></div><div id="moving-status"></div></div><div id="disc-workers" aria-live="polite" hidden></div></div>
 <div id="server-zone" class="zone" aria-label="Monitoring"><div id="monitor"><span id="gauges" aria-label="Subscription usage"></span></div></div>
 <div id="busy" aria-hidden="true"></div>
 </header>
@@ -1950,9 +1955,19 @@ function renderAutoDev() {
   const after = [...target.children].find((c) => /^(Later|Outcome:)/.test(c.textContent.trim()));
   target.insertBefore(offer, after ?? null);
 }
+let pinnedFailures = 0;
+function pinFailure(agent, error) {
+  const line = $('pinned-error'), text = document.createElement('span'), close = document.createElement('button');
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+  const earlier = pinnedFailures++;
+  text.textContent = '✗ ' + agent + ' failed ' + time + ': ' + error.split(/\\r?\\n/)[0] + (earlier ? ' (+' + earlier + ' earlier)' : '');
+  text.title = error; close.type = 'button'; close.textContent = '✕'; close.title = 'Dismiss'; close.setAttribute('aria-label', 'Dismiss pinned error');
+  close.onclick = () => { line.hidden = true; line.replaceChildren(); pinnedFailures = 0; };
+  line.replaceChildren(text, close); line.hidden = false;
+}
 function status(text, error, source) {
   if (!text) return;
-  const hub = $('system-messages');
+  const hub = $('moving-status');
   const line = statusEl((source ? source + ' · ' : '') + text, error);
   line.title = line.textContent; // Long messages keep their full text on hover.
   hub.append(line);
@@ -4455,7 +4470,8 @@ events.onmessage = (e) => {
   if (ev.type === 'schedule' && openServiceName === 'schedule') renderSchedule();
   if (ev.type === 'working') setWorking(ev.name);
   if (ev.type === 'workerinfo') showWorkerInfo(ev.info);
-  if (ev.type === 'message') message(ev.message, true);
+  if (ev.type === 'message') { if (ev.message.error) pinFailure(ev.message.speaker, ev.message.errorText); message(ev.message, true); }
+  if (ev.type === 'agent-failure') pinFailure(ev.agent, ev.error);
   if (ev.type === 'thinking') setThinking(ev.name);
   if (ev.type === 'busy') { commandBusy = ev.on; updateBusy(); }
   if (ev.type === 'turn') { yourTurn = true; status(ev.text); updateReplicaView(); }

@@ -307,7 +307,7 @@ test('without a screen, /__room is just a missing file', async () => {
 });
 
 test('messageView marks errors and passes for the page', () => {
-  assert.deepEqual(messageView({ speaker: 'A', text: 'quota', error: true }), { speaker: 'A', html: '<p>quota</p>\n', error: true, pass: false });
+  assert.deepEqual(messageView({ speaker: 'A', text: 'quota', error: true }), { speaker: 'A', html: '<p>quota</p>\n', error: true, pass: false, errorText: 'quota' });
 });
 
 // A POST as the room page sends it (same host, JSON), with optional header overrides.
@@ -4257,4 +4257,27 @@ test('research conversion appears in both menus and asks for two clicks', () => 
   assert.match(button.textContent, /Click again/);
   button.onclick({ stopPropagation() {} });
   assert.equal(sent, 1);
+});
+
+test('live agent failures stay pinned until dismissed and count earlier failures', () => {
+  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
+  const slice = source.slice(source.indexOf('let pinnedFailures = 0;'), source.indexOf('function status(text, error, source)'));
+  const code = new Function('return `' + slice.replace(/`/g, '\\`') + '`')();
+  const node = () => ({ hidden: false, children: [], replaceChildren(...children) { this.children = children; }, setAttribute() {} });
+  const line = node();
+  const pin = new Function('$', 'document', code + '; return pinFailure;')(() => line, { createElement: node });
+  pin('Ada', 'first error\nmore detail');
+  assert.match(line.children[0].textContent, /^✗ Ada failed \d\d:\d\d: first error$/);
+  assert.equal(line.children[0].title, 'first error\nmore detail');
+  pin('Ben', 'second');
+  assert.match(line.children[0].textContent, /second \(\+1 earlier\)$/);
+  line.children[1].onclick();
+  assert.equal(line.hidden, true);
+  pin('Ada', 'again');
+  assert.doesNotMatch(line.children[0].textContent, /earlier/);
+  assert.match(source, /ev\.type === 'message'.*ev\.message\.error.*pinFailure/);
+  assert.match(source, /ev\.type === 'agent-failure'.*pinFailure/);
+  assert.match(source, /ev\.messages\.forEach\(\(m\) => message\(m, false\)\)/);
+  const ui = readFileSync(new URL('../src/ui.mjs', import.meta.url), 'utf8');
+  assert.match(ui, /catch \(err\) \{ toScreen\(ctx, \{ type: 'agent-failure', agent: writer, error: err\.message \}\); throw err; \}/);
 });
