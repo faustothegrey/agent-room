@@ -23,12 +23,23 @@
     "ghostty-web": "^0.4.0",
     "marked": "^18.1.1",
     "mermaid": "11.17.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "vega": "6.4.0",
     "vega-embed": "7.3.0",
     "vega-lite": "6.5.0",
     "ws": "^8.22.2"
   },
   "devDependencies": {
-    "typescript": "^7.0.2"
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.13",
+    "@types/react": "^19.3.1",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "jsdom": "^31.0.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
   }
 }
