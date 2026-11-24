@@ -74,15 +74,23 @@ function readSavedRooms(file) {
 
 export async function fetchRunningRooms(port, fetchImpl = fetch) {
   try {
-    const res = await fetchImpl(`http://127.0.0.1:${port}/__rooms`, {
-      signal: AbortSignal.timeout(2000),
-    });
-    if (!res.ok) return { reachable: false, rooms: [] };
-    const data = await res.json();
-    if (!Array.isArray(data) || !data.every((r) => r && typeof r.root === 'string')) {
+    const base = `http://127.0.0.1:${port}`;
+    const get = async (path) => {
+      const res = await fetchImpl(base + path, { signal: AbortSignal.timeout(2000) });
+      if (!res.ok) throw new Error('Server did not answer');
+      return res.json();
+    };
+    const health = await get('/__health');
+    if (health.app !== 'agent-room' || !Array.isArray(health.rooms) ||
+        !health.rooms.every((r) => r && typeof r.id === 'string' && typeof r.root === 'string')) {
       return { reachable: false, rooms: [] };
     }
-    return { reachable: true, rooms: data };
+    const rooms = await Promise.all(health.rooms.map(async (r) => {
+      const room = await get(`/r/${encodeURIComponent(r.id)}/__health`);
+      if (room.app !== 'agent-room' || room.root !== r.root) throw new Error('Invalid room health');
+      return { ...r, discussion: room.discussion };
+    }));
+    return { reachable: true, rooms };
   } catch {
     return { reachable: false, rooms: [] };
   }

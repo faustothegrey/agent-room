@@ -867,7 +867,7 @@ in `~/.local/state/agent-room/rooms.json` (never removing entries automatically)
 exposes two read-only tools:
 
 - `list_rooms`: lists saved rooms (skipping folders that no longer exist) plus rooms open on the
-  running local server (`GET /__rooms` on `127.0.0.1`, port `5566` by default), with each room's
+  running local server (its `/__health` and per-room health endpoints on `127.0.0.1`, port `5566` by default), with each room's
   running status and active discussion.
 - `list_discussions(root)`: lists open dated folders in `discussions/` and `brainstorms/` (not
   `discussions/archive/` or `discussions/deferred/`) without reading file contents, and marks the
