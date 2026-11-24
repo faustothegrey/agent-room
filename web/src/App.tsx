@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { FileDetailsResponse, FilesResponse, MessageView, Peek, Room, SayRequest, ScreenEvent, ShowRequest } from '../../src/contract';
+import type { FileDetailsResponse, FilesResponse, HighlightMessage, MessageView, Peek, PointMessage, Room, SayRequest, ScreenEvent, ShowRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void };
 type StatusLine = { text: string; error: boolean };
@@ -61,6 +61,7 @@ export function App({ version, refresh }: Props) {
   const [doc, setDoc] = useState<string | null>(null);
   const docRef = useRef<string | null>(null);
   const frame = useRef<HTMLIFrameElement>(null);
+  const [pointed, setPointed] = useState<Pick<PointMessage, 'label' | 'text'>[]>([]);
   const viewing = useRef<unknown>(null);
   const offerEpoch = useRef(0);
   const [follow, setFollow] = useState(() => { try { return localStorage.getItem('agent-room.followMentions') === '1'; } catch { return false; } });
@@ -103,7 +104,15 @@ export function App({ version, refresh }: Props) {
     } finally { state.posting--; updateBusy(); }
   };
   const send = async () => {
-    const value = text.trim();
+    let prepared = text;
+    if (pointed.length && !text.trim().startsWith('/')) {
+      prepared = text.trimEnd() + (text.trim() ? '\n' : '') + '[pointing at: ' + pointed.map((point) => point.text).join('; ') + ']';
+      setPointed([]);
+      // The legacy composer consumes the line immediately without attachments;
+      // with attachments it remains editable until the request succeeds.
+      setText(files.length ? prepared : '');
+    }
+    const value = prepared.trim();
     if (sending || ended || (!value && !files.length) || (peek && (!value.startsWith('/') || files.length > 0))) return;
     const fail = (reason: string) => addStatus(`✗ ${reason} Nothing was sent.`, true);
     if (value === '/docs' && !files.length) { addStatus('Explorer is not available on this page yet.', true); return; }
@@ -121,11 +130,35 @@ export function App({ version, refresh }: Props) {
         response = await post('__say', { text: value, confirmed: true });
       }
       if (!response.ok) { const error = await response.text(); addStatus(files.length ? `✗ ${error}` : error, true); return; }
-      setText((current) => current === text ? '' : current); setFiles([]);
+      setText((current) => current === text || current === prepared ? '' : current); setFiles([]);
     } catch (error) {
       fail(`Couldn't send${files.length ? ' the attachments' : ' the message'}: ${error instanceof Error ? error.message : String(error)}.`);
     } finally { setSending(false); }
   };
+
+  useEffect(() => {
+    const point = (event: MessageEvent<unknown>) => {
+      if (event.origin !== location.origin || !frame.current || event.source !== frame.current.contentWindow) return;
+      const data = event.data as Partial<PointMessage> | null;
+      if (data?.type !== 'agent-room:point' || typeof data.label !== 'string' || typeof data.text !== 'string') return;
+      const label = data.label, text = data.text;
+      setPointed((previous) => [...previous.filter((item) => item.label !== label), { label: label.slice(0, 80), text: text.slice(0, 300) }]);
+    };
+    const reference = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const ref = target.closest<HTMLElement>('.ref[data-ref]');
+      if (!ref || !frame.current?.contentWindow) return;
+      const message: HighlightMessage = { type: 'agent-room:highlight', ref: ref.dataset.ref ?? '', on: event.type !== 'mouseout' };
+      frame.current.contentWindow.postMessage(message, location.origin);
+    };
+    window.addEventListener('message', point);
+    document.addEventListener('mouseover', reference); document.addEventListener('mouseout', reference); document.addEventListener('click', reference);
+    return () => {
+      window.removeEventListener('message', point);
+      document.removeEventListener('mouseover', reference); document.removeEventListener('mouseout', reference); document.removeEventListener('click', reference);
+    };
+  }, []);
 
   const showFile = async (file: string) => {
     setOffers([]); offerEpoch.current++;
@@ -278,6 +311,7 @@ export function App({ version, refresh }: Props) {
       <div><button type="button" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)" disabled={sending || ended || !!peek || !room?.active} onClick={() => fileInput.current?.click()}>📎 Attach</button>
         <input ref={fileInput} type="file" aria-label="Attach files" multiple hidden onChange={(event) => { const chosen = Array.from(event.target.files ?? []); setFiles((previous) => [...previous, ...chosen]); event.target.value = ''; }} />
         {files.map((file, index) => <span key={index}>{file.name} · {sizeText(file.size)} <button type="button" title="Remove this attachment" aria-label={`Remove ${file.name}`} disabled={sending} onClick={() => setFiles((previous) => previous.filter((_, i) => i !== index))}>✕</button></span>)}
+        {pointed.map((point, index) => <span className="chip" title={point.text} key={index}>{point.label} <button type="button" title="Stop pointing at this" aria-label={`Stop pointing at ${point.label}`} onClick={() => setPointed((previous) => previous.filter((_, i) => i !== index))}>✕</button></span>)}
         {sending && files.length > 0 && <span>Saving the attachments…</span>}
       </div>
     </div>}

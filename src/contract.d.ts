@@ -121,3 +121,7 @@ export type ShowReplyStatus = 204 | 403 | 404;
 // or "fixed" for an immutable received snapshot. Without f it lists room files.
 export interface MtimeRequest { f?: string }
 export type MtimeResponse = string;
+
+// Messages exchanged between the room page and its embedded document viewer.
+export interface PointMessage { type: 'agent-room:point'; label: string; text: string }
+export interface HighlightMessage { type: 'agent-room:highlight'; ref: string; on: boolean }
