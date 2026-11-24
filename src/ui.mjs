@@ -3910,8 +3910,7 @@ export async function reloaded(ctx) {
   const run = ctx.autoDev;
   if (run?.status === 'running' && run.waiting && !runningTasks(shopOf(ctx)).some((t) => t.origin === ctx) && !ctx.workPending) pauseAutoDev(ctx, 'the worker\'s result was lost in the Reload');
   note(ctx, 'Reloaded the code and the agents\' rulebooks; the conversation continues.\n');
-  ctx.docs.notifyNext?.(ctx.screen);
-  toScreen(ctx, { type: 'reloaded', page: ctx.docs.PAGE }); // pages refresh if their code changed
+  toScreen(ctx, { type: 'reloaded', page: ctx.docs.PAGE, webVersion: ctx.docs.nextVersion?.() ?? null }); // pages refresh if their code changed
   // The header's version: the checkout as it is at this Reload (the start's snapshot is kept).
   const at = new Date().toISOString();
   codeInfo().then(({ commit, dirty }) => {

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import * as docs from '../src/docs.mjs';
 import { route } from '../src/ui.mjs';
 
-test('new page routes contain assets and signal version changes separately', async () => {
+test('new page routes contain assets and signal version changes on room events', async () => {
   const root = mkdtempSync(join(tmpdir(), 'next-page-'));
   const dist = join(root, 'dist');
   mkdirSync(join(dist, 'assets'), { recursive: true });
@@ -38,14 +38,18 @@ test('new page routes contain assets and signal version changes separately', asy
     const { request } = await import('node:http');
     const raw = await new Promise((ok, fail) => { const r = request({ hostname: '127.0.0.1', port: server.address().port, path: '/__next/../secret' }, (res) => { res.resume(); ok(res.statusCode); }); r.on('error', fail); r.end(); });
     assert.equal(raw, 404);
-    const response = await fetch(origin + '/r/room-one/__next/events');
+    assert.equal((await fetch(origin + '/r/room-one/__next/events')).status, 404);
+    const response = await fetch(origin + '/r/room-one/__events');
     reader = response.body.getReader();
     const first = new TextDecoder().decode((await reader.read()).value);
     writeFileSync(join(dist, 'assets/app.js'), 'second');
     docs.notifyNext(screen);
     const second = new TextDecoder().decode((await reader.read()).value);
-    assert.notEqual(first, second);
-    assert.equal(screen.clients.size, 0);
+    const reset = JSON.parse(first.trim().slice(6));
+    const changed = JSON.parse(second.trim().slice(6));
+    assert.equal(reset.type, 'reset'); assert.equal(changed.type, 'web-version');
+    assert.notEqual(reset.webVersion, changed.webVersion);
+    assert.equal(screen.clients.size, 1);
     renameSync(dist, dist + '-old');
     const gap = await fetch(origin + '/__next');
     assert.equal(gap.status, 404); assert.match(await gap.text(), /Web build missing/);

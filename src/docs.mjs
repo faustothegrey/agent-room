@@ -482,7 +482,7 @@ document.addEventListener('click', (e) => {
 
 // Forward the version tag: static imports would keep the old helpers across Reload.
 const { createScreenEvents } = await import(`./screen-events.mjs${new URL(import.meta.url).search}`);
-export const { messageView, broadcast, endAll, resetEvent } = createScreenEvents(md, () => PAGE);
+export const { messageView, broadcast, endAll, resetEvent } = createScreenEvents(md, () => PAGE, (screen) => nextVersion(screen.nextDist));
 
 // The conversation's wallpaper: one doodle tile (black strokes), faint, behind the message lists.
 const DOODLE = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(30 30)"><circle r="9"/><path d="M0-15v-5M0 15v5M-15 0h-5M15 0h5M-11-11l-3-3M11 11l3 3M-11 11l-3 3M11-11l3-3"/></g><path d="M90 42h34a9 9 0 0 0 0-18 13 13 0 0 0-25-3 10 10 0 0 0-9 21z"/><g transform="translate(175 22)"><path d="M0 14L40 0 26 34 18 20z"/><path d="M18 20L40 0"/></g><path d="M60 95c-6-8-20-4-16 8 3 7 16 16 16 16s13-9 16-16c4-12-10-16-16-8z"/><g transform="translate(120 78)"><path d="M0 0h26v18a8 8 0 0 1-8 8h-10a8 8 0 0 1-8-8z"/><path d="M26 5h4a5 5 0 0 1 0 10h-4"/><path d="M7-6c-2-3 2-4 0-8M15-6c-2-3 2-4 0-8"/></g><g transform="translate(195 85)"><path d="M8 0v24M8 0l14 4v18"/><ellipse cx="4" cy="25" rx="5" ry="4"/><ellipse cx="18" cy="23" rx="5" ry="4"/></g><g transform="translate(20 150)"><path d="M0 30C0 10 15 0 35 0c0 20-15 30-35 30z"/><path d="M0 30L22 10"/></g><g transform="translate(100 165)"><circle r="16"/><circle cx="-6" cy="-4" r="1.2"/><circle cx="6" cy="-4" r="1.2"/><path d="M-7 5c4 5 10 5 14 0"/></g><g transform="translate(170 140)"><path d="M-22 0a22 22 0 0 1 44 0c-5-4-10-4-14 0-5-4-11-4-16 0-4-4-9-4-14 0z"/><path d="M0 0v22a5 5 0 0 1-10 0"/></g><path d="M215 195l3 7 7 1-5 5 1 7-6-3-6 3 1-7-5-5 7-1z"/><path d="M60 220a12 12 0 1 1 14-15 9 9 0 1 0-14 15z"/><g transform="translate(150 200)"><ellipse rx="10" ry="13"/><path d="M0 13l-3 4h6zM0 17c-3 6 3 9 0 16"/></g><circle cx="70" cy="60" r="3"/><circle cx="155" cy="60" r="2"/><circle cx="225" cy="60" r="3"/><circle cx="95" cy="125" r="2"/><circle cx="215" cy="135" r="2"/><circle cx="30" cy="110" r="3"/><circle cx="60" cy="175" r="2"/><circle cx="125" cy="225" r="3"/><circle cx="200" cy="230" r="2"/><path d="M120 130h12M140 130h4M10 205h10M228 165h6"/></svg>')}")`;
@@ -4744,19 +4744,10 @@ export function nextVersion(dir = fileURLToPath(nextDir)) {
   } catch { return null; }
 }
 export function notifyNext(screen) {
-  if (!screen?.nextClients?.size) return;
-  const data = `data: ${JSON.stringify({ version: nextVersion(screen.nextDist) })}\n\n`;
-  for (const res of screen.nextClients) res.write(data);
+  if (screen?.clients?.size) broadcast(screen, { type: 'web-version', webVersion: nextVersion(screen.nextDist) });
 }
 function handleNext(req, res, url, screen) {
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type, 'cache-control': 'no-cache' }); res.end(body); };
-  if (url.pathname === '/__next/events') {
-    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-    (screen.nextClients ??= new Set()).add(res);
-    req.on('close', () => screen.nextClients.delete(res));
-    res.write(`data: ${JSON.stringify({ version: nextVersion(screen.nextDist) })}\n\n`);
-    return true;
-  }
   if (url.pathname !== '/__next' && !url.pathname.startsWith('/__next/')) return false;
   if (req.method !== 'GET') { send(405, 'text/plain; charset=utf-8', 'Use GET.'); return true; }
   const isPage = url.pathname === '/__next';

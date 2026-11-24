@@ -56,7 +56,7 @@ export interface ResetEvent {
   status?: string | null; busy: boolean; input: boolean; room: Room | null; worker: WorkerMessage[];
   working: string | null; workInput: boolean; workerInfo: WorkerInfo | null;
   quota?: Gauge[] | null; quotaAt: QuotaAt | null; monitor: Monitor | null; newRoom: boolean;
-  page: string; replica: Replica | null; replicaOff: string | null; viewing: unknown; peek: Peek | null;
+  page: string; webVersion: string | null; replica: Replica | null; replicaOff: string | null; viewing: unknown; peek: Peek | null;
 }
 export type ScreenEvent = ResetEvent
   | { type: 'message'; message: MessageView }
@@ -73,7 +73,8 @@ export type ScreenEvent = ResetEvent
   | { type: 'doc'; file: string | null }
   | { type: 'moved'; from: string; to: string | null }
   | { type: 'goto'; url: string }
-  | { type: 'reloaded'; page: string }
+  | { type: 'reloaded'; page: string; webVersion: string | null }
+  | { type: 'web-version'; webVersion: string | null }
   | { type: 'agent-failure'; agent: string; error: string }
   | { type: 'files' | 'schedule' | 'ended' | 'restarting' };
 
@@ -81,7 +82,7 @@ export type ScreenEvent = ResetEvent
 export interface Screen {
   clients: Set<{ write(data: string): unknown; end(data: string, done: () => void): unknown }>;
   transcript: TranscriptEntry[]; doc?: string | null; thinking?: string | null; status?: string | null;
-  busy?: unknown; say?: unknown; room?: Room | null; workerForPage?: () => WorkerMessage[];
+  nextDist?: string; busy?: unknown; say?: unknown; room?: Room | null; workerForPage?: () => WorkerMessage[];
   worker?: WorkerMessage[]; working?: string | null; work?: unknown; workerInfo?: WorkerInfo | null;
   quota?: Gauge[] | null; quotaAt?: QuotaAt | null; monitor?: Monitor | null; newRoom?: unknown;
   replica?: Replica | null; replicaOff?: string | null; viewing?: unknown; peek?: Peek | null;

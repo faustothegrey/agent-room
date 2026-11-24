@@ -10,11 +10,12 @@
   "scripts": {
     "start": "node src/cli.mjs --dev",
     "terminal": "node src/cli.mjs --no-screen",
-    "test": "npm run typecheck && node --test test/next-integration.mjs && node test/helpers/run-tests.mjs fast",
+    "test": "npm run typecheck && npm run test:web && node --test test/next-integration.mjs && node test/helpers/run-tests.mjs fast",
     "test:slow": "node test/helpers/run-tests.mjs slow",
     "test:all": "node test/helpers/run-tests.mjs all",
     "typecheck": "tsc --noEmit",
-    "build:web": "node src/cli.mjs --build-web"
+    "build:web": "node src/cli.mjs --build-web",
+    "test:web": "vitest run --environment jsdom web/src"
   },
   "engines": {
     "node": ">=20"

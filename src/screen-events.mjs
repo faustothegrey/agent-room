@@ -1,7 +1,7 @@
 // @ts-check
 
-/** @param {{parse(text: string): string}} md @param {() => string} page */
-export function createScreenEvents(md, page) {
+/** @param {{parse(text: string): string}} md @param {() => string} page @param {(screen: import("./contract.d.ts").Screen) => string | null} webVersion */
+export function createScreenEvents(md, page, webVersion) {
 // A transcript entry as the page shows it: the text rendered as Markdown. Summary turns are
 // hidden (only the summary's result is shown); the result carries its label.
 /** @param {import("./contract.d.ts").TranscriptEntry} m @returns {import("./contract.d.ts").MessageView} */
@@ -46,7 +46,7 @@ function resetEvent(screen) {
     doc: peek ? peek.doc : screen.doc,
     thinking: screen.thinking, status: screen.status, busy: !!screen.busy, input: !!screen.say,
     room: screen.room ?? null, worker: peek?.kind === 'workbench' ? (peek.worker ?? []) : (screen.workerForPage?.() ?? screen.worker ?? []), working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
-    quota: screen.quota, quotaAt: screen.quotaAt ?? null, monitor: screen.monitor ?? null, newRoom: !!screen.newRoom, page: page(),
+    quota: screen.quota, quotaAt: screen.quotaAt ?? null, monitor: screen.monitor ?? null, newRoom: !!screen.newRoom, page: page(), webVersion: webVersion(screen),
     replica: screen.replica ?? null, replicaOff: screen.replicaOff ?? null, viewing: screen.viewing ?? null, peek };
 }
 

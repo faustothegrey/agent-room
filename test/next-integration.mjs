@@ -27,23 +27,37 @@ test('dev rebuild and Reload notify the new page after publishing the build', { 
     const room = `/r/${health.rooms[0].id}/`;
     const oldHtml = await (await fetch(origin + room + '__next')).text();
     const oldAsset = new URL(oldHtml.match(/src="([^"]+)"/)[1], origin + room + '__next');
-    const events = await fetch(origin + room + '__next/events');
+    const oldRoom = await (await fetch(origin + room + '__room')).text();
+    assert.equal((await fetch(origin + room + '__next/events')).status, 404);
+    const events = await fetch(origin + room + '__events');
     reader = events.body.getReader();
-    const next = async () => JSON.parse(new TextDecoder().decode((await reader.read()).value).trim().slice(6));
-    const initial = await next();
-    const page = join(root, 'web/src/main.tsx');
+    let buffer = '';
+    const next = async () => {
+      while (!buffer.includes('\n\n')) { const chunk = await reader.read(); if (chunk.done) throw new Error('stream ended'); buffer += new TextDecoder().decode(chunk.value); }
+      const end = buffer.indexOf('\n\n'), part = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+      return JSON.parse(part.slice(6));
+    };
+    const untilEvent = async (type) => { for (;;) { const event = await next(); if (event.type === type) return event; } };
+    const initial = await untilEvent('reset');
+    const page = join(root, 'web/src/App.tsx');
     const { readFileSync } = await import('node:fs');
     const original = readFileSync(page, 'utf8');
     writeFileSync(page, 'invalid !!! syntax');
     await until(() => output.includes('Web build failed;'));
     assert.equal((await fetch(oldAsset)).status, 200);
-    writeFileSync(page, original.replace('The new room page is being built.', 'The new room page has changed.'));
-    const rebuilt = await next();
-    assert.ok(rebuilt.version); assert.notEqual(rebuilt.version, initial.version);
+    writeFileSync(page, original.replace('Conversation', 'Updated conversation'));
+    const rebuilt = await untilEvent('web-version');
+    assert.ok(rebuilt.webVersion); assert.notEqual(rebuilt.webVersion, initial.webVersion);
+    assert.equal(await (await fetch(origin + room + '__room')).text(), oldRoom);
+    await reader.cancel();
+    reader = (await fetch(origin + room + '__events')).body.getReader(); buffer = '';
+    const reconnected = await untilEvent('reset');
+    assert.equal(reconnected.webVersion, rebuilt.webVersion); assert.equal(reconnected.page, initial.page);
     assert.equal((await fetch(oldAsset)).status, 404);
     const post = await fetch(origin + room + '__say', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: '/reload' }) });
     assert.equal(post.status, 204);
-    assert.equal((await next()).version, rebuilt.version);
+    const reload = await untilEvent('reloaded');
+    assert.equal(reload.webVersion, rebuilt.webVersion); assert.equal(reload.page, initial.page);
     assert.equal((await fetch(origin + room + '__room')).status, 200);
   } finally {
     await reader?.cancel(); cli.kill('SIGTERM');
