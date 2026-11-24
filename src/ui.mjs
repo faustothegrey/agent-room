@@ -5316,7 +5316,12 @@ export function route(hub, req, res) {
     return send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, startedAt: hub.startedAt ?? null,
       rooms: rooms.map((r) => ({ id: r.id, root: r.cwd, pages: r.screen.clients.size })) }));
   }
-  if (url.pathname === '/__next' || url.pathname.startsWith('/__next/')) {
+  if (url.pathname === '/__next') {
+    if (!rooms.length) return send(404, 'text/plain; charset=utf-8', 'This server has no room open.');
+    res.writeHead(302, { location: `${roomPath(rooms[0])}__next` });
+    return res.end();
+  }
+  if (url.pathname.startsWith('/__next/')) {
     if (!rooms.length) return send(404, 'text/plain; charset=utf-8', 'This server has no room open.');
     return rooms[0].docs.handle(req, res, rooms[0].cwd, rooms[0].screen);
   }

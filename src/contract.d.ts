@@ -44,7 +44,7 @@ export interface Room {
   cliSessions: unknown; discussion: string; active: string | null; started: boolean;
   fresh: boolean; brainstorm: boolean; workbench: boolean; research: boolean;
   workbenches: string[]; researches: string[]; researchStats: unknown; members: unknown[];
-  failedAgents: { name: string; disabled: boolean }[]; autoDev: unknown; workerStop: unknown;
+  failedAgents: { name: string; disabled: boolean }[]; autoDev: { status: string | null; [key: string]: unknown } | null; workerStop: unknown;
   retryId: string | null; transcript: string | null; checkpoints: unknown; closedDiscussions: unknown;
   closingDiscussions: Record<string, string>; busyWorkers: string[]; back: unknown; code: unknown;
   rollbacks: unknown[]; multi: unknown; open: unknown;
@@ -95,6 +95,8 @@ export interface EventsRequest { method?: string; url?: string }
 // Successful page and asset responses have a 200 status; missing assets/builds return plain text 404,
 // and unsupported methods return plain text 405. The SSE endpoint writes ScreenEvent frames.
 export type NextRouteStatus = 200 | 404 | 405;
+// The hub redirects the root page to the first room, or returns 404 when no room is open.
+export type RootNextRouteStatus = 302 | 404;
 export type NextRouteBody = string | Uint8Array;
 export type EventStreamFrame = ScreenEvent;
 export interface HttpReply {
