@@ -6985,3 +6985,195 @@ test('turn research into discussion preserves its folder, starts fresh agents an
   assert.match(resumedPrompts[0], /turned from a research board/);
   assert.match(resumedPrompts[0], /research notes.*transcripts\//);
 });
+
+test('Reload loads the lane diagram module again while preserving live room and worker state', async () => {
+  const { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { fileURLToPath, pathToFileURL } = await import('node:url');
+  const source = fileURLToPath(new URL('../', import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), 'lane-reload-'));
+  try {
+    for (const name of ['src', 'rulebooks']) cpSync(join(source, name), join(root, name), { recursive: true });
+    symlinkSync(join(source, 'node_modules'), join(root, 'node_modules'), 'dir');
+    const ui = await import(pathToFileURL(join(root, 'src/ui.mjs')).href);
+    const ctx = freshCtx(); ctx.workerSpec = 'claude:Worker';
+    Object.assign(ctx, await ui.load(ctx, '?v=first'));
+    ctx.state.transcript.push({ speaker: 'User', text: 'kept across Reload' });
+    const state = ctx.state, shop = ctx.shop, session = ctx.sessions.get('worker:Worker'), first = ctx.lanes;
+    assert.equal(first.BRANCH_DIAGRAM_LIMIT, 15);
+    const firstWorkshop = ctx.workshopModule;
+    ctx.autoDev = { status: 'running', cycle: 2, limit: 5, lastSteps: 3, reason: null, waiting: true, report: null };
+    ctx.autoDevSent = [4]; ctx.workQueue = Promise.resolve();
+    shop.confirming = true; // simulate a queued task without starting a worker or Git action
+    ui.queueWork(ctx, 'queued across Reload', ctx.autoDev);
+    const run = ctx.autoDev, queued = shop.lanes.get('').tasks[0];
+    assert.equal(queued.text, 'queued across Reload'); assert.equal(queued.run, run);
+    let release, reached;
+    const blocked = new Promise((resolve) => { release = resolve; });
+    const entered = new Promise((resolve) => { reached = resolve; });
+    const inFlight = ui.refreshWorker(ctx, { place: { disabled: 'old' }, _beforeBroadcast: async () => { reached(); await blocked; } });
+    await entered;
+    const file = join(root, 'src/lanes.mjs');
+    const text = readFileSync(file, 'utf8');
+    assert.match(text, /BRANCH_DIAGRAM_LIMIT = 15/);
+    assert.match(text, /if \(own\.disabled\) return \{ lines: \[own\.disabled\]/);
+    writeFileSync(file, text.replace('BRANCH_DIAGRAM_LIMIT = 15', 'BRANCH_DIAGRAM_LIMIT = 16')
+      .replace('if (own.disabled) return { lines: [own.disabled]', "if (own.disabled) return { lines: ['new: ' + own.disabled]"));
+    const workshopFile = join(root, 'src/workshop.mjs'), workshopText = readFileSync(workshopFile, 'utf8');
+    assert.match(workshopText, /AUTO_DEV_CYCLES = 5/);
+    writeFileSync(workshopFile, workshopText.replace('AUTO_DEV_CYCLES = 5', 'AUTO_DEV_CYCLES = 6'));
+    const uiFile = join(root, 'src/ui.mjs'), uiText = readFileSync(uiFile, 'utf8');
+    const callback = 'const toScreen = (ctx, event) => ctx.docs.broadcast(ctx.screen, event);';
+    assert.ok(uiText.includes(callback));
+    assert.ok(uiText.includes('  watchMonitor(ctx);\n  startScheduler(ctx);'));
+    writeFileSync(uiFile, uiText.replace(callback, "const toScreen = (ctx, event) => { ctx.callbackVersion = 'new'; return ctx.docs.broadcast(ctx.screen, event); };")
+      .replace('  watchMonitor(ctx);\n  startScheduler(ctx);', '  // Monitor and scheduler are disabled in this isolated Reload test.'));
+    const nextUi = await import(pathToFileURL(uiFile).href + '?v=second');
+    Object.assign(ctx, await nextUi.load(ctx, '?v=second'));
+    await nextUi.reloaded(ctx);
+    assert.notEqual(ctx.workshopModule, firstWorkshop); assert.equal(nextUi.AUTO_DEV_CYCLES, 6);
+    assert.equal(ctx.autoDev, run); assert.deepEqual(run, { status: 'running', cycle: 2, limit: 5, lastSteps: 3, reason: null, waiting: true, report: null });
+    assert.deepEqual(ctx.autoDevSent, [4]); assert.equal(shop.lanes.get('').tasks[0], queued);
+    assert.equal(queued.run, run); assert.equal(ctx.workPending, 1);
+    await nextUi.refreshWorker(ctx, { place: { disabled: 'current' } });
+    assert.deepEqual(ctx.screen.workerInfo.lines, ['new: current']);
+    assert.equal(ctx.callbackVersion, 'new');
+    release(); await inFlight;
+    assert.deepEqual(ctx.screen.workerInfo.lines, ['new: current']); // stale in-flight refresh did not overwrite it
+    assert.notEqual(ctx.lanes, first);
+    assert.notEqual(ctx.lanes.workerPlace, first.workerPlace);
+    assert.notEqual(ctx.lanes.checkWorkerReport, first.checkWorkerReport);
+    assert.equal(ctx.lanes.BRANCH_DIAGRAM_LIMIT, 16);
+    assert.equal(ctx.state, state); assert.equal(ctx.shop, shop);
+    assert.equal(ctx.sessions.get('worker:Worker'), session);
+    assert.equal(ctx.room.transcript[0].text, 'kept across Reload');
+  } finally { rmSync(root, { recursive: true, force: true, maxRetries: 5 }); }
+});
+
+test('Reload retains an open board and resumes a paused board from its checkpoint', async () => {
+  const { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { fileURLToPath, pathToFileURL } = await import('node:url');
+  const source = fileURLToPath(new URL('../', import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), 'board-reload-')), home = process.env.HOME;
+  process.env.HOME = root;
+  try {
+    for (const name of ['src', 'rulebooks']) cpSync(join(source, name), join(root, name), { recursive: true });
+    symlinkSync(join(source, 'node_modules'), join(root, 'node_modules'), 'dir');
+    const cwd = join(root, 'room'); mkdirSync(cwd);
+    const uiFile = join(root, 'src/ui.mjs');
+    const ui = await import(pathToFileURL(uiFile).href);
+    const ctx = { ...freshCtx(), cwd, workerSpec: 'claude:W', noScreen: true };
+    Object.assign(ctx, await ui.load(ctx, '?v=first'));
+    ctx.usage = { ...ctx.usage, fetchQuota: async () => null };
+    const titles = ['Paused board', 'Open board'];
+    ctx.suggestTitle = async () => ({ title: titles.shift() });
+    for (const agent of ctx.room.agents) agent.turn = async () => 'PASS';
+    Object.assign(ctx.sessions.get('A'), { id: 'paused-session', started: true });
+    Object.assign(ctx.sessions.get('B'), { threadId: 'paused-codex' });
+    await ui.handleLine('paused message', ctx);
+    const paused = ctx.discussion.name, pausedFile = await checkpointPath(cwd, paused);
+    assert.ok(existsSync(pausedFile));
+    const pausedSnapshot = JSON.parse(readFileSync(pausedFile, 'utf8'));
+    assert.equal(new Map(pausedSnapshot.sessions).get('A').id, 'paused-session');
+    await ui.handleLine('/new', ctx);
+    await ui.handleLine('open message', ctx);
+    const open = ctx.discussion, activeState = ctx.state, openFile = await checkpointPath(cwd, open.name);
+    assert.ok(existsSync(openFile));
+    const boardsFile = join(root, 'src/boards.mjs'), boardText = readFileSync(boardsFile, 'utf8');
+    assert.ok(boardText.includes('function readCheckpoint(ctx, name) {'));
+    writeFileSync(boardsFile, boardText.replace('function readCheckpoint(ctx, name) {', "function readCheckpoint(ctx, name) { ctx.boardReadVersion = 'new';"));
+    const uiText = readFileSync(uiFile, 'utf8');
+    assert.ok(uiText.includes('  watchMonitor(ctx);\n  startScheduler(ctx);'));
+    writeFileSync(uiFile, uiText.replace('  watchMonitor(ctx);\n  startScheduler(ctx);', '  // Monitor and scheduler disabled in this isolated test.'));
+    const nextUi = await import(pathToFileURL(uiFile).href + '?v=second');
+    const firstBoards = ctx.boardsModule;
+    Object.assign(ctx, await nextUi.load(ctx, '?v=second'));
+    await nextUi.reloaded(ctx);
+    assert.notEqual(ctx.boardsModule, firstBoards);
+    assert.equal(ctx.discussion, open); assert.equal(ctx.state, activeState);
+    assert.ok(ctx.state.transcript.some((m) => m.text === 'open message'));
+    assert.ok(existsSync(openFile));
+    await nextUi.handleLine('/resume ' + paused, ctx);
+    assert.equal(ctx.boardReadVersion, 'new'); assert.equal(ctx.discussion.name, paused);
+    assert.equal(ctx.sessions.get('A').id, 'paused-session');
+    assert.deepEqual(ctx.state.transcript, pausedSnapshot.state.transcript);
+  } finally {
+    if (home === undefined) delete process.env.HOME; else process.env.HOME = home;
+    rmSync(root, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test('Reload preserves per-context quota, per-workshop schedule and server monitor timers', async () => {
+  const { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { fileURLToPath, pathToFileURL } = await import('node:url');
+  const source = fileURLToPath(new URL('../', import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), 'timer-reload-'));
+  const originalSet = globalThis.setInterval, originalClear = globalThis.clearInterval;
+  const active = new Set(), made = [];
+  globalThis.setInterval = (fn, ms) => { const timer = { fn, ms, unref() { return this; } }; active.add(timer); made.push(timer); return timer; };
+  globalThis.clearInterval = (timer) => { active.delete(timer); };
+  try {
+    for (const name of ['src', 'rulebooks']) cpSync(join(source, name), join(root, name), { recursive: true });
+    symlinkSync(join(source, 'node_modules'), join(root, 'node_modules'), 'dir');
+    const roomA = join(root, 'a'), roomB = join(root, 'b'); mkdirSync(roomA); mkdirSync(roomB);
+    const uiFile = join(root, 'src/ui.mjs'), ui = await import(pathToFileURL(uiFile).href);
+    const hub = { rooms: new Map(), node: null };
+    const make = async (cwd, key) => {
+      const ctx = { ...freshCtx(), cwd, key, hub, workerSpec: 'claude:Worker', noScreen: true };
+      Object.assign(ctx, await ui.load(ctx, '?v=first'));
+      ctx.usage = { ...ctx.usage, fetchQuota: async () => null, checkLogin: async () => ({ state: 'ok' }) };
+      ctx.findLeftovers = async () => [];
+      hub.rooms.set(key, ctx);
+      await ui.start(ctx);
+      return ctx;
+    };
+    const a = await make(roomA, roomA);
+    const b = await make(roomA, roomA + '#second');
+    const c = await make(roomB, roomB);
+    assert.equal(a.shop, b.shop); assert.notEqual(a.shop, c.shop);
+    assert.equal(made.length, 7); assert.equal(active.size, 7);
+    assert.equal(made.filter((t) => t.ms === 15_000).length, 2);
+    assert.equal(made.filter((t) => t.ms === 60_000).length, 4); // three quotas and one leftovers
+    assert.equal(made.filter((t) => t.ms === 600_000).length, 1);
+    const quotas = [a.quotaTimer, b.quotaTimer, c.quotaTimer], timers = [...hub.monitorTimers], schedules = [a.shop.schedulerTimer, c.shop.schedulerTimer];
+    const oldQuota = a.refreshQuota, oldLogin = hub.checkLogins, oldLeftovers = hub.checkLeftovers, oldSchedule = a.shop.checkSchedule;
+    const oldMonitor = a.monitorModule, oldScheduler = a.schedulerModule;
+    const monitorFile = join(root, 'src/monitor.mjs'), mon = readFileSync(monitorFile, 'utf8');
+    assert.ok(mon.includes('  hub.monitor.cli ??= {};'));
+    writeFileSync(monitorFile, mon.replace('  hub.monitor.cli ??= {};', "  hub.monitor.cli ??= {}; hub.monitor.versionProbe = 'new';"));
+    const schedulerFile = join(root, 'src/scheduler.mjs'), sched = readFileSync(schedulerFile, 'utf8');
+    assert.ok(sched.includes('  shop.schedulerCtx = ctx;'));
+    writeFileSync(schedulerFile, sched.replace('  shop.schedulerCtx = ctx;', "  shop.schedulerCtx = ctx; shop.schedulerVersionProbe = 'new';"));
+    const nextUi = await import(pathToFileURL(uiFile).href + '?v=second');
+    for (const ctx of [a, b, c]) {
+      Object.assign(ctx, await nextUi.load(ctx, '?v=second'));
+      ctx.usage = { ...ctx.usage, fetchQuota: async () => null, checkLogin: async () => ({ state: 'ok' }) };
+      ctx.findLeftovers = async () => [];
+      await nextUi.reloaded(ctx);
+    }
+    assert.notEqual(a.monitorModule, oldMonitor); assert.notEqual(a.schedulerModule, oldScheduler);
+    assert.equal(hub.monitor.versionProbe, 'new'); assert.equal(a.shop.schedulerVersionProbe, 'new'); assert.equal(c.shop.schedulerVersionProbe, 'new');
+    assert.notEqual(a.refreshQuota, oldQuota); assert.notEqual(hub.checkLogins, oldLogin);
+    assert.notEqual(hub.checkLeftovers, oldLeftovers); assert.notEqual(a.shop.checkSchedule, oldSchedule);
+    assert.deepEqual([a.quotaTimer, b.quotaTimer, c.quotaTimer], quotas);
+    assert.deepEqual(hub.monitorTimers, timers); assert.deepEqual([a.shop.schedulerTimer, c.shop.schedulerTimer], schedules);
+    assert.equal(made.length, 7); assert.equal(active.size, 7);
+    const calls = [];
+    a.refreshQuota = () => calls.push('quota'); hub.checkLogins = () => calls.push('login');
+    hub.checkLeftovers = () => calls.push('leftovers'); a.shop.checkSchedule = () => calls.push('schedule');
+    quotas[0].fn(); timers[0].fn(); timers[1].fn(); schedules[0].fn();
+    assert.deepEqual(calls, ['quota', 'login', 'leftovers', 'schedule']);
+    a.stopped = true; nextUi.ended(a); assert.ok(active.has(schedules[0]));
+    b.stopped = true; nextUi.ended(b); assert.ok(!active.has(schedules[0]));
+    c.stopped = true; nextUi.ended(c); assert.ok(!active.has(schedules[1]));
+    assert.deepEqual([...active], timers); // monitor timers are server-wide, not owned by rooms
+  } finally {
+    globalThis.setInterval = originalSet; globalThis.clearInterval = originalClear;
+    rmSync(root, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
