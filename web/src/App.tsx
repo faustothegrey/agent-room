@@ -100,6 +100,15 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [armedCreation, setArmedCreation] = useState<Record<string, boolean>>({});
   const creationTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   useEffect(() => () => { for (const timer of Object.values(creationTimers.current)) clearTimeout(timer); }, []);
+  const [armedActions, setArmedActions] = useState<Record<string, boolean>>({});
+  const actionTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const actionsMenu = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const close = (event: MouseEvent) => { if (event.target instanceof Node && !actionsMenu.current?.contains(event.target) && actionsMenu.current) actionsMenu.current.open = false; };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && actionsMenu.current) actionsMenu.current.open = false; };
+    document.addEventListener('click', close); document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('click', close); document.removeEventListener('keydown', escape); for (const timer of Object.values(actionTimers.current)) clearTimeout(timer); };
+  }, []);
   const [boardSections, setBoardSections] = useState(() => new Set(['discussions', 'research', 'brainstorms']));
   const [orderRevision, setOrderRevision] = useState(0);
   const [dragged, setDragged] = useState<{ kind: OrderKind; name: string; names: string[] } | null>(null);
@@ -280,6 +289,15 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       creationTimers.current[command] = setTimeout(() => { setArmedCreation((previous) => ({ ...previous, [command]: false })); delete creationTimers.current[command]; }, 4000);
       return;
     }
+    void boardCommand(command);
+  };
+  const runAction = (key: string, command: string, confirm: boolean) => {
+    if (confirm && !armedActions[key]) {
+      setArmedActions((previous) => ({ ...previous, [key]: true }));
+      actionTimers.current[key] = setTimeout(() => { setArmedActions((previous) => ({ ...previous, [key]: false })); delete actionTimers.current[key]; }, 4000);
+      return;
+    }
+    if (actionsMenu.current) actionsMenu.current.open = false;
     void boardCommand(command);
   };
   const saveOrder = (kind: OrderKind, names: string[]) => {
@@ -501,6 +519,11 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   });
   const inactive = ['archive', 'deferred'].flatMap((section) => ['discussions', 'brainstorms'].flatMap((kind) => namesUnder(`${kind}/${section}`).map((name) => ({ name, path: `${kind}/${section}/${name}`, brainstorm: kind === 'brainstorms' }))));
   const sectionToggle = (key: string, open: boolean) => setBoardSections((previous) => { if (previous.has(key) === open) return previous; const next = new Set(previous); if (open) next.add(key); else next.delete(key); return next; });
+  const canAct = !!(room && input && !peek && !viewLayout);
+  const canSummary = !!(room && !peek && !viewLayout && !room.workbench);
+  const canClose = !!(canAct && room?.multi && (room.active || room.brainstorm || room.workbench || room.research || (room.open?.length ?? 0) > 1));
+  const lane = !room?.brainstorm && !room?.research && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
+  const closeLabel = room?.brainstorm ? 'Close brainstorm' : room?.research ? 'Close' : lane && workerInfo?.pending?.some((item) => item.lane === lane) ? 'Close with pending work' : 'Close';
   const reveal = async () => {
     openDocument(); setSubtab('explorer');
     const file = docRef.current, prefix = rootMode ? '' : base;
@@ -512,6 +535,16 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   };
   return <main>
     <h1>{title}</h1>
+    {(canSummary || canAct) && <details ref={actionsMenu} className="actions-menu" onToggle={(event) => { if (event.currentTarget.open) refreshWorker(); }}>
+      <summary aria-label="Discussion actions" title="Actions">Actions</summary>
+      <div>
+        {canSummary && <button type="button" onClick={() => runAction('summary', '/summary', false)}>Summarize</button>}
+        {canAct && <button type="button" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker." onClick={() => runAction('research', '/research', !room?.multi && !!room?.started)}>{armedActions.research ? 'Click again: this session ends and the chat clears' : 'New research'}</button>}
+        {canAct && room?.active && (room.brainstorm || room.research) && <button type="button" title={room.research ? 'Keep the folder and start fresh discussion sessions; linked recurring tasks are turned off.' : 'Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder.'} onClick={() => runAction('convert', '/convert ' + room.active, true)}>{armedActions.convert ? room.research ? 'Click again: research sessions end and scheduled tasks turn off' : 'Click again: it moves to discussions/' : 'Turn into a discussion'}</button>}
+        {canAct && room?.active && room.brainstorm && <button type="button" title="Move it to discussions/ with a .research marker: the same agents start fresh sessions with the research rulebook, briefed from its transcripts and latest summary." onClick={() => runAction('convert-research', '/convert ' + room.active + ' research', true)}>{armedActions['convert-research'] ? 'Click again: it moves to discussions/ as a research board' : 'Turn into research'}</button>}
+        {canClose && <button type="button" title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions." onClick={() => runAction('close', '/close', !!room?.started)}>{armedActions.close ? 'Click again: this discussion closes (its agents stop)' : closeLabel}</button>}
+      </div>
+    </details>}
     {!!(room && input && !peek && !viewLayout && room.multi && !room.active && (room.brainstorm || room.workbench || room.research || (room.open?.length ?? 0) > 1)) && <button type="button" title="Discard this new board and return to the board you came from" onClick={() => void boardCommand('/cancel')}>Cancel</button>}
     <div className={'next-workspace' + (boardsClosed ? ' boards-closed' : '')}>
     <aside className="next-boards" aria-label="Boards">

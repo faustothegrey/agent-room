@@ -19,3 +19,7 @@
 .board-row button, .board-row a { display: block; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
 .worker-pending { color: #a05b00; }
 .worker-conflict, .research-laps-high { color: #b42318; }
+.actions-menu { position: relative; display: inline-block; }
+.actions-menu > summary { cursor: pointer; }
+.actions-menu > div { position: absolute; z-index: 2; min-width: 14rem; padding: .4rem; background: Canvas; border: 1px solid; }
+.actions-menu button { display: block; width: 100%; text-align: left; }
