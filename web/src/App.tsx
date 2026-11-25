@@ -4,7 +4,8 @@ import './layout.css';
 import { ChatList, type ChatMemory } from './ChatList';
 import { WorkerInfoLine, shownWorkerInfo } from './WorkerInfoLine';
 import { RoomZones } from './RoomZones';
-import type { Gauge, Monitor, NewRoomRequest, PairRequest, QuotaAt, ReceivedLine, Replica, ViewedLine, ViewReply, ViewRequest, AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
+import { FailedAgents, SettingsPanel } from './Settings';
+import type { AgentEnabledRequest, SettingsSaveRequest, Gauge, Monitor, NewRoomRequest, PairRequest, QuotaAt, ReceivedLine, Replica, ViewedLine, ViewReply, ViewRequest, AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
 type StatusLine = { text: string; error: boolean };
@@ -234,6 +235,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [quota, setQuota] = useState<{ gauges: Gauge[] | null | undefined; at: QuotaAt | null | undefined }>({ gauges: undefined, at: null });
   const [monitor, setMonitor] = useState<Monitor>({});
   const workChatMemory = useRef<ChatMemory | null>(null);
+  // Settings saves from both panels run one after another; Retry with… waits for them.
+  const settingsQueue = useRef<Promise<unknown>>(Promise.resolve());
   const [text, setText] = useState(() => { try { const saved = sessionStorage.getItem('next-composer-draft') ?? ''; sessionStorage.removeItem('next-composer-draft'); return saved; } catch { return ''; } });
   const draft = useRef(text); draft.current = text;
   const [files, setFiles] = useState<File[]>([]);
@@ -261,7 +264,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command || state.posting > 0 ? 'on' : null); }, 1500);
     }
   };
-  const post = async (path: '__view' | '__pair' | '__newroom' | '/__shutdown' | '/__shutdown?confirmed=yes' | '__say' | '__work' | '__retry' | '__stopworker' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: ViewRequest | PairRequest | NewRoomRequest | SayRequest | WorkRequest | RetryRequest | StopWorkerRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
+  const post = async (path: '__settings' | '__agent-enabled' | '__view' | '__pair' | '__newroom' | '/__shutdown' | '/__shutdown?confirmed=yes' | '__say' | '__work' | '__retry' | '__stopworker' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: SettingsSaveRequest | AgentEnabledRequest | ViewRequest | PairRequest | NewRoomRequest | SayRequest | WorkRequest | RetryRequest | StopWorkerRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
     const state = busyState.current; state.posting++; updateBusy();
     try {
       return await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': client.current }, body: JSON.stringify(body) });
@@ -294,6 +297,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   };
   const chooseRetry = async (id: string) => {
     try {
+      await settingsQueue.current;
       const data = await readSettings(), worker = data.settings.worker;
       const custom = !!worker.model && !data.models[worker.provider].some((model) => model.id === worker.model);
       setRetryDialog({ id, models: data.models, worker: { ...worker }, custom, error: '', busy: false });
@@ -937,6 +941,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {!(peek ? peek.kind === 'research' : room?.research) && <button type="button" role="tab" aria-selected={tab === 'worker'} onClick={() => { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); refreshWorker(); }}>Worker{workerNews ? ' · new' : ''}</button>}
     </div>
     {tab === 'worker' && <section className="next-pane" aria-label="Worker conversation">
+      <SettingsPanel scope="work" room={room} post={(path, body) => post(path, body)} queue={settingsQueue} />
       <WorkerInfoLine info={shownWorkerInfo(workerInfo, !!room?.brainstorm, !!peek || !!viewLayout)} />
       <ChatList endLabel="Scroll to latest worker messages" resetKey={chatReset} memory={workChatMemory}>
       {workerHint && <p className="status">{room?.workbench ? 'Send your first instruction to name and start this workbench.' : 'Give the worker instructions here. It works alongside the discussion and sees only what you send it.'}</p>}
@@ -975,6 +980,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     {!!(room && !room.active && !peek && !viewLayout && !room.workbench) && <p>{room.brainstorm ? 'Your first message names this brainstorm and saves it here.' : room.research ? 'Your first message names this research board and saves it here.' : 'Your first message starts a new discussion.'}</p>}
     {turnVisible && <p aria-label="Turn status">your turn</p>}
     {busy && <div aria-label="Busy" data-state={busy}>{busy === 'on' ? 'Working…' : 'Action failed'}</div>}
+    {!peek && !viewLayout && !room?.workbench && <SettingsPanel scope="talk" room={room} post={(path, body) => post(path, body)} queue={settingsQueue} />}
+    <FailedAgents agents={room?.failedAgents} post={(path, body) => post(path, body)} status={(text) => addStatus(text, true)} />
     <ChatList endLabel="Scroll to latest discussion messages" resetKey={chatReset}>
     <section aria-label="Conversation">{messages.map((message, index) => <article key={index} className={'msg' + (message.error ? ' error' : '') + (message.outcome ? ' summary' + (message.outcome === 'agreed' ? '' : ' not-agreed') : '')}>
       <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong><div onClick={(event) => { const element = event.target as Element; const target = element.closest<HTMLAnchorElement>('a.mention'); if (target?.dataset.file) { event.preventDefault(); void showFile(target.dataset.file); } if (element.closest('[data-auto-dev="start"]')) void boardCommand('/autodev'); }} dangerouslySetInnerHTML={{ __html: (() => { const html = peek ? message.html : linkFiles(message.html, knownFiles, room?.active ?? null).html; return autoDev && autoDev.status !== 'running' && autoDev.status !== 'paused' && autoDev.offer && index === summaryIndex ? autoOfferHtml(html, autoDev.offer, autoDev.max) : html; })() }} />

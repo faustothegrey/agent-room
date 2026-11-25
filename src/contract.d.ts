@@ -49,11 +49,15 @@ export interface ResearchStats { laps: number; priorUnknown?: boolean; lastRun?:
 export interface AutoDev { status: 'running' | 'paused' | 'finished' | null; cycle: number; max: number; reason: string | null; waiting: boolean; offer: { text?: string; error?: string } | null }
 export interface WorkerStop { after: boolean; now: boolean }
 export interface StopWorkerRequest { mode: 'after' | 'now' }
+// The agents a discussion started with (the members panel), and the CLI sessions of its agents and worker.
+export interface Member { provider: AgentSettings['provider']; name: string; model: string; modelLabel: string; enabled: boolean }
+export interface CliSession { name: string; provider: string; id: string | null }
+export interface CliSessions { agents: CliSession[]; worker: CliSession | null }
 export interface Room {
   folder: string; agents: string[]; worker: string; workerModel: string | null;
-  cliSessions: unknown; discussion: string; active: string | null; started: boolean;
+  cliSessions: CliSessions | null; discussion: string; active: string | null; started: boolean;
   fresh: boolean; brainstorm: boolean; workbench: boolean; research: boolean;
-  workbenches: string[]; researches: string[]; researchStats: Record<string, ResearchStats>; members: unknown[];
+  workbenches: string[]; researches: string[]; researchStats: Record<string, ResearchStats>; members: Member[];
   failedAgents: { name: string; disabled: boolean }[]; autoDev: AutoDev | null; workerStop: WorkerStop | null;
   retryId: string | null; transcript: string | null; checkpoints: BoardCheckpoint[]; closedDiscussions: string[];
   closingDiscussions: Record<string, string>; busyWorkers: string[]; back: unknown; code: CodeInfo | null;
@@ -143,6 +147,11 @@ export interface EventsReply extends HttpReply { write(data: string): unknown }
 export interface SayAttachment { name: string; data: string }
 export interface AgentSettings { name: string; provider: 'claude' | 'codex' | 'agy'; model: string }
 export interface RoomSettings { agents: AgentSettings[]; worker: AgentSettings; [key: string]: unknown }
+// POST __settings: the settings to save, for the Discussion ('talk') or Worker ('work') panel.
+export type SettingsSaveRequest = RoomSettings & { scope: 'talk' | 'work' };
+export interface SettingsSaveReply { applied: boolean; workerApplied?: boolean; settings?: RoomSettings }
+// POST __agent-enabled: an agent of this discussion left out (or back) from its next round; member: from the members panel.
+export interface AgentEnabledRequest { name: string; enabled: boolean; member?: boolean }
 export interface SettingsReply { settings: RoomSettings; defaults?: RoomSettings; launchDefaults?: RoomSettings; started: boolean; models: Record<AgentSettings['provider'], { id: string; label: string }[]> }
 export interface RetryRequest { id: string; settings?: RoomSettings & { scope: 'work' } }
 export interface WorkRequest { text: string }
