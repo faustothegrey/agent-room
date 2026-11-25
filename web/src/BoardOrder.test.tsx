@@ -22,13 +22,15 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 it('reads and saves separate room-specific discussion and brainstorm orders using move controls', async () => {
   localStorage.setItem(key('discussion'), JSON.stringify([alpha, beta])); localStorage.setItem(key('brainstorm'), JSON.stringify([idea, other]));
   localStorage.setItem(key('discussion', '/other'), JSON.stringify([beta, alpha]));
-  setup(); await screen.findByRole('button', { name: 'Move Alpha down' });
+  setup(); await screen.findByLabelText('Board actions for Alpha');
   expect(rowTitles('Discussions (2)')).toEqual(['Alpha', 'beta']); expect(rowTitles('Brainstorms (2)')).toEqual(['idea', 'other']);
-  const user = userEvent.setup(); await user.click(screen.getByRole('button', { name: 'Move Alpha down' }));
+  const user = userEvent.setup(); await user.click(screen.getByLabelText('Board actions for Alpha')); await user.click(await screen.findByRole('button', { name: 'Move Alpha down' }));
   expect(rowTitles('Discussions (2)')).toEqual(['beta', 'Alpha']); expect(JSON.parse(localStorage.getItem(key('discussion'))!)).toEqual([beta, alpha]);
+  await user.click(screen.getByLabelText('Board actions for Alpha'));
   expect((screen.getByRole('button', { name: 'Move Alpha down' }) as HTMLButtonElement).disabled).toBe(true);
   await user.click(screen.getByRole('button', { name: 'Move Alpha up' }));
   expect(JSON.parse(localStorage.getItem(key('discussion'))!)).toEqual([alpha, beta]);
+  await user.click(screen.getByLabelText('Board actions for idea'));
   await user.click(screen.getByRole('button', { name: 'Move idea down' }));
   expect(JSON.parse(localStorage.getItem(key('brainstorm'))!)).toEqual([other, idea]);
   expect(JSON.parse(localStorage.getItem(key('discussion', '/other'))!)).toEqual([beta, alpha]);

@@ -101,11 +101,13 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const creationTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   useEffect(() => () => { for (const timer of Object.values(creationTimers.current)) clearTimeout(timer); }, []);
   const [armedActions, setArmedActions] = useState<Record<string, boolean>>({});
+  const [rowMenu, setRowMenu] = useState<string | null>(null);
+  const rowMenuRef = useRef<string | null>(null); rowMenuRef.current = rowMenu;
   const actionTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const actionsMenu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
-    const close = (event: MouseEvent) => { if (event.target instanceof Node && !actionsMenu.current?.contains(event.target) && actionsMenu.current) actionsMenu.current.open = false; };
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && actionsMenu.current) actionsMenu.current.open = false; };
+    const close = (event: MouseEvent) => { if (event.target instanceof Node && !actionsMenu.current?.contains(event.target) && actionsMenu.current) actionsMenu.current.open = false; if (event.target instanceof Element && !event.target.closest('.row-menu')) setRowMenu(null); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { if (actionsMenu.current) actionsMenu.current.open = false; setRowMenu(null); } };
     document.addEventListener('click', close); document.addEventListener('keydown', escape);
     return () => { document.removeEventListener('click', close); document.removeEventListener('keydown', escape); for (const timer of Object.values(actionTimers.current)) clearTimeout(timer); };
   }, []);
@@ -491,11 +493,22 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     return <div className="board-row" key={path} onDragOver={(event) => { if (dragged && ordering?.kind === dragged.kind) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } }} onDrop={(event) => { if (!dragged || !ordering || dragged.kind !== ordering.kind || dragged.name === name) return; event.preventDefault(); const remaining = dragged.names.filter((item) => item !== dragged.name); const bounds = event.currentTarget.getBoundingClientRect(); const target = remaining.indexOf(name); if (target < 0) return; remaining.splice(target + (event.clientY > bounds.top + bounds.height / 2 ? 1 : 0), 0, dragged.name); saveOrder(dragged.kind, remaining); setDragged(null); }}>
       {ordering && ordering.names.length > 1 && <span draggable title="Drag to reorder" aria-label={`Drag ${label} to reorder`} onDragStart={(event) => { setDragged({ kind: ordering.kind, name, names: ordering.names }); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', name); }} onDragEnd={() => setDragged(null)}>⠿</span>}
       {open ? <a className={'entry ' + kind} title={path} href={open.url.replace(/__room(?=([?#]|$))/, '__next')}>{content}</a> : <button type="button" className={'entry ' + kind} title={path} aria-current={current ? 'true' : undefined} onClick={action}>{content}</button>}
-      {ordering && ordering.names.length > 1 && <span><button type="button" aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => reorder(name, index - 1)}>Move up</button><button type="button" aria-label={`Move ${label} down`} disabled={index === ordering.names.length - 1} onClick={() => reorder(name, index + 1)}>Move down</button></span>}
       <div className="local-label" title={tooltip || undefined}>{archivedState ?? (state + suffix + (isDiscussion && entry?.working ? ' · worker working' : '') + closingText + changed)}</div>
       {isDiscussion && !archived && work && <div className="worker-pending">⚠ Worker: {pendingText}</div>}
       {!!conflictText && !workerBusy && <div className="worker-conflict">⚠ {conflictText}</div>}
       {isResearch && <div className="local-label"><span className={count > 30 ? 'research-laps-high' : undefined}>Laps: {stats?.priorUnknown ? '≥' : ''}{count}</span> · Last: {date(stats?.lastRun)} · Next: {date(stats?.nextRun)}</div>}
+      {!!(room && input && !viewing.current) && <details className="row-menu" open={rowMenu === path} onToggle={(event) => { const isOpen = event.currentTarget.open; if (isOpen && rowMenuRef.current !== path) { if (actionsMenu.current) actionsMenu.current.open = false; rowMenuRef.current = path; setRowMenu(path); refreshWorker(); } else if (!isOpen && rowMenuRef.current === path) { rowMenuRef.current = null; setRowMenu(null); } }}>
+        <summary aria-label={`Board actions for ${label}`} title="Actions">⋯</summary><div className="row-menu-items" hidden={rowMenu !== path}>
+          {current && peek && <button type="button" title={`Return to this ${isResearch ? 'research board' : kind}: leave the peek.`} onClick={() => { setRowMenu(null); void backToCurrent(); }}>Back to this {isResearch ? 'research board' : kind}</button>}
+          {!current && <>
+            {open && !open.started ? <a href={open.url.replace(/__room(?=([?#]|$))/, '__next')} title={`Show this open ${kind}: it has not started yet`}>Go to</a> : <button type="button" title={archived ? `${closed ? 'Resume' : 'Continue'}: makes it active first` : closed ? 'Resume this board' : 'Continue this board'} onClick={() => { setRowMenu(null); if (open) navigate(open.url.replace(/__room(?=([?#]|$))/, '__next')); else void boardCommand('/resume ' + ref); }}>{open && brainstorm ? 'Go to' : closed ? 'Resume' : 'Continue'}</button>}
+            <button type="button" title={`Show this ${isResearch ? 'research board’s' : brainstorm ? 'brainstorm’s' : 'discussion’s'} files in Explorer without switching`} onClick={() => { setRowMenu(null); setFilePeek({ path, name, title: label, readonly: archived || closed }); setExplorerMode('discussion'); setSubtab('explorer'); openDocument(); }}>Peek files</button>
+            {closed && !isResearch && <button type="button" title="Look at this closed board read-only: its conversation and files, without reopening it." onClick={() => { setRowMenu(null); setExplorerMode('discussion'); setSubtab('explorer'); void boardCommand('/peek ' + ref); }}>Peek chat &amp; files</button>}
+          </>}
+          {!archived && (!closed || brainstorm) && <button type="button" disabled={brainstorm && !(current || open)} title={brainstorm && !(current || open) ? 'It is not open' : undefined} onClick={() => { setRowMenu(null); void boardCommand('/close ' + ref); }}>{!brainstorm && !isResearch && workerInfo?.pending?.some((item) => item.lane === name) ? 'Close with pending work' : 'Close'}</button>}
+          {ordering && <><button type="button" aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => { setRowMenu(null); reorder(name, index - 1); }}>Move up</button><button type="button" aria-label={`Move ${label} down`} disabled={index === ordering.names.length - 1} onClick={() => { setRowMenu(null); reorder(name, index + 1); }}>Move down</button></>}
+        </div>
+      </details>}
     </div>;
   };
   const discussions = namesUnder('discussions'), brainstorms = namesUnder('brainstorms');
@@ -535,7 +548,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   };
   return <main>
     <h1>{title}</h1>
-    {(canSummary || canAct) && <details ref={actionsMenu} className="actions-menu" onToggle={(event) => { if (event.currentTarget.open) refreshWorker(); }}>
+    {(canSummary || canAct) && <details ref={actionsMenu} className="actions-menu" onToggle={(event) => { if (event.currentTarget.open) { setRowMenu(null); refreshWorker(); } }}>
       <summary aria-label="Discussion actions" title="Actions">Actions</summary>
       <div>
         {canSummary && <button type="button" onClick={() => runAction('summary', '/summary', false)}>Summarize</button>}

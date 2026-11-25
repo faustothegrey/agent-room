@@ -23,3 +23,8 @@
 .actions-menu > summary { cursor: pointer; }
 .actions-menu > div { position: absolute; z-index: 2; min-width: 14rem; padding: .4rem; background: Canvas; border: 1px solid; }
 .actions-menu button { display: block; width: 100%; text-align: left; }
+.row-menu { position: relative; display: inline-block; }
+.row-menu summary { cursor: pointer; }
+.row-menu-items { position: absolute; z-index: 3; min-width: 12rem; padding: .4rem; background: Canvas; border: 1px solid; }
+.row-menu-items[hidden] { display: none; }
+.row-menu-items button, .row-menu-items a { display: block; width: 100%; text-align: left; }
