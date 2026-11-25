@@ -12,3 +12,8 @@
 .next-document[hidden], .next-side section[hidden] { display: none; }
 .next-side section[aria-label$="files"] { overflow: auto; min-height: 0; }
 .file-columns { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); }
+.next-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 7px; }
+.next-workspace.boards-closed { grid-template-columns: 32px minmax(0, 1fr); }
+.next-boards { min-width: 0; max-height: calc(100vh - 6rem); overflow: auto; border-right: 1px solid #ccc; }
+.next-boards summary { cursor: pointer; }
+.board-row button, .board-row a { display: block; max-width: 100%; overflow-wrap: anywhere; text-align: left; }

@@ -76,6 +76,7 @@ export function App({ version, refresh }: Props) {
   const [thinking, setThinking] = useState<string | null>(null);
   const [yourTurn, setYourTurn] = useState(false);
   const [peek, setPeek] = useState<Peek | null>(null);
+  const [filePeek, setFilePeek] = useState<{ path: string; name: string; title: string; readonly: boolean } | null>(null);
   const peekRef = useRef<Peek | null>(null);
   const roomRef = useRef<Room | null>(null);
   const liveMessages = useRef<MessageView[]>([]);
@@ -84,6 +85,8 @@ export function App({ version, refresh }: Props) {
   const fileLoad = useRef<Promise<FilesResponse> | null>(null);
   const preservePeekDoc = useRef(false);
   const [fileDetails, setFileDetails] = useState<FileDetailsResponse | null>(null);
+  const [boardsClosed, setBoardsClosed] = useState(() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } });
+  const [boardSections, setBoardSections] = useState(() => new Set(['discussions', 'research', 'brainstorms']));
   const [subtab, setSubtab] = useState<'explorer' | 'document'>('explorer');
   const [explorerMode, setExplorerMode] = useState<'discussion' | 'root'>('discussion');
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -244,6 +247,10 @@ export function App({ version, refresh }: Props) {
     setOffers([]); offerEpoch.current++;
     try { await post('__show', { file }); } catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
   };
+  const boardCommand = async (text: string) => {
+    try { const response = await post('__say', { text }); if (!response.ok) addStatus(await response.text(), true); }
+    catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
+  };
   const loadFiles = (): Promise<FilesResponse> => {
     if (fileLoad.current) return fileLoad.current;
     fileLoad.current = (async () => {
@@ -308,7 +315,7 @@ export function App({ version, refresh }: Props) {
         setViewLayout(event.viewing && typeof event.viewing === 'object' ? event.viewing as { name?: string; discussion?: string } : null);
         roomRef.current = event.room; peekRef.current = event.peek ?? null;
         setRoom(event.room); setPeek(event.peek ?? null); setInput(event.input);
-        if (event.peek) { setExplorerMode('discussion'); void loadDetails(); }
+        if (event.peek) { setFilePeek(null); setExplorerMode('discussion'); void loadDetails(); }
         else if (event.room?.folder) void loadDetails();
         if (!preservePeekDoc.current || event.peek) { docRef.current = event.doc ?? null; setDoc(event.doc ?? null); setSubtab(event.doc ? 'document' : 'explorer'); }
         if (!event.peek) preservePeekDoc.current = false;
@@ -354,6 +361,7 @@ export function App({ version, refresh }: Props) {
         if (changed && peekRef.current) {
           peekRef.current = null; setPeek(null); setMessages([]); liveMessages.current = []; offerEpoch.current++; setOffers([]);
         }
+        if (changed) setFilePeek(null);
         roomRef.current = event.room; setRoom(event.room); if (event.room.folder) void loadDetails();
       } else if (event.type === 'files') {
         setSubtab('explorer'); void loadDetails();
@@ -368,9 +376,33 @@ export function App({ version, refresh }: Props) {
 
   const title = displayTitle(peek?.name ?? room?.active?.split('/').at(-1), peek?.title ?? room?.discussion) || 'agent-room';
   const turnVisible = !!room?.started && yourTurn && !thinking && !peek && room.autoDev?.status !== 'running';
-  const base = peek?.path ?? room?.active ?? null;
+  const base = filePeek?.path ?? peek?.path ?? room?.active ?? null;
   const rootMode = explorerMode === 'root' || !base;
   const treeFiles = rootMode ? (fileDetails?.files ?? []).filter((file) => !inBoard(file)) : (fileDetails?.files ?? []).filter((file) => file.startsWith(base + '/')).map((file) => file.slice(base!.length + 1));
+  const namesUnder = (prefix: string) => [...new Set((fileDetails?.files ?? []).filter((f) => f.startsWith(prefix + '/')).map((f) => f.slice(prefix.length + 1).split('/')).filter((parts) => parts.length > 1 && /^\d{4}-\d{2}-\d{2}-/.test(parts[0])).map((parts) => parts[0]))].sort((a, b) => b.localeCompare(a));
+  const boardTitle = (name: string, path: string, brainstorm: boolean) => displayTitle(name, room?.open?.find((entry) => entry.active === path)?.title ?? (room?.active === path ? room.discussion : undefined) ?? room?.checkpoints?.find((entry) => entry.name === (brainstorm ? 'brainstorms/' + name : name))?.title);
+  const boardRow = (name: string, path: string, brainstorm: boolean, archived = false) => {
+    const current = room?.active === path, open = room?.open?.find((entry) => entry.active === path && !entry.current);
+    const closed = brainstorm ? !current && !open : !!room?.closedDiscussions?.includes(name);
+    const kind = brainstorm ? 'brainstorm' : room?.workbenches?.includes(name) ? 'workbench' : room?.researches?.includes(name) ? 'research' : 'discussion';
+    const label = boardTitle(name, path, brainstorm);
+    const ref = brainstorm ? path : archived ? path.slice('discussions/'.length) : name;
+    const action = () => {
+      if (current) { if (peekRef.current) void backToCurrent(); else setFilePeek(null); return; }
+      if (closed || brainstorm) { setExplorerMode('discussion'); setSubtab('explorer'); void boardCommand('/peek ' + ref); }
+      else if (!archived && input && !viewing.current) void boardCommand('/resume ' + ref);
+      else { setFilePeek({ path, name, title: label, readonly: archived }); setExplorerMode('discussion'); setSubtab('explorer'); }
+    };
+    const content = <>{kind === 'workbench' ? '🔧 ' : kind === 'research' ? '🔬 ' : ''}{label}</>;
+    return <div className="board-row" key={path}>{open ? <a className={'entry ' + kind} title={path} href={open.url.replace(/__room(?=([?#]|$))/, '__next')}>{content}</a> : <button type="button" className={'entry ' + kind} title={path} aria-current={current ? 'true' : undefined} onClick={action}>{content}</button>}</div>;
+  };
+  const discussions = namesUnder('discussions'), brainstorms = namesUnder('brainstorms');
+  const research = discussions.filter((name) => room?.researches?.includes(name));
+  const activeDiscussions = discussions.filter((name) => !room?.researches?.includes(name));
+  const unstarted = (room?.open ?? []).filter((entry) => !entry.current && !entry.active);
+  const openUnstarted = (researchBoard: boolean) => unstarted.filter((entry) => !!entry.research === researchBoard).map((entry) => <div className="board-row" key={entry.url}><a href={entry.url.replace(/__room(?=([?#]|$))/, '__next')}>{entry.workbench ? '🔧 ' : entry.research ? '🔬 ' : ''}{entry.title}</a></div>);
+  const inactive = ['archive', 'deferred'].flatMap((section) => ['discussions', 'brainstorms'].flatMap((kind) => namesUnder(`${kind}/${section}`).map((name) => ({ name, path: `${kind}/${section}/${name}`, brainstorm: kind === 'brainstorms' }))));
+  const sectionToggle = (key: string, open: boolean) => setBoardSections((previous) => { if (previous.has(key) === open) return previous; const next = new Set(previous); if (open) next.add(key); else next.delete(key); return next; });
   const reveal = async () => {
     openDocument(); setSubtab('explorer');
     const file = docRef.current, prefix = rootMode ? '' : base;
@@ -382,6 +414,16 @@ export function App({ version, refresh }: Props) {
   };
   return <main>
     <h1>{title}</h1>
+    <div className={'next-workspace' + (boardsClosed ? ' boards-closed' : '')}>
+    <aside className="next-boards" aria-label="Boards">
+      <div><b hidden={boardsClosed}>Boards</b> <button type="button" aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} }}>{boardsClosed ? '»' : '«'}</button></div>
+      {!boardsClosed && <div className="boards-list">
+        <details open={boardSections.has('discussions')} onToggle={(e) => sectionToggle('discussions', e.currentTarget.open)}><summary>Discussions ({activeDiscussions.length + unstarted.filter((entry) => !entry.research).length})</summary>{openUnstarted(false)}{activeDiscussions.map((name) => boardRow(name, 'discussions/' + name, false))}</details>
+        <details open={boardSections.has('research')} onToggle={(e) => sectionToggle('research', e.currentTarget.open)}><summary>Research ({research.length + unstarted.filter((entry) => entry.research).length})</summary>{openUnstarted(true)}{research.map((name) => boardRow(name, 'discussions/' + name, false))}</details>
+        <details open={boardSections.has('brainstorms')} onToggle={(e) => sectionToggle('brainstorms', e.currentTarget.open)}><summary>Brainstorms ({brainstorms.length})</summary>{brainstorms.map((name) => boardRow(name, 'brainstorms/' + name, true))}</details>
+        <details open={boardSections.has('archived-deferred')} onToggle={(e) => sectionToggle('archived-deferred', e.currentTarget.open)}><summary>Archived · Deferred ({inactive.length})</summary>{inactive.map(({ name, path, brainstorm }) => boardRow(name, path, brainstorm, true))}</details>
+      </div>}
+    </aside>
     <div ref={panel} className={'next-layout' + (layout.stacked ? ' stacked' : '') + (layout.sideClosed ? ' closed' : '')} style={{ '--left': layout.left ? layout.left + 'px' : '55%', '--top': layout.top ? layout.top + 'px' : '55%' } as React.CSSProperties}>
     <div ref={conversation} className="next-conversation">
     {layout.sideClosed && <button type="button" title="Open side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: false }, true, 'side-closed')}>Open side pane</button>}
@@ -424,14 +466,15 @@ export function App({ version, refresh }: Props) {
       onPointerUp={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = panel.current?.getBoundingClientRect(); if (bounds) resize((layoutRef.current.stacked ? event.clientY - bounds.top : event.clientX - bounds.left) - 3, layoutRef.current.stacked, true); event.currentTarget.releasePointerCapture(event.pointerId); }} />
     <div className="next-side" hidden={layout.sideClosed}>
       <div><button type="button" title={layout.stacked ? 'Place conversation and side pane side by side' : 'Stack conversation above side pane'} onClick={() => applyLayout({ ...layoutRef.current, stacked: !layoutRef.current.stacked }, true, 'split-orient')}>{layout.stacked ? '⇆' : '⇅'}</button> <button type="button" title="Close side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: true }, true, 'side-closed')}>✕</button></div>
-      <div><button type="button" aria-label={peek ? 'Explorer tab' : undefined} data-peeking={peek ? 'true' : undefined} aria-pressed={subtab === 'explorer'} onClick={() => void reveal()}>Explorer</button> <button type="button" disabled={!doc} aria-pressed={subtab === 'document'} onClick={() => { openDocument(); setSubtab('document'); }}>Document</button></div>
-      <section ref={explorer} aria-label={peek ? 'Peeked board files' : 'Explorer files'} hidden={subtab !== 'explorer'}>
-        {peek && <p>Looking at <b>{displayTitle(peek.name, peek.title)}</b> <button type="button" onClick={() => void backToCurrent()}>Back to current</button></p>}
+      <div><button type="button" aria-label={peek || filePeek ? 'Explorer tab' : undefined} data-peeking={peek || filePeek ? 'true' : undefined} aria-pressed={subtab === 'explorer'} onClick={() => void reveal()}>Explorer</button> <button type="button" disabled={!doc} aria-pressed={subtab === 'document'} onClick={() => { openDocument(); setSubtab('document'); }}>Document</button></div>
+      <section ref={explorer} aria-label={peek || filePeek ? 'Peeked board files' : 'Explorer files'} hidden={subtab !== 'explorer'}>
+        {(peek || filePeek) && <p>Looking at <b>{displayTitle((peek || filePeek)!.name, (peek || filePeek)!.title)}</b> <button type="button" onClick={() => { if (peek) void backToCurrent(); else setFilePeek(null); }}>Back to current</button></p>}
         <div><button type="button" disabled={!base} aria-pressed={!rootMode} onClick={() => setExplorerMode('discussion')}>Discussion</button> <button type="button" aria-pressed={rootMode} onClick={() => setExplorerMode('root')}>Room checkout</button> <button type="button" disabled title="Coming soon">Worker copy</button></div>
         <p>{rootMode ? `${room?.folder?.replace(/\/+$/, '').split('/').at(-1) || 'agent-room'}/ · ${fileDetails?.branch || 'main'}` : `${base}/`}</p>
-        <FileTree files={treeFiles} prefix={rootMode ? '' : base!} doc={doc} unviewable={fileDetails?.unviewable ?? []} expanded={expanded} toggle={(path, open) => setExpanded((previous) => { const next = new Set(previous); if (open) next.add(path); else next.delete(path); return next; })} choose={(file) => { if (peek && !rootMode) { docRef.current = file; setDoc(file); setSubtab('document'); openDocument(); } else void showFile(file); }} />
+        <FileTree files={treeFiles} prefix={rootMode ? '' : base!} doc={doc} unviewable={fileDetails?.unviewable ?? []} expanded={expanded} toggle={(path, open) => setExpanded((previous) => { const next = new Set(previous); if (open) next.add(path); else next.delete(path); return next; })} choose={(file) => { if ((peek || filePeek?.readonly) && !rootMode) { docRef.current = file; setDoc(file); setSubtab('document'); openDocument(); } else void showFile(file); }} />
       </section>
       {doc && <section className="next-document" aria-label="Document" hidden={subtab !== 'document'}><p>Selected file: {doc}</p><iframe ref={frame} title="Document viewer" src={doc.split('/').map(encodeURIComponent).join('/')} /></section>}
+    </div>
     </div>
     </div>
   </main>;

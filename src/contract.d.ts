@@ -39,15 +39,17 @@ export interface Peek {
 export interface Gauge { provider: string; group?: string; label: string; used: number; resets: string | null }
 export interface QuotaAt { measured: string | null; checked: string }
 export interface WorkerInfo { lines: string[]; disabled?: boolean; error?: boolean; lanes?: unknown[]; pending?: unknown[]; discardable?: string[]; mergeable?: Record<string, unknown>; merged?: string[] }
+export interface OpenBoard { url: string; current: boolean; title: string; active: string | null; brainstorm: boolean; workbench: boolean; research: boolean; started: boolean; working: boolean; workerBusy: boolean; ongoing: boolean }
+export interface BoardCheckpoint { name: string; title?: string; at?: string; kind?: string }
 export interface Room {
   folder: string; agents: string[]; worker: string; workerModel: string | null;
   cliSessions: unknown; discussion: string; active: string | null; started: boolean;
   fresh: boolean; brainstorm: boolean; workbench: boolean; research: boolean;
   workbenches: string[]; researches: string[]; researchStats: unknown; members: unknown[];
   failedAgents: { name: string; disabled: boolean }[]; autoDev: { status: string | null; [key: string]: unknown } | null; workerStop: unknown;
-  retryId: string | null; transcript: string | null; checkpoints: unknown; closedDiscussions: unknown;
+  retryId: string | null; transcript: string | null; checkpoints: BoardCheckpoint[]; closedDiscussions: string[];
   closingDiscussions: Record<string, string>; busyWorkers: string[]; back: unknown; code: unknown;
-  rollbacks: unknown[]; multi: unknown; open: unknown;
+  rollbacks: unknown[]; multi: unknown; open: OpenBoard[];
 }
 export type Monitor = Record<string, { login: unknown; running: number; leftovers: unknown[]; inRoom: boolean }>;
 export interface Replica { node: string; addresses: string[]; roomId: string; project: string | null; own: Record<string, unknown>; received: unknown[]; peers: unknown[] }
