@@ -1961,21 +1961,8 @@ test('Resume replaces a brainstorm only with a valid checkpoint; on the discussi
   await handleLine('/resume ' + name, ctx);
   assert.deepEqual([ctx.discussion.name, ctx.state.transcript.length, ctx.sessions.get('A').id], [name, length, 'claude-original']);
 
-  // Start fresh, from the page's own button: the first click only asks.
-  const page = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
-  const code = page.slice(page.indexOf('function resumeTip('), page.indexOf('const pendingArchives'));
-  const sent = [];
-  const freshButton = new Function('room', 'send', 'setTimeout', `${code}; return freshButton;`)(
-    ctx.screen.room, (line) => sent.push(handleLine(line, ctx)), () => {});
-  const button = { textContent: 'Start fresh', dataset: {} };
-  freshButton(button, name);
-  const click = () => button.onclick({ stopPropagation() {} });
-  click();
-  assert.equal(button.textContent, 'Click again: its saved sessions and chat are discarded; it starts from its handoff');
-  assert.equal(sent.length, 0);
-  click();
-  assert.equal(sent.length, 1);
-  await sent[0];
+  // The page's confirmation is covered by the React test.
+  await handleLine('/fresh ' + name, ctx);
   assert.deepEqual([ctx.discussion.name, ctx.logPath, ctx.state.transcript.length], [name, null, 0]);
   assert.notEqual(ctx.sessions.get('A').id, 'claude-original');
   const left = JSON.parse(readFileSync(file, 'utf8'));
@@ -2038,17 +2025,6 @@ test('removed commands answer with a hint and reach no agent', async () => {
   assert.match(notes[3], /^Auto-summarize is always on now/);
 });
 
-test('Explorer\'s Resume says what it will do: show an open one, continue a saved one, or start from the handoff', async () => {
-  const { readFileSync } = await import('node:fs');
-  const page = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
-  const code = page.slice(page.indexOf('function resumeTip('), page.indexOf('// Start fresh: discards'));
-  const room = { checkpoints: [{ name: 'full', kind: 'full' }, { name: 'fresh', kind: 'fresh' }] };
-  const tip = new Function('room', `${code}; return resumeTip;`)(room);
-  assert.match(tip('full', { started: true }, null), /^Show it: its agents carry on, nothing is restarted/);
-  assert.match(tip('full', null, null), /^Continue where it stopped: the same agent and worker sessions/);
-  assert.match(tip('fresh', null, null), /with the summary chosen at Start fresh/);
-  assert.match(tip('other', null, 'archive'), /^Makes it active first\. No saved session: start from its handoff and notes/);
-});
 
 // ── Auto dev ──
 // A discussion in a Git room on scripted agents: a summary draft takes the next of `summaries`, a
@@ -2307,20 +2283,6 @@ test('auto dev: while paused, any agreed summary ending in Outcome: FINISH finis
   assert.doesNotMatch(drafts().at(-1), /Auto dev is|End the summary with one last line/);
 });
 
-test('auto dev: while a run is active, talkStatus omits "your turn" and "Auto dev running" (auto dev has its own header item)', async () => {
-  const { readFileSync } = await import('node:fs');
-  const page = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
-  const code = page.slice(page.indexOf('function talkStatus('), page.indexOf('function updateReplicaView('));
-  const status = (room, more = {}) => new Function('tab', 'localWorking', 'room', 'viewing', 'peeking', 'localThinking', 'yourTurn', `${code}; return talkStatus();`)(
-    more.tab ?? 'talk', more.working ?? null, room, null, null, more.thinking ?? null, true);
-  const started = { started: true, paused: false };
-  assert.equal(status({ ...started, autoDev: { status: null } }), 'your turn');
-  assert.equal(status({ ...started, autoDev: { status: 'running' } }), '');
-  assert.equal(status({ ...started, autoDev: { status: 'running' } }, { thinking: 'A' }), 'A is thinking');
-  assert.equal(status({ ...started, autoDev: { status: 'paused' } }), 'your turn');
-  assert.equal(status({ ...started, autoDev: { status: 'finished' } }), 'your turn');
-  assert.equal(status({ ...started, autoDev: { status: 'running' } }, { tab: 'work', working: 'W' }), 'W is working');
-});
 
 test('auto dev: never in a brainstorm; New discussion ends a run; Reload keeps it, and a lost worker result pauses it', async () => {
   const { reloaded } = await import('../src/ui.mjs');
@@ -3158,28 +3120,6 @@ test('Stage 3: an ambiguous or failed rollback report cannot authorize archiving
   assert.equal(git('rev-parse', `worker/${name}`), git('rev-parse', 'main'));
 });
 
-test('Stage 3: Explorer queues rollback separately from two-click archive confirmation after a report', async () => {
-  const { readFileSync } = await import('node:fs');
-  const source = readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
-  const confirmed = source.slice(source.indexOf('function confirmed('), source.indexOf('// Rollback queues work'));
-  const buttons = source.slice(source.indexOf('function rollbackButtons('), source.indexOf('const pendingArchives'));
-  const element = () => ({ children: [], dataset: {}, style: {}, append(...items) { this.children.push(...items); } });
-  const sent = [], room = { rollbacks: [] };
-  const build = new Function('room', 'document', 'send', 'setTimeout', confirmed + buttons + '; return rollbackButtons;')(
-    room, { createElement: element }, (line) => sent.push(line), () => {});
-  const name = '2026-11-09-topic', row = element(), details = element(), ev = { stopPropagation() {} };
-  build(row, details, name, name, false);
-  row.children[0].onclick(ev); assert.deepEqual(sent, []);
-  row.children[0].onclick(ev); assert.deepEqual(sent, [`/rollback ${name}`]);
-  assert.equal(row.children.length, 1); // no archive confirmation before a successful report
-  room.rollbacks = [{ name, status: 'ready', report: 'Tests passed; review dependencies. Rollback ready: abc' }];
-  const ready = element(); build(ready, details, name, name, false);
-  assert.equal(details.children[0].children[1].textContent, room.rollbacks[0].report);
-  ready.children[1].onclick(ev); assert.equal(sent.length, 1);
-  ready.children[1].onclick(ev); assert.equal(sent[1], `/archive-rollback ${name}`);
-  const current = element(); build(current, element(), name, name, true);
-  assert.equal(current.children[1].disabled, true); // unchanged Archive guard for the one in use
-});
 
 test('failed worktree inspection blocks even the holding origin recovery in its lane, preserves ownership and retries; other lanes go on', async () => {
   const { queueWork } = await import('../src/ui.mjs');
@@ -4034,10 +3974,6 @@ test('Delete: refused while the brainstorm is open (here or beside), otherwise i
   assert.ok(existsSync(`${first.cwd}/brainstorms/${name}`));
   await handleLine(`/delete ${ref}`, first);
   assert.ok(existsSync(`${first.cwd}/brainstorms/${name}`));
-  // The page's button: disabled while open, two clicks with the warning otherwise.
-  const page = (await import('node:fs')).readFileSync(new URL('../src/docs.mjs', import.meta.url), 'utf8');
-  assert.match(page, /del\.disabled = isCurrent \|\| !!openHere;/);
-  assert.match(page, /confirmed\(del, .*'Click again: its folder \(transcripts, drawings\) and checkpoint are removed; uncommitted files are lost for good', \(\) => true\)/);
   first.stopped = true; // closed
   await handleLine(`/delete ${ref}`, other);
   assert.equal(existsSync(`${first.cwd}/brainstorms/${name}`), false);

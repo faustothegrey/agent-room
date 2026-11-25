@@ -1,4 +1,4 @@
-/* The legacy room page's stylesheet (the <style> in SCREEN, src/docs.mjs), generated once for the React
+/* The room page stylesheet, originally adapted from the legacy page and now maintained for the React
    page by Step 9a2; adapted only where noted (the page grid is on .app instead of <body>). Rules for
    React markup that differs from the legacy page are in layout.css. */
 :root { color-scheme: light dark; --line: #8884; --dim: #888; }

@@ -38,9 +38,7 @@ test('dev rebuild and Reload notify the new page after publishing the build', { 
     };
     const untilEvent = async (type) => { for (;;) { const event = await next(); if (event.type === type) return event; } };
     const initial = await untilEvent('reset');
-    const { createHash } = await import('node:crypto');
-    const { SCREEN } = await import('../src/docs.mjs');
-    const oldPageVersion = createHash('sha1').update(SCREEN).digest('hex').slice(0, 12);
+    const oldPageVersion = '66c0b857b36e'; // legacy page's version before the switch
     assert.notEqual(initial.page, oldPageVersion); // an already-open legacy page refreshes on reloaded
     const page = join(root, 'web/src/App.tsx');
     const { readFileSync } = await import('node:fs');

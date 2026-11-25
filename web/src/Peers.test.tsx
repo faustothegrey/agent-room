@@ -179,3 +179,17 @@ it('keeps one menu open at a time across the header, Actions and the row menus',
   const rowMenu = screen.getByLabelText('Board actions for Live').closest('details')!; expect(rowMenu.open).toBe(true);
   await user.click(screen.getByText('my-room')); await waitFor(() => expect(rowMenu.open).toBe(false)); expect(roomMenu.open).toBe(true);
 });
+
+it('creates distinct client IDs without randomUUID on plain HTTP', async () => {
+  let value = 0;
+  vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => { bytes.fill(++value); return bytes; } });
+  const clientId = async () => {
+    render(<App version="one" refresh={() => {}} />); reset();
+    await userEvent.setup().click(screen.getByRole('tab', { name: 'Worker' }));
+    const request = fetchMock.mock.calls.filter(([url]) => url === '__workerinfo').at(-1);
+    const id = (request?.[1]?.headers as Record<string, string>)['x-view-client'];
+    cleanup(); return id;
+  };
+  const first = await clientId(), second = await clientId();
+  expect(first).toMatch(/^[0-9a-f]{32}$/); expect(second).toMatch(/^[0-9a-f]{32}$/); expect(second).not.toBe(first);
+});
