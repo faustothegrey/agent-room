@@ -113,6 +113,7 @@ export interface EventsReply extends HttpReply { write(data: string): unknown }
 
 // JSON sent by the conversation composer to POST /__say (with same-page headers).
 export interface SayAttachment { name: string; data: string }
+export interface WorkRequest { text: string }
 export interface SayRequest { text: string; files?: SayAttachment[]; confirmed?: boolean }
 export type SayReplyStatus = 204 | 400 | 403 | 409 | 413;
 

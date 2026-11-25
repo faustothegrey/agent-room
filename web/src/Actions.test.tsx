@@ -24,7 +24,8 @@ it('refreshes worker information on opening Actions and sends Summarize and New 
   await user.click(screen.getByRole('button', { name: 'Summarize' })); await waitFor(() => expect(says()).toContain('/summary'));
   await user.click(screen.getByLabelText('Discussion actions')); await user.click(screen.getByRole('button', { name: 'New research' }));
   await waitFor(() => expect(says()).toContain('/research'));
-  expect(screen.queryByRole('button', { name: 'New workbench' })).toBeNull();
+  await user.click(screen.getByLabelText('Discussion actions')); await user.click(screen.getByRole('button', { name: 'New workbench' }));
+  await waitFor(() => expect(says()).toContain('/workbench'));
 });
 
 it('requires two clicks to convert a brainstorm to a discussion or research', async () => {

@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './layout.css';
-import type { BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, Room, SayRequest, ScreenEvent, ShowRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage } from '../../src/contract';
+import type { BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, Room, SayRequest, ScreenEvent, ShowRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
 type StatusLine = { text: string; error: boolean };
@@ -94,6 +94,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   }, [!!boardDialog]);
   const [messages, setMessages] = useState<MessageView[]>([]);
   const [workerMessages, setWorkerMessages] = useState<WorkerMessage[]>([]);
+  const [workInput, setWorkInput] = useState(false);
+  const [workText, setWorkText] = useState('');
+  const [workError, setWorkError] = useState('');
   const [tab, setTab] = useState<'discussion' | 'worker'>('discussion');
   const tabRef = useRef(tab); tabRef.current = tab;
   const [workerNews, setWorkerNews] = useState(false);
@@ -222,11 +225,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command || state.posting > 0 ? 'on' : null); }, 1500);
     }
   };
-  const post = async (path: '__say' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: SayRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
+  const post = async (path: '__say' | '__work' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: SayRequest | WorkRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
     const state = busyState.current; state.posting++; updateBusy();
     try {
       return await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': client.current }, body: JSON.stringify(body) });
     } finally { state.posting--; updateBusy(); }
+  };
+  const sendWork = async (value: string) => {
+    const instruction = value.trim();
+    if (!instruction || ended || peek || viewLayout) return;
+    try { const response = await post('__work', { text: instruction }); if (!response.ok) setWorkError(await response.text()); }
+    catch (error) { setWorkError(error instanceof Error ? error.message : String(error)); }
   };
   const refreshWorker = () => { void post('__workerinfo', {}).catch(() => {}); };
   const actionReply = async <T,>(path: '__merge' | '__discard' | '__catchup', body: BoardActionRequest): Promise<T> => {
@@ -459,6 +468,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       }
       if (event.type === 'reset') {
         setWorkerInfo(event.workerInfo ?? null);
+        setWorkInput(!!event.workInput); setWorkError('');
         setWorkerMessages(event.worker ?? []);
         if (event.room?.workbench && !event.peek) { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); }
         else if (event.room?.research && tabRef.current === 'worker') { tabRef.current = 'discussion'; setTab('discussion'); }
@@ -678,6 +688,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       <summary aria-label="Discussion actions" title="Actions">Actions</summary>
       <div>
         {canSummary && <button type="button" onClick={() => runAction('summary', '/summary', false)}>Summarize</button>}
+        {canAct && <button type="button" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker." onClick={() => runAction('workbench', '/workbench', !room?.multi && !!room?.started)}>{armedActions.workbench ? 'Click again: this session ends and the chat clears' : 'New workbench'}</button>}
         {canAct && <button type="button" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker." onClick={() => runAction('research', '/research', !room?.multi && !!room?.started)}>{armedActions.research ? 'Click again: this session ends and the chat clears' : 'New research'}</button>}
         {canAct && room?.active && (room.brainstorm || room.research) && <button type="button" title={room.research ? 'Keep the folder and start fresh discussion sessions; linked recurring tasks are turned off.' : 'Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder.'} onClick={() => runAction('convert', '/convert ' + room.active, true)}>{armedActions.convert ? room.research ? 'Click again: research sessions end and scheduled tasks turn off' : 'Click again: it moves to discussions/' : 'Turn into a discussion'}</button>}
         {canAct && room?.active && room.brainstorm && <button type="button" title="Move it to discussions/ with a .research marker: the same agents start fresh sessions with the research rulebook, briefed from its transcripts and latest summary." onClick={() => runAction('convert-research', '/convert ' + room.active + ' research', true)}>{armedActions['convert-research'] ? 'Click again: it moves to discussions/ as a research board' : 'Turn into research'}</button>}
@@ -711,6 +722,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         {!!(room && input && !peek && !viewLayout) && <div className="boards-new">
           {!!(room.active || room.brainstorm || room.workbench || room.research) && <button type="button" title={room.multi ? 'Open a new discussion beside this one, which stays open (click it in Boards to show it again).' : 'End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.'} onClick={() => createBoard('/new')}>{armedCreation['/new'] ? 'Click again: this session ends and the chat clears' : '+ New discussion'}</button>}
           <button type="button" title={room.multi ? 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.' : 'A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.'} onClick={() => createBoard('/brainstorm')}>{armedCreation['/brainstorm'] ? 'Click again: this session ends and the chat clears' : '+ New brainstorm'}</button>
+          <button type="button" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker." onClick={() => createBoard('/workbench')}>{armedCreation['/workbench'] ? 'Click again: this session ends and the chat clears' : '+ New workbench'}</button>
           <button type="button" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker." onClick={() => createBoard('/research')}>{armedCreation['/research'] ? 'Click again: this session ends and the chat clears' : '+ New research'}</button>
         </div>}
         <details open={boardSections.has('discussions')} onToggle={(e) => sectionToggle('discussions', e.currentTarget.open)}><summary>Discussions ({activeDiscussions.length + unstarted.filter((entry) => !entry.research).length})</summary>{openUnstarted(false)}{workerInfo?.pending?.filter((item) => !activeDiscussions.includes(item.lane ?? '')).map((item) => <div className="worker-pending" key={item.branch}>⚠ {item.branch}: {[item.ahead && `${item.ahead} ${item.ahead === 1 ? 'commit' : 'commits'} not merged into main`, item.dirty && 'uncommitted changes'].filter(Boolean).join(' · ')}</div>)}{activeDiscussions.map((name) => boardRow(name, 'discussions/' + name, false, false, canOrder ? { kind: 'discussions', names: activeDiscussions } : undefined))}</details>
@@ -726,7 +738,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {!room?.workbench && <button type="button" role="tab" aria-selected={tab === 'discussion'} onClick={() => { tabRef.current = 'discussion'; setTab('discussion'); }}>Discussion</button>}
       {!room?.research && <button type="button" role="tab" aria-selected={tab === 'worker'} onClick={() => { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); refreshWorker(); }}>Worker{workerNews ? ' · new' : ''}</button>}
     </div>
-    {tab === 'worker' && <section aria-label="Worker conversation">{workerMessages.map((message, index) => 'note' in message ? <p key={index} className={message.error ? 'status error' : 'status'}>{message.note}</p> : <article key={index} className={'msg' + (message.error ? ' error' : '')}><strong>{message.speaker}{message.error ? ' — failed' : ''}</strong><div dangerouslySetInnerHTML={{ __html: message.html }} /></article>)}<p>Worker input is not available on this page yet.</p></section>}
+    {tab === 'worker' && <section aria-label="Worker conversation">{workerMessages.map((message, index) => 'note' in message ? <p key={index} className={message.error ? 'status error' : 'status'}>{message.note}</p> : <article key={index} className={'msg' + (message.error ? ' error' : '')}><strong>{message.speaker}{message.error ? ' — failed' : ''}</strong><div dangerouslySetInnerHTML={{ __html: message.html }} /></article>)}{workError && <p className="status error" role="alert">{workError}</p>}{workInput && <textarea aria-label="Instruction to the worker" value={workText} disabled={ended || !!peek || !!viewLayout || !!room?.brainstorm || !!workerInfo?.disabled} placeholder={peek ? 'Peeking read-only — click Back to return to the active discussion.' : viewLayout ? 'Read-only: viewing a peer’s discussion.' : room?.brainstorm ? 'Turn this brainstorm into a discussion to send work.' : workerInfo?.disabled ? workerInfo.lines[0] : room?.workbench && !room.active ? 'First instruction to the worker… (names this workbench and starts it)' : 'Instruction to the worker… (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands.'} onChange={(event) => setWorkText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); const value = workText; setWorkText(''); void sendWork(value); } }} />}</section>}
     <div hidden={tab !== 'discussion'}>
     {peek && <p>peeking at {displayTitle(peek.name, peek.title)} · read-only</p>}
     {!!(room && !room.active && !peek && !viewLayout && !room.workbench) && <p>{room.brainstorm ? 'Your first message names this brainstorm and saves it here.' : room.research ? 'Your first message names this research board and saves it here.' : 'Your first message starts a new discussion.'}</p>}

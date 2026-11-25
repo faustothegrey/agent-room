@@ -20,11 +20,10 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 it('creates each supported board beside the current one and follows the goto to its React page', async () => {
   setup(); const user = userEvent.setup(), boards = screen.getByLabelText('Boards');
-  for (const [label, command] of [['+ New discussion', '/new'], ['+ New brainstorm', '/brainstorm'], ['+ New research', '/research']]) {
+  for (const [label, command] of [['+ New discussion', '/new'], ['+ New brainstorm', '/brainstorm'], ['+ New workbench', '/workbench'], ['+ New research', '/research']]) {
     await user.click(within(boards).getByRole('button', { name: label }));
     await waitFor(() => expect(says()).toContain(command));
   }
-  expect(within(boards).queryByRole('button', { name: '+ New workbench' })).toBeNull();
   Source.current.send({ type: 'goto', url: '/r/next/__room' }); expect(navigate).toHaveBeenCalledWith('/r/next/__next');
 });
 
