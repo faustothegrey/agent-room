@@ -7,6 +7,15 @@ type Props = { version: string | undefined; refresh: () => void };
 type StatusLine = { text: string; error: boolean };
 type Failure = { agent: string; error: string; time: string; earlier: number };
 type Layout = { stacked: boolean; sideClosed: boolean; left: number | null; top: number | null };
+type OrderKind = 'discussions' | 'brainstorms';
+const orderKey = (folder: string, kind: OrderKind) => `agent-room.${kind === 'discussions' ? 'discussion' : 'brainstorm'}-order:${folder}`;
+function readOrder(folder: string, kind: OrderKind): string[] {
+  try { const value: unknown = JSON.parse(localStorage.getItem(orderKey(folder, kind)) || '[]'); return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
+}
+function orderedNames(found: string[], saved: string[]): string[] {
+  const here = new Set(found), kept = [...new Set(saved)].filter((name) => here.has(name)), known = new Set(kept);
+  return [...found.filter((name) => !known.has(name)), ...kept];
+}
 const layoutKey = (folder: string, board: string) => 'agent-room:board-layout:' + JSON.stringify([folder, board]);
 const boardName = (path: string | null | undefined) => path?.replace(/\/+$/, '').split('/').at(-1) || null;
 function initialLayout(): Layout {
@@ -88,6 +97,8 @@ export function App({ version, refresh }: Props) {
   const [fileDetails, setFileDetails] = useState<FileDetailsResponse | null>(null);
   const [boardsClosed, setBoardsClosed] = useState(() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } });
   const [boardSections, setBoardSections] = useState(() => new Set(['discussions', 'research', 'brainstorms']));
+  const [orderRevision, setOrderRevision] = useState(0);
+  const [dragged, setDragged] = useState<{ kind: OrderKind; name: string; names: string[] } | null>(null);
   const [subtab, setSubtab] = useState<'explorer' | 'document'>('explorer');
   const [explorerMode, setExplorerMode] = useState<'discussion' | 'root'>('discussion');
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -259,6 +270,19 @@ export function App({ version, refresh }: Props) {
     try { const response = await post('__say', { text }); if (!response.ok) addStatus(await response.text(), true); }
     catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
   };
+  const saveOrder = (kind: OrderKind, names: string[]) => {
+    const folder = roomRef.current?.folder;
+    if (!folder) return;
+    try { localStorage.setItem(orderKey(folder, kind), JSON.stringify(names)); } catch {}
+    setOrderRevision((revision) => revision + 1);
+  };
+  useEffect(() => {
+    const changed = (event: StorageEvent) => {
+      const folder = roomRef.current?.folder;
+      if (folder && (event.key === orderKey(folder, 'discussions') || event.key === orderKey(folder, 'brainstorms'))) setOrderRevision((revision) => revision + 1);
+    };
+    window.addEventListener('storage', changed); return () => window.removeEventListener('storage', changed);
+  }, []);
   const loadFiles = (): Promise<FilesResponse> => {
     if (fileLoad.current) return fileLoad.current;
     fileLoad.current = (async () => {
@@ -376,6 +400,13 @@ export function App({ version, refresh }: Props) {
         roomRef.current = event.room; setRoom(event.room); if (event.room.folder) void loadDetails();
       } else if (event.type === 'files') {
         setSubtab('explorer'); void loadDetails();
+      } else if (event.type === 'moved') {
+        const folder = roomRef.current?.folder, name = event.from?.split('/').at(-1);
+        if (folder && name) {
+          const kind: OrderKind = event.from.startsWith('brainstorms/') ? 'brainstorms' : 'discussions';
+          saveOrder(kind, readOrder(folder, kind).filter((item) => item !== name));
+        }
+        void loadDetails();
       } else if (event.type === 'ended') {
         setEnded(true); addStatus('This room has ended. You can close this window.'); events.close();
       } else if (event.type === 'restarting') {
@@ -392,7 +423,7 @@ export function App({ version, refresh }: Props) {
   const treeFiles = rootMode ? (fileDetails?.files ?? []).filter((file) => !inBoard(file)) : (fileDetails?.files ?? []).filter((file) => file.startsWith(base + '/')).map((file) => file.slice(base!.length + 1));
   const namesUnder = (prefix: string) => [...new Set((fileDetails?.files ?? []).filter((f) => f.startsWith(prefix + '/')).map((f) => f.slice(prefix.length + 1).split('/')).filter((parts) => parts.length > 1 && /^\d{4}-\d{2}-\d{2}-/.test(parts[0])).map((parts) => parts[0]))].sort((a, b) => b.localeCompare(a));
   const boardTitle = (name: string, path: string, brainstorm: boolean) => displayTitle(name, room?.open?.find((entry) => entry.active === path)?.title ?? (room?.active === path ? room.discussion : undefined) ?? room?.checkpoints?.find((entry) => entry.name === (brainstorm ? 'brainstorms/' + name : name))?.title);
-  const boardRow = (name: string, path: string, brainstorm: boolean, archived = false) => {
+  const boardRow = (name: string, path: string, brainstorm: boolean, archived = false, ordering?: { kind: OrderKind; names: string[] }) => {
     const current = room?.active === path, open = room?.open?.find((entry) => entry.active === path && !entry.current);
     const entry = room?.open?.find((item) => item.active === path);
     const closed = brainstorm ? !current && !open : !!room?.closedDiscussions?.includes(name);
@@ -423,7 +454,12 @@ export function App({ version, refresh }: Props) {
     };
     const content = <>{kind === 'workbench' ? '🔧 ' : kind === 'research' ? '🔬 ' : ''}{label}</>;
     const archivedState = archived ? (path.includes('/archive/') ? 'archived' : 'deferred') + (brainstorm ? ' brainstorm' : isResearch ? ' research' : '') + (!brainstorm && closed ? ' · closed' : '') + closingText + (isDiscussion && workerInfo?.merged?.includes(name) ? ' · merged' : '') : null;
-    return <div className="board-row" key={path}>{open ? <a className={'entry ' + kind} title={path} href={open.url.replace(/__room(?=([?#]|$))/, '__next')}>{content}</a> : <button type="button" className={'entry ' + kind} title={path} aria-current={current ? 'true' : undefined} onClick={action}>{content}</button>}
+    const index = ordering?.names.indexOf(name) ?? -1;
+    const reorder = (from: string, to: number) => { if (!ordering) return; const next = ordering.names.filter((item) => item !== from); next.splice(Math.max(0, Math.min(to, next.length)), 0, from); saveOrder(ordering.kind, next); };
+    return <div className="board-row" key={path} onDragOver={(event) => { if (dragged && ordering?.kind === dragged.kind) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } }} onDrop={(event) => { if (!dragged || !ordering || dragged.kind !== ordering.kind || dragged.name === name) return; event.preventDefault(); const remaining = dragged.names.filter((item) => item !== dragged.name); const bounds = event.currentTarget.getBoundingClientRect(); const target = remaining.indexOf(name); if (target < 0) return; remaining.splice(target + (event.clientY > bounds.top + bounds.height / 2 ? 1 : 0), 0, dragged.name); saveOrder(dragged.kind, remaining); setDragged(null); }}>
+      {ordering && ordering.names.length > 1 && <span draggable title="Drag to reorder" aria-label={`Drag ${label} to reorder`} onDragStart={(event) => { setDragged({ kind: ordering.kind, name, names: ordering.names }); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', name); }} onDragEnd={() => setDragged(null)}>⠿</span>}
+      {open ? <a className={'entry ' + kind} title={path} href={open.url.replace(/__room(?=([?#]|$))/, '__next')}>{content}</a> : <button type="button" className={'entry ' + kind} title={path} aria-current={current ? 'true' : undefined} onClick={action}>{content}</button>}
+      {ordering && ordering.names.length > 1 && <span><button type="button" aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => reorder(name, index - 1)}>Move up</button><button type="button" aria-label={`Move ${label} down`} disabled={index === ordering.names.length - 1} onClick={() => reorder(name, index + 1)}>Move down</button></span>}
       <div className="local-label" title={tooltip || undefined}>{archivedState ?? (state + suffix + (isDiscussion && entry?.working ? ' · worker working' : '') + closingText + changed)}</div>
       {isDiscussion && !archived && work && <div className="worker-pending">⚠ Worker: {pendingText}</div>}
       {!!conflictText && !workerBusy && <div className="worker-conflict">⚠ {conflictText}</div>}
@@ -432,7 +468,18 @@ export function App({ version, refresh }: Props) {
   };
   const discussions = namesUnder('discussions'), brainstorms = namesUnder('brainstorms');
   const research = discussions.filter((name) => room?.researches?.includes(name));
-  const activeDiscussions = discussions.filter((name) => !room?.researches?.includes(name));
+  const foundDiscussions = discussions.filter((name) => !room?.researches?.includes(name));
+  const folder = room?.folder;
+  const activeDiscussions = dragged?.kind === 'discussions' ? dragged.names : folder ? orderedNames(foundDiscussions, readOrder(folder, 'discussions')) : foundDiscussions;
+  const orderedBrainstorms = dragged?.kind === 'brainstorms' ? dragged.names : folder ? orderedNames(brainstorms, readOrder(folder, 'brainstorms')) : brainstorms;
+  useEffect(() => {
+    if (!folder || !fileDetails || dragged) return;
+    for (const [kind, found] of [['discussions', foundDiscussions], ['brainstorms', brainstorms]] as [OrderKind, string[]][]) {
+      const next = orderedNames(found, readOrder(folder, kind));
+      try { if (localStorage.getItem(orderKey(folder, kind)) !== JSON.stringify(next)) localStorage.setItem(orderKey(folder, kind), JSON.stringify(next)); } catch {}
+    }
+  }, [folder, fileDetails, room?.researches, orderRevision, dragged]);
+  const canOrder = !!(room && input && !viewing.current && folder);
   const unstarted = (room?.open ?? []).filter((entry) => !entry.current && !entry.active);
   const openUnstarted = (researchBoard: boolean) => unstarted.filter((entry) => !!entry.research === researchBoard).map((entry) => {
     const state = entry.ongoing || entry.working ? 'ongoing' : !entry.started ? 'not started' : entry.waitingForInput ? 'waiting for input' : entry.readyForAutoDev ? 'ready for auto dev' : entry.workReady && !entry.workbench && !entry.brainstorm ? 'work ready' : 'idle';
@@ -455,9 +502,9 @@ export function App({ version, refresh }: Props) {
     <aside className="next-boards" aria-label="Boards">
       <div><b hidden={boardsClosed}>Boards</b> <button type="button" aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} }}>{boardsClosed ? '»' : '«'}</button></div>
       {!boardsClosed && <div className="boards-list">
-        <details open={boardSections.has('discussions')} onToggle={(e) => sectionToggle('discussions', e.currentTarget.open)}><summary>Discussions ({activeDiscussions.length + unstarted.filter((entry) => !entry.research).length})</summary>{openUnstarted(false)}{workerInfo?.pending?.filter((item) => !activeDiscussions.includes(item.lane ?? '')).map((item) => <div className="worker-pending" key={item.branch}>⚠ {item.branch}: {[item.ahead && `${item.ahead} ${item.ahead === 1 ? 'commit' : 'commits'} not merged into main`, item.dirty && 'uncommitted changes'].filter(Boolean).join(' · ')}</div>)}{activeDiscussions.map((name) => boardRow(name, 'discussions/' + name, false))}</details>
+        <details open={boardSections.has('discussions')} onToggle={(e) => sectionToggle('discussions', e.currentTarget.open)}><summary>Discussions ({activeDiscussions.length + unstarted.filter((entry) => !entry.research).length})</summary>{openUnstarted(false)}{workerInfo?.pending?.filter((item) => !activeDiscussions.includes(item.lane ?? '')).map((item) => <div className="worker-pending" key={item.branch}>⚠ {item.branch}: {[item.ahead && `${item.ahead} ${item.ahead === 1 ? 'commit' : 'commits'} not merged into main`, item.dirty && 'uncommitted changes'].filter(Boolean).join(' · ')}</div>)}{activeDiscussions.map((name) => boardRow(name, 'discussions/' + name, false, false, canOrder ? { kind: 'discussions', names: activeDiscussions } : undefined))}</details>
         <details open={boardSections.has('research')} onToggle={(e) => sectionToggle('research', e.currentTarget.open)}><summary>Research ({research.length + unstarted.filter((entry) => entry.research).length})</summary>{openUnstarted(true)}{research.map((name) => boardRow(name, 'discussions/' + name, false))}</details>
-        <details open={boardSections.has('brainstorms')} onToggle={(e) => sectionToggle('brainstorms', e.currentTarget.open)}><summary>Brainstorms ({brainstorms.length})</summary>{brainstorms.map((name) => boardRow(name, 'brainstorms/' + name, true))}</details>
+        <details open={boardSections.has('brainstorms')} onToggle={(e) => sectionToggle('brainstorms', e.currentTarget.open)}><summary>Brainstorms ({orderedBrainstorms.length})</summary>{orderedBrainstorms.map((name) => boardRow(name, 'brainstorms/' + name, true, false, canOrder ? { kind: 'brainstorms', names: orderedBrainstorms } : undefined))}</details>
         <details open={boardSections.has('archived-deferred')} onToggle={(e) => sectionToggle('archived-deferred', e.currentTarget.open)}><summary>Archived · Deferred ({inactive.length})</summary>{inactive.map(({ name, path, brainstorm }) => boardRow(name, path, brainstorm, true))}</details>
       </div>}
     </aside>
