@@ -6854,6 +6854,7 @@ test('recurring research restores unloaded sessions and resumes a closed board f
   ctx.say = () => {};
   await reloaded(ctx);
   ctx.usage = { ...ctx.usage, fetchQuota: async () => ({}), checkQuotaFloor: () => ({ ok: true }) };
+  const testUsage = ctx.usage;
   ctx.suggestTitle = async () => ({ title: 'Generated Title' });
   let lastLoaded, prompts = [];
   const loadRoom = async (next, v) => {
@@ -6875,6 +6876,7 @@ test('recurring research restores unloaded sessions and resumes a closed board f
   assert.match(prompts.at(-1), /\[Scheduler\]: Study this/);
   // Close the saved open board through the normal UI path, then the next run must start fresh.
   await handleLine(`/resume ${boardName}`, ctx);
+  ctx.usage = testUsage; // Resuming reloads the usage module; keep this test independent of the live meter.
   ctx.closingAgent = () => ({ name: 'Worker', turn: async () => 'Closing statement: research findings. See pending-instructions.md.' });
   await handleLine('/close', ctx);
   assert.match(readFileSync(`${cwd}/discussions/${boardName}/closing-statement.md`, 'utf8'), /research findings/);
