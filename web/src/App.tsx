@@ -1,12 +1,13 @@
 /// <reference types="vite/client" />
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './layout.css';
-import type { FileDetailsResponse, FilesResponse, HighlightMessage, MessageView, Peek, PointMessage, Room, SayRequest, ScreenEvent, ShowRequest, WorkerInfo, WorkerInfoRequest } from '../../src/contract';
+import type { BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, Room, SayRequest, ScreenEvent, ShowRequest, WorkerInfo, WorkerInfoRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
 type StatusLine = { text: string; error: boolean };
 type Failure = { agent: string; error: string; time: string; earlier: number };
 type Layout = { stacked: boolean; sideClosed: boolean; left: number | null; top: number | null };
+type BoardDialog = { kind: 'merge'; name: string; preview: MergePreview; changed: boolean; error?: string } | { kind: 'discard'; name: string; preview: DiscardPreview; changed: boolean; error?: string } | { kind: 'catchup'; name: string; target: string; behind: number; message: string; changed: boolean; error?: string };
 type OrderKind = 'discussions' | 'brainstorms';
 const orderKey = (folder: string, kind: OrderKind) => `agent-room.${kind === 'discussions' ? 'discussion' : 'brainstorm'}-order:${folder}`;
 function readOrder(folder: string, kind: OrderKind): string[] {
@@ -83,6 +84,14 @@ const navigatePage = (url: string) => window.location.assign(url);
 export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [room, setRoom] = useState<Room | null>(null);
   const [workerInfo, setWorkerInfo] = useState<WorkerInfo | null>(null);
+  const [boardDialog, setBoardDialog] = useState<BoardDialog | null>(null);
+  const [dialogBusy, setDialogBusy] = useState(false);
+  const dialogElement = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => {
+    const dialog = dialogElement.current;
+    if (!boardDialog || !dialog || dialog.open) return;
+    if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
+  }, [!!boardDialog]);
   const [messages, setMessages] = useState<MessageView[]>([]);
   const [thinking, setThinking] = useState<string | null>(null);
   const [yourTurn, setYourTurn] = useState(false);
@@ -209,13 +218,56 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command || state.posting > 0 ? 'on' : null); }, 1500);
     }
   };
-  const post = async (path: '__say' | '__show' | '__workerinfo', body: SayRequest | ShowRequest | WorkerInfoRequest) => {
+  const post = async (path: '__say' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: SayRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
     const state = busyState.current; state.posting++; updateBusy();
     try {
       return await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': client.current }, body: JSON.stringify(body) });
     } finally { state.posting--; updateBusy(); }
   };
   const refreshWorker = () => { void post('__workerinfo', {}).catch(() => {}); };
+  const actionReply = async <T,>(path: '__merge' | '__discard' | '__catchup', body: BoardActionRequest): Promise<T> => {
+    const response = await post(path, body); if (!response.ok) throw new Error(await response.text()); return await response.json() as T;
+  };
+  const mergeResult = (name: string, result: MergeReply, changed: boolean) => {
+    if ('catchUp' in result && result.catchUp) setBoardDialog({ kind: 'catchup', name, target: result.targetBranch, behind: result.behind, message: result.message, changed });
+    else if ('preview' in result) setBoardDialog({ kind: 'merge', name, preview: result.preview, changed });
+    else setBoardDialog(null);
+  };
+  const startBoardAction = async (kind: 'merge' | 'discard', name: string) => {
+    if (actionsMenu.current) actionsMenu.current.open = false; setRowMenu(null);
+    try {
+      if (kind === 'merge') mergeResult(name, await actionReply<MergeReply>('__merge', { name }), false);
+      else { const result = await actionReply<DiscardReply>('__discard', { name }); if ('preview' in result) setBoardDialog({ kind, name, preview: result.preview, changed: false }); }
+    } catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); refreshWorker(); }
+  };
+  const confirmBoardAction = async () => {
+    const dialog = boardDialog; if (!dialog || dialogBusy) return;
+    setDialogBusy(true);
+    try {
+      if (dialog.kind === 'catchup') {
+        const latest = await actionReply<MergeReply>('__merge', { name: dialog.name });
+        if (!('catchUp' in latest) || !latest.catchUp || latest.targetBranch !== dialog.target || latest.behind !== dialog.behind || latest.message !== dialog.message) { mergeResult(dialog.name, latest, true); return; }
+        const result = await actionReply<CatchUpReply>('__catchup', { name: dialog.name });
+        setBoardDialog(null); addStatus(`Queued catch-up with ${result.targetBranch} for ${dialog.name}. Review the report, then click Close and Merge again.`);
+      } else if (dialog.kind === 'merge') {
+        const result = await actionReply<MergeReply>('__merge', { name: dialog.name, snapshot: dialog.preview.snapshot });
+        mergeResult(dialog.name, result, true);
+      } else {
+        const result = await actionReply<DiscardReply>('__discard', { name: dialog.name, snapshot: dialog.preview.snapshot });
+        if ('preview' in result && result.changed) setBoardDialog({ kind: 'discard', name: dialog.name, preview: result.preview, changed: true }); else setBoardDialog(null);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (dialog.kind === 'catchup') { setBoardDialog(null); addStatus(message, true); }
+      else setBoardDialog({ ...dialog, error: message });
+      refreshWorker();
+    }
+    finally { setDialogBusy(false); }
+  };
+  const cancelClose = async (name: string) => {
+    try { const response = await post('__cancelclose', { name }); if (!response.ok) throw new Error(await response.text()); }
+    catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
+  };
   useEffect(() => {
     let last = -Infinity;
     const refresh = () => { if (document.visibilityState === 'hidden' || Date.now() - last < 5000) return; last = Date.now(); refreshWorker(); };
@@ -484,6 +536,13 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const treeFiles = rootMode ? (fileDetails?.files ?? []).filter((file) => !inBoard(file)) : (fileDetails?.files ?? []).filter((file) => file.startsWith(base + '/')).map((file) => file.slice(base!.length + 1));
   const namesUnder = (prefix: string) => [...new Set((fileDetails?.files ?? []).filter((f) => f.startsWith(prefix + '/')).map((f) => f.slice(prefix.length + 1).split('/')).filter((parts) => parts.length > 1 && /^\d{4}-\d{2}-\d{2}-/.test(parts[0])).map((parts) => parts[0]))].sort((a, b) => b.localeCompare(a));
   const boardTitle = (name: string, path: string, brainstorm: boolean) => displayTitle(name, room?.open?.find((entry) => entry.active === path)?.title ?? (room?.active === path ? room.discussion : undefined) ?? room?.checkpoints?.find((entry) => entry.name === (brainstorm ? 'brainstorms/' + name : name))?.title);
+  const mergeControls = (name: string) => {
+    const info = workerInfo?.mergeable?.[name], discardable = workerInfo?.discardable?.includes(name);
+    const target = info?.targetBranch;
+    const text = info?.catchUp ? 'Catch up with ' + target : 'Close and Merge';
+    const tip = info?.catchUp ? `Ask the worker to merge ${target} into worker/${name} and run tests; nothing merges into ${target} automatically.` : info?.canMerge ? `Merge worker/${name} into ${target}, remove the worktree and branch, and close.` : info?.disabledReason || 'Cannot Close and Merge yet.';
+    return <>{info && <button type="button" disabled={!info.catchUp && !info.canMerge} title={tip} onClick={() => void startBoardAction('merge', name)}>{text}</button>}{discardable && <button type="button" title="Close this discussion and discard its worker worktree and branch (asks to confirm with a list of what will be lost)." onClick={() => void startBoardAction('discard', name)}>Close and Discard</button>}</>;
+  };
   const boardRow = (name: string, path: string, brainstorm: boolean, archived = false, ordering?: { kind: OrderKind; names: string[] }) => {
     const current = room?.active === path, open = room?.open?.find((entry) => entry.active === path && !entry.current);
     const entry = room?.open?.find((item) => item.active === path);
@@ -534,6 +593,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {isDiscussion && !archived && work && <div className="worker-pending">⚠ Worker: {pendingText}</div>}
       {!!conflictText && !workerBusy && <div className="worker-conflict">⚠ {conflictText}</div>}
       {isResearch && <div className="local-label"><span className={count > 30 ? 'research-laps-high' : undefined}>Laps: {stats?.priorUnknown ? '≥' : ''}{count}</span> · Last: {date(stats?.lastRun)} · Next: {date(stats?.nextRun)}</div>}
+      {!!(room && input && !viewing.current && isDiscussion && closing === 'waiting') && <button type="button" onClick={() => void cancelClose(name)}>Cancel close</button>}
       {!!(room && input && !viewing.current && rollback?.report) && <details><summary>Rollback report · {rollback.status}</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{rollback.report}</pre></details>}
       {!!(room && input && !viewing.current) && <details className="row-menu" open={rowMenu === path} onToggle={(event) => { const isOpen = event.currentTarget.open; if (isOpen && rowMenuRef.current !== path) { if (actionsMenu.current) actionsMenu.current.open = false; rowMenuRef.current = path; setRowMenu(path); refreshWorker(); } else if (!isOpen && rowMenuRef.current === path) { rowMenuRef.current = null; setRowMenu(null); } }}>
         <summary aria-label={`Board actions for ${label}`} title="Actions">⋯</summary><div className="row-menu-items" hidden={rowMenu !== path}>
@@ -544,6 +604,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
             {closed && !isResearch && (!brainstorm || archived) && <button type="button" title={`Look at this closed ${brainstorm ? 'brainstorm' : 'discussion'} read-only: its conversation and files, without reopening it.`} onClick={() => { setRowMenu(null); setExplorerMode('discussion'); setSubtab('explorer'); void boardCommand('/peek ' + ref); }}>Peek chat &amp; files</button>}
           </>}
           {(!closed || brainstorm && !archived) && <button type="button" disabled={brainstorm && !(current || open)} title={brainstorm ? current || open ? 'Close it: its agents stop; its checkpoint is kept' : 'It is not open' : undefined} onClick={() => { setRowMenu(null); void boardCommand('/close ' + ref); }}>{!brainstorm && !isResearch && workerInfo?.pending?.some((item) => item.lane === name) ? 'Close with pending work' : 'Close'}</button>}
+          {!archived && isDiscussion && !closed && mergeControls(name)}
           {archived ? <>
             <button type="button" onClick={() => { setRowMenu(null); void boardCommand('/move ' + ref + ' active'); }}>Make active</button>
             {path.includes('/archive/') ? <button type="button" disabled={!brainstorm && !closed} title={!brainstorm && !closed ? `Close the ${isResearch ? 'research board' : 'discussion'} before moving it into deferred/.` : undefined} onClick={() => { setRowMenu(null); void boardCommand('/move ' + ref + ' deferred'); }}>Defer</button> : <button type="button" disabled={(!brainstorm && !closed) || pendingArchives.has(path)} aria-busy={pendingArchives.has(path)} title={!brainstorm && !closed ? `Close the ${isResearch ? 'research board' : 'discussion'} before moving it into archive/.` : undefined} onClick={() => void archiveBoard(path, ref)}>Archive</button>}
@@ -607,9 +668,28 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         {canAct && room?.active && (room.brainstorm || room.research) && <button type="button" title={room.research ? 'Keep the folder and start fresh discussion sessions; linked recurring tasks are turned off.' : 'Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder.'} onClick={() => runAction('convert', '/convert ' + room.active, true)}>{armedActions.convert ? room.research ? 'Click again: research sessions end and scheduled tasks turn off' : 'Click again: it moves to discussions/' : 'Turn into a discussion'}</button>}
         {canAct && room?.active && room.brainstorm && <button type="button" title="Move it to discussions/ with a .research marker: the same agents start fresh sessions with the research rulebook, briefed from its transcripts and latest summary." onClick={() => runAction('convert-research', '/convert ' + room.active + ' research', true)}>{armedActions['convert-research'] ? 'Click again: it moves to discussions/ as a research board' : 'Turn into research'}</button>}
         {canClose && <button type="button" title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions." onClick={() => runAction('close', '/close', !!room?.started)}>{armedActions.close ? 'Click again: this discussion closes (its agents stop)' : closeLabel}</button>}
+        {canClose && lane && !room?.closedDiscussions?.includes(lane) && mergeControls(lane)}
       </div>
     </details>}
     {!!(room && input && !peek && !viewLayout && room.multi && !room.active && (room.brainstorm || room.workbench || room.research || (room.open?.length ?? 0) > 1)) && <button type="button" title="Discard this new board and return to the board you came from" onClick={() => void boardCommand('/cancel')}>Cancel</button>}
+    {boardDialog && <dialog ref={dialogElement} aria-label={boardDialog.kind === 'merge' ? boardDialog.preview.title : boardDialog.kind === 'discard' ? `Close and Discard ${boardDialog.name}?` : `Catch up with ${boardDialog.target}?`} className="board-dialog" onCancel={(event) => { event.preventDefault(); if (!dialogBusy) setBoardDialog(null); }}>
+      <h3>{boardDialog.kind === 'merge' ? boardDialog.preview.title : boardDialog.kind === 'discard' ? `Close and Discard ${boardDialog.name}?` : `Catch up with ${boardDialog.target}?`}</h3>
+      {boardDialog.changed && <p className="discard-warn">{boardDialog.kind === 'merge' ? 'The room branch or worktree changed since your first click. Review the updated preview below and confirm again.' : boardDialog.kind === 'discard' ? 'The worktree or branch changed since your first click. Review the updated list below and confirm again.' : 'The target or readiness changed. Review the updated information and confirm again.'}</p>}
+      {boardDialog.kind === 'catchup' ? <p>{boardDialog.message}</p> : boardDialog.kind === 'merge' ? <>
+        <p>Worktree: {boardDialog.preview.path}</p>
+        <p>After merging, the worktree and branch will be removed and the discussion closed.</p>
+        {!!boardDialog.preview.untracked?.length && <p>Untracked files in the worktree will be deleted for good: {boardDialog.preview.untracked.join(', ')}</p>}
+        {boardDialog.preview.activeNotice && <p>{boardDialog.preview.activeNotice}</p>}
+        <h4>Commits to merge ({boardDialog.preview.commits.length})</h4>{boardDialog.preview.commits.length ? <ul>{boardDialog.preview.commits.map((commit, index) => <li key={index}>{commit.hash} {commit.subject}</li>)}</ul> : <p>None.</p>}
+      </> : <>
+        <p>Branch: {boardDialog.preview.branch} · Worktree: {boardDialog.preview.path}</p>
+        <p>{boardDialog.preview.commits.length ? `Commits will be saved to a recovery ref under refs/discarded/${boardDialog.name}/… (commits only; uncommitted, untracked and ignored files are deleted for good).` : 'Nothing committed to save; the worktree and branch will be removed and all uncommitted, untracked and ignored files deleted for good.'}</p>
+        {([['Commits not in main', boardDialog.preview.commits.map((c) => c.hash + ' ' + c.subject)], ['Tracked edits', boardDialog.preview.tracked.map((item) => item.status + ' ' + item.path)], ['Untracked files', boardDialog.preview.untracked], ['Ignored files (by top-level folder)', boardDialog.preview.ignored.map((item) => item.label)]] as [string, string[]][]).map(([heading, items]) => <section key={heading}><h4>{heading} ({items.length})</h4>{items.length ? <ul>{items.map((item, index) => <li key={index}>{item}</li>)}</ul> : <p>None.</p>}</section>)}
+      </>}
+      {boardDialog.kind !== 'catchup' && <details><summary>Snapshot</summary><code>{boardDialog.preview.snapshot}</code></details>}
+      {boardDialog.error && <p role="alert">{boardDialog.error}</p>}
+      <button type="button" disabled={dialogBusy} onClick={() => setBoardDialog(null)}>Cancel</button> <button type="button" disabled={dialogBusy} onClick={() => void confirmBoardAction()}>{boardDialog.kind === 'merge' ? 'Confirm ' + boardDialog.preview.title : boardDialog.kind === 'discard' ? 'Confirm Close and Discard' : 'Catch up with ' + boardDialog.target}</button>
+    </dialog>}
     <div className={'next-workspace' + (boardsClosed ? ' boards-closed' : '')}>
     <aside className="next-boards" aria-label="Boards">
       <div><b hidden={boardsClosed}>Boards</b> <button type="button" aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} }}>{boardsClosed ? '»' : '«'}</button></div>

@@ -39,7 +39,7 @@ export interface Peek {
 export interface Gauge { provider: string; group?: string; label: string; used: number; resets: string | null }
 export interface QuotaAt { measured: string | null; checked: string }
 export interface WorkerPending { lane: string | null; branch: string; ahead: number; dirty: boolean; conflicts: string[] }
-export interface MergeReadiness { canMerge: boolean; catchUp: boolean; disabledReason?: string | null }
+export interface MergeReadiness { canMerge: boolean; catchUp: boolean; disabledReason?: string | null; targetBranch?: string | null; behind?: number }
 export interface WorkerInfo { lines: string[]; disabled?: boolean; error?: boolean; lanes?: unknown[]; pending?: WorkerPending[]; discardable?: string[]; mergeable?: Record<string, MergeReadiness>; merged?: string[] }
 export interface OpenBoard { url: string; current: boolean; title: string; active: string | null; brainstorm: boolean; workbench: boolean; research: boolean; started: boolean; working: boolean; workerBusy: boolean; ongoing: boolean; waitingForInput?: boolean; waitingReason?: string | null; readyForAutoDev?: boolean; workReady?: boolean }
 export interface BoardCheckpoint { name: string; title?: string; at?: string; kind?: string; summary?: boolean }
@@ -124,6 +124,15 @@ export interface ShowRequest { file: string }
 export type ShowReplyStatus = 204 | 403 | 404;
 // POST /__workerinfo requests an asynchronous workerinfo event.
 export type WorkerInfoRequest = Record<string, never>;
+
+// Preview requests omit snapshot; confirmations send the snapshot returned by the preview.
+export interface BoardActionRequest { name: string; snapshot?: string }
+export interface BoardCommit { hash: string; subject: string }
+export interface MergePreview { name: string; branch: string; targetBranch: string; title: string; path: string; commits: BoardCommit[]; untracked: string[]; activeNotice?: string; snapshot: string }
+export interface DiscardPreview { name: string; branch: string; path: string; worktreeExists: boolean; branchExists: boolean; commits: BoardCommit[]; tracked: { status: string; path: string }[]; untracked: string[]; ignored: { label: string }[]; snapshot: string }
+export type MergeReply = { catchUp: true; targetBranch: string; behind: number; message: string } | { preview: MergePreview; changed?: boolean; ok?: boolean } | { ok: true; changed?: false };
+export type DiscardReply = { preview: DiscardPreview; changed?: boolean; ok?: boolean } | { ok: true; changed?: false };
+export interface CatchUpReply { ok: boolean; targetBranch: string }
 
 // GET /__mtime?f=<room-relative file>: decimal mtime, "false" when unavailable,
 // or "fixed" for an immutable received snapshot. Without f it lists room files.

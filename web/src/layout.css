@@ -28,3 +28,6 @@
 .row-menu-items { position: absolute; z-index: 3; min-width: 12rem; padding: .4rem; background: Canvas; border: 1px solid; }
 .row-menu-items[hidden] { display: none; }
 .row-menu-items button, .row-menu-items a { display: block; width: 100%; text-align: left; }
+.board-dialog::backdrop { background: #0006; }
+.board-dialog { background: Canvas; color: CanvasText; border: 1px solid; padding: 1rem; max-width: min(90vw, 48rem); max-height: 85vh; overflow: auto; }
+.discard-warn { color: #a05b00; font-weight: bold; }
