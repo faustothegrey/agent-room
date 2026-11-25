@@ -149,3 +149,21 @@ it('keeps the Worker box draft across a version refresh, as both boxes are kept 
   await user.click(screen.getByRole('tab', { name: /Worker/ }));
   expect((screen.getByRole('textbox', { name: 'Instruction to the worker' }) as HTMLTextAreaElement).value).toBe('half an instruction');
 });
+
+it('asks the room to recheck worker info when the Worker tab is shown, as /__room does', async () => {
+  render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
+  const before = bodies('__workerinfo').length;
+  await user.click(screen.getByRole('tab', { name: /Worker/ }));
+  await waitFor(() => expect(bodies('__workerinfo')).toHaveLength(before + 1));
+  await user.click(screen.getByRole('tab', { name: 'Discussion' })); expect(bodies('__workerinfo')).toHaveLength(before + 1); // only on showing Worker
+});
+
+it('never opens the Providers service by itself, also when a new discussion opens its members panel', async () => {
+  answer = (url) => url === '__settings' ? ok({ settings: { agents: [{ name: 'A', provider: 'claude', model: '' }, { name: 'B', provider: 'codex', model: '' }], worker: { name: 'W', provider: 'claude', model: '' } }, started: false, models: { claude: [], codex: [], agy: [] } }) : ok([]);
+  render(<App version="one" refresh={() => {}} />); reset();
+  Source.current.send({ type: 'room', room: { ...room, fresh: true, active: null, started: false } });
+  expect(await screen.findByRole('form', { name: 'Discussion members' })).toBeTruthy();
+  expect(screen.getByLabelText('Services panel').hidden).toBe(true);
+  expect(screen.getByRole('button', { name: '⚙ Providers' }).getAttribute('aria-pressed')).toBe('false');
+  expect(screen.queryByRole('form', { name: 'Default providers' })).toBeNull();
+});

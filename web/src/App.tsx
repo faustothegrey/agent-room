@@ -1086,7 +1086,6 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       </ChatList>
       <div className="composer" id="wcomposer">
       {offers.length > 0 && <div className="mention-offer" aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
-      <label className="follow-label" title="When an agent or the worker names a file in a new message, show it here at once (this browser only)"><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
       {working && <p className="hint" id="whint">The worker is busy: what you send now waits for it to finish.</p>}
       {remote && <div className="remote-view" id="work-remote-view"><p>Read-only: viewing {remote.line.node}'s line.</p>{ownLine && <button type="button" onClick={() => void viewRemote(null)}>Back to {replica?.node}'s line</button>}</div>}
       {input && !peek && !viewLayout && room?.workerStop && !room.workerStop.now && <div className="tools" id="wstop">
@@ -1121,7 +1120,6 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     </ChatList>
     <div className="composer" id="composer">
     {tab === 'discussion' && offers.length > 0 && <div className="mention-offer" aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
-    <label className="follow-label" title="When an agent or the worker names a file in a new message, show it here at once (this browser only)"><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
     {autoDev?.status === 'paused' && autoDev.offer?.text && <div id="autodev" className="paused" role="status"><p>Next agreed instruction:</p><p>{autoDev.offer.text}</p><p><button type="button" onClick={() => void boardCommand('/autodev')}>Restart auto dev ({autoDev.max} more)</button> Restarting grants another {autoDev.max} worker cycles.</p></div>}
     {autoDev?.status === 'paused' && autoDev.offer?.error && <div id="autodev" className="paused" role="status">The latest agreed instruction can’t be sent: {autoDev.offer.error}.</div>}
     {input && <>
@@ -1170,6 +1168,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
           <div className="menu-items" id="siblings" aria-label="Other files in this folder">{siblings === null ? null : siblings.length ? siblings.map((f) => <button type="button" key={f.path} className={f.shown ? 'shown' : undefined} disabled={f.cantShow} title={f.cantShow ? "can't be shown here" : undefined}
             onClick={(e) => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; if (f.cantShow || f.shown) return; if (f.received) { docRef.current = f.path; setDoc(f.path); } else void showFile(f.path); }}>{f.label}</button>) : 'No other files here.'}</div></details>
           {transcriptDoc && <button type="button" id="feed" title="Ask the agents to read this transcript in full" onClick={() => { tabRef.current = 'discussion'; setTab('discussion'); const root = room!.folder.endsWith('/') ? room!.folder : room!.folder + '/'; void boardCommand('Please read this transcript of an earlier session in full, as background for our discussion: ' + root + doc); }}>Send to agents</button>}
+          <label className="follow-label" id="follow-label" title="When an agent or the worker names a file in a new message, show it here at once (this browser only)"><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
         </div><div id="docpane"><iframe ref={frame} id="doc" title="Document viewer" src={doc.split('/').map(encodeURIComponent).join('/')} /></div></section>}
     </div>
     </div>

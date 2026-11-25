@@ -150,6 +150,7 @@ it('links Worker reports and offers live Worker mentions, including follow and u
   const offers = await screen.findByLabelText('File mentions');
   await user.click(within(offers).getByRole('button', { name: '📄 Show notes.md' }));
   expect(JSON.parse(fetchMock.mock.calls.find(([url]) => url === '__show')![1].body)).toEqual({ file: paths[1] });
+  Source.current.send({ type: 'doc', file: 'README.md' }); // Follow mentions is in the Document bar, as on /__room
   await user.click(screen.getByRole('checkbox', { name: 'Follow mentions' }));
   Source.current.send({ type: 'work', message: entry('Worker report', '<p>./drawings/flow.svg</p>') });
   await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === '__show')).toHaveLength(2));
