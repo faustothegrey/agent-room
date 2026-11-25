@@ -38,6 +38,8 @@ One Node process serves several rooms, one per folder. Its source modules:
 | `src/room.mjs` | The main loop: turns, unseen messages, passes, the summary procedure. |
 | `src/ui.mjs` | Room setup, command routing and screen coordination. |
 | `src/boards.mjs` | Discussion, brainstorm, research and workbench lifecycle, closing and checkpoints; reloaded with the room. |
+| `src/scheduler.mjs` | Research schedule storage, quota guard, execution and workshop timer. |
+| `src/monitor.mjs` | Quota, provider and process monitoring, health and prompt tests. |
 | `src/workshop.mjs` | Worker queues, recovery and task execution, workbench instructions, auto dev and summary checks; reloaded with the room. |
 | `src/lanes.mjs` | Worker worktrees, Git snapshots, merge/discard/catch-up actions, worker information, test reports and branch diagrams; reloaded with the room. |
 | `src/agents.mjs` | Provider adapters (Claude, Codex, agy): one CLI process per turn, launch flags, sessions, usage parsing, the record of running programs. |
@@ -50,6 +52,24 @@ One Node process serves several rooms, one per folder. Its source modules:
 | `src/instructions.mjs` | Prompt builders and the instruction catalog displayed in the Instructions panel. |
 | `src/mcp.mjs` | Read-only MCP stdio service for listing rooms and discussions. |
 | `src/notes.mjs` | The Notes pane: the User's own notes, kept on this computer only, never replicated nor shown to agents. |
+
+The server coordinator loads each area with the current Reload tag and binds explicit callbacks for room state and cross-area operations. Board, workshop, lane, scheduler and monitor modules do not import the coordinator; shared room, workshop and server state—including timer handles—stays with the running contexts and hub. An operation already in flight can finish with the callbacks it started with.
+
+```mermaid
+flowchart LR
+  CLI[cli.mjs: rooms and input] --> UI[ui.mjs: coordinator]
+  UI --> B[boards.mjs: lifecycle and checkpoints]
+  UI --> W[workshop.mjs: worker queues and auto dev]
+  UI --> L[lanes.mjs: worktrees and Git actions]
+  UI --> S[scheduler.mjs: schedule and quota guard]
+  UI --> M[monitor.mjs: quota and provider health]
+  UI --> D[docs modules: HTTP and events]
+  B -. callbacks .-> UI
+  W -. callbacks .-> UI
+  L -. callbacks .-> UI
+  S -. callbacks .-> UI
+  M -. callbacks .-> UI
+```
 
 The single Node server serves the built room page at `/__room` (and each room’s `/r/<room>/__room`); `/__next` bookmarks redirect there. `npm start` builds and watches `web/` in the background. A direct start builds when the page is missing or older than its sources; build failure leaves the server running. Open pages compare the built-asset version on the room event stream after a rebuild or Reload.
 

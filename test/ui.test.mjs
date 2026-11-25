@@ -7105,3 +7105,75 @@ test('Reload retains an open board and resumes a paused board from its checkpoin
     rmSync(root, { recursive: true, force: true, maxRetries: 5 });
   }
 });
+
+test('Reload preserves per-context quota, per-workshop schedule and server monitor timers', async () => {
+  const { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { fileURLToPath, pathToFileURL } = await import('node:url');
+  const source = fileURLToPath(new URL('../', import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), 'timer-reload-'));
+  const originalSet = globalThis.setInterval, originalClear = globalThis.clearInterval;
+  const active = new Set(), made = [];
+  globalThis.setInterval = (fn, ms) => { const timer = { fn, ms, unref() { return this; } }; active.add(timer); made.push(timer); return timer; };
+  globalThis.clearInterval = (timer) => { active.delete(timer); };
+  try {
+    for (const name of ['src', 'rulebooks']) cpSync(join(source, name), join(root, name), { recursive: true });
+    symlinkSync(join(source, 'node_modules'), join(root, 'node_modules'), 'dir');
+    const roomA = join(root, 'a'), roomB = join(root, 'b'); mkdirSync(roomA); mkdirSync(roomB);
+    const uiFile = join(root, 'src/ui.mjs'), ui = await import(pathToFileURL(uiFile).href);
+    const hub = { rooms: new Map(), node: null };
+    const make = async (cwd, key) => {
+      const ctx = { ...freshCtx(), cwd, key, hub, workerSpec: 'claude:Worker', noScreen: true };
+      Object.assign(ctx, await ui.load(ctx, '?v=first'));
+      ctx.usage = { ...ctx.usage, fetchQuota: async () => null, checkLogin: async () => ({ state: 'ok' }) };
+      ctx.findLeftovers = async () => [];
+      hub.rooms.set(key, ctx);
+      await ui.start(ctx);
+      return ctx;
+    };
+    const a = await make(roomA, roomA);
+    const b = await make(roomA, roomA + '#second');
+    const c = await make(roomB, roomB);
+    assert.equal(a.shop, b.shop); assert.notEqual(a.shop, c.shop);
+    assert.equal(made.length, 7); assert.equal(active.size, 7);
+    assert.equal(made.filter((t) => t.ms === 15_000).length, 2);
+    assert.equal(made.filter((t) => t.ms === 60_000).length, 4); // three quotas and one leftovers
+    assert.equal(made.filter((t) => t.ms === 600_000).length, 1);
+    const quotas = [a.quotaTimer, b.quotaTimer, c.quotaTimer], timers = [...hub.monitorTimers], schedules = [a.shop.schedulerTimer, c.shop.schedulerTimer];
+    const oldQuota = a.refreshQuota, oldLogin = hub.checkLogins, oldLeftovers = hub.checkLeftovers, oldSchedule = a.shop.checkSchedule;
+    const oldMonitor = a.monitorModule, oldScheduler = a.schedulerModule;
+    const monitorFile = join(root, 'src/monitor.mjs'), mon = readFileSync(monitorFile, 'utf8');
+    assert.ok(mon.includes('  hub.monitor.cli ??= {};'));
+    writeFileSync(monitorFile, mon.replace('  hub.monitor.cli ??= {};', "  hub.monitor.cli ??= {}; hub.monitor.versionProbe = 'new';"));
+    const schedulerFile = join(root, 'src/scheduler.mjs'), sched = readFileSync(schedulerFile, 'utf8');
+    assert.ok(sched.includes('  shop.schedulerCtx = ctx;'));
+    writeFileSync(schedulerFile, sched.replace('  shop.schedulerCtx = ctx;', "  shop.schedulerCtx = ctx; shop.schedulerVersionProbe = 'new';"));
+    const nextUi = await import(pathToFileURL(uiFile).href + '?v=second');
+    for (const ctx of [a, b, c]) {
+      Object.assign(ctx, await nextUi.load(ctx, '?v=second'));
+      ctx.usage = { ...ctx.usage, fetchQuota: async () => null, checkLogin: async () => ({ state: 'ok' }) };
+      ctx.findLeftovers = async () => [];
+      await nextUi.reloaded(ctx);
+    }
+    assert.notEqual(a.monitorModule, oldMonitor); assert.notEqual(a.schedulerModule, oldScheduler);
+    assert.equal(hub.monitor.versionProbe, 'new'); assert.equal(a.shop.schedulerVersionProbe, 'new'); assert.equal(c.shop.schedulerVersionProbe, 'new');
+    assert.notEqual(a.refreshQuota, oldQuota); assert.notEqual(hub.checkLogins, oldLogin);
+    assert.notEqual(hub.checkLeftovers, oldLeftovers); assert.notEqual(a.shop.checkSchedule, oldSchedule);
+    assert.deepEqual([a.quotaTimer, b.quotaTimer, c.quotaTimer], quotas);
+    assert.deepEqual(hub.monitorTimers, timers); assert.deepEqual([a.shop.schedulerTimer, c.shop.schedulerTimer], schedules);
+    assert.equal(made.length, 7); assert.equal(active.size, 7);
+    const calls = [];
+    a.refreshQuota = () => calls.push('quota'); hub.checkLogins = () => calls.push('login');
+    hub.checkLeftovers = () => calls.push('leftovers'); a.shop.checkSchedule = () => calls.push('schedule');
+    quotas[0].fn(); timers[0].fn(); timers[1].fn(); schedules[0].fn();
+    assert.deepEqual(calls, ['quota', 'login', 'leftovers', 'schedule']);
+    a.stopped = true; nextUi.ended(a); assert.ok(active.has(schedules[0]));
+    b.stopped = true; nextUi.ended(b); assert.ok(!active.has(schedules[0]));
+    c.stopped = true; nextUi.ended(c); assert.ok(!active.has(schedules[1]));
+    assert.deepEqual([...active], timers); // monitor timers are server-wide, not owned by rooms
+  } finally {
+    globalThis.setInterval = originalSet; globalThis.clearInterval = originalClear;
+    rmSync(root, { recursive: true, force: true, maxRetries: 5 });
+  }
+});

@@ -8,8 +8,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir, networkInterfaces, tmpdir } from 'node:os';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { homedir, networkInterfaces } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as defaultInstructions from './instructions.mjs';
@@ -18,6 +18,9 @@ import { formattedTurn as defaultFormattedTurn } from './room.mjs';
 const laneModule = await import(`./lanes.mjs${new URL(import.meta.url).search}`);
 const workshopModule = await import(`./workshop.mjs${new URL(import.meta.url).search}`);
 const boardsModule = await import(`./boards.mjs${new URL(import.meta.url).search}`);
+const monitorModule = await import(`./monitor.mjs${new URL(import.meta.url).search}`);
+const schedulerModule = await import(`./scheduler.mjs${new URL(import.meta.url).search}`);
+const { SCHEDULE_TIME_RE } = schedulerModule;
 export const { branchDiagram, BRANCH_DIAGRAM_LIMIT, WORKER_BRANCH, NOTES, workerPlace, ensureWorktree,
   parsePorcelainConflicts, worktreeStatus, catchUp, checkWorkerReport } = laneModule;
 const { git, gitOk, plural, labelledCommits, lanePlace, existingLanes, mainRef, workerGitFacts } = laneModule;
@@ -255,24 +258,6 @@ export async function saveSettings(ctx, value, file = defaultsFile()) {
   return { applied, workerApplied: true, settings: saved };
 }
 
-// Turn records live only in memory, keyed by the actual provider session, never in checkpoints.
-export function monitorAgentTurns(agent, session, records) {
-  const turn = agent.turn.bind(agent), reset = agent.reset?.bind(agent);
-  agent.turn = async (...args) => {
-    try {
-      const result = await turn(...args);
-      records.set(session, { ...records.get(session), ended: new Date().toISOString(), outcome: 'ok' });
-      return result;
-    } catch (err) {
-      const ended = new Date().toISOString();
-      records.set(session, { ended, outcome: 'error', error: { message: err?.message ?? String(err), at: ended } });
-      throw err;
-    }
-  };
-  if (reset) agent.reset = (...args) => { records.delete(session); return reset(...args); };
-  return agent;
-}
-
 // Imports fresh copies of the modules and the rulebook layers and builds a room on ctx.state, and the worker. Returns
 // the parts to put into ctx; if anything fails it throws, leaving ctx as it was (at most an
 // unused empty session added).
@@ -303,6 +288,8 @@ export async function load(ctx, v) {
   const lanes = await import(`./lanes.mjs${v}`);
   const workshopModule = await import(`./workshop.mjs${v}`);
   const boardsModule = await import(`./boards.mjs${v}`);
+  const monitorModule = await import(`./monitor.mjs${v}`);
+  const schedulerModule = await import(`./scheduler.mjs${v}`);
   const usage = await import(`./usage.mjs${v}`);
   // Replication is loaded only with --node.
   const replicate = ctx.node ? await import(`./replicate.mjs${v}`) : null;
@@ -360,7 +347,7 @@ export async function load(ctx, v) {
     gauges: ctx.screen?.quota,
     measured: ctx.screen?.quotaAt?.measured,
   });
-  return { room: createRoom(agents, ctx.state, instr, usageLine), worker, docs, lanes, workshopModule, boardsModule, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
+  return { room: createRoom(agents, ctx.state, instr, usageLine), worker, docs, lanes, workshopModule, boardsModule, monitorModule, schedulerModule, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: roomShop,
     testPrompt: (room, provider, model) => runPromptTest(room, provider, model, runner, { parseCodexEvents, parseAgyOutput }),
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
@@ -736,176 +723,6 @@ function replicaOff(ctx) {
   const launch = [...ctx.hub.rooms.values()].find((r) => r.launch);
   return `Replication runs only for this server's launch room${launch ? ` (${launch.cwd})` : ''}. A --peer address names a whole server, `
     + 'not one of its rooms, so this room has no peer: its rounds are neither saved for replication nor sent.';
-}
-
-// The header's quota gauges, for the room's and the worker's providers: refreshed every minute and
-// after each turn. screen.quota is null when the meter can't be read.
-async function refreshQuota(ctx, quota) {
-  quota ??= await ctx.usage.fetchQuota();
-  const providers = [...new Set([...ctx.room.agents, ctx.worker].map((a) => a.provider))];
-  ctx.screen.quota = quota ? ctx.usage.quotaGauges(quota, providers) : null;
-  // When the meter measured these values, and when the room last asked it.
-  ctx.screen.quotaAt = { measured: quota?.last_update ?? null, checked: new Date().toISOString() };
-  toScreen(ctx, { type: 'quota', gauges: ctx.screen.quota, at: ctx.screen.quotaAt });
-  return quota;
-}
-
-// The monitor panel's warnings (see README, "The header"), checked once per server: each provider's
-// login at startup and every 10 minutes, the record of programs for leftovers at startup and every
-// minute. Each room's panel shows its own part (monitorView). The timers call through the hub, so
-// after a reload they run the new code.
-const LOGIN_EVERY_MS = 10 * 60_000, LEFTOVERS_EVERY_MS = 60_000;
-const loadedRooms = (hub) => [...hub.rooms.values()].filter((r) => r.room && r.usage);
-const providersOf = (ctx) => [...new Set([...ctx.room.agents, ctx.worker].map((a) => a.provider))];
-function watchMonitor(ctx) {
-  const hub = hubOf(ctx);
-  hub.monitor ??= { login: {}, leftovers: [] };
-  hub.monitor.errors ??= { login: {}, leftovers: null, cli: {} };
-  hub.monitor.cli ??= {};
-  hub.checkLogins = (all, requested) => checkLogins(hub, all, requested);
-  hub.checkLeftovers = () => checkLeftovers(hub);
-  ctx.showMonitor = () => showMonitor(ctx);
-  if (!hub.monitorTimers) {
-    hub.monitor.nextLogin = new Date(Date.now() + LOGIN_EVERY_MS).toISOString();
-    hub.monitor.nextLeftovers = new Date(Date.now() + LEFTOVERS_EVERY_MS).toISOString();
-    hub.monitorTimers = [setInterval(() => { hub.monitor.nextLogin = new Date(Date.now() + LOGIN_EVERY_MS).toISOString(); hub.checkLogins(true); }, LOGIN_EVERY_MS).unref(),
-      setInterval(() => { hub.monitor.nextLeftovers = new Date(Date.now() + LEFTOVERS_EVERY_MS).toISOString(); hub.checkLeftovers(); }, LEFTOVERS_EVERY_MS).unref()];
-    hub.checkLeftovers();
-  }
-  hub.checkLogins(false);
-}
-const errorAt = (err) => ({ message: err?.message ?? String(err), at: new Date().toISOString() });
-// Preserve the last success separately from the latest failure, including unreadable login output.
-export async function checkLogins(hub, all, requested) {
-  const rooms = loadedRooms(hub);
-  if (!rooms.length) return;
-  const providers = (requested ?? [...new Set(rooms.flatMap(providersOf))]).filter((p) => all || !(p in hub.monitor.login));
-  await Promise.all(providers.map(async (p) => {
-    try {
-      const result = await rooms[0].usage.checkLogin(p), checked = new Date().toISOString();
-      if (result.state === 'unknown') hub.monitor.errors.login[p] = { message: result.error, at: checked };
-      else hub.monitor.login[p] = { ...result, checked };
-      hub.monitor.loginCurrent ??= {};
-      hub.monitor.loginCurrent[p] = { ...result, checked };
-    } catch (err) {
-      hub.monitor.errors.login[p] = errorAt(err);
-      (hub.monitor.loginCurrent ??= {})[p] = { state: 'unknown', error: hub.monitor.errors.login[p].message, checked: hub.monitor.errors.login[p].at };
-    }
-  }));
-  for (const r of loadedRooms(hub)) showMonitor(r);
-}
-export async function checkLeftovers(hub) {
-  const rooms = loadedRooms(hub);
-  if (!rooms.length) return;
-  try {
-    const tracked = new Set(rooms.flatMap((r) => [...(r.programs?.running ?? [])].map((p) => p.pid)));
-    hub.monitor.leftovers = await rooms[0].findLeftovers(tracked);
-    hub.monitor.leftoversChecked = new Date().toISOString();
-  } catch (err) { hub.monitor.errors.leftovers = errorAt(err); }
-  for (const r of loadedRooms(hub)) showMonitor(r);
-}
-const commandOutput = (command, args) => new Promise((resolve, reject) => execFile(command, args, { timeout: 20_000 }, (err, out) => err ? reject(err) : resolve(String(out).trim())));
-export async function checkCli(hub, provider, run = commandOutput) {
-  let path;
-  try {
-    path = await run('which', [provider]);
-    const version = await run(path, ['--version']);
-    hub.monitor.cli[provider] = { path, version, checked: new Date().toISOString() };
-  } catch (err) { hub.monitor.errors.cli[provider] = { ...errorAt(err), path: path ?? null }; }
-}
-// A diagnostic is a fresh provider invocation, separate from every agent's session and rulebook.
-export async function runPromptTest(ctx, provider, model, runner, parsers) {
-  const hub = hubOf(ctx), rooms = loadedRooms(hub);
-  if (!['claude', 'codex', 'agy'].includes(provider) || typeof model !== 'string') throw new Error('Choose a provider and model.');
-  const configured = rooms.flatMap((r) => { const s = currentSettings(r); return [...s.agents, s.worker]; });
-  if (model && !configured.some((a) => a.provider === provider && a.model === model)) throw new Error('Choose a model configured on this server.');
-  hub.promptRunning ??= new Set();
-  if (hub.promptRunning.has(provider)) throw new Error('A prompt test for this provider is already running.');
-  hub.promptRunning.add(provider);
-  const started = Date.now(), at = new Date(started).toISOString();
-  let dir, reply = '', error = null;
-  try {
-    dir = mkdtempSync(join(tmpdir(), 'agent-room-prompt-test-'));
-    let args;
-    if (provider === 'claude') {
-      args = ['-p', '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config'];
-      if (model) args.push('--model', model);
-      args.push('--tools', '');
-    } else if (provider === 'codex') {
-      args = ['exec', '--json', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', '-c', 'web_search="disabled"'];
-      if (model) args.push('-m', model);
-      args.push('-');
-    } else {
-      args = ['--output-format', 'json', '--sandbox'];
-      if (model) args.push('--model', model);
-    }
-    const output = await runner(provider, args, { input: 'Reply with exactly OK.', cwd: dir, timeoutMs: 30_000, agent: 'prompt test' });
-    if (provider === 'claude') {
-      const result = JSON.parse(output);
-      if (result.is_error) throw new Error(`claude: ${result.result || 'test failed'}`);
-      reply = String(result.result ?? '').trim();
-    } else if (provider === 'codex') reply = parsers.parseCodexEvents(output).text;
-    else reply = parsers.parseAgyOutput(output).text;
-    if (!reply) throw new Error(`${provider}: no reply`);
-  } catch (err) { error = err?.message ?? String(err); }
-  finally {
-    try { if (dir) rmSync(dir, { recursive: true, force: true }); }
-    catch (err) { error = [error, `Could not remove temporary folder: ${err.message}`].filter(Boolean).join('; '); }
-    hub.promptRunning.delete(provider);
-  }
-  const result = { provider, model, at, durationMs: Date.now() - started, outcome: error ? 'failed' : 'ok', reply: reply.slice(0, 200), error };
-  hub.promptResults ??= new Map();
-  if (!hub.promptResults.has(provider)) hub.promptResults.set(provider, new Map());
-  hub.promptResults.get(provider).set(model, result);
-  return result;
-}
-function healthView(ctx) {
-  const hub = hubOf(ctx), m = hub.monitor;
-  const rooms = loadedRooms(hub);
-  const catalogs = { claude: { models: claudeModels, loaded: true, error: null }, codex: codexModels.status(), agy: agyModels.status() };
-  const configured = (settings) => [...settings.agents.map((a) => ({ ...a, role: 'member' })), { ...settings.worker, role: 'worker' }]
-    .map((a) => ({ ...a, alignment: modelAlignment(a.model, catalogs[a.provider]) }));
-  const defaults = readDefaults();
-  const sessions = rooms.map((r) => {
-    const view = sessionView(r);
-    const entry = (agent, role, key) => ({ ...agent, role, lastTurn: r.turnRecords?.get(r.sessions.get(key)) ?? null });
-    return { room: r.cwd, discussion: folderOf(r), agents: [
-      ...view.agents.map((a) => entry(a, 'member', a.name)), entry(view.worker, 'worker', `worker:${view.worker.name}`) ] };
-  });
-  return { promptResults: [...(hub.promptResults?.values() ?? [])].flatMap((results) => [...results.values()]),
-    promptRunning: [...(hub.promptRunning ?? [])], sessions, scheduledProviders: [...new Set(rooms.flatMap(providersOf))], catalogs,
-    configured: rooms.map((r) => ({ room: r.cwd, discussion: folderOf(r), agents: configured(currentSettings(r)).map((a) => ({ ...a, enabled: a.role === 'worker' || !(r.state.disabledAgents ?? []).includes(a.name) })) })),
-    defaults: defaults ? configured(defaults) : null, login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
-    leftovers: m.leftovers, leftoversChecked: m.leftoversChecked, nextLogin: m.nextLogin, nextLeftovers: m.nextLeftovers,
-    running: loadedRooms(hub).flatMap((r) => [...(r.programs?.running ?? [])].map((p) => ({ pid: p.pid, provider: p.provider, ...p.monitorInfo }))),
-    quota: loadedRooms(hub).map((r) => ({ room: r.cwd, reachable: r.screen.quota === undefined ? null : r.screen.quota !== null, ...r.screen.quotaAt })) };
-}
-async function checkProviderHealth(ctx) {
-  const hub = hubOf(ctx);
-  codexModels();
-  await Promise.all([agyModels.refresh(), checkLogins(hub, true, ['claude', 'codex', 'agy']), checkLeftovers(hub),
-    ...['claude', 'codex', 'agy'].map((p) => checkCli(hub, p)), ...loadedRooms(hub).map((r) => refreshQuota(r).catch(() => null))]);
-  return healthView(ctx);
-}
-// What this room's panel shows, per provider: its login, how many of this room's programs are in its
-// procs, and the leftovers of this room, or of a room not open on this server. A provider with a
-// leftover is shown even when no agent of this room uses it.
-export function monitorView(ctx) {
-  const hub = hubOf(ctx);
-  const open = new Set(loadedRooms(hub).map((r) => r.cwd));
-  const leftovers = (hub.monitor?.leftovers ?? []).filter((l) => l.room === ctx.cwd || !open.has(l.room));
-  const running = [...(ctx.programs?.running ?? [])];
-  const view = {};
-  for (const p of new Set([...providersOf(ctx), ...leftovers.map((l) => l.provider)])) {
-    view[p] = { login: hub.monitor?.loginCurrent?.[p] ?? hub.monitor?.login[p] ?? null, running: running.filter((r) => r.provider === p).length,
-      leftovers: leftovers.filter((l) => l.provider === p), inRoom: providersOf(ctx).includes(p) };
-  }
-  return view;
-}
-function showMonitor(ctx) {
-  if (!ctx.screen || !ctx.room) return;
-  ctx.screen.monitor = monitorView(ctx);
-  toScreen(ctx, { type: 'monitor', monitor: ctx.screen.monitor });
 }
 
 export const promptText = () => (tty ? '\x1b[1;36mYou ›\x1b[0m ' : 'You › ');
@@ -1653,312 +1470,15 @@ async function pairWith(ctx, peer, confirm) {
   return result;
 }
 
-// ── Scheduler (research tasks) ─────────────────────────────────
-// Per-room schedule stored in agent-room's local state, outside the project's working tree:
-// ~/.local/state/agent-room/schedules/<sha256 of realpath(room folder)>.json
-const DEFAULT_QUOTA_FLOOR = 50;
-const SCHEDULE_EVERY_MS = 15_000;
-const SCHEDULE_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
-
-export function scheduleFile(ctx) {
-  return ctx.scheduleFile ?? join(homedir(), '.local', 'state', 'agent-room', 'schedules',
-    createHash('sha256').update(realpathSync(ctx.cwd)).digest('hex') + '.json');
-}
-
-export function readSchedule(ctx) {
-  const file = scheduleFile(ctx);
-  const empty = () => ({ version: 1, root: realpathSync(ctx.cwd), quotaFloor: DEFAULT_QUOTA_FLOOR, tasks: [] });
-  if (!existsSync(file)) return empty();
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8'));
-    if (!parsed || typeof parsed !== 'object') return empty();
-    const quotaFloor = typeof parsed.quotaFloor === 'number' && Number.isFinite(parsed.quotaFloor) && parsed.quotaFloor >= 0 && parsed.quotaFloor <= 100
-      ? parsed.quotaFloor : DEFAULT_QUOTA_FLOOR;
-    const tasks = Array.isArray(parsed.tasks) ? parsed.tasks.filter((t) => t && typeof t.id === 'string') : [];
-    return { version: 1, root: realpathSync(ctx.cwd), quotaFloor, tasks };
-  } catch {
-    return empty();
-  }
-}
-
-function writeSchedule(ctx, data) {
-  const file = scheduleFile(ctx);
-  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  const temp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-  try {
-    writeFileSync(temp, JSON.stringify({ version: 1, root: realpathSync(ctx.cwd), quotaFloor: data.quotaFloor, tasks: data.tasks }, null, 2) + '\n', { mode: 0o600 });
-    renameSync(temp, file);
-  } finally {
-    if (existsSync(temp)) unlinkSync(temp);
-  }
-}
-
-function broadcastSchedule(ctx) {
-  for (const c of siblings(ctx)) if (!c.stopped && c.screen) toScreen(c, { type: 'schedule' });
-  showHeader(ctx);
-}
-
-function listScheduleDiscussions(ctx) {
-  const parent = join(ctx.cwd, 'discussions');
-  if (!existsSync(parent)) return [];
-  const savedTitles = new Map(checkpoints(ctx).map((c) => [c.name, c.title]));
-  const titleFor = (name) => savedTitles.get(name) ?? name.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/-/g, ' ');
-  const scan = (dir, section) => {
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && DATED.test(e.name) && !isWorkbenchDir(join(dir, e.name)))
-      .map((e) => ({ ref: section ? `${section}/${e.name}` : e.name, name: e.name, title: titleFor(e.name), section }))
-      .sort((a, b) => b.name.localeCompare(a.name));
-  };
-  return [
-    ...scan(parent, null),
-    ...SECTIONS.flatMap((s) => scan(join(parent, s), s)),
-  ];
-}
-
-export function getSchedule(ctx) {
-  const data = readSchedule(ctx);
-  const running = shopOf(ctx).schedulerRunningTasks ?? new Set();
-  return {
-    quotaFloor: data.quotaFloor,
-    discussions: listScheduleDiscussions(ctx),
-    tasks: data.tasks.map((t) => ({
-      id: t.id,
-      kind: t.kind,
-      title: t.title, date: t.date, board: t.board ?? null,
-      prompt: t.prompt,
-      time: t.time,
-      enabled: !!t.enabled,
-      lastRun: t.lastRun ?? null,
-      running: running.has(t.id),
-    })),
-  };
-}
-
-function validateTaskInput(ctx, body) {
-  const kind = body?.kind;
-  if (kind !== 'research' && kind !== 'recurring') {
-    const d = body?.discussion && discussionRef(join(ctx.cwd, 'discussions'), body.discussion);
-    if (d && isWorkbenchDir(join(ctx.cwd, 'discussions', d.section ?? '', d.name))) throw new Error('Workbenches cannot be scheduled.');
-    throw new Error('Choose a research task type.');
-  }
-  const title = String(body.title ?? '').trim();
-  const prompt = String(body.prompt ?? '').trim();
-  const time = String(body.time ?? '').trim();
-  if (!prompt) throw new Error('Enter a prompt for the scheduled run.');
-  if (!SCHEDULE_TIME_RE.test(time)) throw new Error('Enter a local time in 24-hour HH:MM format.');
-  if (kind === 'research') {
-    const date = String(body.date ?? '').trim();
-    const parsed = new Date(`${date}T12:00:00`);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsed.getTime()) || day(parsed) !== date) throw new Error('Enter a valid local date.');
-    return { kind, title, prompt, date, time, enabled: true };
-  }
-  return { kind, title, prompt, time, enabled: body.enabled === undefined ? true : !!body.enabled };
-}
-
-export function saveSchedule(ctx, body) {
-  if (!body || typeof body !== 'object') throw new Error('Invalid schedule request.');
-  const data = readSchedule(ctx);
-  const action = body.action;
-  if (action === 'floor') {
-    const floor = Number(body.quotaFloor);
-    if (!Number.isFinite(floor) || floor < 0 || floor > 100) throw new Error('Quota floor must be a number between 0 and 100.');
-    data.quotaFloor = Math.round(floor);
-  } else if (action === 'add') {
-    const fields = validateTaskInput(ctx, body);
-    data.tasks.push({ id: randomBytes(8).toString('hex'), ...fields, lastRun: null, lastTriggerKey: null });
-  } else if (action === 'edit') {
-    const task = data.tasks.find((t) => t.id === body.id);
-    if (!task) throw new Error('Scheduled task not found.');
-    if (task.kind !== body.kind) throw new Error('Cannot change task type.');
-    const fields = validateTaskInput(ctx, body);
-    const timeChanged = task.time !== fields.time || task.date !== fields.date;
-    Object.assign(task, fields);
-    if (timeChanged) { task.lastTriggerKey = null; if (task.kind === 'research') task.lastRun = null; }
-  } else if (action === 'toggle') {
-    const task = data.tasks.find((t) => t.id === body.id);
-    if (!task) throw new Error('Scheduled task not found.');
-    task.enabled = !!body.enabled;
-  } else if (action === 'delete') {
-    const before = data.tasks.length;
-    data.tasks = data.tasks.filter((t) => t.id !== body.id);
-    if (data.tasks.length === before) throw new Error('Scheduled task not found.');
-  } else {
-    throw new Error('Unknown schedule action.');
-  }
-  writeSchedule(ctx, data);
-  broadcastSchedule(ctx);
-  return getSchedule(ctx);
-}
-
-function recordTaskRun(ctx, taskId, status, reason, at, triggerKey = undefined) {
-  const data = readSchedule(ctx);
-  const task = data.tasks.find((t) => t.id === taskId);
-  if (!task || (triggerKey !== undefined && task.lastTriggerKey !== triggerKey)) return;
-  task.lastRun = { at, status, reason: reason ?? null };
-  writeSchedule(ctx, data);
-  broadcastSchedule(ctx);
-}
-
-export async function runScheduledTask(ctx, taskId, { now = null, loadRoom = load } = {}) {
-  const data = readSchedule(ctx);
-  const task = data.tasks.find((t) => t.id === taskId);
-  if (!task) return null;
-  return runScheduledResearch(ctx, task, data, { now, loadRoom });
-}
-
-async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
-  const at = (now ?? new Date()).toISOString();
-  const clockMs = () => now ? now.getTime() : Date.now();
-  const shop = shopOf(ctx);
-  shop.schedulerRunningTasks ??= new Set();
-  if (shop.schedulerRunningTasks.has(task.id)) {
-    const reason = 'A round or summary is already in progress for this task';
-    recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
-    return { status: 'skipped', reason };
-  }
-  shop.schedulerRunningTasks.add(task.id);
-  broadcastSchedule(ctx);
-  let runCtx = null;
-  let createdBeside = false;
-  try {
-    const parent = join(ctx.cwd, 'discussions');
-    const ref = task.board && [task.board, ...SECTIONS.map((section) => `${section}/${task.board}`)]
-      .find((candidate) => discussionRef(parent, candidate));
-    if (task.board && (!ref || !isResearchDir(join(parent, ref)))) throw new Error(`Research board ${task.board} was not found.`);
-    let open = task.board && siblings(ctx).find((c) => !c.stopped && isDiscussion(c, task.board));
-    if (open?.busy) {
-      const reason = `${task.board} has a round or summary in progress`;
-      recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
-      return { status: 'skipped', reason };
-    }
-    const saved = task.board && readCheckpoint(ctx, task.board);
-    const specs = open?.agentSpecs ?? saved?.agentSpecs ?? roomDefaults(ctx).agents ?? ctx.agentSpecs ?? '';
-    const providers = open
-      ? [...new Set(open.room.agents.filter((a) => !(open.state.disabledAgents ?? []).includes(a.name)).map((a) => a.provider))]
-      : [...new Set(specs.split(',').filter(Boolean).map((s) => parseSpec(s)).filter((a) => !(saved?.state?.disabledAgents ?? []).includes(a.name)).map((a) => a.provider))];
-    const quota = await ctx.usage.fetchQuota();
-    refreshQuota(ctx, quota).catch(() => {});
-    const check = ctx.usage.checkQuotaFloor(quota, providers, data.quotaFloor, { now: clockMs() });
-    if (!check.ok) {
-      recordTaskRun(ctx, task.id, 'skipped', check.reason, at, task.lastTriggerKey);
-      return { status: 'skipped', reason: check.reason };
-    }
-    if (task.board && !isResearchDir(join(parent, ref))) throw new Error(`Research board ${task.board} is no longer research.`);
-    // Another round may have started while quota was being fetched.
-    open = task.board && siblings(ctx).find((c) => !c.stopped && isDiscussion(c, task.board));
-    if (open?.busy) {
-      const reason = `${task.board} has a round or summary in progress`;
-      recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
-      return { status: 'skipped', reason };
-    }
-    if (open) {
-      runCtx = open;
-    } else if (ctx.hub?.addRoom) {
-      runCtx = await openBeside(ctx);
-      createdBeside = true;
-      if (task.board) {
-        await resumeDiscussion(runCtx, ref, { loadRoom });
-        if (!isDiscussion(runCtx, task.board)) throw new Error(`Could not resume research board ${task.board}.`);
-      } else await newResearch(runCtx);
-    } else {
-      const state = { transcript: [], seen: new Map(), research: true }, sessions = new Map();
-      runCtx = { ...ctx, state, sessions, discussion: null, programs: { running: new Set(), stopping: false },
-        screen: { clients: new Set(), transcript: state.transcript, worker: shop.log }, lastRound: null, logPath: null,
-        checkpointError: null, hub: null, noScreen: true };
-      Object.assign(runCtx, await loadRoom(runCtx, `?sched=${Date.now()}`), { state, sessions, usage: ctx.usage });
-      wire(runCtx);
-      if (task.board) {
-        await resumeDiscussion(runCtx, ref, { loadRoom });
-        if (!isDiscussion(runCtx, task.board)) throw new Error(`Could not resume research board ${task.board}.`);
-      }
-    }
-    if (runCtx.busy) {
-      const reason = `${task.board} has a round or summary in progress`;
-      recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
-      return { status: 'skipped', reason };
-    }
-    if (!runCtx.logPath) {
-      const suggestTitle = runCtx.suggestTitle;
-      if (!task.board && task.title) runCtx.suggestTitle = async () => ({ title: task.title });
-      let opened;
-      try { opened = await openDiscussion(runCtx, task.prompt); } finally { runCtx.suggestTitle = suggestTitle; }
-      if (!opened) throw new Error('Could not create the research board or transcript.');
-    }
-    if (task.kind === 'recurring' && !task.board) {
-      const current = readSchedule(ctx), stored = current.tasks.find((t) => t.id === task.id);
-      if (stored) { stored.board = runCtx.discussion.name; writeSchedule(ctx, current); broadcastSchedule(ctx); }
-    }
-    const result = await runRound(task.prompt, runCtx, {
-      speaker: 'Scheduler',
-      beforeLap: async (lap) => {
-        const q = await runCtx.usage.fetchQuota();
-        refreshQuota(runCtx, q).catch(() => {});
-        const active = [...new Set(runCtx.room.agents.filter((a) => !(runCtx.state.disabledAgents ?? []).includes(a.name)).map((a) => a.provider))];
-        const next = runCtx.usage.checkQuotaFloor(q, active, readSchedule(ctx).quotaFloor, { now: clockMs() });
-        return next.ok ? null : `Scheduled run stopped early by quota guard before lap ${lap + 1}: ${next.reason}`;
-      },
-    });
-    const status = result?.stoppedReason ? 'stopped' : result?.failedError ? 'failed' : 'ran';
-    const reason = result?.stoppedReason ?? result?.failedError ?? null;
-    saveCheckpoint(runCtx);
-    recordTaskRun(ctx, task.id, status, reason, at, task.lastTriggerKey);
-    return { status, reason };
-  } catch (err) {
-    recordTaskRun(ctx, task.id, 'failed', err.message, at, task.lastTriggerKey);
-    if (createdBeside && runCtx && !runCtx.stopped && fresh(runCtx)) closeContext(runCtx);
-    return { status: 'failed', reason: err.message };
-  } finally {
-    shop.schedulerRunningTasks.delete(task.id);
-    broadcastSchedule(ctx);
-    showHeader(ctx);
-  }
-}
-
-export async function checkSchedule(ctx, now = null, opts = {}) {
-  const data = readSchedule(ctx);
-  if (!data.tasks.length) return [];
-  const current = now ?? new Date();
-  const today = day(current);
-  const nowTime = `${pad(current.getHours())}:${pad(current.getMinutes())}`;
-  const triggerKey = `${today} ${nowTime}`;
-  const due = [];
-  let changed = false;
-  for (const task of data.tasks) {
-    if (!task.enabled) continue;
-    if (task.time !== nowTime) continue;
-    if (task.kind === 'research' && (task.date !== today || task.lastTriggerKey || shopOf(ctx).schedulerRunningTasks?.has(task.id))) continue;
-    if (task.lastTriggerKey === triggerKey) continue;
-    task.lastTriggerKey = triggerKey;
-    changed = true;
-    due.push(task.id);
-  }
-  if (changed) writeSchedule(ctx, data);
-  return Promise.all(due.map((id) => runScheduledTask(ctx, id, { ...opts, now })));
-}
-
-function startScheduler(ctx) {
-  const shop = shopOf(ctx);
-  shop.schedulerCtx = ctx;
-  shop.checkSchedule = () => {
-    const live = siblings(shop.schedulerCtx).find((c) => !c.stopped && c.room && c.usage);
-    if (live) checkSchedule(live).catch(() => {});
-  };
-  shop.schedulerTimer ??= setInterval(() => shop.checkSchedule?.(), SCHEDULE_EVERY_MS).unref();
-}
-
-function stopSchedulerIfLast(ctx) {
-  const shop = ctx.shop;
-  if (!shop?.schedulerTimer) return;
-  if (!siblings(ctx).some((c) => c !== ctx && !c.stopped)) {
-    clearInterval(shop.schedulerTimer);
-    shop.schedulerTimer = null;
-  }
-}
+// Monitoring binds the current coordinator; hub and room state retain timer ownership.
+const monitor = monitorModule.createMonitor({ hubOf, toScreen, currentSettings, claudeModels, codexModels, agyModels,
+  modelAlignment, readDefaults, sessionView, folderOf: (...args) => folderOf(...args) });
+export const { monitorAgentTurns, checkLogins, checkLeftovers, checkCli, runPromptTest, monitorView } = monitor;
+const { refreshQuota, watchMonitor, healthView, checkProviderHealth, showMonitor } = monitor;
 
 // Board callbacks are rebound with each UI version; running operations keep their original set.
 const boards = boardsModule.createBoards({
-  day, hhmm, pad, slug, SCHEDULE_TIME_RE, readSchedule, siblings, multi, fresh, ownerOf, originLabel,
+  day, hhmm, pad, slug, SCHEDULE_TIME_RE, readSchedule: (...args) => readSchedule(...args), siblings, multi, fresh, ownerOf, originLabel,
   baseKey, roomPath, roomDefaults, parseSpec, specFor, load, wire, note, out, red, dim, bold, log,
   toScreen, showHeader, runRound, refreshWorker: (...args) => refreshWorker(...args),
   laneOf: (...args) => laneOf(...args), lanePlace, workerPlace, workerHold: (...args) => workerHold(...args), WORKER_BRANCH,
@@ -1969,7 +1489,8 @@ const boards = boardsModule.createBoards({
   pump: (...args) => pump(...args), leftovers: (...args) => leftovers(...args),
   autoDevInput: (...args) => autoDevInput(...args), cleanupMergedOnClose: (...args) => cleanupMergedOnClose(...args),
   refreshQuota, pushReplica, recoverWorkerOwner: (...args) => recoverWorkerOwner(...args),
-  startThinking, stopThinking, setScreenThinking, when, describe, writeSchedule, broadcastSchedule, pageOf,
+  startThinking, stopThinking, setScreenThinking, when, describe,
+  writeSchedule: (...args) => writeSchedule(...args), broadcastSchedule: (...args) => broadcastSchedule(...args), pageOf,
   mainRef, modelLabel, currentSettings, saveClosed,
 });
 export const { WORKBENCH_MARKER, isWorkbenchDir, RESEARCH_MARKER, isResearchDir, createDiscussionFolder, createSessionFile, cancelClose } = boards;
@@ -2002,3 +1523,11 @@ const laneActions = laneModule.createLaneActions({
 export const { discardPreview, closeAndDiscard, mergeReadiness, closeMergePreview,
   catchUpWithBranch, closeAndMerge, refreshWorker } = laneActions;
 const { laneOf, cleanupMergedOnClose, worktreeFingerprint, recordTested } = laneActions;
+
+// Scheduler callbacks are rebound after the board and worker factories for each UI version.
+const scheduler = schedulerModule.createScheduler({ siblings, toScreen, showHeader, checkpoints, DATED, isWorkbenchDir,
+  SECTIONS, shopOf, discussionRef, day, pad, load, isResearchDir, isDiscussion, readCheckpoint,
+  roomDefaults, parseSpec, refreshQuota, openBeside, resumeDiscussion, newResearch, wire,
+  openDiscussion, runRound, saveCheckpoint, fresh, closeContext });
+export const { scheduleFile, readSchedule, getSchedule, saveSchedule, runScheduledTask, checkSchedule } = scheduler;
+const { writeSchedule, broadcastSchedule, startScheduler, stopSchedulerIfLast } = scheduler;
