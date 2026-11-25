@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './layout.css';
-import type { BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, Room, SayRequest, ScreenEvent, ShowRequest, WorkerInfo, WorkerInfoRequest } from '../../src/contract';
+import type { BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, Room, SayRequest, ScreenEvent, ShowRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
 type StatusLine = { text: string; error: boolean };
@@ -93,6 +93,10 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
   }, [!!boardDialog]);
   const [messages, setMessages] = useState<MessageView[]>([]);
+  const [workerMessages, setWorkerMessages] = useState<WorkerMessage[]>([]);
+  const [tab, setTab] = useState<'discussion' | 'worker'>('discussion');
+  const tabRef = useRef(tab); tabRef.current = tab;
+  const [workerNews, setWorkerNews] = useState(false);
   const [thinking, setThinking] = useState<string | null>(null);
   const [yourTurn, setYourTurn] = useState(false);
   const [peek, setPeek] = useState<Peek | null>(null);
@@ -233,8 +237,13 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     else if ('preview' in result) setBoardDialog({ kind: 'merge', name, preview: result.preview, changed });
     else setBoardDialog(null);
   };
+  const catchUp = async (name: string) => {
+    try { const result = await actionReply<CatchUpReply>('__catchup', { name }); addStatus(`Queued catch-up with ${result.targetBranch} for ${name}. Review the report, then click Close and Merge again.`); }
+    catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); refreshWorker(); }
+  };
   const startBoardAction = async (kind: 'merge' | 'discard', name: string) => {
     if (actionsMenu.current) actionsMenu.current.open = false; setRowMenu(null);
+    if (kind === 'merge' && workerInfo?.mergeable?.[name]?.catchUp) { await catchUp(name); return; }
     try {
       if (kind === 'merge') mergeResult(name, await actionReply<MergeReply>('__merge', { name }), false);
       else { const result = await actionReply<DiscardReply>('__discard', { name }); if ('preview' in result) setBoardDialog({ kind, name, preview: result.preview, changed: false }); }
@@ -245,10 +254,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     setDialogBusy(true);
     try {
       if (dialog.kind === 'catchup') {
-        const latest = await actionReply<MergeReply>('__merge', { name: dialog.name });
-        if (!('catchUp' in latest) || !latest.catchUp || latest.targetBranch !== dialog.target || latest.behind !== dialog.behind || latest.message !== dialog.message) { mergeResult(dialog.name, latest, true); return; }
-        const result = await actionReply<CatchUpReply>('__catchup', { name: dialog.name });
-        setBoardDialog(null); addStatus(`Queued catch-up with ${result.targetBranch} for ${dialog.name}. Review the report, then click Close and Merge again.`);
+        setBoardDialog(null); await catchUp(dialog.name);
       } else if (dialog.kind === 'merge') {
         const result = await actionReply<MergeReply>('__merge', { name: dialog.name, snapshot: dialog.preview.snapshot });
         mergeResult(dialog.name, result, true);
@@ -453,6 +459,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       }
       if (event.type === 'reset') {
         setWorkerInfo(event.workerInfo ?? null);
+        setWorkerMessages(event.worker ?? []);
+        if (event.room?.workbench && !event.peek) { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); }
+        else if (event.room?.research && tabRef.current === 'worker') { tabRef.current = 'discussion'; setTab('discussion'); }
         viewing.current = event.viewing;
         setViewLayout(event.viewing && typeof event.viewing === 'object' ? event.viewing as { name?: string; discussion?: string } : null);
         roomRef.current = event.room; peekRef.current = event.peek ?? null;
@@ -486,6 +495,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
             });
           }
         }
+      } else if (event.type === 'work') {
+        if ('note' in event.message) addStatus(event.message.note, !!event.message.error);
+        else { setWorkerMessages((previous) => [...previous, event.message]); if (event.message.speaker !== 'User' && tabRef.current !== 'worker') setWorkerNews(true); }
       } else if (event.type === 'agent-failure') {
         pin(event.agent, event.error);
       } else if (event.type === 'thinking') {
@@ -508,6 +520,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         }
         if (changed) setFilePeek(null);
         roomRef.current = event.room; setRoom(event.room); if (event.room.folder) void loadDetails();
+        if (event.room.workbench && !peekRef.current) { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); }
+        else if (event.room.research && tabRef.current === 'worker') { tabRef.current = 'discussion'; setTab('discussion'); }
       } else if (event.type === 'files') {
         setSubtab('explorer'); void loadDetails();
       } else if (event.type === 'moved') {
@@ -708,6 +722,12 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     <div ref={panel} className={'next-layout' + (layout.stacked ? ' stacked' : '') + (layout.sideClosed ? ' closed' : '')} style={{ '--left': layout.left ? layout.left + 'px' : '55%', '--top': layout.top ? layout.top + 'px' : '55%' } as React.CSSProperties}>
     <div ref={conversation} className="next-conversation">
     {layout.sideClosed && <button type="button" title="Open side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: false }, true, 'side-closed')}>Open side pane</button>}
+    <div role="tablist" aria-label="Conversation tabs">
+      {!room?.workbench && <button type="button" role="tab" aria-selected={tab === 'discussion'} onClick={() => { tabRef.current = 'discussion'; setTab('discussion'); }}>Discussion</button>}
+      {!room?.research && <button type="button" role="tab" aria-selected={tab === 'worker'} onClick={() => { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); refreshWorker(); }}>Worker{workerNews ? ' · new' : ''}</button>}
+    </div>
+    {tab === 'worker' && <section aria-label="Worker conversation">{workerMessages.map((message, index) => 'note' in message ? <p key={index} className={message.error ? 'status error' : 'status'}>{message.note}</p> : <article key={index} className={'msg' + (message.error ? ' error' : '')}><strong>{message.speaker}{message.error ? ' — failed' : ''}</strong><div dangerouslySetInnerHTML={{ __html: message.html }} /></article>)}<p>Worker input is not available on this page yet.</p></section>}
+    <div hidden={tab !== 'discussion'}>
     {peek && <p>peeking at {displayTitle(peek.name, peek.title)} · read-only</p>}
     {!!(room && !room.active && !peek && !viewLayout && !room.workbench) && <p>{room.brainstorm ? 'Your first message names this brainstorm and saves it here.' : room.research ? 'Your first message names this research board and saves it here.' : 'Your first message starts a new discussion.'}</p>}
     {turnVisible && <p aria-label="Turn status">your turn</p>}
@@ -733,6 +753,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         {sending && files.length > 0 && <span>Saving the attachments…</span>}
       </div>
     </div>}
+    </div>
     </div>
     <div ref={divider} role="separator" tabIndex={0} aria-label="Resize conversation and side pane" aria-orientation={layout.stacked ? 'horizontal' : 'vertical'} className="next-divider"
       onKeyDown={(event) => {

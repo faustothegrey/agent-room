@@ -59,16 +59,13 @@ it('previews discard from a row and rechecks all changed contents before confirm
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(calls('__discard')).toEqual([{ name }, { name, snapshot: 'd1' }, { name, snapshot: 'd2' }]);
 });
 
-it('previews and rechecks catch-up before queuing it, and asks again if the target changed', async () => {
+it('queues catch-up directly without a preview or confirmation', async () => {
   setup({}, { lines: [], mergeable: { [name]: { canMerge: false, catchUp: true, targetBranch: 'main' } } });
-  let previewCount = 0;
-  fetchMock.mockImplementation(async (url: string) => url === '__merge' ? respond({ catchUp: true, targetBranch: ++previewCount === 1 ? 'main' : 'trunk', behind: 1, message: 'Target moved.' }) : url === '__catchup' ? respond({ ok: true, targetBranch: 'trunk' }) : respond({ files: [`discussions/${name}/notes.md`], unviewable: [], branch: null }));
+  fetchMock.mockImplementation(async (url: string) => url === '__catchup' ? respond({ ok: true, targetBranch: 'main' }) : respond({ files: [`discussions/${name}/notes.md`], unviewable: [], branch: null }));
   const user = userEvent.setup(); await openActions(); await user.click(screen.getByRole('button', { name: 'Catch up with main' }));
-  let dialog = await screen.findByRole('dialog'); expect(calls('__catchup')).toHaveLength(0);
-  await user.click(within(dialog).getByRole('button', { name: 'Catch up with main' })); dialog = await screen.findByRole('dialog');
-  expect(within(dialog).getByText(/target or readiness changed/i)).toBeTruthy(); expect(calls('__catchup')).toHaveLength(0);
-  await user.click(within(dialog).getByRole('button', { name: 'Catch up with trunk' }));
-  await waitFor(() => expect(calls('__catchup')).toEqual([{ name }])); expect(await screen.findByText(/Queued catch-up with trunk/)).toBeTruthy();
+  await waitFor(() => expect(calls('__catchup')).toEqual([{ name }]));
+  expect(calls('__merge')).toHaveLength(0); expect(screen.queryByRole('dialog')).toBeNull();
+  expect(await screen.findByText(/Queued catch-up with main/)).toBeTruthy();
 });
 
 it('shows refusal and partial failure text and refreshes worker info for each failed action', async () => {
@@ -110,12 +107,11 @@ it('keeps a failed merge confirmation open and refreshes worker information', as
   await waitFor(() => expect(calls('__workerinfo').length).toBe(before + 1));
 });
 
-it('refreshes worker information when a confirmed catch-up is refused', async () => {
+it('refreshes worker information when direct catch-up is refused', async () => {
   setup({}, { lines: [], mergeable: { [name]: { canMerge: false, catchUp: true, targetBranch: 'main' } } });
-  fetchMock.mockImplementation(async (url: string) => url === '__merge' ? respond({ catchUp: true, targetBranch: 'main', behind: 1, message: 'Target moved.' }) : url === '__catchup' ? respond('Catch up refused', false) : url === '__files?detail=1' ? respond({ files: [`discussions/${name}/notes.md`], unviewable: [], branch: null }) : respond({}));
+  fetchMock.mockImplementation(async (url: string) => url === '__catchup' ? respond('Catch up refused', false) : url === '__files?detail=1' ? respond({ files: [`discussions/${name}/notes.md`], unviewable: [], branch: null }) : respond({}));
   const user = userEvent.setup(); await openActions(); const before = calls('__workerinfo').length;
-  await user.click(screen.getByRole('button', { name: 'Catch up with main' })); const dialog = await screen.findByRole('dialog');
-  await user.click(within(dialog).getByRole('button', { name: 'Catch up with main' }));
+  await user.click(screen.getByRole('button', { name: 'Catch up with main' }));
   expect(await screen.findByText('Catch up refused')).toBeTruthy(); expect(screen.queryByRole('dialog')).toBeNull();
   await waitFor(() => expect(calls('__workerinfo').length).toBe(before + 1));
 });
