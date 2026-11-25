@@ -3524,6 +3524,19 @@ test('started discussion settings preserve the local worker and permit names fro
   assert.deepEqual(readDefaults(file), { agents: laterAgents, worker: defaultWorker });
 });
 
+test('saving settings after reload uses the reloaded modules', async () => {
+  const version = '?settings-reload-test';
+  const { load: reloadedLoad, saveSettings } = await import('../src/ui.mjs' + version);
+  const instructions = await import('../src/instructions.mjs' + version);
+  const ctx = { ...freshCtx(), workerSpec: 'codex:W' };
+  Object.assign(ctx, await reloadedLoad(ctx, version));
+  const file = `${await tmp('reloaded-settings-')}/defaults.json`;
+  await saveSettings(ctx, { agents: [{ provider: 'claude', name: 'A', model: '' }, { provider: 'codex', name: 'B', model: '' }],
+    worker: { provider: 'claude', name: 'W', model: '' }, scope: 'work' }, file);
+  assert.equal(ctx.instructions, instructions);
+  assert.equal(ctx.worker.provider, 'claude');
+});
+
 test('new screen discussions and terminal sessions use the saved worker default', async () => {
   const { mkdirSync, writeFileSync } = await import('node:fs');
   const { join } = await import('node:path');
@@ -6854,6 +6867,7 @@ test('recurring research restores unloaded sessions and resumes a closed board f
   ctx.say = () => {};
   await reloaded(ctx);
   ctx.usage = { ...ctx.usage, fetchQuota: async () => ({}), checkQuotaFloor: () => ({ ok: true }) };
+  const testUsage = ctx.usage;
   ctx.suggestTitle = async () => ({ title: 'Generated Title' });
   let lastLoaded, prompts = [];
   const loadRoom = async (next, v) => {
@@ -6875,6 +6889,7 @@ test('recurring research restores unloaded sessions and resumes a closed board f
   assert.match(prompts.at(-1), /\[Scheduler\]: Study this/);
   // Close the saved open board through the normal UI path, then the next run must start fresh.
   await handleLine(`/resume ${boardName}`, ctx);
+  ctx.usage = testUsage; // Resuming reloads the usage module; keep this test independent of the live meter.
   ctx.closingAgent = () => ({ name: 'Worker', turn: async () => 'Closing statement: research findings. See pending-instructions.md.' });
   await handleLine('/close', ctx);
   assert.match(readFileSync(`${cwd}/discussions/${boardName}/closing-statement.md`, 'utf8'), /research findings/);
