@@ -7002,11 +7002,28 @@ test('Reload loads the lane diagram module again while preserving live room and 
     ctx.state.transcript.push({ speaker: 'User', text: 'kept across Reload' });
     const state = ctx.state, shop = ctx.shop, session = ctx.sessions.get('worker:Worker'), first = ctx.lanes;
     assert.equal(first.BRANCH_DIAGRAM_LIMIT, 15);
+    let release, reached;
+    const blocked = new Promise((resolve) => { release = resolve; });
+    const entered = new Promise((resolve) => { reached = resolve; });
+    const inFlight = ui.refreshWorker(ctx, { place: { disabled: 'old' }, _beforeBroadcast: async () => { reached(); await blocked; } });
+    await entered;
     const file = join(root, 'src/lanes.mjs');
     const text = readFileSync(file, 'utf8');
     assert.match(text, /BRANCH_DIAGRAM_LIMIT = 15/);
-    writeFileSync(file, text.replace('BRANCH_DIAGRAM_LIMIT = 15', 'BRANCH_DIAGRAM_LIMIT = 16'));
-    Object.assign(ctx, await ui.load(ctx, '?v=second'));
+    assert.match(text, /if \(own\.disabled\) return \{ lines: \[own\.disabled\]/);
+    writeFileSync(file, text.replace('BRANCH_DIAGRAM_LIMIT = 15', 'BRANCH_DIAGRAM_LIMIT = 16')
+      .replace('if (own.disabled) return { lines: [own.disabled]', "if (own.disabled) return { lines: ['new: ' + own.disabled]"));
+    const uiFile = join(root, 'src/ui.mjs'), uiText = readFileSync(uiFile, 'utf8');
+    const callback = 'const toScreen = (ctx, event) => ctx.docs.broadcast(ctx.screen, event);';
+    assert.ok(uiText.includes(callback));
+    writeFileSync(uiFile, uiText.replace(callback, "const toScreen = (ctx, event) => { ctx.callbackVersion = 'new'; return ctx.docs.broadcast(ctx.screen, event); };"));
+    const nextUi = await import(pathToFileURL(uiFile).href + '?v=second');
+    Object.assign(ctx, await nextUi.load(ctx, '?v=second'));
+    await nextUi.refreshWorker(ctx, { place: { disabled: 'current' } });
+    assert.deepEqual(ctx.screen.workerInfo.lines, ['new: current']);
+    assert.equal(ctx.callbackVersion, 'new');
+    release(); await inFlight;
+    assert.deepEqual(ctx.screen.workerInfo.lines, ['new: current']); // stale in-flight refresh did not overwrite it
     assert.notEqual(ctx.lanes, first);
     assert.notEqual(ctx.lanes.workerPlace, first.workerPlace);
     assert.notEqual(ctx.lanes.checkWorkerReport, first.checkWorkerReport);

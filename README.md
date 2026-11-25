@@ -928,7 +928,7 @@ agent-room's source.
 | `src/instructions.mjs` | The prompt catalog: every instruction sent to the discussion agents, the worker, the closing-statement agent and the title-generation call; the one source the runtime and the Instructions page (on the Control bar) both read. |
 | `src/room.mjs` | Discussion turns, unseen messages, passes and summary agreement. |
 | `src/ui.mjs` | Room setup, persistent defaults, commands, discussions, worker queue, logging and launch integration. |
-| `src/lanes.mjs` | Worker worktree placement and lifecycle, Git status and merge previews, report checks and branch diagrams. |
+| `src/lanes.mjs` | Worker worktrees, Git snapshots, merge/discard/catch-up actions, worker information, test reports and branch diagrams. |
 | `src/docs.mjs` | Reloadable document and screen HTTP facade. |
 | `src/docs-files.mjs` | Document rendering, viewer page and room file helpers. |
 | `src/docs-routes.mjs` | Room screen and input HTTP routes. |
