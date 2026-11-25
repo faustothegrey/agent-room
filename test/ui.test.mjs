@@ -7050,3 +7050,58 @@ test('Reload loads the lane diagram module again while preserving live room and 
     assert.equal(ctx.room.transcript[0].text, 'kept across Reload');
   } finally { rmSync(root, { recursive: true, force: true, maxRetries: 5 }); }
 });
+
+test('Reload retains an open board and resumes a paused board from its checkpoint', async () => {
+  const { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { fileURLToPath, pathToFileURL } = await import('node:url');
+  const source = fileURLToPath(new URL('../', import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), 'board-reload-')), home = process.env.HOME;
+  process.env.HOME = root;
+  try {
+    for (const name of ['src', 'rulebooks']) cpSync(join(source, name), join(root, name), { recursive: true });
+    symlinkSync(join(source, 'node_modules'), join(root, 'node_modules'), 'dir');
+    const cwd = join(root, 'room'); mkdirSync(cwd);
+    const uiFile = join(root, 'src/ui.mjs');
+    const ui = await import(pathToFileURL(uiFile).href);
+    const ctx = { ...freshCtx(), cwd, workerSpec: 'claude:W', noScreen: true };
+    Object.assign(ctx, await ui.load(ctx, '?v=first'));
+    ctx.usage = { ...ctx.usage, fetchQuota: async () => null };
+    const titles = ['Paused board', 'Open board'];
+    ctx.suggestTitle = async () => ({ title: titles.shift() });
+    for (const agent of ctx.room.agents) agent.turn = async () => 'PASS';
+    Object.assign(ctx.sessions.get('A'), { id: 'paused-session', started: true });
+    Object.assign(ctx.sessions.get('B'), { threadId: 'paused-codex' });
+    await ui.handleLine('paused message', ctx);
+    const paused = ctx.discussion.name, pausedFile = await checkpointPath(cwd, paused);
+    assert.ok(existsSync(pausedFile));
+    const pausedSnapshot = JSON.parse(readFileSync(pausedFile, 'utf8'));
+    assert.equal(new Map(pausedSnapshot.sessions).get('A').id, 'paused-session');
+    await ui.handleLine('/new', ctx);
+    await ui.handleLine('open message', ctx);
+    const open = ctx.discussion, activeState = ctx.state, openFile = await checkpointPath(cwd, open.name);
+    assert.ok(existsSync(openFile));
+    const boardsFile = join(root, 'src/boards.mjs'), boardText = readFileSync(boardsFile, 'utf8');
+    assert.ok(boardText.includes('function readCheckpoint(ctx, name) {'));
+    writeFileSync(boardsFile, boardText.replace('function readCheckpoint(ctx, name) {', "function readCheckpoint(ctx, name) { ctx.boardReadVersion = 'new';"));
+    const uiText = readFileSync(uiFile, 'utf8');
+    assert.ok(uiText.includes('  watchMonitor(ctx);\n  startScheduler(ctx);'));
+    writeFileSync(uiFile, uiText.replace('  watchMonitor(ctx);\n  startScheduler(ctx);', '  // Monitor and scheduler disabled in this isolated test.'));
+    const nextUi = await import(pathToFileURL(uiFile).href + '?v=second');
+    const firstBoards = ctx.boardsModule;
+    Object.assign(ctx, await nextUi.load(ctx, '?v=second'));
+    await nextUi.reloaded(ctx);
+    assert.notEqual(ctx.boardsModule, firstBoards);
+    assert.equal(ctx.discussion, open); assert.equal(ctx.state, activeState);
+    assert.ok(ctx.state.transcript.some((m) => m.text === 'open message'));
+    assert.ok(existsSync(openFile));
+    await nextUi.handleLine('/resume ' + paused, ctx);
+    assert.equal(ctx.boardReadVersion, 'new'); assert.equal(ctx.discussion.name, paused);
+    assert.equal(ctx.sessions.get('A').id, 'paused-session');
+    assert.deepEqual(ctx.state.transcript, pausedSnapshot.state.transcript);
+  } finally {
+    if (home === undefined) delete process.env.HOME; else process.env.HOME = home;
+    rmSync(root, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
