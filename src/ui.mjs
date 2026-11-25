@@ -5318,7 +5318,7 @@ export function route(hub, req, res) {
   }
   if (url.pathname === '/__next') {
     if (!rooms.length) return send(404, 'text/plain; charset=utf-8', 'This server has no room open.');
-    res.writeHead(302, { location: `${roomPath(rooms[0])}__next` });
+    res.writeHead(302, { location: `${roomPath(rooms[0])}__room${url.search}` });
     return res.end();
   }
   if (url.pathname.startsWith('/__next/')) {

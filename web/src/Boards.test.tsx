@@ -34,7 +34,7 @@ it('groups named boards by kind and shows saved titles, current board and open-r
   expect(within(boards).getByRole('button', { name: '🔧 work' })).toBeTruthy();
   expect(within(boards).getByRole('button', { name: '🔬 research' })).toBeTruthy();
   expect(within(boards).getByRole('button', { name: 'idea' })).toBeTruthy();
-  expect(within(boards).getByRole('link', { name: 'Open board' }).getAttribute('href')).toBe('/r/other/__next');
+  expect(within(boards).getByRole('link', { name: 'Open board' }).getAttribute('href')).toBe('/r/other/__room');
   expect(within(boards).getByText('Archived · Deferred (2)')).toBeTruthy();
   await userEvent.setup().click(within(boards).getByText('Archived · Deferred (2)'));
   expect(within(boards).getByRole('button', { name: 'old' })).toBeTruthy();

@@ -293,7 +293,10 @@ function watchWeb() {
     try {
       await buildWeb();
       console.log('Web build complete.');
-      for (const ctx of hub.rooms.values()) ctx.docs?.notifyNext(ctx.screen);
+      for (const ctx of hub.rooms.values()) {
+        ctx.docs?.notifyNext(ctx.screen);
+        ctx.docs?.broadcast(ctx.screen, { type: 'reloaded', page: ctx.docs.PAGE, webVersion: ctx.docs.nextVersion() });
+      }
     } catch (err) {
       for (const ctx of hub.rooms.values()) report(ctx, `Web build failed; the existing room is still available: ${err.message}`);
     }

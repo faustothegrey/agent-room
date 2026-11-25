@@ -5,7 +5,7 @@ import { extname, join } from 'node:path';
 import { handleShell } from './host-shell.mjs';
 import { handleNotes } from './notes.mjs';
 
-export function createRoutes({ SCREEN, broadcast, resetEvent, handleNext, files }) {
+export function createRoutes({ broadcast, resetEvent, handleNext, files }) {
 const { docFiles, servable, isViewable, roomBranch } = files;
 // Input endpoints accept only the page itself: same host, JSON. A page on another site can't send
 // a JSON POST here without a CORS preflight, which this server never approves, and the Host check
@@ -75,7 +75,6 @@ function readJson(req, limit = 100_000) {
 // for any other path.
 function handleScreen(req, res, url, dir, screen) {
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type }); res.end(body); };
-  if (url.pathname === '/__room') { send(200, 'text/html; charset=utf-8', SCREEN); return true; }
   if (handleNext(req, res, url, screen)) return true;
   if (handleShell(req, res, url)) return true; // the terminal pane (host-shell.mjs)
   if (handleNotes(req, res, url, dir)) return true; // the Notes pane (notes.mjs)

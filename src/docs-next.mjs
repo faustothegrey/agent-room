@@ -38,9 +38,10 @@ function notifyNext(screen) {
 function handleNext(req, res, url, screen) {
   /** @param {number} status @param {string} type @param {string | Uint8Array} body */
   const send = (status, type, body) => { res.writeHead(status, { 'content-type': type, 'cache-control': 'no-cache' }); res.end(body); };
-  if (url.pathname !== '/__next' && !url.pathname.startsWith('/__next/')) return false;
+  if (url.pathname !== '/__room' && url.pathname !== '/__next' && !url.pathname.startsWith('/__next/')) return false;
+  if (url.pathname === '/__next') { res.writeHead(302, { location: './__room' + url.search }); res.end(''); return true; }
   if (req.method !== 'GET') { send(405, 'text/plain; charset=utf-8', 'Use GET.'); return true; }
-  const isPage = url.pathname === '/__next';
+  const isPage = url.pathname === '/__room';
   let name;
   try { name = isPage ? 'index.html' : decodeURIComponent(url.pathname.slice('/__next/'.length)); }
   catch { send(404, 'text/plain; charset=utf-8', 'Not found'); return true; }

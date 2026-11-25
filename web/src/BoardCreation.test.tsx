@@ -24,7 +24,7 @@ it('creates each supported board beside the current one and follows the goto to 
     await user.click(within(boards).getByRole('button', { name: label }));
     await waitFor(() => expect(says()).toContain(command));
   }
-  Source.current.send({ type: 'goto', url: '/r/next/__room' }); expect(navigate).toHaveBeenCalledWith('/r/next/__next');
+  Source.current.send({ type: 'goto', url: '/r/next/__room' }); expect(navigate).toHaveBeenCalledWith('/r/next/__room');
 });
 
 it('requires a second click in a started single-session room and lets the warning expire', async () => {
@@ -55,7 +55,7 @@ it('sends the first message to name an unnamed discussion, brainstorm or researc
 it('offers Cancel only for an unnamed multi-room creation and sends /cancel', async () => {
   setup({ active: null, brainstorm: true }); const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: 'Cancel' })); await waitFor(() => expect(says()).toContain('/cancel'));
-  Source.current.send({ type: 'goto', url: '/r/origin/__room' }); expect(navigate).toHaveBeenCalledWith('/r/origin/__next');
+  Source.current.send({ type: 'goto', url: '/r/origin/__room' }); expect(navigate).toHaveBeenCalledWith('/r/origin/__room');
   reset(); expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
   reset({ active: null, research: true, multi: false }); expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
 });

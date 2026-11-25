@@ -6,7 +6,7 @@ import { createServer, request } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ATTACH_LIMIT, broadcast, csvTable, docFiles, handle, isTextFile, isViewable, listFiles, messageView, pick, roomBranch, saveAttachments } from '../src/docs.mjs';
+import { SCREEN, ATTACH_LIMIT, broadcast, csvTable, docFiles, handle, isTextFile, isViewable, listFiles, messageView, pick, roomBranch, saveAttachments } from '../src/docs.mjs';
 
 // A proposal/ folder with a doc, a drawing, a hidden file, and a file just outside it.
 function fixture() {
@@ -191,7 +191,7 @@ test('a ```vega-lite block: its spec is kept (escaped) for the page to draw, wit
 
 test('the room page\'s script parses as served (it is written inside a template string)', async () => {
   const s = await serve(fixture(), { clients: new Set(), transcript: [] });
-  const html = await (await s.get('/__room')).text();
+  const html = SCREEN;
   s.close();
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   assert.ok(scripts.length >= 1);
@@ -266,8 +266,6 @@ test('the discussion screen: a new page gets the room so far, then live events',
   const transcript = [{ speaker: 'User', text: 'look at **this**' }, { speaker: 'A', text: 'PASS', pass: true }];
   const screen = { clients: new Set(), transcript, doc: 'plan.md', thinking: 'B' };
   const s = await serve(fixture(), screen);
-  const page = await (await s.get('/__room')).text();
-  assert.match(page, /EventSource\('__events'\)/); // relative: the page's own room
 
   const next = eventReader(await s.get('/__events'));
   const reset = await next();
@@ -727,7 +725,7 @@ test('agent settings endpoint reads choices and protects saves with the same-ori
     assert.deepEqual(await res.json(), { applied: false });
     assert.deepEqual(saved, { agents: [] });
     // Check the inline browser program parses as JavaScript, rather than only the server module.
-    const html = await (await s.get('/__room')).text();
+    const html = SCREEN;
     new Function(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
     // Over plain HTTP from another machine the browser has no crypto.randomUUID: the page still gets a client id.
     const idLine = html.match(/const viewClient = (.*);/)[1];
@@ -1056,7 +1054,7 @@ test('member panel keeps legacy agent lists intact rather than truncating them',
 
 test('the room header shows the folder basename, puts the full path in #replica-header with and without replication, and places #server-box and #peer-warning in #room-zone', async () => {
   const s = await serve(fixture(), { clients: new Set(), transcript: [] });
-  const html = await (await s.get('/__room')).text();
+  const html = SCREEN;
   s.close();
 
   // #folder is gone from the header; #server-box and #peer-warning sit inside #room-zone, under the room name.
@@ -1182,7 +1180,7 @@ test('right pane three tabs, header disc-workers, and docLabel behavior', async 
   const root = mkdtempSync(join(tmpdir(), 'html-test-'));
   const s = await serve(root, { clients: new Set(), transcript: [] });
   try {
-    const html = await (await s.get('/__room')).text();
+    const html = SCREEN;
     assert.match(html, /id="list-panel"/);
     assert.match(html, /id="list-pane"/);
     assert.match(html, /id="list-split"/);
@@ -1672,7 +1670,7 @@ test('the Worker tab shows a merge preview collapsed, its outcome in the summary
   const root = mkdtempSync(join(tmpdir(), 'html-test-'));
   const s = await serve(root, { clients: new Set(), transcript: [] });
   try {
-    const html = await (await s.get('/__room')).text(); // the page as served, escapes resolved
+    const html = SCREEN; // the page as served, escapes resolved
     const code = html.slice(html.indexOf('function setWorkerInfo('), html.indexOf('function setWorking('));
     const node = (tag) => ({
       tag, textContent: '', dataset: {}, children: [], open: false,
@@ -1956,7 +1954,7 @@ test('a started discussion\'s members panel lists the agents it started with, lo
   const root = mkdtempSync(join(tmpdir(), 'html-test-'));
   const s = await serve(root, { clients: new Set(), transcript: [] });
   try {
-    const html = await (await s.get('/__room')).text();
+    const html = SCREEN;
     const code = html.slice(html.indexOf('function agentRow('), html.indexOf('function selectedSettings('));
     class El {
       constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.classList = { toggle() {} }; this.value = ''; this.disabled = false; this.hidden = false; this.textContent = ''; }
@@ -2423,7 +2421,7 @@ test('Side pane: two tabs (Explorer/Document), close/reopen, [[D4]] reopen, and 
   const root = mkdtempSync(join(tmpdir(), 'side-pane-'));
   const s = await serve(root, { clients: new Set(), transcript: [] });
   try {
-    const html = await (await s.get('/__room')).text();
+    const html = SCREEN;
     assert.match(html, /id="main-panel"/);
     assert.match(html, /id="tab-explorer"/);
     assert.match(html, /id="tab-document"/);
@@ -2528,7 +2526,7 @@ test('Services panel: Control bar services, half-window grid, list collapse/rest
   const root = mkdtempSync(join(tmpdir(), 'services-panel-'));
   const s = await serve(root, { clients: new Set(), transcript: [] });
   try {
-    const html = await (await s.get('/__room')).text();
+    const html = SCREEN;
     assert.match(html, /id="control-bar"/);
     assert.match(html, /id="ctrl-boards"/);
     assert.match(html, /id="ctrl-providers"/);
@@ -2717,7 +2715,7 @@ test('list-collapsed grid places #main-panel in the last column with a real widt
   const root = mkdtempSync(join(tmpdir(), 'list-collapsed-grid-'));
   const s = await serve(root, { clients: new Set(), transcript: [] });
   try {
-    const html = await (await s.get('/__room')).text();
+    const html = SCREEN;
     const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] || '';
     const bodyMatch = style.match(/body\s*\{[^}]*grid-template-columns:\s*([^;]+);/);
     const collapsedMatch = style.match(/body\.list-collapsed\s*\{[^}]*grid-template-columns:\s*([^;]+);/);
@@ -2762,7 +2760,7 @@ test('Schedule Control bar button, page view, and /__schedule GET/POST endpoints
   };
   const s = await serve(dir, screen);
   try {
-    const html = await (await s.get('/__room')).text();
+    const html = SCREEN;
     assert.match(html, /id="ctrl-schedule"/);
     assert.match(html, /id="schedule"/);
     const getRes = await s.get('/__schedule');
@@ -3398,7 +3396,7 @@ test('worker state refreshes via __workerinfo when Actions ▾ opens, on focus/v
 
 test('discussion area header: #disc-header spans #main-panel with title, status, auto dev, and Actions ▾; #disc-zone holds system messages and busy workers', async () => {
   const s = await serve(fixture(), { clients: new Set(), transcript: [] });
-  const html = await (await s.get('/__room')).text();
+  const html = SCREEN;
   s.close();
 
   const header = html.slice(html.indexOf('<header id="header">'), html.indexOf('</header>'));
@@ -3652,7 +3650,7 @@ test('opening a board row ⋯ menu refreshes worker state via __workerinfo, and 
 
 test('workbench UI: + New workbench in Boards, New workbench in Actions ▾, worker-only view, 🔧 Boards icon, and Close and Merge/Discard shown on workbenches', async () => {
   const s = await serve(fixture(), { clients: new Set(), transcript: [] });
-  const html = await (await s.get('/__room')).text();
+  const html = SCREEN;
   s.close();
 
   // + New workbench sits beside + New discussion and + New brainstorm at the top of Boards;
@@ -4073,7 +4071,7 @@ test('Boards rows show work ready with ranking, merge suffixes, no-suffix cases,
 test('research board UI: + New research, Research section, exact row menu actions, absent Worker tab, and Archived · Deferred', async () => {
   const root = mkdtempSync(join(tmpdir(), 'research-ui-'));
   const s = await serve(root, { clients: new Set(), transcript: [], say: () => {} });
-  const html = await (await s.get('/__room')).text();
+  const html = SCREEN;
   s.close();
 
   const listPanel = html.slice(html.indexOf('<aside id="list-panel"'), html.indexOf('</aside>'));

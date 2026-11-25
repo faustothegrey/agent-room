@@ -15,7 +15,7 @@ test('root React page redirects to the first room like the legacy page in UI and
     try {
       for (const page of ['__room', '__next']) {
         const res = await fetch(`${origin}/${page}`, { redirect: 'manual' });
-        assert.equal(res.status, 302); assert.equal(res.headers.get('location'), `/r/first/${page}`);
+        assert.equal(res.status, 302); assert.equal(res.headers.get('location'), `/r/first/__room`);
       }
       hub.rooms.clear();
       assert.equal((await fetch(origin + '/__next', { redirect: 'manual' })).status, 404);

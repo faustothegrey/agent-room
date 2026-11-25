@@ -25,9 +25,8 @@ test('dev rebuild and Reload notify the new page after publishing the build', { 
     await until(async () => (await fetch(origin + '/__next')).ok);
     const health = await (await fetch(origin + '/__health')).json();
     const room = `/r/${health.rooms[0].id}/`;
-    const oldHtml = await (await fetch(origin + room + '__next')).text();
-    const oldAsset = new URL(oldHtml.match(/src="([^"]+)"/)[1], origin + room + '__next');
-    const oldRoom = await (await fetch(origin + room + '__room')).text();
+    const oldHtml = await (await fetch(origin + room + '__room')).text();
+    const oldAsset = new URL(oldHtml.match(/src="([^"]+)"/)[1], origin + room + '__room');
     assert.equal((await fetch(origin + room + '__next/events')).status, 404);
     const events = await fetch(origin + room + '__events');
     reader = events.body.getReader();
@@ -39,6 +38,10 @@ test('dev rebuild and Reload notify the new page after publishing the build', { 
     };
     const untilEvent = async (type) => { for (;;) { const event = await next(); if (event.type === type) return event; } };
     const initial = await untilEvent('reset');
+    const { createHash } = await import('node:crypto');
+    const { SCREEN } = await import('../src/docs.mjs');
+    const oldPageVersion = createHash('sha1').update(SCREEN).digest('hex').slice(0, 12);
+    assert.notEqual(initial.page, oldPageVersion); // an already-open legacy page refreshes on reloaded
     const page = join(root, 'web/src/App.tsx');
     const { readFileSync } = await import('node:fs');
     const original = readFileSync(page, 'utf8');
@@ -48,7 +51,9 @@ test('dev rebuild and Reload notify the new page after publishing the build', { 
     writeFileSync(page, original.replace('Conversation', 'Updated conversation'));
     const rebuilt = await untilEvent('web-version');
     assert.ok(rebuilt.webVersion); assert.notEqual(rebuilt.webVersion, initial.webVersion);
-    assert.equal(await (await fetch(origin + room + '__room')).text(), oldRoom);
+    const legacyRefresh = await untilEvent('reloaded');
+    assert.notEqual(legacyRefresh.page, oldPageVersion); assert.equal(legacyRefresh.webVersion, rebuilt.webVersion);
+    assert.notEqual(await (await fetch(origin + room + '__room')).text(), oldHtml);
     await reader.cancel();
     reader = (await fetch(origin + room + '__events')).body.getReader(); buffer = '';
     const reconnected = await untilEvent('reset');
@@ -58,6 +63,7 @@ test('dev rebuild and Reload notify the new page after publishing the build', { 
     assert.equal(post.status, 204);
     const reload = await untilEvent('reloaded');
     assert.equal(reload.webVersion, rebuilt.webVersion); assert.equal(reload.page, initial.page);
+    assert.notEqual(reload.page, oldPageVersion);
     assert.equal((await fetch(origin + room + '__room')).status, 200);
   } finally {
     await reader?.cancel(); cli.kill('SIGTERM');
@@ -106,7 +112,7 @@ test('Reload loads each extracted document module again', { timeout: 30000 }, as
     const reader = response.body.getReader();
     const reset = JSON.parse(new TextDecoder().decode((await reader.read()).value).trim().slice(6));
     assert.equal(reset.input, false); await reader.cancel();
-    assert.equal(await (await fetch(origin + room + '__room')).text(), before);
+    assert.notEqual(await (await fetch(origin + room + '__room')).text(), before);
   } finally {
     cli.kill('SIGTERM'); await new Promise((ok) => cli.exitCode !== null ? ok() : cli.once('exit', ok));
     rmSync(root, { recursive: true, force: true });
@@ -132,7 +138,7 @@ test('direct start builds a missing or stale page and survives a failed build', 
         await new Promise((ok) => setTimeout(ok, 50));
       }
       const origin = output.match(/Discussion screen: (http:\/\/[^/]+)/)[1];
-      assert.equal((await fetch(origin + '/__room')).status, 200);
+      assert.equal((await fetch(origin + '/__room')).status, missing ? 404 : 200);
       if (missing) { const page = await fetch(origin + '/__next'); assert.equal(page.status, 404); assert.match(await page.text(), /Web build missing/); }
       return output;
     } finally {

@@ -66,7 +66,7 @@ it('asks about an unsaved note before a row menu’s Continue shows a board open
   await user.click(within(screen.getByLabelText('Board actions for Other').parentElement!).getByRole('button', { name: 'Continue' }));
   expect(navigate).not.toHaveBeenCalled();
   await user.click(within(screen.getByRole('alertdialog', { name: '"Unsaved" has unsaved changes.' })).getByRole('button', { name: 'Discard changes' }));
-  expect(navigate).toHaveBeenCalledWith('/r/x/__next?d=' + other);
+  expect(navigate).toHaveBeenCalledWith('/r/x/__room?d=' + other);
 });
 
 it('waits for a pending members save before a Providers save', async () => {

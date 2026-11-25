@@ -24,7 +24,7 @@ test('new page routes contain assets and signal version changes on room events',
   const origin = `http://127.0.0.1:${server.address().port}`;
   let reader;
   try {
-    for (const path of ['/__next', '/r/room-one/__next']) {
+    for (const path of ['/__room', '/r/room-one/__room']) {
       const res = await fetch(origin + path); assert.equal(res.status, 200);
       const html = await res.text();
       const asset = html.match(/src="([^"]+)"/)[1];
@@ -51,13 +51,17 @@ test('new page routes contain assets and signal version changes on room events',
     assert.notEqual(reset.webVersion, changed.webVersion);
     assert.equal(screen.clients.size, 1);
     renameSync(dist, dist + '-old');
-    const gap = await fetch(origin + '/__next');
+    const gap = await fetch(origin + '/__room');
     assert.equal(gap.status, 404); assert.match(await gap.text(), /Web build missing/);
     renameSync(dist + '-old', dist);
     rmSync(join(dist, 'index.html'));
-    const missing = await fetch(origin + '/__next');
+    const missing = await fetch(origin + '/__room');
     assert.equal(missing.status, 404); assert.match(await missing.text(), /Web build missing/);
-    assert.equal((await fetch(origin + '/r/room-one/__room')).status, 200);
+    assert.equal((await fetch(origin + '/r/room-one/__room')).status, 404);
+    for (const path of ['/__next?d=x', '/r/room-one/__next?d=x']) {
+      const redirect = await fetch(origin + path, { redirect: 'manual' });
+      assert.equal(redirect.status, 302); assert.match(redirect.headers.get('location'), /__room\?d=x$/);
+    }
   } finally {
     await reader?.cancel(); server.closeAllConnections(); await new Promise((ok) => server.close(ok));
     rmSync(root, { recursive: true, force: true });

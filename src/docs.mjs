@@ -36,7 +36,7 @@ const DOODLE = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http:/
 // The Explorer's wallpaper: its own tile, same style and strength.
 const DOODLE_EXPLORER = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(30 15)"><path d="M0 0l14 16-14 22-14-22z"/><path d="M-14 16h28M0 0v38"/><path d="M0 38c-4 6 4 9 0 15s4 9 0 14"/></g><g transform="translate(105 30)"><path d="M-6 16a12 12 0 1 1 12 0v6h-12z"/><path d="M-5 26h10M-3 30h6"/><path d="M-3 4l3 4 3-4"/></g><g transform="translate(170 22)"><rect width="40" height="26" rx="3"/><path d="M0 2l20 14 20-14"/></g><g transform="translate(60 105)"><circle r="5"/><circle cy="-11" r="6"/><circle cy="11" r="6"/><circle cx="-11" r="6"/><circle cx="11" r="6"/><path d="M0 17v20M0 30c-6-2-9-6-9-10"/></g><g transform="translate(130 95)"><path d="M0 14L18 0l18 14"/><path d="M4 11v21h28V11"/><path d="M14 32V21h8v11"/></g><g transform="translate(190 108)"><path d="M0 0c8-10 24-10 32 0-8 10-24 10-32 0z"/><path d="M32 0l10-7v14z"/><circle cx="8" cy="-2" r="1.2"/></g><g transform="translate(22 180) rotate(-35)"><path d="M0 0h36l8 5-8 5H0z"/><path d="M36 0v10M6 0v10"/></g><g transform="translate(100 172)"><circle r="8"/><path d="M8 0h26M28 0v6M22 0v5"/></g><g transform="translate(185 175)"><path d="M0-14v28M-12-7l24 14M-12 7l24-14"/><path d="M-4-10l4 4 4-4M-4 10l4-4 4 4"/></g><g transform="translate(70 215)"><circle cy="-14" r="3"/><path d="M0-11v22M-6-6h12M-11 2c0 7 5 9 11 9s11-2 11-9"/></g><g transform="translate(145 222)"><path d="M-10 6c3-3 2-8 2-12a8 8 0 0 1 16 0c0 4-1 9 2 12z"/><path d="M-3 10a3 3 0 0 0 6 0"/></g><path d="M75 45h6M78 42v6M225 70h6M228 67v6M95 140h6M98 137v6M230 150h6M233 147v6M15 75h6M18 72v6"/><circle cx="150" cy="60" r="2"/><circle cx="40" cy="140" r="2.5"/><circle cx="215" cy="215" r="2.5"/><circle cx="110" cy="230" r="2"/><circle cx="160" cy="150" r="2"/></svg>')}")`;
 
-const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+export const SCREEN = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>agent-room</title><style>
 :root { color-scheme: light dark; --line: #8884; --dim: #888; }
 * { box-sizing: border-box; }
@@ -4209,12 +4209,12 @@ $('notes-remove').onclick = () => {
 </script></body></html>`;
 
 // The page's own code, as a short hash: existing pages refresh only if it changed.
-export const PAGE = createHash('sha1').update(SCREEN).digest('hex').slice(0, 12);
+export const PAGE = createHash('sha1').update(SCREEN + ' React switch').digest('hex').slice(0, 12);
 // Each facade is built from modules loaded with its version tag.
 const events = createScreenEvents(files.md, () => PAGE, (screen) => nextVersion(screen.nextDist));
 export const { messageView, broadcast, endAll, resetEvent } = events;
 const next = createNextRoutes(broadcast, { createHash, lstatSync, readdirSync, readFileSync, extname, join, fileURLToPath });
 export const { nextVersion, notifyNext } = next;
-const routes = createRoutes({ SCREEN, broadcast, resetEvent, handleNext: next.handleNext, files });
+const routes = createRoutes({ broadcast, resetEvent, handleNext: next.handleNext, files });
 export const { fromOwnPage, ATTACH_LIMIT, ATTACH_TOTAL, saveAttachments } = routes;
 export const { handle, pick } = createFileRoutes({ handleScreen: routes.handleScreen, ownHost: routes.ownHost, files });

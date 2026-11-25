@@ -776,7 +776,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         }
         void loadDetails();
       } else if (event.type === 'goto') {
-        navigate(event.url.replace(/__room(?=([?#]|$))/, '__next'));
+        navigate(event.url);
       } else if (event.type === 'ended') {
         setEnded(true); addStatus('This room has ended. You can close this window.'); events.close();
       } else if (event.type === 'restarting') {
@@ -875,7 +875,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     return <div className={'board-row row discussion-row' + (current ? ' in-use' : '') + (peek?.path === path || filePeek?.path === path ? ' peeking' : '')} key={path} onDragOver={(event) => { if (dragged && ordering?.kind === dragged.kind) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } }} onDrop={(event) => { if (!dragged || !ordering || dragged.kind !== ordering.kind || dragged.name === name) return; event.preventDefault(); const remaining = dragged.names.filter((item) => item !== dragged.name); const bounds = event.currentTarget.getBoundingClientRect(); const target = remaining.indexOf(name); if (target < 0) return; remaining.splice(target + (event.clientY > bounds.top + bounds.height / 2 ? 1 : 0), 0, dragged.name); saveOrder(dragged.kind, remaining); setDragged(null); }}>
       {ordering && ordering.names.length > 1 && <span className="drag-handle" draggable title="Drag to reorder" aria-label={`Drag ${label} to reorder`} onDragStart={(event) => { setDragged({ kind: ordering.kind, name, names: ordering.names }); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', name); }} onDragEnd={() => setDragged(null)}>⠿</span>}
       <div className="discussion-block">
-      {open ? <a className={'entry ' + kind} title={path} href={open.url.replace(/__room(?=([?#]|$))/, '__next')}>{content}</a> : <button type="button" className={'entry ' + kind} title={path} aria-current={current ? 'true' : undefined} onClick={action}>{content}</button>}
+      {open ? <a className={'entry ' + kind} title={path} href={open.url}>{content}</a> : <button type="button" className={'entry ' + kind} title={path} aria-current={current ? 'true' : undefined} onClick={action}>{content}</button>}
       <div className="local-label" title={tooltip || undefined}>{archivedState ?? (state + suffix + (isDiscussion && entry?.working ? ' · worker working' : '') + closingText + changed)}</div>
       {isDiscussion && !archived && work && <div className="worker-pending">⚠ Worker: {pendingText}</div>}
       {!!conflictText && !workerBusy && <div className="worker-conflict">⚠ {conflictText}</div>}
@@ -887,7 +887,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         <summary aria-label={`Board actions for ${label}`} title="Actions">⋯</summary><div className="row-menu-items menu-items" hidden={rowMenu !== path}>
           {current && peek && <button type="button" title={`Return to this ${isResearch ? 'research board' : brainstorm ? 'brainstorm' : 'discussion'}: leave the peek.`} onClick={() => { setRowMenu(null); void backToCurrent(); }}>Back to this {isResearch ? 'research board' : brainstorm ? 'brainstorm' : 'discussion'}</button>}
           {!current && <>
-            {open && !open.started && !brainstorm ? <a href={open.url.replace(/__room(?=([?#]|$))/, '__next')} title={`Show this open ${isResearch ? 'research board' : 'discussion'}: it has not started yet`}>Go to</a> : <button type="button" title={resumeTitle} onClick={() => { setRowMenu(null); if (open) { const url = open.url.replace(/__room(?=([?#]|$))/, '__next'); notesGuard(() => navigate(url)); } else void boardCommand('/resume ' + ref); }}>{open && brainstorm ? 'Go to' : closed ? 'Resume' : 'Continue'}</button>}
+            {open && !open.started && !brainstorm ? <a href={open.url} title={`Show this open ${isResearch ? 'research board' : 'discussion'}: it has not started yet`}>Go to</a> : <button type="button" title={resumeTitle} onClick={() => { setRowMenu(null); if (open) { const url = open.url; notesGuard(() => navigate(url)); } else void boardCommand('/resume ' + ref); }}>{open && brainstorm ? 'Go to' : closed ? 'Resume' : 'Continue'}</button>}
             {!(open && !open.started && !brainstorm) && <button type="button" title={`Show this ${isResearch ? 'research board’s' : brainstorm ? 'brainstorm’s' : 'discussion’s'} files in Explorer without ${archived ? 'moving it' : 'switching'}`} onClick={() => { setRowMenu(null); setFilePeek({ path, name, title: label, readonly: archived || closed }); setExplorerMode('discussion'); setSubtab('explorer'); openDocument(); }}>Peek files</button>}
             {closed && !isResearch && (!brainstorm || archived) && <button type="button" title={`Look at this closed ${brainstorm ? 'brainstorm' : 'discussion'} read-only: its conversation and files, without reopening it.`} onClick={() => { setRowMenu(null); setExplorerMode('discussion'); setSubtab('explorer'); void boardCommand('/peek ' + ref); }}>Peek chat &amp; files</button>}
           </>}
@@ -928,7 +928,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const unstarted = (room?.open ?? []).filter((entry) => !entry.current && !entry.active);
   const openUnstarted = (researchBoard: boolean) => unstarted.filter((entry) => !!entry.research === researchBoard).map((entry) => {
     const state = entry.ongoing || entry.working ? 'ongoing' : !entry.started ? 'not started' : entry.waitingForInput ? 'waiting for input' : entry.readyForAutoDev ? 'ready for auto dev' : entry.workReady && !entry.workbench && !entry.brainstorm ? 'work ready' : 'idle';
-    return <div className="board-row row discussion-row" key={entry.url}><a href={entry.url.replace(/__room(?=([?#]|$))/, '__next')}>{entry.workbench ? '🔧 ' : entry.research ? '🔬 ' : ''}{entry.title}</a><div className="local-label" title={state === 'waiting for input' ? entry.waitingReason || undefined : undefined}>{state}{entry.working && !researchBoard ? ' · worker working' : ''}</div>{researchBoard && <div className="local-label">Laps: 0 · Last: — · Next: —</div>}</div>;
+    return <div className="board-row row discussion-row" key={entry.url}><a href={entry.url}>{entry.workbench ? '🔧 ' : entry.research ? '🔬 ' : ''}{entry.title}</a><div className="local-label" title={state === 'waiting for input' ? entry.waitingReason || undefined : undefined}>{state}{entry.working && !researchBoard ? ' · worker working' : ''}</div>{researchBoard && <div className="local-label">Laps: 0 · Last: — · Next: —</div>}</div>;
   });
   const remoteOnly = replica ? replica.received.filter((line) => !line.local && !foundDiscussions.some((name) => replica.own[name]?.discussion === line.discussion)) : [];
   // The sections' hints, as renderBoards writes them on /__room (the first message's effect, or how to add one).

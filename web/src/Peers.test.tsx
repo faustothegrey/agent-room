@@ -41,11 +41,11 @@ it('switches room from a chooser of this server rooms, in this tab or a new wind
     ['/Users/me/other · No discussion started · 0 pages open', false],
     ['/Users/me/busy · discussions/x · 2 pages open (open in another window)', true]]);
   fireEvent.change(chooser, { target: { value: 'window:/r/b/__room' } });
-  expect(open).toHaveBeenCalledWith(new URL('/r/b/__next', location.href).href, '_blank', expect.stringMatching(/^width=/));
-  expect(within(log()).getByText(/The browser blocked the new window; open .*\/r\/b\/__next yourself\./).className).toBe('status error');
+  expect(open).toHaveBeenCalledWith(new URL('/r/b/__room', location.href).href, '_blank', expect.stringMatching(/^width=/));
+  expect(within(log()).getByText(/The browser blocked the new window; open .*\/r\/b\/__room yourself\./).className).toBe('status error');
   await user.click(screen.getByRole('button', { name: 'Switch room…' }));
   fireEvent.change(await screen.findByRole('combobox', { name: 'Running rooms' }), { target: { value: 'tab:/r/b/__room' } });
-  expect(navigate).toHaveBeenCalledWith(new URL('/r/b/__next', location.href).href);
+  expect(navigate).toHaveBeenCalledWith(new URL('/r/b/__room', location.href).href);
   answer = (url) => url === '__rooms' ? ok([rooms[0]]) : ok([]);
   await user.click(screen.getByRole('button', { name: 'Switch room…' }));
   expect(await within(log()).findByText('No other rooms are open on this server: Open room in folder… adds one.')).toBeTruthy();
@@ -63,7 +63,7 @@ it('opens a room in a folder: asks before creating one, says when it is already 
   await user.click(screen.getByRole('button', { name: 'Open room in folder…' }));
   const dialog = await screen.findByRole('dialog', { name: 'Create a room in /Users/me/new?' });
   await user.click(within(dialog).getByRole('button', { name: 'Create room' }));
-  await waitFor(() => expect(win.location.href).toBe(new URL('/r/n/__next', location.href).href));
+  await waitFor(() => expect(win.location.href).toBe(new URL('/r/n/__room', location.href).href));
   expect(bodies('__newroom')).toEqual([{}, { token: 't1' }]);
   expect(within(log()).getByText('Opened a new room in /Users/me/new. This room keeps running.')).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Open room in folder…' }));

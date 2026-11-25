@@ -136,7 +136,7 @@ export function RoomZones({ children, roomName, folder, active, replica, replica
   // Switch room…: this server's rooms, twice (switch this tab, or open a new window). A room with
   // a page open (on any device) is disabled in both, so the chooser doesn't open it twice.
   const [rooms, setRooms] = useState<RoomEntry[] | null>(null), [switching, setSwitching] = useState(false);
-  const nextUrl = (path: string) => new URL(path.replace(/__room(?=([?#]|$))/, '__next'), location.href).href;
+  const nextUrl = (path: string) => new URL(path, location.href).href;
   const switchRoom = async () => {
     closeMenus(); setSwitching(true);
     try {

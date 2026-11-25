@@ -89,7 +89,7 @@ it('guards board links and room switches while a note is unsaved, and warns befo
   await user.click(screen.getByRole('button', { name: 'Switch room…' }));
   fireEvent.change(await screen.findByRole('combobox', { name: 'Running rooms' }), { target: { value: 'tab:/r/c/__room' } });
   await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Discard changes' }));
-  expect(navigate).toHaveBeenCalledWith(new URL('/r/c/__next', location.href).href);
+  expect(navigate).toHaveBeenCalledWith(new URL('/r/c/__room', location.href).href);
 });
 
 it('keeps an unsaved note across a version refresh and reopens it with its notice', async () => {
