@@ -7008,6 +7008,8 @@ test('Reload loads the lane diagram module again while preserving live room and 
     writeFileSync(file, text.replace('BRANCH_DIAGRAM_LIMIT = 15', 'BRANCH_DIAGRAM_LIMIT = 16'));
     Object.assign(ctx, await ui.load(ctx, '?v=second'));
     assert.notEqual(ctx.lanes, first);
+    assert.notEqual(ctx.lanes.workerPlace, first.workerPlace);
+    assert.notEqual(ctx.lanes.checkWorkerReport, first.checkWorkerReport);
     assert.equal(ctx.lanes.BRANCH_DIAGRAM_LIMIT, 16);
     assert.equal(ctx.state, state); assert.equal(ctx.shop, shop);
     assert.equal(ctx.sessions.get('worker:Worker'), session);
