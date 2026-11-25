@@ -6985,3 +6985,32 @@ test('turn research into discussion preserves its folder, starts fresh agents an
   assert.match(resumedPrompts[0], /turned from a research board/);
   assert.match(resumedPrompts[0], /research notes.*transcripts\//);
 });
+
+test('Reload loads the lane diagram module again while preserving live room and worker state', async () => {
+  const { cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { fileURLToPath, pathToFileURL } = await import('node:url');
+  const source = fileURLToPath(new URL('../', import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), 'lane-reload-'));
+  try {
+    for (const name of ['src', 'rulebooks']) cpSync(join(source, name), join(root, name), { recursive: true });
+    symlinkSync(join(source, 'node_modules'), join(root, 'node_modules'), 'dir');
+    const ui = await import(pathToFileURL(join(root, 'src/ui.mjs')).href);
+    const ctx = freshCtx(); ctx.workerSpec = 'claude:Worker';
+    Object.assign(ctx, await ui.load(ctx, '?v=first'));
+    ctx.state.transcript.push({ speaker: 'User', text: 'kept across Reload' });
+    const state = ctx.state, shop = ctx.shop, session = ctx.sessions.get('worker:Worker'), first = ctx.lanes;
+    assert.equal(first.BRANCH_DIAGRAM_LIMIT, 15);
+    const file = join(root, 'src/lanes.mjs');
+    const text = readFileSync(file, 'utf8');
+    assert.match(text, /BRANCH_DIAGRAM_LIMIT = 15/);
+    writeFileSync(file, text.replace('BRANCH_DIAGRAM_LIMIT = 15', 'BRANCH_DIAGRAM_LIMIT = 16'));
+    Object.assign(ctx, await ui.load(ctx, '?v=second'));
+    assert.notEqual(ctx.lanes, first);
+    assert.equal(ctx.lanes.BRANCH_DIAGRAM_LIMIT, 16);
+    assert.equal(ctx.state, state); assert.equal(ctx.shop, shop);
+    assert.equal(ctx.sessions.get('worker:Worker'), session);
+    assert.equal(ctx.room.transcript[0].text, 'kept across Reload');
+  } finally { rmSync(root, { recursive: true, force: true, maxRetries: 5 }); }
+});

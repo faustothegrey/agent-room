@@ -928,6 +928,7 @@ agent-room's source.
 | `src/instructions.mjs` | The prompt catalog: every instruction sent to the discussion agents, the worker, the closing-statement agent and the title-generation call; the one source the runtime and the Instructions page (on the Control bar) both read. |
 | `src/room.mjs` | Discussion turns, unseen messages, passes and summary agreement. |
 | `src/ui.mjs` | Room setup, persistent defaults, commands, discussions, worker queue, logging and launch integration. |
+| `src/lanes.mjs` | Read-only worker-lane branch diagrams from Git history. |
 | `src/docs.mjs` | Reloadable document and screen HTTP facade. |
 | `src/docs-files.mjs` | Document rendering, viewer page and room file helpers. |
 | `src/docs-routes.mjs` | Room screen and input HTTP routes. |
@@ -970,7 +971,7 @@ import that carries a fresh query string, `await import('./ui.mjs?v=<millis>')`:
 each load a different module to the loader. The tag is `Date.now()` at every Reload (and each
 room's first load), so each reload is a fresh module. `ui.mjs`'s `load()` then imports the other
 modules with the same tag — `instructions.mjs`, `agents.mjs`, `room.mjs`, `docs.mjs`, `usage.mjs`,
-and `replicate.mjs` under `--node` — so the whole set comes in fresh together. `docs.mjs` forwards its tag to `screen-events.mjs`, `docs-files.mjs`, `docs-routes.mjs`, `docs-http.mjs` and `docs-next.mjs`, so those helpers and routes reload too. The runtime path
+and `replicate.mjs` under `--node` — so the whole set comes in fresh together. `load()` also loads `lanes.mjs` with the same tag for worker branch diagrams. `docs.mjs` forwards its tag to `screen-events.mjs`, `docs-files.mjs`, `docs-routes.mjs`, `docs-http.mjs` and `docs-next.mjs`, so those helpers and routes reload too. The runtime path
 never uses a static import for these, because a static import of a local module stays cached and a
 reload would silently miss it.
 
