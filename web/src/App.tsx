@@ -115,7 +115,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [messages, setMessages] = useState<MessageView[]>([]);
   const [workerMessages, setWorkerMessages] = useState<WorkerMessage[]>([]);
   const [workInput, setWorkInput] = useState(false);
-  const [workText, setWorkText] = useState('');
+  // The Worker box's draft is kept across a refresh too, as refreshPage keeps both boxes on /__room.
+  const [workText, setWorkText] = useState(() => { try { const saved = sessionStorage.getItem('next-work-draft') ?? ''; sessionStorage.removeItem('next-work-draft'); return saved; } catch { return ''; } });
+  const workDraft = useRef(workText); workDraft.current = workText;
   const [workerHint, setWorkerHint] = useState(true);
   const [chatReset, setChatReset] = useState(0);
   const [working, setWorking] = useState<string | null>(null);
@@ -263,10 +265,12 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const workChatMemory = useRef<ChatMemory | null>(null);
   // Settings saves from both panels run one after another; Retry with… waits for them.
   const settingsQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const membersOpen = useRef(false), wasFresh = useRef(false);
   const [text, setText] = useState(() => { try { const saved = sessionStorage.getItem('next-composer-draft') ?? ''; sessionStorage.removeItem('next-composer-draft'); return saved; } catch { return ''; } });
   const draft = useRef(text); draft.current = text;
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
+  const inFlight = useRef(new Set<string>());
   const fileInput = useRef<HTMLInputElement>(null);
   const client = useRef(globalThis.crypto.randomUUID?.() ?? Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join(''));
   const busyState = useRef({ command: false, posting: 0, ended: 0, show: undefined as ReturnType<typeof setTimeout> | undefined, fail: undefined as ReturnType<typeof setTimeout> | undefined });
@@ -351,7 +355,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       } else if (!response.ok) addStatus(await response.text(), true);
     } catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
   };
-  const serverChanged = () => { try { sessionStorage.setItem('next-composer-draft', draft.current); } catch {} keepNoteDraft(); refresh(); };
+  const serverChanged = () => { try { sessionStorage.setItem('next-composer-draft', draft.current); sessionStorage.setItem('next-work-draft', workDraft.current); } catch {} keepNoteDraft(); refresh(); };
   // View chat: pins a received line for this browser and shows its chat read-only; null goes back.
   const viewRemote = async (line: ReceivedLine | ViewedLine | null) => {
     try {
@@ -405,6 +409,25 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     };
     document.addEventListener('click', leave); return () => document.removeEventListener('click', leave);
   }, [navigate]);
+  // The file name's ▾ menu: the shown file's siblings (files in its folder), to switch without
+  // Explorer; a received snapshot's siblings come from that snapshot.
+  const [siblings, setSiblings] = useState<{ path: string; label: string; cantShow: boolean; shown: boolean; received: boolean }[] | null>(null);
+  const loadSiblings = async () => {
+    const shown = docRef.current; setSiblings(null); if (!shown) return;
+    const isReceived = shown.startsWith('__received/'), parts = shown.split('/');
+    const prefix = isReceived ? parts.slice(0, 4).join('/') + '/' : '';
+    const rel = shown.slice(prefix.length), folder = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/') + 1) : '';
+    let files: string[] = [], unviewable = new Set<string>();
+    try {
+      if (isReceived) files = await (await fetch('__rfiles?d=' + encodeURIComponent(parts[1]) + '&n=' + encodeURIComponent(parts[2]) + '&c=' + encodeURIComponent(parts[3]))).json() as string[];
+      else { const raw = await (await fetch('__files?detail=1')).json() as FileDetailsResponse | string[]; files = Array.isArray(raw) ? raw : raw.files; unviewable = new Set(Array.isArray(raw) ? [] : raw.unviewable); }
+    } catch {}
+    const binary = /\.(icns|ico|bmp|tiff?|heic|avif|zip|tar|gz|tgz|bz2|xz|7z|rar|zst|dmg|pkg|iso|bin|exe|dll|so|dylib|a|o|wasm|woff2?|ttf|otf|eot|mp3|wav|ogg|flac|m4a|aac|mp4|mov|webm|avi|mkv|sqlite3?|db|pyc|class|jar)$/i;
+    setSiblings(files.filter((f) => f.startsWith(folder) && !f.slice(folder.length).includes('/')).sort().map((f) => {
+      const cantShow = !isReceived && (unviewable.has(f) || binary.test(f)) || (isReceived && binary.test(f));
+      return { path: prefix + f, label: f.slice(folder.length) + (cantShow ? " · can't be shown here" : ''), cantShow, shown: prefix + f === shown, received: isReceived };
+    }));
+  };
   const refreshWorker = () => { void post('__workerinfo', {}).catch(() => {}); };
   const actionReply = async <T,>(path: '__merge' | '__discard' | '__catchup', body: BoardActionRequest): Promise<T> => {
     const response = await post(path, body); if (!response.ok) throw new Error(await response.text()); return await response.json() as T;
@@ -467,14 +490,18 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       setText(files.length ? prepared : '');
     }
     const value = prepared.trim();
-    if (sending || ended || (!value && !files.length) || (peek && (!value.startsWith('/') || files.length > 0))) return;
+    // As on /__room, a message without attachments doesn't wait for an earlier one: a second Enter
+    // starts another request. The draft stays until its request succeeds, so the same text already
+    // on its way isn't sent twice. A message with attachments waits for the one being saved.
+    const plain = !files.length;
+    if ((plain ? inFlight.current.has(value) : sending) || ended || (!value && !files.length) || (peek && (!value.startsWith('/') || files.length > 0))) return;
     const fail = (reason: string) => addStatus(`✗ ${reason} Nothing was sent.`, true);
     if (value === '/docs' && !files.length) { setSubtab('explorer'); openDocument(); void loadDetails(); setText(''); return; }
     if (files.length && value.startsWith('/')) return fail('Attachments go with a message, not a command.');
     const tooBig = files.find((file) => file.size > ATTACH_LIMIT);
     if (tooBig) return fail(`${tooBig.name} is over 25 MB.`);
     if (files.reduce((total, file) => total + file.size, 0) > ATTACH_TOTAL) return fail('Over 250 MB at once: attach fewer files per message.');
-    setSending(true);
+    if (plain) inFlight.current.add(value); else setSending(true);
     try {
       const body: SayRequest = { text: value };
       if (files.length) body.files = await Promise.all(files.map(async (file) => ({ name: file.name, data: await base64(file) })));
@@ -487,7 +514,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       setText((current) => current === text || current === prepared ? '' : current); setFiles([]);
     } catch (error) {
       fail(`Couldn't send${files.length ? ' the attachments' : ' the message'}: ${error instanceof Error ? error.message : String(error)}.`);
-    } finally { setSending(false); }
+    } finally { if (plain) inFlight.current.delete(value); else setSending(false); }
   };
 
   useEffect(() => {
@@ -640,7 +667,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     events.onmessage = ({ data }) => {
       const event = JSON.parse(data) as ScreenEvent;
       if ('webVersion' in event && event.webVersion && version && event.webVersion !== version) {
-        try { sessionStorage.setItem('next-composer-draft', draft.current); } catch {}
+        try { sessionStorage.setItem('next-composer-draft', draft.current); sessionStorage.setItem('next-work-draft', workDraft.current); } catch {}
         keepNoteDraft(); refresh(); return;
       }
       if (event.type === 'reset') {
@@ -763,12 +790,37 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const ownLine = remote && replica ? Object.values(replica.own).find((line) => line.discussion === remote.line.discussion) : undefined;
   const newerLine = remote && replica?.received.find((line) => line.discussion === remote.line.discussion && line.node === remote.line.node && line.commit !== remote.line.commit);
   const busyWorkers = (room?.open ?? []).filter((entry) => entry.working);
+  // A board that becomes fresh opens its members panel, also when that happened during a Peek (the
+  // panel isn't shown then): the request waits for the panel (setRoom's fresh on /__room).
+  if (room?.fresh && !wasFresh.current && !room.workbench) membersOpen.current = true;
+  wasFresh.current = !!room?.fresh;
   const turnVisible = !!room?.started && yourTurn && !thinking && !peek && !remote && room.autoDev?.status !== 'running';
   const base = filePeek?.path ?? peek?.path ?? room?.active ?? null;
   const rootMode = explorerMode === 'root' || !base;
   const treeFiles = rootMode ? (fileDetails?.files ?? []).filter((file) => !inBoard(file)) : (fileDetails?.files ?? []).filter((file) => file.startsWith(base + '/')).map((file) => file.slice(base!.length + 1));
   const namesUnder = (prefix: string) => [...new Set((fileDetails?.files ?? []).filter((f) => f.startsWith(prefix + '/')).map((f) => f.slice(prefix.length + 1).split('/')).filter((parts) => parts.length > 1 && /^\d{4}-\d{2}-\d{2}-/.test(parts[0])).map((parts) => parts[0]))].sort((a, b) => b.localeCompare(a));
   const boardTitle = (name: string, path: string, brainstorm: boolean) => displayTitle(name, room?.open?.find((entry) => entry.active === path)?.title ?? (room?.active === path ? room.discussion : undefined) ?? room?.checkpoints?.find((entry) => entry.name === (brainstorm ? 'brainstorms/' + name : name))?.title);
+  // Document's path line (docLabel): the discussion (current, peeked or received) or "Room checkout",
+  // plus the file's path inside it; the browser tab is named after it, or after the board.
+  const docLabel = (file: string | null) => {
+    if (!file) return 'No document shown.';
+    if (file.startsWith('__received/')) {
+      const [, d, node, , ...rest] = file.split('/');
+      const rec = replica?.received.find((l) => l.discussion === d && l.node === node), mine = received?.discussion === d ? received : null;
+      return displayTitle((mine?.name || rec?.local || rec?.name || d) ?? undefined, (mine?.title || rec?.title) ?? undefined) + ' · ' + rest.join('/');
+    }
+    const p = file.split('/'), dated = (n: string | undefined) => /^\d{4}-\d{2}-\d{2}-/.test(n ?? '');
+    if ((p[0] === 'discussions' || p[0] === 'brainstorms') && p.length >= 3 && dated(p[1])) return boardTitle(p[1], p[0] + '/' + p[1], p[0] === 'brainstorms') + ' · ' + p.slice(2).join('/');
+    if ((p[0] === 'discussions' || p[0] === 'brainstorms') && p.length >= 4 && (p[1] === 'archive' || p[1] === 'deferred') && dated(p[2])) return boardTitle(p[2], p.slice(0, 3).join('/'), p[0] === 'brainstorms') + ' · ' + p.slice(3).join('/');
+    return 'Room checkout · ' + file;
+  };
+  const tabTitle = doc ? docLabel(doc) + ' · agent-room' : title !== 'agent-room' && (remote || peek || room?.active || room?.brainstorm || room?.workbench) ? title + ' · agent-room' : 'agent-room';
+  useEffect(() => { document.title = tabTitle; }, [tabTitle]);
+  // Send to agents, on a transcript of an earlier session (not this one): a normal message asking
+  // the agents to read it as background; its old sessions are not resumed.
+  const docParts = doc ? doc.split('/') : [];
+  const transcriptDoc = !!doc && docParts.length >= 3 && docParts.length <= 5 && (docParts[0] === 'discussions' || docParts[0] === 'brainstorms') && docParts.at(-2) === 'transcripts' && docParts.at(-1)!.endsWith('.md')
+    && !!room && !room.workbench && doc !== room.transcript && !remote && input;
   const mergeControls = (name: string) => {
     const info = workerInfo?.mergeable?.[name], discardable = workerInfo?.discardable?.includes(name);
     const target = info?.targetBranch;
@@ -832,7 +884,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         <summary aria-label={`Board actions for ${label}`} title="Actions">⋯</summary><div className="row-menu-items" hidden={rowMenu !== path}>
           {current && peek && <button type="button" title={`Return to this ${isResearch ? 'research board' : brainstorm ? 'brainstorm' : 'discussion'}: leave the peek.`} onClick={() => { setRowMenu(null); void backToCurrent(); }}>Back to this {isResearch ? 'research board' : brainstorm ? 'brainstorm' : 'discussion'}</button>}
           {!current && <>
-            {open && !open.started && !brainstorm ? <a href={open.url.replace(/__room(?=([?#]|$))/, '__next')} title={`Show this open ${isResearch ? 'research board' : 'discussion'}: it has not started yet`}>Go to</a> : <button type="button" title={resumeTitle} onClick={() => { setRowMenu(null); if (open) navigate(open.url.replace(/__room(?=([?#]|$))/, '__next')); else void boardCommand('/resume ' + ref); }}>{open && brainstorm ? 'Go to' : closed ? 'Resume' : 'Continue'}</button>}
+            {open && !open.started && !brainstorm ? <a href={open.url.replace(/__room(?=([?#]|$))/, '__next')} title={`Show this open ${isResearch ? 'research board' : 'discussion'}: it has not started yet`}>Go to</a> : <button type="button" title={resumeTitle} onClick={() => { setRowMenu(null); if (open) { const url = open.url.replace(/__room(?=([?#]|$))/, '__next'); notesGuard(() => navigate(url)); } else void boardCommand('/resume ' + ref); }}>{open && brainstorm ? 'Go to' : closed ? 'Resume' : 'Continue'}</button>}
             {!(open && !open.started && !brainstorm) && <button type="button" title={`Show this ${isResearch ? 'research board’s' : brainstorm ? 'brainstorm’s' : 'discussion’s'} files in Explorer without ${archived ? 'moving it' : 'switching'}`} onClick={() => { setRowMenu(null); setFilePeek({ path, name, title: label, readonly: archived || closed }); setExplorerMode('discussion'); setSubtab('explorer'); openDocument(); }}>Peek files</button>}
             {closed && !isResearch && (!brainstorm || archived) && <button type="button" title={`Look at this closed ${brainstorm ? 'brainstorm' : 'discussion'} read-only: its conversation and files, without reopening it.`} onClick={() => { setRowMenu(null); setExplorerMode('discussion'); setSubtab('explorer'); void boardCommand('/peek ' + ref); }}>Peek chat &amp; files</button>}
           </>}
@@ -1034,7 +1086,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     {!!(room && !room.active && !peek && !viewLayout && !room.workbench) && <p>{room.brainstorm ? 'Your first message names this brainstorm and saves it here.' : room.research ? 'Your first message names this research board and saves it here.' : 'Your first message starts a new discussion.'}</p>}
     {turnVisible && <p aria-label="Turn status">your turn</p>}
     {busy && <div aria-label="Busy" data-state={busy}>{busy === 'on' ? 'Working…' : 'Action failed'}</div>}
-    {!peek && !viewLayout && !room?.workbench && <SettingsPanel scope="talk" room={room} post={(path, body) => post(path, body)} queue={settingsQueue} />}
+    {!peek && !viewLayout && !room?.workbench && <SettingsPanel scope="talk" room={room} post={(path, body) => post(path, body)} queue={settingsQueue} openSignal={membersOpen} />}
     <FailedAgents agents={room?.failedAgents} post={(path, body) => post(path, body)} status={(text) => addStatus(text, true)} />
     <ChatList endLabel="Scroll to latest discussion messages" resetKey={chatReset}>
     <section aria-label="Conversation">{messages.map((message, index) => <article key={index} className={'msg' + (message.error ? ' error' : '') + (message.outcome ? ' summary' + (message.outcome === 'agreed' ? '' : ' not-agreed') : '')}>
@@ -1085,7 +1137,11 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
             choose={(file) => { const full = '__received/' + received.discussion + '/' + received.node + '/' + received.commit + '/' + file; docRef.current = full; setDoc(full); setSubtab('document'); openDocument(); }} />
         </> : <FileTree files={treeFiles} prefix={rootMode ? '' : base!} doc={doc} unviewable={fileDetails?.unviewable ?? []} expanded={expanded} toggle={(path, open) => setExpanded((previous) => { const next = new Set(previous); if (open) next.add(path); else next.delete(path); return next; })} choose={(file) => { if ((peek || filePeek?.readonly) && !rootMode) { docRef.current = file; setDoc(file); setSubtab('document'); openDocument(); } else void showFile(file); }} />}
       </section>
-      {doc && <section className="next-document" aria-label="Document" hidden={subtab !== 'document'}><p>Selected file: {doc}</p><iframe ref={frame} title="Document viewer" src={doc.split('/').map(encodeURIComponent).join('/')} /></section>}
+      {doc && <section className="next-document" aria-label="Document" hidden={subtab !== 'document'}><div className="doc-bar"><details className="menu doc-menu" onToggle={(e) => { if (e.currentTarget.open) void loadSiblings(); }}><summary title="Other files in this folder"><span className="doc-current" title={doc}>{docLabel(doc)}</span></summary>
+          <div className="menu-items" aria-label="Other files in this folder">{siblings === null ? null : siblings.length ? siblings.map((f) => <button type="button" key={f.path} className={f.shown ? 'shown' : undefined} disabled={f.cantShow} title={f.cantShow ? "can't be shown here" : undefined}
+            onClick={(e) => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; if (f.cantShow || f.shown) return; if (f.received) { docRef.current = f.path; setDoc(f.path); } else void showFile(f.path); }}>{f.label}</button>) : 'No other files here.'}</div></details>
+          {transcriptDoc && <button type="button" title="Ask the agents to read this transcript in full" onClick={() => { tabRef.current = 'discussion'; setTab('discussion'); const root = room!.folder.endsWith('/') ? room!.folder : room!.folder + '/'; void boardCommand('Please read this transcript of an earlier session in full, as background for our discussion: ' + root + doc); }}>Send to agents</button>}
+        </div><iframe ref={frame} title="Document viewer" src={doc.split('/').map(encodeURIComponent).join('/')} /></section>}
     </div>
     </div>
     </div>

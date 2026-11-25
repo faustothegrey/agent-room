@@ -259,7 +259,7 @@ export function RoomZones({ roomName, folder, active, replica, replicaOff, viewi
           <button type="button" className="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running." onClick={() => twice('quit', () => command('/quit'))}>{armed.quit ? 'Click again to quit this room' : 'Quit room'}</button></div>
       </details>
       <span className="hover-detail" role="tooltip" aria-label="Room details">{folder && <code>{folder}</code>}{replica && <span>{replicaLine(replica, active, viewing, location.port)}</span>}</span>
-      {rooms && <select aria-label="Running rooms" value="" onChange={(e) => chooseRoom(e.target.value)} onBlur={() => setRooms(null)}>
+      {rooms && <select aria-label="Running rooms" value="" onChange={(e) => chooseRoom(e.target.value)}>
         <option value="">Choose a running room…</option>
         {([['tab', 'Switch this tab to'], ['window', 'Open in new window']] as const).map(([mode, heading]) => <optgroup key={mode} label={heading}>{rooms.map((r) => {
           const open = !r.current && (r.pages ?? 0) > 0;

@@ -112,3 +112,5 @@
 .terminal-service { display: flex; flex-direction: column; min-height: 0; height: calc(100vh - 9rem); }
 .terminal-bar { display: flex; align-items: center; gap: .5rem; font-size: .75rem; }
 .hostshell-term { flex: 1; min-height: 0; }
+.doc-bar { display: flex; align-items: center; gap: .5rem; }
+.doc-menu .menu-items button.shown { font-weight: 600; }

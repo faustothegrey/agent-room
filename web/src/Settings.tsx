@@ -54,7 +54,7 @@ export function AgentRow({ row, models, title, member, locked, disabled, change,
   </div>;
 }
 type Post = (path: '__settings' | '__agent-enabled', body: SettingsSaveRequest | AgentEnabledRequest) => Promise<Response>;
-export function SettingsPanel({ scope, room, post, queue }: { scope: 'talk' | 'work'; room: Room | null; post: Post; queue: MutableRefObject<Promise<unknown>> }) {
+export function SettingsPanel({ scope, room, post, queue, openSignal }: { scope: 'talk' | 'work'; room: Room | null; post: Post; queue: MutableRefObject<Promise<unknown>>; openSignal?: MutableRefObject<boolean> }) {
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<{ models: Models; rows: Row[]; plan: Plan | null; members: boolean; hint: string; note: string | null; workerName: string } | null>(null);
   const [result, setResult] = useState('');
@@ -83,9 +83,8 @@ export function SettingsPanel({ scope, room, post, queue }: { scope: 'talk' | 'w
     } catch (err) { setResult('Could not load settings: ' + (err instanceof Error ? err.message : String(err))); }
   };
   // A new discussion or brainstorm (or a page on one) opens the members panel: its members are chosen first.
-  const wasFresh = useRef(false);
   useEffect(() => {
-    const fresh = !!room?.fresh && !wasFresh.current && !room.workbench; wasFresh.current = !!room?.fresh;
+    const fresh = !!openSignal?.current; if (openSignal) openSignal.current = false;
     if (scope === 'talk' && fresh && details.current && !details.current.open) { details.current.open = true; setOpen(true); void load(); }
     else if (scope === 'talk' && open && panel?.members) { if (room?.fresh) void load(); else setPanel((p) => p && room?.members ? { ...p, rows: room.members.map((m, i) => ({ ...p.rows[i], active: m.enabled })) } : p); }
   }, [room]);

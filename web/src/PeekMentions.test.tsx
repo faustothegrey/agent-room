@@ -82,7 +82,7 @@ it('peeks at closed chat and files, keeps live messages out of view, and returns
   const board = screen.getByLabelText('Peeked board files');
   const notes = await within(board).findByRole('button', { name: 'notes.md' });
   expect((within(board).getByRole('button', { name: "archive.zip · can't be shown here" }) as HTMLButtonElement).disabled).toBe(true);
-  await user.click(notes); expect(screen.getByText(`Selected file: ${paths[3]}`)).toBeTruthy();
+  await user.click(notes); expect(screen.getByTitle(paths[3])).toBeTruthy();
   expect(fetchMock.mock.calls.filter(([url]) => url === '__show')).toHaveLength(0);
   Source.current.send({ type: 'message', message: entry('A', '<p>live during</p>') });
   expect(screen.queryByText('live during')).toBeNull();
@@ -95,9 +95,9 @@ it('peeks at closed chat and files, keeps live messages out of view, and returns
   expect(screen.getByText('live before')).toBeTruthy(); expect(screen.getByText('live during')).toBeTruthy();
   Source.current.send({ type: 'reset', input: true, room, peek: null, doc: null, messages: [entry('A', '<p>live after reset</p>')] });
   expect(screen.getByText('live after reset')).toBeTruthy();
-  expect(screen.getByText(`Selected file: ${paths[3]}`)).toBeTruthy();
+  expect(screen.getByTitle(paths[3])).toBeTruthy();
   Source.current.send({ type: 'doc', file: paths[3] });
-  expect(screen.queryByLabelText('Explorer tab')).toBeNull(); expect(screen.getByText(`Selected file: ${paths[3]}`)).toBeTruthy();
+  expect(screen.queryByLabelText('Explorer tab')).toBeNull(); expect(screen.getByTitle(paths[3])).toBeTruthy();
 });
 
 it('clears a peek when the active discussion changes and keeps file selection outside the peek', async () => {
@@ -108,7 +108,7 @@ it('clears a peek when the active discussion changes and keeps file selection ou
   Source.current.send({ type: 'room', room: { ...room, active: 'discussions/new', discussion: 'New' } });
   expect(screen.queryByLabelText('Explorer tab')).toBeNull(); expect(screen.queryByText('closed chat')).toBeNull();
   Source.current.send({ type: 'doc', file: paths[3] });
-  expect(screen.queryByLabelText('Explorer tab')).toBeNull(); expect(screen.getByText(`Selected file: ${paths[3]}`)).toBeTruthy();
+  expect(screen.queryByLabelText('Explorer tab')).toBeNull(); expect(screen.getByTitle(paths[3])).toBeTruthy();
 });
 
 it('offers at most three distinct files and does not revive stale offers after the user speaks', async () => {
