@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './layout.css';
 import type { FileDetailsResponse, FilesResponse, HighlightMessage, MessageView, Peek, PointMessage, Room, SayRequest, ScreenEvent, ShowRequest, WorkerInfo, WorkerInfoRequest } from '../../src/contract';
 
-type Props = { version: string | undefined; refresh: () => void };
+type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
 type StatusLine = { text: string; error: boolean };
 type Failure = { agent: string; error: string; time: string; earlier: number };
 type Layout = { stacked: boolean; sideClosed: boolean; left: number | null; top: number | null };
@@ -79,7 +79,8 @@ function FileTree({ files, prefix, doc, unviewable, expanded, toggle, choose }: 
   return <>{folders.map((folder) => { const path = prefix ? `${prefix}/${folder}` : folder; return <details key={path} open={expanded.has(path)} onToggle={(event) => toggle(path, event.currentTarget.open)}><summary>{folder}/</summary><FileTree files={files.filter((f) => f.startsWith(folder + '/')).map((f) => f.slice(folder.length + 1))} prefix={path} doc={doc} unviewable={unviewable} expanded={expanded} toggle={toggle} choose={choose} /></details>; })}{entries.length > 10 ? <div className="file-columns">{buttons}</div> : buttons}{!folders.length && !entries.length && <span>No files yet.</span>}</>;
 }
 
-export function App({ version, refresh }: Props) {
+const navigatePage = (url: string) => window.location.assign(url);
+export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [room, setRoom] = useState<Room | null>(null);
   const [workerInfo, setWorkerInfo] = useState<WorkerInfo | null>(null);
   const [messages, setMessages] = useState<MessageView[]>([]);
@@ -96,6 +97,9 @@ export function App({ version, refresh }: Props) {
   const preservePeekDoc = useRef(false);
   const [fileDetails, setFileDetails] = useState<FileDetailsResponse | null>(null);
   const [boardsClosed, setBoardsClosed] = useState(() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } });
+  const [armedCreation, setArmedCreation] = useState<Record<string, boolean>>({});
+  const creationTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  useEffect(() => () => { for (const timer of Object.values(creationTimers.current)) clearTimeout(timer); }, []);
   const [boardSections, setBoardSections] = useState(() => new Set(['discussions', 'research', 'brainstorms']));
   const [orderRevision, setOrderRevision] = useState(0);
   const [dragged, setDragged] = useState<{ kind: OrderKind; name: string; names: string[] } | null>(null);
@@ -270,6 +274,14 @@ export function App({ version, refresh }: Props) {
     try { const response = await post('__say', { text }); if (!response.ok) addStatus(await response.text(), true); }
     catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
   };
+  const createBoard = (command: string) => {
+    if (!room?.multi && room?.started && !armedCreation[command]) {
+      setArmedCreation((previous) => ({ ...previous, [command]: true }));
+      creationTimers.current[command] = setTimeout(() => { setArmedCreation((previous) => ({ ...previous, [command]: false })); delete creationTimers.current[command]; }, 4000);
+      return;
+    }
+    void boardCommand(command);
+  };
   const saveOrder = (kind: OrderKind, names: string[]) => {
     const folder = roomRef.current?.folder;
     if (!folder) return;
@@ -407,6 +419,8 @@ export function App({ version, refresh }: Props) {
           saveOrder(kind, readOrder(folder, kind).filter((item) => item !== name));
         }
         void loadDetails();
+      } else if (event.type === 'goto') {
+        navigate(event.url.replace(/__room(?=([?#]|$))/, '__next'));
       } else if (event.type === 'ended') {
         setEnded(true); addStatus('This room has ended. You can close this window.'); events.close();
       } else if (event.type === 'restarting') {
@@ -414,7 +428,7 @@ export function App({ version, refresh }: Props) {
       }
     };
     return () => { events.close(); clearTimeout(state.show); clearTimeout(state.fail); state.show = undefined; state.fail = undefined; };
-  }, [version, refresh]);
+  }, [version, refresh, navigate]);
 
   const title = displayTitle(peek?.name ?? room?.active?.split('/').at(-1), peek?.title ?? room?.discussion) || 'agent-room';
   const turnVisible = !!room?.started && yourTurn && !thinking && !peek && room.autoDev?.status !== 'running';
@@ -498,10 +512,16 @@ export function App({ version, refresh }: Props) {
   };
   return <main>
     <h1>{title}</h1>
+    {!!(room && input && !peek && !viewLayout && room.multi && !room.active && (room.brainstorm || room.workbench || room.research || (room.open?.length ?? 0) > 1)) && <button type="button" title="Discard this new board and return to the board you came from" onClick={() => void boardCommand('/cancel')}>Cancel</button>}
     <div className={'next-workspace' + (boardsClosed ? ' boards-closed' : '')}>
     <aside className="next-boards" aria-label="Boards">
       <div><b hidden={boardsClosed}>Boards</b> <button type="button" aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} }}>{boardsClosed ? '»' : '«'}</button></div>
       {!boardsClosed && <div className="boards-list">
+        {!!(room && input && !peek && !viewLayout) && <div className="boards-new">
+          {!!(room.active || room.brainstorm || room.workbench || room.research) && <button type="button" title={room.multi ? 'Open a new discussion beside this one, which stays open (click it in Boards to show it again).' : 'End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.'} onClick={() => createBoard('/new')}>{armedCreation['/new'] ? 'Click again: this session ends and the chat clears' : '+ New discussion'}</button>}
+          <button type="button" title={room.multi ? 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.' : 'A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.'} onClick={() => createBoard('/brainstorm')}>{armedCreation['/brainstorm'] ? 'Click again: this session ends and the chat clears' : '+ New brainstorm'}</button>
+          <button type="button" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker." onClick={() => createBoard('/research')}>{armedCreation['/research'] ? 'Click again: this session ends and the chat clears' : '+ New research'}</button>
+        </div>}
         <details open={boardSections.has('discussions')} onToggle={(e) => sectionToggle('discussions', e.currentTarget.open)}><summary>Discussions ({activeDiscussions.length + unstarted.filter((entry) => !entry.research).length})</summary>{openUnstarted(false)}{workerInfo?.pending?.filter((item) => !activeDiscussions.includes(item.lane ?? '')).map((item) => <div className="worker-pending" key={item.branch}>⚠ {item.branch}: {[item.ahead && `${item.ahead} ${item.ahead === 1 ? 'commit' : 'commits'} not merged into main`, item.dirty && 'uncommitted changes'].filter(Boolean).join(' · ')}</div>)}{activeDiscussions.map((name) => boardRow(name, 'discussions/' + name, false, false, canOrder ? { kind: 'discussions', names: activeDiscussions } : undefined))}</details>
         <details open={boardSections.has('research')} onToggle={(e) => sectionToggle('research', e.currentTarget.open)}><summary>Research ({research.length + unstarted.filter((entry) => entry.research).length})</summary>{openUnstarted(true)}{research.map((name) => boardRow(name, 'discussions/' + name, false))}</details>
         <details open={boardSections.has('brainstorms')} onToggle={(e) => sectionToggle('brainstorms', e.currentTarget.open)}><summary>Brainstorms ({orderedBrainstorms.length})</summary>{orderedBrainstorms.map((name) => boardRow(name, 'brainstorms/' + name, true, false, canOrder ? { kind: 'brainstorms', names: orderedBrainstorms } : undefined))}</details>
@@ -512,6 +532,7 @@ export function App({ version, refresh }: Props) {
     <div ref={conversation} className="next-conversation">
     {layout.sideClosed && <button type="button" title="Open side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: false }, true, 'side-closed')}>Open side pane</button>}
     {peek && <p>peeking at {displayTitle(peek.name, peek.title)} · read-only</p>}
+    {!!(room && !room.active && !peek && !viewLayout && !room.workbench) && <p>{room.brainstorm ? 'Your first message names this brainstorm and saves it here.' : room.research ? 'Your first message names this research board and saves it here.' : 'Your first message starts a new discussion.'}</p>}
     {turnVisible && <p aria-label="Turn status">your turn</p>}
     <section aria-label="Activity" aria-live="polite">
       {failure && <div><span title={failure.error}>✗ {failure.agent} failed {failure.time}: {failure.error.split(/\r?\n/)[0]}{failure.earlier ? ` (+${failure.earlier} earlier)` : ''}</span> <button type="button" title="Dismiss" aria-label="Dismiss pinned error" onClick={() => setFailure(null)}>✕</button></div>}
