@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './layout.css';
-import type { FileDetailsResponse, FilesResponse, HighlightMessage, MessageView, Peek, PointMessage, Room, SayRequest, ScreenEvent, ShowRequest } from '../../src/contract';
+import type { FileDetailsResponse, FilesResponse, HighlightMessage, MessageView, Peek, PointMessage, Room, SayRequest, ScreenEvent, ShowRequest, WorkerInfo, WorkerInfoRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void };
 type StatusLine = { text: string; error: boolean };
@@ -72,6 +72,7 @@ function FileTree({ files, prefix, doc, unviewable, expanded, toggle, choose }: 
 
 export function App({ version, refresh }: Props) {
   const [room, setRoom] = useState<Room | null>(null);
+  const [workerInfo, setWorkerInfo] = useState<WorkerInfo | null>(null);
   const [messages, setMessages] = useState<MessageView[]>([]);
   const [thinking, setThinking] = useState<string | null>(null);
   const [yourTurn, setYourTurn] = useState(false);
@@ -179,12 +180,19 @@ export function App({ version, refresh }: Props) {
       state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command || state.posting > 0 ? 'on' : null); }, 1500);
     }
   };
-  const post = async (path: '__say' | '__show', body: SayRequest | ShowRequest) => {
+  const post = async (path: '__say' | '__show' | '__workerinfo', body: SayRequest | ShowRequest | WorkerInfoRequest) => {
     const state = busyState.current; state.posting++; updateBusy();
     try {
       return await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': client.current }, body: JSON.stringify(body) });
     } finally { state.posting--; updateBusy(); }
   };
+  const refreshWorker = () => { void post('__workerinfo', {}).catch(() => {}); };
+  useEffect(() => {
+    let last = -Infinity;
+    const refresh = () => { if (document.visibilityState === 'hidden' || Date.now() - last < 5000) return; last = Date.now(); refreshWorker(); };
+    window.addEventListener('focus', refresh); document.addEventListener('visibilitychange', refresh);
+    return () => { window.removeEventListener('focus', refresh); document.removeEventListener('visibilitychange', refresh); };
+  }, []);
   const send = async () => {
     let prepared = text;
     if (pointed.length && !text.trim().startsWith('/')) {
@@ -311,6 +319,7 @@ export function App({ version, refresh }: Props) {
         refresh(); return;
       }
       if (event.type === 'reset') {
+        setWorkerInfo(event.workerInfo ?? null);
         viewing.current = event.viewing;
         setViewLayout(event.viewing && typeof event.viewing === 'object' ? event.viewing as { name?: string; discussion?: string } : null);
         roomRef.current = event.room; peekRef.current = event.peek ?? null;
@@ -354,6 +363,8 @@ export function App({ version, refresh }: Props) {
         addStatus(event.text, !!event.error);
       } else if (event.type === 'busy') {
         state.command = event.on; updateBusy();
+      } else if (event.type === 'workerinfo') {
+        setWorkerInfo(event.info);
       } else if (event.type === 'doc') {
         docRef.current = event.file; setDoc(event.file); setSubtab(event.file ? 'document' : 'explorer'); if (event.file) openDocument();
       } else if (event.type === 'room') {
@@ -383,9 +394,26 @@ export function App({ version, refresh }: Props) {
   const boardTitle = (name: string, path: string, brainstorm: boolean) => displayTitle(name, room?.open?.find((entry) => entry.active === path)?.title ?? (room?.active === path ? room.discussion : undefined) ?? room?.checkpoints?.find((entry) => entry.name === (brainstorm ? 'brainstorms/' + name : name))?.title);
   const boardRow = (name: string, path: string, brainstorm: boolean, archived = false) => {
     const current = room?.active === path, open = room?.open?.find((entry) => entry.active === path && !entry.current);
+    const entry = room?.open?.find((item) => item.active === path);
     const closed = brainstorm ? !current && !open : !!room?.closedDiscussions?.includes(name);
     const kind = brainstorm ? 'brainstorm' : room?.workbenches?.includes(name) ? 'workbench' : room?.researches?.includes(name) ? 'research' : 'discussion';
     const label = boardTitle(name, path, brainstorm);
+    const work = workerInfo?.pending?.find((item) => item.lane === name);
+    const isResearch = kind === 'research', isDiscussion = !brainstorm && !isResearch;
+    const closing = brainstorm ? null : room?.closingDiscussions?.[name];
+    const workerBusy = isDiscussion && !!(entry?.working || entry?.workerBusy || room?.busyWorkers?.includes(name));
+    const conflicts = isDiscussion ? work?.conflicts ?? [] : [];
+    const state = entry?.ongoing || entry?.working || closing || workerBusy ? 'ongoing' : closed ? 'closed' : conflicts.length ? 'waiting for input' : entry ? !entry.started ? 'not started' : entry.waitingForInput ? 'waiting for input' : entry.readyForAutoDev ? 'ready for auto dev' : entry.workReady && !entry.workbench && !entry.brainstorm ? 'work ready' : 'idle' : current && !room?.started ? 'not started' : 'idle';
+    const merge = workerInfo?.mergeable?.[name];
+    const suffix = state === 'work ready' && isDiscussion && merge ? merge.canMerge ? ' · mergeable' : merge.catchUp ? ' · needs catch-up' : ' · merge blocked' : '';
+    const conflictText = conflicts.length ? 'Worker conflict: ' + conflicts.join(', ') : '';
+    const tooltip = state === 'waiting for input' ? conflictText || entry?.waitingReason : suffix === ' · merge blocked' ? merge?.disabledReason : undefined;
+    const closingText = closing ? closing === 'waiting' ? ' · closing · waiting for worker' : ' · closing · writing statement' : '';
+    const changed = isDiscussion && !archived ? workerInfo?.merged?.includes(name) ? ' · merged' : workerInfo?.pending && !work ? ' · no changes' : '' : '';
+    const pendingText = work ? [work.ahead && `${work.ahead} ${work.ahead === 1 ? 'commit' : 'commits'} not merged into main`, work.dirty && 'uncommitted changes'].filter(Boolean).join(' · ') : '';
+    const stats = room?.researchStats?.[name];
+    const count = Number.isSafeInteger(stats?.laps) && stats!.laps >= 0 ? stats!.laps : 0;
+    const date = (value?: string | null) => { if (!value) return '—'; const d = new Date(value); return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
     const ref = brainstorm ? path : archived ? path.slice('discussions/'.length) : name;
     const action = () => {
       if (current) { if (peekRef.current) void backToCurrent(); else setFilePeek(null); return; }
@@ -394,13 +422,22 @@ export function App({ version, refresh }: Props) {
       else { setFilePeek({ path, name, title: label, readonly: archived }); setExplorerMode('discussion'); setSubtab('explorer'); }
     };
     const content = <>{kind === 'workbench' ? '🔧 ' : kind === 'research' ? '🔬 ' : ''}{label}</>;
-    return <div className="board-row" key={path}>{open ? <a className={'entry ' + kind} title={path} href={open.url.replace(/__room(?=([?#]|$))/, '__next')}>{content}</a> : <button type="button" className={'entry ' + kind} title={path} aria-current={current ? 'true' : undefined} onClick={action}>{content}</button>}</div>;
+    const archivedState = archived ? (path.includes('/archive/') ? 'archived' : 'deferred') + (brainstorm ? ' brainstorm' : isResearch ? ' research' : '') + (!brainstorm && closed ? ' · closed' : '') + closingText + (isDiscussion && workerInfo?.merged?.includes(name) ? ' · merged' : '') : null;
+    return <div className="board-row" key={path}>{open ? <a className={'entry ' + kind} title={path} href={open.url.replace(/__room(?=([?#]|$))/, '__next')}>{content}</a> : <button type="button" className={'entry ' + kind} title={path} aria-current={current ? 'true' : undefined} onClick={action}>{content}</button>}
+      <div className="local-label" title={tooltip || undefined}>{archivedState ?? (state + suffix + (isDiscussion && entry?.working ? ' · worker working' : '') + closingText + changed)}</div>
+      {isDiscussion && !archived && work && <div className="worker-pending">⚠ Worker: {pendingText}</div>}
+      {!!conflictText && !workerBusy && <div className="worker-conflict">⚠ {conflictText}</div>}
+      {isResearch && <div className="local-label"><span className={count > 30 ? 'research-laps-high' : undefined}>Laps: {stats?.priorUnknown ? '≥' : ''}{count}</span> · Last: {date(stats?.lastRun)} · Next: {date(stats?.nextRun)}</div>}
+    </div>;
   };
   const discussions = namesUnder('discussions'), brainstorms = namesUnder('brainstorms');
   const research = discussions.filter((name) => room?.researches?.includes(name));
   const activeDiscussions = discussions.filter((name) => !room?.researches?.includes(name));
   const unstarted = (room?.open ?? []).filter((entry) => !entry.current && !entry.active);
-  const openUnstarted = (researchBoard: boolean) => unstarted.filter((entry) => !!entry.research === researchBoard).map((entry) => <div className="board-row" key={entry.url}><a href={entry.url.replace(/__room(?=([?#]|$))/, '__next')}>{entry.workbench ? '🔧 ' : entry.research ? '🔬 ' : ''}{entry.title}</a></div>);
+  const openUnstarted = (researchBoard: boolean) => unstarted.filter((entry) => !!entry.research === researchBoard).map((entry) => {
+    const state = entry.ongoing || entry.working ? 'ongoing' : !entry.started ? 'not started' : entry.waitingForInput ? 'waiting for input' : entry.readyForAutoDev ? 'ready for auto dev' : entry.workReady && !entry.workbench && !entry.brainstorm ? 'work ready' : 'idle';
+    return <div className="board-row" key={entry.url}><a href={entry.url.replace(/__room(?=([?#]|$))/, '__next')}>{entry.workbench ? '🔧 ' : entry.research ? '🔬 ' : ''}{entry.title}</a><div className="local-label" title={state === 'waiting for input' ? entry.waitingReason || undefined : undefined}>{state}{entry.working && !researchBoard ? ' · worker working' : ''}</div>{researchBoard && <div className="local-label">Laps: 0 · Last: — · Next: —</div>}</div>;
+  });
   const inactive = ['archive', 'deferred'].flatMap((section) => ['discussions', 'brainstorms'].flatMap((kind) => namesUnder(`${kind}/${section}`).map((name) => ({ name, path: `${kind}/${section}/${name}`, brainstorm: kind === 'brainstorms' }))));
   const sectionToggle = (key: string, open: boolean) => setBoardSections((previous) => { if (previous.has(key) === open) return previous; const next = new Set(previous); if (open) next.add(key); else next.delete(key); return next; });
   const reveal = async () => {
@@ -416,9 +453,9 @@ export function App({ version, refresh }: Props) {
     <h1>{title}</h1>
     <div className={'next-workspace' + (boardsClosed ? ' boards-closed' : '')}>
     <aside className="next-boards" aria-label="Boards">
-      <div><b hidden={boardsClosed}>Boards</b> <button type="button" aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} }}>{boardsClosed ? '»' : '«'}</button></div>
+      <div><b hidden={boardsClosed}>Boards</b> <button type="button" aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} }}>{boardsClosed ? '»' : '«'}</button></div>
       {!boardsClosed && <div className="boards-list">
-        <details open={boardSections.has('discussions')} onToggle={(e) => sectionToggle('discussions', e.currentTarget.open)}><summary>Discussions ({activeDiscussions.length + unstarted.filter((entry) => !entry.research).length})</summary>{openUnstarted(false)}{activeDiscussions.map((name) => boardRow(name, 'discussions/' + name, false))}</details>
+        <details open={boardSections.has('discussions')} onToggle={(e) => sectionToggle('discussions', e.currentTarget.open)}><summary>Discussions ({activeDiscussions.length + unstarted.filter((entry) => !entry.research).length})</summary>{openUnstarted(false)}{workerInfo?.pending?.filter((item) => !activeDiscussions.includes(item.lane ?? '')).map((item) => <div className="worker-pending" key={item.branch}>⚠ {item.branch}: {[item.ahead && `${item.ahead} ${item.ahead === 1 ? 'commit' : 'commits'} not merged into main`, item.dirty && 'uncommitted changes'].filter(Boolean).join(' · ')}</div>)}{activeDiscussions.map((name) => boardRow(name, 'discussions/' + name, false))}</details>
         <details open={boardSections.has('research')} onToggle={(e) => sectionToggle('research', e.currentTarget.open)}><summary>Research ({research.length + unstarted.filter((entry) => entry.research).length})</summary>{openUnstarted(true)}{research.map((name) => boardRow(name, 'discussions/' + name, false))}</details>
         <details open={boardSections.has('brainstorms')} onToggle={(e) => sectionToggle('brainstorms', e.currentTarget.open)}><summary>Brainstorms ({brainstorms.length})</summary>{brainstorms.map((name) => boardRow(name, 'brainstorms/' + name, true))}</details>
         <details open={boardSections.has('archived-deferred')} onToggle={(e) => sectionToggle('archived-deferred', e.currentTarget.open)}><summary>Archived · Deferred ({inactive.length})</summary>{inactive.map(({ name, path, brainstorm }) => boardRow(name, path, brainstorm, true))}</details>

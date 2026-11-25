@@ -17,3 +17,5 @@
 .next-boards { min-width: 0; max-height: calc(100vh - 6rem); overflow: auto; border-right: 1px solid #ccc; }
 .next-boards summary { cursor: pointer; }
 .board-row button, .board-row a { display: block; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.worker-pending { color: #a05b00; }
+.worker-conflict, .research-laps-high { color: #b42318; }

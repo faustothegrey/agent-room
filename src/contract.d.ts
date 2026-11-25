@@ -38,14 +38,17 @@ export interface Peek {
 }
 export interface Gauge { provider: string; group?: string; label: string; used: number; resets: string | null }
 export interface QuotaAt { measured: string | null; checked: string }
-export interface WorkerInfo { lines: string[]; disabled?: boolean; error?: boolean; lanes?: unknown[]; pending?: unknown[]; discardable?: string[]; mergeable?: Record<string, unknown>; merged?: string[] }
-export interface OpenBoard { url: string; current: boolean; title: string; active: string | null; brainstorm: boolean; workbench: boolean; research: boolean; started: boolean; working: boolean; workerBusy: boolean; ongoing: boolean }
+export interface WorkerPending { lane: string | null; branch: string; ahead: number; dirty: boolean; conflicts: string[] }
+export interface MergeReadiness { canMerge: boolean; catchUp: boolean; disabledReason?: string | null }
+export interface WorkerInfo { lines: string[]; disabled?: boolean; error?: boolean; lanes?: unknown[]; pending?: WorkerPending[]; discardable?: string[]; mergeable?: Record<string, MergeReadiness>; merged?: string[] }
+export interface OpenBoard { url: string; current: boolean; title: string; active: string | null; brainstorm: boolean; workbench: boolean; research: boolean; started: boolean; working: boolean; workerBusy: boolean; ongoing: boolean; waitingForInput?: boolean; waitingReason?: string | null; readyForAutoDev?: boolean; workReady?: boolean }
 export interface BoardCheckpoint { name: string; title?: string; at?: string; kind?: string }
+export interface ResearchStats { laps: number; priorUnknown?: boolean; lastRun?: string | null; nextRun?: string | null }
 export interface Room {
   folder: string; agents: string[]; worker: string; workerModel: string | null;
   cliSessions: unknown; discussion: string; active: string | null; started: boolean;
   fresh: boolean; brainstorm: boolean; workbench: boolean; research: boolean;
-  workbenches: string[]; researches: string[]; researchStats: unknown; members: unknown[];
+  workbenches: string[]; researches: string[]; researchStats: Record<string, ResearchStats>; members: unknown[];
   failedAgents: { name: string; disabled: boolean }[]; autoDev: { status: string | null; [key: string]: unknown } | null; workerStop: unknown;
   retryId: string | null; transcript: string | null; checkpoints: BoardCheckpoint[]; closedDiscussions: string[];
   closingDiscussions: Record<string, string>; busyWorkers: string[]; back: unknown; code: unknown;
@@ -118,6 +121,8 @@ export type FilesResponse = string[];
 export interface FileDetailsResponse { files: string[]; unviewable: string[]; branch: string | null }
 export interface ShowRequest { file: string }
 export type ShowReplyStatus = 204 | 403 | 404;
+// POST /__workerinfo requests an asynchronous workerinfo event.
+export type WorkerInfoRequest = Record<string, never>;
 
 // GET /__mtime?f=<room-relative file>: decimal mtime, "false" when unavailable,
 // or "fixed" for an immutable received snapshot. Without f it lists room files.
