@@ -66,7 +66,25 @@ export type Monitor = Record<string, { login: MonitorLogin | null; running: numb
 export interface CodeInfo { path: string; branch: string | null; commit: string | null; dirty: boolean; startedAt?: string | null; reloaded?: { at: string; commit: string | null; dirty: boolean } }
 // GET __health (the heartbeat, every 3 s); 404 when this room is no longer on the server.
 export interface HealthReply { app: 'agent-room'; pid: number; root: string; startedAt: string | null; discussion: string | null; pages: number }
-export interface Replica { node: string; addresses: string[]; roomId: string; project: string | null; own: Record<string, unknown>; received: unknown[]; peers: unknown[] }
+// Replication (replicaStatus in ui.mjs): this node's own lines, the lines received from peers, and the peers.
+export interface ProjectVersion { commit: string | null; dirty: boolean }
+export interface OwnLine { discussion: string; round: number; sent: Record<string, boolean> }
+export interface ReceivedLine { discussion: string; node: string; commit: string; round: number; kind?: string; outcome?: string; name?: string | null; title?: string | null; at?: string; receivedAt?: string | null; local: string | null }
+export interface ReplicaPeer { name: string; address: string; reachable: boolean | null; since: string | null; activity: string | null; project: ProjectVersion | null; paired: boolean; mismatch: boolean; error: string | null }
+export interface Replica { node: string; addresses: string[]; roomId: string; project: ProjectVersion | null; own: Record<string, OwnLine>; received: ReceivedLine[]; peers: ReplicaPeer[] }
+// POST __view: { discussion, node } pins a received line for this browser, { renew: true } keeps the
+// pin, { back: true } releases it. Replies { viewing }: the pinned line with its chat, true (renewed), or null.
+export type ViewRequest = { discussion: string; node: string } | { renew: true } | { back: true };
+export interface ViewedLine { discussion: string; node: string; commit: string; round: number; kind?: string; outcome?: string; name?: string | null; title?: string | null; receivedAt: string | null; messages: MessageView[] }
+export interface ViewReply { viewing: ViewedLine | true | null }
+// POST __pair: { peer } checks (both rooms' folders), { peer, confirm: true } pairs.
+export interface PairRequest { peer: string; confirm?: boolean }
+export interface PairCheck { local: { node: string; root: string; roomId: string | null }; peer: { node: string; root: string } }
+// GET __rooms: this server's rooms, for Switch room….
+export interface RoomEntry { id: string; path: string; root: string; discussion: string | null; pages: number | null; current: boolean }
+// POST __newroom: {} asks the server's folder chooser; { token } creates the room it asked about; { token, cancel: true } drops it.
+export type NewRoomRequest = Record<string, never> | { token: string; cancel?: boolean };
+export interface NewRoomReply { cancelled?: boolean; confirm?: boolean; token?: string; folder?: string; url?: string; existing?: boolean; open?: boolean }
 export interface ResetEvent {
   type: 'reset'; messages: MessageView[]; doc?: string | null; thinking?: string | null;
   status?: string | null; busy: boolean; input: boolean; room: Room | null; worker: WorkerMessage[];

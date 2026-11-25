@@ -88,3 +88,11 @@
 .quota b .hover-detail, .gauge .hover-detail { left: auto; right: 0; text-transform: none; font-weight: 400; white-space: normal; }
 .quota b:is(:hover, :focus-visible) > .hover-detail, .gauge:is(:hover, :focus-visible) > .hover-detail { display: flex; }
 .hover-detail .problem { font-weight: 600; color: light-dark(#b45309, #d6a84c); } .hover-detail .problem.red { color: #ef4444; }
+.peer-warning { border: 0; background: none; padding: 0 .2rem; font-size: .8rem; line-height: 1.1; color: light-dark(#92600a, #d6a84c); }
+.room-zone > details.menu:not([open]):hover + .hover-detail { display: flex; }
+.ask, .peers { max-width: min(40rem, 90vw); border: 1px solid #ccc; border-radius: 8px; padding: 1rem 1.2rem; }
+.ask::backdrop, .peers::backdrop { background: #0006; }
+.ask > div, .peers > div:last-child { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
+.peer-dot.up { color: #22c55e; } .peer-dot.down { color: #ef4444; }
+.local-label, .local-activity { font-size: .75rem; opacity: .75; }
+.remote-view { border: 1px solid #ccc; border-radius: 6px; padding: .3rem .6rem; }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { CodeInfo, Gauge, HealthReply, Monitor, QuotaAt } from '../../src/contract';
+import type { CodeInfo, Gauge, HealthReply, Monitor, NewRoomReply, NewRoomRequest, PairCheck, PairRequest, QuotaAt, Replica, RoomEntry, ViewedLine } from '../../src/contract';
 
 // The page header's Room and Monitoring zones, as on /__room: the room menu (Quit room), the
 // server menu (Reload, Restart, Shutdown server) with its state from the heartbeat, and the quota
@@ -103,11 +103,100 @@ function version(c: CodeInfo | null | undefined): { text: string; title: string 
 }
 const upFor = (t: string) => { const m = Math.max(0, Math.floor((Date.now() - Date.parse(t)) / 60000)); return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h ' + (m % 60) + 'm'; };
 type Server = { state: 'up' | 'down' | null; text: string; title: string; beat: number };
+const receivedTime = (at: string | null | undefined) => at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'time unavailable';
+export function peerActivity(replica: Replica | null, name: string) {
+  const p = replica?.peers.find((peer) => peer.name === name);
+  if (!p) return 'unreachable (not configured)';
+  return p.reachable === false ? 'unreachable' + (p.since ? ' since ' + receivedTime(p.since) : '') : p.activity || 'checking';
+}
+// The replica line beside the room menu, as updateReplicaHeader does: the room folder, then this
+// node's address and line (or the line being viewed) and the project version.
+function replicaLine(replica: Replica, active: string | null, viewing: ViewedLine | null, port: string) {
+  const own = replica.own[active?.split('/').at(-1) ?? ''];
+  const project = replica.project?.commit ? 'Project ' + replica.project.commit + (replica.project.dirty ? ' + uncommitted' : '') : 'Version unavailable';
+  const line = viewing ? '[Viewing ' + viewing.node + "'s line, round " + viewing.round + ', received ' + receivedTime(viewing.receivedAt) + ' · read-only] · ' + viewing.node + ': ' + peerActivity(replica, viewing.node)
+    : replica.node + "'s line" + (own ? ', round ' + own.round : ', no saved round') + ' · agents run on ' + replica.node;
+  return replica.node + ' ' + (replica.addresses[0] || '127.0.0.1:' + port) + ' · ' + line + ' · ' + project;
+}
+type Ask = { text: string; buttons: [string, (() => unknown)?][]; done: (value: unknown) => void };
 type Props = {
-  roomName: string; code: CodeInfo | null | undefined; gauges: Gauge[] | null | undefined; at: QuotaAt | null | undefined; monitor: Monitor;
+  roomName: string; folder: string | null; active: string | null; replica: Replica | null; replicaOff: string | null; viewing: ViewedLine | null; newRoom: boolean; readOnly: boolean;
+  post: (path: '__newroom' | '__pair', body: NewRoomRequest | PairRequest) => Promise<Response>; status: (text: string, error?: boolean) => void; navigate: (url: string) => void; code: CodeInfo | null | undefined; gauges: Gauge[] | null | undefined; at: QuotaAt | null | undefined; monitor: Monitor;
   ended: boolean; restarting: boolean; command: (text: string) => void; shutdown: () => void; serverChanged: () => void;
 };
-export function RoomZones({ roomName, code, gauges, at, monitor, ended, restarting, command, shutdown, serverChanged }: Props) {
+export function RoomZones({ roomName, folder, active, replica, replicaOff, viewing, newRoom, readOnly, post, status, navigate, code, gauges, at, monitor, ended, restarting, command, shutdown, serverChanged }: Props) {
+  // A modal question drawn in the page, as ask() does: each button's act runs inside its click (so
+  // it may open a window); the promise resolves to what it returns (undefined for Escape).
+  const [question, setQuestion] = useState<Ask | null>(null);
+  const askDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { const d = askDialog.current; if (question && d && !d.open) { if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', ''); } }, [question]);
+  const ask = (text: string, buttons: Ask['buttons']) => new Promise<unknown>((done) => setQuestion({ text, buttons, done }));
+  const answer = (act?: () => unknown) => { const q = question; setQuestion(null); askDialog.current?.close?.(); q?.done(act ? act() : undefined); };
+  // Switch room…: this server's rooms, twice (switch this tab, or open a new window). A room with
+  // a page open (on any device) is disabled in both, so the chooser doesn't open it twice.
+  const [rooms, setRooms] = useState<RoomEntry[] | null>(null), [switching, setSwitching] = useState(false);
+  const nextUrl = (path: string) => new URL(path.replace(/__room(?=([?#]|$))/, '__next'), location.href).href;
+  const switchRoom = async () => {
+    closeMenus(); setSwitching(true);
+    try {
+      const res = await fetch('__rooms'); if (!res.ok) throw new Error(await res.text());
+      const list = await res.json() as RoomEntry[]; setRooms(list);
+      if (!list.some((r) => !r.current)) status('No other rooms are open on this server: Open room in folder… adds one.');
+    } catch (err) { status('✗ Switch room: ' + (err instanceof Error ? err.message : String(err)), true); }
+    finally { setSwitching(false); }
+  };
+  const chooseRoom = (value: string) => {
+    const at = value.indexOf(':'), mode = value.slice(0, at), path = value.slice(at + 1);
+    if (!path) return;
+    const url = nextUrl(path);
+    if (mode === 'tab') { navigate(url); return; }
+    // Opened during the choice, so the browser doesn't block it; this window stays on its room.
+    const win = window.open(url, '_blank', 'width=' + window.outerWidth + ',height=' + window.outerHeight);
+    setRooms(null);
+    status(win ? 'Opened the room in a new window. This window stays on its room.' : 'The browser blocked the new window; open ' + url + ' yourself.', !win);
+  };
+  // Open room in folder…: the server shows the Mac's folder chooser. A folder whose room exists opens
+  // it in a new window; one without a room is created only after the page has asked.
+  const newWindow = () => window.open('', '_blank', 'width=' + window.outerWidth + ',height=' + window.outerHeight);
+  const openRoom = async () => {
+    closeMenus();
+    let win = newWindow();
+    if (win) win.document.body.textContent = 'Choose a folder in the window that has just opened…';
+    try {
+      let res = await post('__newroom', {});
+      if (!res.ok) { win?.close(); status('✗ Open room: ' + await res.text(), true); return; }
+      let r = await res.json() as NewRoomReply;
+      if (r.cancelled) { win?.close(); return; }
+      if (r.open) { win?.close(); await ask('The room in ' + r.folder + ' is already open in another window.', [['OK']]); return; }
+      if (r.confirm) {
+        win?.close();
+        const chosen = await ask('Create a room in ' + r.folder + '?', [['Cancel'], ['Create room', () => ({ win: newWindow() })]]) as { win: Window | null } | undefined;
+        if (!chosen) { post('__newroom', { token: r.token!, cancel: true }).catch(() => {}); return; }
+        win = chosen.win;
+        if (win) win.document.body.textContent = 'Creating the room in ' + r.folder + '…';
+        res = await post('__newroom', { token: r.token! });
+        if (!res.ok) { win?.close(); status('✗ Open room: ' + await res.text(), true); return; }
+        r = await res.json() as NewRoomReply;
+        if (r.open) { win?.close(); await ask('The room in ' + r.folder + ' is already open in another window.', [['OK']]); return; }
+      }
+      if (win && r.url) win.location.href = nextUrl(r.url);
+      status((r.existing ? 'Opened the room already in ' : 'Opened a new room in ') + r.folder + (win ? '' : ' at ' + r.url + ' (the browser blocked the new window)') + '. This room keeps running.');
+    } catch (err) { win?.close(); status('✗ Open room: ' + (err instanceof Error ? err.message : String(err)), true); }
+  };
+  // Peers…: the replication peers, with their reachability and Pair buttons.
+  const [peersOpen, setPeersOpen] = useState(false);
+  const peersDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { const d = peersDialog.current; if (peersOpen && d && !d.open) { if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', ''); } }, [peersOpen]);
+  const pair = async (peer: string) => {
+    try {
+      const check = await post('__pair', { peer }); if (!check.ok) { status(await check.text(), true); return; }
+      const x = await check.json() as PairCheck;
+      if (!window.confirm('Pair these room folders?\n' + x.local.node + ': ' + x.local.root + '\n' + x.peer.node + ': ' + x.peer.root)) return;
+      const result = await post('__pair', { peer, confirm: true }); if (!result.ok) status(await result.text(), true);
+    } catch (err) { status(err instanceof Error ? err.message : String(err), true); }
+  };
+  const down = replica?.peers.filter((p) => p.reachable === false).length ?? 0;
+  const downText = down + (down === 1 ? ' peer unreachable' : ' peers unreachable');
   const [armed, setArmed] = useState<Record<string, boolean>>({});
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   useEffect(() => () => { for (const t of Object.values(timers.current)) clearTimeout(t); }, []);
@@ -161,13 +250,27 @@ export function RoomZones({ roomName, code, gauges, at, monitor, ended, restarti
     <div className="room-zone" aria-label="Room">
       <details className="menu" ref={roomMenu} onToggle={(e) => { if (e.currentTarget.open && serverMenu.current) serverMenu.current.open = false; }}>
         <summary><b>{roomName}</b></summary>
-        <div className="menu-items"><button type="button" className="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running." onClick={() => twice('quit', () => command('/quit'))}>{armed.quit ? 'Click again to quit this room' : 'Quit room'}</button></div>
+        <div className="menu-items">
+          <button type="button" disabled={switching} onClick={() => void switchRoom()}>Switch room…</button>
+          {newRoom && <button type="button" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running." onClick={() => void openRoom()}>Open room in folder…</button>}
+          {(replica || replicaOff) && <button type="button" title="Replication peers: reachability and pairing" onClick={() => { closeMenus(); setPeersOpen(true); }}>Peers…</button>}
+          <hr aria-hidden="true" />
+          <button type="button" className="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running." onClick={() => twice('quit', () => command('/quit'))}>{armed.quit ? 'Click again to quit this room' : 'Quit room'}</button></div>
       </details>
+      <span className="hover-detail" role="tooltip" aria-label="Room details">{folder && <code>{folder}</code>}{replica && <span>{replicaLine(replica, active, viewing, location.port)}</span>}</span>
+      {rooms && <select aria-label="Running rooms" value="" onChange={(e) => chooseRoom(e.target.value)} onBlur={() => setRooms(null)}>
+        <option value="">Choose a running room…</option>
+        {([['tab', 'Switch this tab to'], ['window', 'Open in new window']] as const).map(([mode, heading]) => <optgroup key={mode} label={heading}>{rooms.map((r) => {
+          const open = !r.current && (r.pages ?? 0) > 0;
+          const pages = r.pages == null ? '' : ' · ' + r.pages + (r.pages === 1 ? ' page' : ' pages') + ' open';
+          return <option key={r.id} value={mode + ':' + r.path} disabled={r.current || open}>{r.root + ' · ' + (r.discussion || 'No discussion started') + pages + (r.current ? ' (current)' : open ? ' (open in another window)' : '')}</option>;
+        })}</optgroup>)}
+      </select>}
       <span className="server-head">
         <details className="menu" ref={serverMenu} onToggle={(e) => { if (e.currentTarget.open && roomMenu.current) roomMenu.current.open = false; }}>
           <summary><span className="server" data-state={server.state ?? undefined} title={server.title}><i key={server.beat} className={server.state === 'up' ? 'beat on' : 'beat'} aria-hidden="true" />Server</span></summary>
           <div className="menu-items">
-            <button type="button" onClick={() => { closeMenus(); command('/reload'); }}>Reload</button>
+            {!readOnly && <button type="button" onClick={() => { closeMenus(); command('/reload'); }}>Reload</button>}
             <button type="button" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear." onClick={() => twice('restart', () => command('/restart'))}>{armed.restart ? 'Click again: the chat clears' : 'Restart'}</button>
             <hr aria-hidden="true" />
             <button type="button" className="danger" title="End every room on this server, then the server." onClick={() => twice('shutdown', shutdown)}>{armed.shutdown ? 'Click again: every room ends' : 'Shutdown server'}</button>
@@ -175,6 +278,21 @@ export function RoomZones({ roomName, code, gauges, at, monitor, ended, restarti
         </details>
         <span className="hover-detail" role="tooltip" aria-label="Server state"><span>{server.text}</span><span title={v.title}>{v.text}</span></span>
       </span>
+      {down > 0 && <button type="button" className="peer-warning" title={downText} aria-label={downText} onClick={() => setPeersOpen(true)}>⚠</button>}
+      {question && <dialog ref={askDialog} className="ask" aria-label={question.text} onCancel={(e) => { e.preventDefault(); answer(); }}>
+        <p>{question.text}</p><div>{question.buttons.map(([label, act], i) => <button type="button" key={label} autoFocus={i === question.buttons.length - 1} onClick={() => answer(act)}>{label}</button>)}</div>
+      </dialog>}
+      {peersOpen && <dialog ref={peersDialog} className="peers" aria-label="Peers" onCancel={(e) => { e.preventDefault(); setPeersOpen(false); }}>
+        {(replica || replicaOff) && <h3>Peers</h3>}
+        {!replica && replicaOff && <p className="status">{replicaOff}</p>}
+        {replica?.peers.map((peer) => <div className="peer-row" key={peer.name} title={peer.error ?? undefined}>
+          <span className={'peer-dot ' + (peer.reachable === true ? 'up' : peer.reachable === false ? 'down' : '')}>● </span>
+          {peer.name + ' · ' + peer.address + ' · ' + peerActivity(replica, peer.name) + (peer.paired ? ' · paired' : ' · not paired')}
+          {!peer.paired && <button type="button" onClick={() => void pair(peer.name)}>Pair with {peer.name}…</button>}
+          {' · project ' + (peer.project?.commit ? peer.project.commit + (peer.project.dirty ? '+' : '') : 'version unavailable')}
+        </div>)}
+        <div><button type="button" onClick={() => { peersDialog.current?.close?.(); setPeersOpen(false); }}>Close</button></div>
+      </dialog>}
     </div>
     <div className="server-zone" aria-label="Monitoring"><Gauges gauges={gauges} at={at} monitor={monitor} /></div>
   </div>;

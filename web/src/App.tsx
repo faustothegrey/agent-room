@@ -4,7 +4,7 @@ import './layout.css';
 import { ChatList, type ChatMemory } from './ChatList';
 import { WorkerInfoLine, shownWorkerInfo } from './WorkerInfoLine';
 import { RoomZones } from './RoomZones';
-import type { Gauge, Monitor, QuotaAt, AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
+import type { Gauge, Monitor, NewRoomRequest, PairRequest, QuotaAt, ReceivedLine, Replica, ViewedLine, ViewReply, ViewRequest, AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
 type StatusLine = { text: string; error: boolean };
@@ -166,6 +166,15 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [pointed, setPointed] = useState<Pick<PointMessage, 'label' | 'text'>[]>([]);
   const viewing = useRef<unknown>(null);
   const [viewLayout, setViewLayout] = useState<{ name?: string; discussion?: string } | null>(null);
+  // Replication: the room's replica status, and the received line this browser views (View chat,
+  // a leased pin renewed every 30 s) or peeks at (Peek files: its received files in Explorer).
+  const [replica, setReplica] = useState<Replica | null>(null);
+  const [replicaOff, setReplicaOff] = useState<string | null>(null);
+  const [newRoom, setNewRoom] = useState(false);
+  const [remote, setRemote] = useState<{ line: ViewedLine; expired: boolean } | null>(null);
+  const remoteRef = useRef<ViewedLine | null>(null);
+  const [receivedPeek, setReceivedPeek] = useState<{ discussion: string; node: string; commit: string; round: number; name: string; title: string | null } | null>(null);
+  const [receivedFiles, setReceivedFiles] = useState<string[]>([]);
   const [layout, setLayout] = useState<Layout>(initialLayout);
   const layoutRef = useRef(layout); layoutRef.current = layout;
   const layoutContext = useRef<{ id: string; readonly: boolean; folder: string; board: string | null } | null>(null);
@@ -252,7 +261,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command || state.posting > 0 ? 'on' : null); }, 1500);
     }
   };
-  const post = async (path: '/__shutdown' | '/__shutdown?confirmed=yes' | '__say' | '__work' | '__retry' | '__stopworker' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: SayRequest | WorkRequest | RetryRequest | StopWorkerRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
+  const post = async (path: '__view' | '__pair' | '__newroom' | '/__shutdown' | '/__shutdown?confirmed=yes' | '__say' | '__work' | '__retry' | '__stopworker' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: ViewRequest | PairRequest | NewRoomRequest | SayRequest | WorkRequest | RetryRequest | StopWorkerRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
     const state = busyState.current; state.posting++; updateBusy();
     try {
       return await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': client.current }, body: JSON.stringify(body) });
@@ -313,6 +322,49 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     } catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
   };
   const serverChanged = () => { try { sessionStorage.setItem('next-composer-draft', draft.current); } catch {} refresh(); };
+  // View chat: pins a received line for this browser and shows its chat read-only; null goes back.
+  const viewRemote = async (line: ReceivedLine | ViewedLine | null) => {
+    try {
+      const response = await post('__view', line ? { discussion: line.discussion, node: line.node } : { back: true });
+      if (!response.ok) { addStatus(await response.text(), true); return; }
+      const next = (await response.json() as ViewReply).viewing;
+      const shown = next && next !== true ? next : null;
+      remoteRef.current = shown; viewing.current = shown;
+      setRemote(shown ? { line: shown, expired: false } : null);
+      setViewLayout(shown ? { name: shown.name ?? undefined, discussion: shown.discussion } : null);
+      setReceivedPeek(null); setFilePeek(null); setRowMenu(null);
+      docRef.current = null; setDoc(null); setSubtab('explorer');
+      offerEpoch.current++; setOffers([]);
+      setMessages(shown ? shown.messages.filter((m) => !m.pass && !m.hidden) : liveMessages.current);
+      if (shown) setExplorerMode('discussion');
+    } catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
+  };
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      if (!remoteRef.current) return;
+      try { const response = await post('__view', { renew: true }); if (!response.ok) setRemote((r) => r && { ...r, expired: true }); } catch {}
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
+  const received = remote ? remote.line : receivedPeek;
+  useEffect(() => {
+    if (!received) { setReceivedFiles([]); return; }
+    let live = true;
+    fetch('__rfiles?d=' + encodeURIComponent(received.discussion) + '&n=' + encodeURIComponent(received.node) + '&c=' + encodeURIComponent(received.commit || ''))
+      .then((r) => r.json() as Promise<string[]>).then((files) => { if (live) setReceivedFiles(Array.isArray(files) ? files : []); }, () => { if (live) setReceivedFiles([]); });
+    return () => { live = false; };
+  }, [received?.discussion, received?.node, received?.commit]);
+  // One menu open at a time, as on /__room: opening the room or server menu, Actions ▾ or a row ⋯ closes the others.
+  useEffect(() => {
+    const opened = (event: Event) => {
+      const menu = event.target;
+      if (!(menu instanceof HTMLDetailsElement) || !menu.open || !menu.matches('details.menu, details.actions-menu, details.row-menu')) return;
+      for (const other of document.querySelectorAll<HTMLDetailsElement>('details.menu, details.actions-menu')) if (other !== menu) other.open = false;
+      if (!menu.matches('details.row-menu')) setRowMenu(null);
+    };
+    document.addEventListener('toggle', opened, true);
+    return () => document.removeEventListener('toggle', opened, true);
+  }, []);
   const refreshWorker = () => { void post('__workerinfo', {}).catch(() => {}); };
   const actionReply = async <T,>(path: '__merge' | '__discard' | '__catchup', body: BoardActionRequest): Promise<T> => {
     const response = await post(path, body); if (!response.ok) throw new Error(await response.text()); return await response.json() as T;
@@ -559,8 +611,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         for (const m of event.worker ?? []) if ('note' in m) addStatus(m.note, !!m.error, 'Worker');
         if (event.peek ? event.peek.kind === 'workbench' : event.room?.workbench) { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); }
         else if ((event.peek ? event.peek.kind === 'research' : event.room?.research || roomRef.current?.workbench) && tabRef.current === 'worker') { tabRef.current = 'discussion'; setTab('discussion'); }
-        viewing.current = event.viewing;
-        setViewLayout(event.viewing && typeof event.viewing === 'object' ? event.viewing as { name?: string; discussion?: string } : null);
+        viewing.current = remoteRef.current ?? event.viewing;
+        setViewLayout(remoteRef.current ? { name: remoteRef.current.name ?? undefined, discussion: remoteRef.current.discussion } : event.viewing && typeof event.viewing === 'object' ? event.viewing as { name?: string; discussion?: string } : null);
+        setReplica(event.replica ?? null); setReplicaOff(event.replicaOff ?? null); setNewRoom(!!event.newRoom);
         roomRef.current = event.room; peekRef.current = event.peek ?? null;
         setRoom(event.room); setPeek(event.peek ?? null); setInput(event.input);
         if (event.peek) { setFilePeek(null); setExplorerMode('discussion'); void loadDetails(); }
@@ -569,7 +622,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         if (!event.peek) preservePeekDoc.current = false;
         offerEpoch.current++; setOffers([]);
         const visible = event.messages.filter((m) => !m.pass && !m.hidden);
-        setMessages(visible);
+        if (!remoteRef.current) setMessages(visible);
         if (!event.peek) { liveMessages.current = visible; if (visible.length || event.worker?.length) void loadFiles(); }
         setThinking(event.thinking ?? null); setYourTurn(!event.thinking);
         if (event.status) addStatus(event.status);
@@ -580,7 +633,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         if (!event.message.pass && !event.message.hidden) {
           const message = event.message;
           liveMessages.current = [...liveMessages.current, message];
-          if (!peekRef.current) {
+          if (!peekRef.current && !remoteRef.current) {
             setMessages(liveMessages.current);
             const eligible = message.speaker !== 'User' && message.speaker !== 'Relayed from discussion' && !message.error;
             const epoch = ++offerEpoch.current, active = roomRef.current?.active ?? null;
@@ -622,6 +675,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         state.command = event.on; updateBusy();
       } else if (event.type === 'working') {
         setWorking(event.name);
+      } else if (event.type === 'replica') {
+        setReplica(event.replica);
       } else if (event.type === 'quota') {
         setQuota({ gauges: event.gauges, at: event.at });
       } else if (event.type === 'monitor') {
@@ -661,9 +716,12 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     return () => { events.close(); clearTimeout(state.show); clearTimeout(state.fail); state.show = undefined; state.fail = undefined; };
   }, [version, refresh, navigate]);
 
-  const title = displayTitle(peek?.name ?? room?.active?.split('/').at(-1), peek?.title ?? room?.discussion) || 'agent-room';
+  const title = (remote ? displayTitle(remote.line.name ?? undefined, remote.line.title ?? undefined) : displayTitle(peek?.name ?? room?.active?.split('/').at(-1), peek?.title ?? room?.discussion)) || 'agent-room';
+  const receivedTime = (at: string | null | undefined) => at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'time unavailable';
+  const ownLine = remote && replica ? Object.values(replica.own).find((line) => line.discussion === remote.line.discussion) : undefined;
+  const newerLine = remote && replica?.received.find((line) => line.discussion === remote.line.discussion && line.node === remote.line.node && line.commit !== remote.line.commit);
   const busyWorkers = (room?.open ?? []).filter((entry) => entry.working);
-  const turnVisible = !!room?.started && yourTurn && !thinking && !peek && room.autoDev?.status !== 'running';
+  const turnVisible = !!room?.started && yourTurn && !thinking && !peek && !remote && room.autoDev?.status !== 'running';
   const base = filePeek?.path ?? peek?.path ?? room?.active ?? null;
   const rootMode = explorerMode === 'root' || !base;
   const treeFiles = rootMode ? (fileDetails?.files ?? []).filter((file) => !inBoard(file)) : (fileDetails?.files ?? []).filter((file) => file.startsWith(base + '/')).map((file) => file.slice(base!.length + 1));
@@ -775,6 +833,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     const state = entry.ongoing || entry.working ? 'ongoing' : !entry.started ? 'not started' : entry.waitingForInput ? 'waiting for input' : entry.readyForAutoDev ? 'ready for auto dev' : entry.workReady && !entry.workbench && !entry.brainstorm ? 'work ready' : 'idle';
     return <div className="board-row" key={entry.url}><a href={entry.url.replace(/__room(?=([?#]|$))/, '__next')}>{entry.workbench ? '🔧 ' : entry.research ? '🔬 ' : ''}{entry.title}</a><div className="local-label" title={state === 'waiting for input' ? entry.waitingReason || undefined : undefined}>{state}{entry.working && !researchBoard ? ' · worker working' : ''}</div>{researchBoard && <div className="local-label">Laps: 0 · Last: — · Next: —</div>}</div>;
   });
+  const remoteOnly = replica ? replica.received.filter((line) => !line.local && !foundDiscussions.some((name) => replica.own[name]?.discussion === line.discussion)) : [];
   const inactive = ['archive', 'deferred'].flatMap((section) => ['discussions', 'brainstorms'].flatMap((kind) => namesUnder(`${kind}/${section}`).map((name) => ({ name, path: `${kind}/${section}/${name}`, brainstorm: kind === 'brainstorms' }))));
   const sectionToggle = (key: string, open: boolean) => setBoardSections((previous) => { if (previous.has(key) === open) return previous; const next = new Set(previous); if (open) next.add(key); else next.delete(key); return next; });
   const canAct = !!(room && input && !peek && !viewLayout);
@@ -794,7 +853,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     requestAnimationFrame(() => explorer.current?.querySelector<HTMLElement>('.shown')?.scrollIntoView?.({ block: 'center' }));
   };
   return <main>
-    <RoomZones roomName={room?.folder?.replace(/[/]+$/, '').split('/').pop() || room?.folder || 'agent-room'} code={room?.code} gauges={quota.gauges} at={quota.at} monitor={monitor}
+    <RoomZones folder={room?.folder ?? null} active={room?.active ?? null} replica={replica} replicaOff={replicaOff} viewing={remote?.line ?? null} newRoom={newRoom} readOnly={!!peek || !!viewLayout}
+      post={(path, body) => post(path, body)} status={(text, error) => addStatus(text, error)} navigate={navigate}
+      roomName={room?.folder?.replace(/[/]+$/, '').split('/').pop() || room?.folder || 'agent-room'} code={room?.code} gauges={quota.gauges} at={quota.at} monitor={monitor}
       ended={ended} restarting={restarting} command={(text) => void boardCommand(text)} shutdown={() => void shutdownServer()} serverChanged={serverChanged} />
     <h1>{title}</h1>
     {autoDev?.status === 'running' && <span>Auto dev running · cycle {autoDev.cycle} of {autoDev.max} · {autoDev.waiting ? 'worker is working' : 'discussion is reviewing'}</span>}
@@ -852,6 +913,20 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         <details open={boardSections.has('research')} onToggle={(e) => sectionToggle('research', e.currentTarget.open)}><summary>Research ({research.length + unstarted.filter((entry) => entry.research).length})</summary>{openUnstarted(true)}{research.map((name) => boardRow(name, 'discussions/' + name, false))}</details>
         <details open={boardSections.has('brainstorms')} onToggle={(e) => sectionToggle('brainstorms', e.currentTarget.open)}><summary>Brainstorms ({orderedBrainstorms.length})</summary>{orderedBrainstorms.map((name) => boardRow(name, 'brainstorms/' + name, true, false, canOrder ? { kind: 'brainstorms', names: orderedBrainstorms } : undefined))}</details>
         <details open={boardSections.has('archived-deferred')} onToggle={(e) => sectionToggle('archived-deferred', e.currentTarget.open)}><summary>Archived · Deferred ({inactive.length})</summary>{inactive.map(({ name, path, brainstorm }) => boardRow(name, path, brainstorm, true))}</details>
+        {remoteOnly.length > 0 && <details open={boardSections.has('peers')} onToggle={(e) => sectionToggle('peers', e.currentTarget.open)}><summary>Received from peers ({remoteOnly.length})</summary>{remoteOnly.map((line) => {
+          const folderName = line.name || line.local || line.discussion, label = displayTitle(folderName, line.title ?? undefined), key = 'peer:' + line.discussion + ':' + line.node;
+          const peekReceived = () => { setRowMenu(null); setFilePeek(null); setReceivedPeek({ discussion: line.discussion, node: line.node, commit: line.commit, round: line.round, name: folderName, title: line.title ?? null }); setExplorerMode('discussion'); setSubtab('explorer'); openDocument(); };
+          return <div key={key} className={'board-row' + (receivedPeek?.discussion === line.discussion ? ' peeking' : '')}>
+            <button type="button" title={line.local ? 'discussions/' + line.local : /^\d{4}-\d{2}-\d{2}-/.test(folderName) ? 'discussions/' + folderName : folderName} onClick={peekReceived}>{label}</button>
+            <div className="local-label">{line.node} · round {line.round}</div>
+            <details className="row-menu" open={rowMenu === key} onToggle={(event) => { const isOpen = event.currentTarget.open; if (isOpen && rowMenuRef.current !== key) { rowMenuRef.current = key; setRowMenu(key); } else if (!isOpen && rowMenuRef.current === key) { rowMenuRef.current = null; setRowMenu(null); } }}>
+              <summary aria-label={`Board actions for ${label}`} title="Actions">⋯</summary><div className="row-menu-items" hidden={rowMenu !== key}>
+                <button type="button" title="View this peer’s discussion in full, read-only" onClick={() => { setRowMenu(null); void viewRemote(line); }}>View chat</button>
+                <button type="button" title="Peek at this received discussion’s files in Explorer" onClick={peekReceived}>Peek files</button>
+              </div>
+            </details>
+          </div>;
+        })}</details>}
       </div>}
     </aside>
     <div ref={panel} className={'next-layout' + (layout.stacked ? ' stacked' : '') + (layout.sideClosed ? ' closed' : '')} style={{ '--left': layout.left ? layout.left + 'px' : '55%', '--top': layout.top ? layout.top + 'px' : '55%' } as React.CSSProperties}>
@@ -874,6 +949,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {offers.length > 0 && <div aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
       <label><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
       {working && <p>The worker is busy: what you send now waits for it to finish.</p>}
+      {remote && <div className="remote-view"><p>Read-only: viewing {remote.line.node}'s line.</p>{ownLine && <button type="button" onClick={() => void viewRemote(null)}>Back to {replica?.node}'s line</button>}</div>}
       {input && !peek && !viewLayout && room?.workerStop && !room.workerStop.now && <div>
         <button type="button" disabled={room.workerStop.after} title="The running instruction finishes and is reported as usual; this discussion's queued instructions are cancelled, and auto dev pauses" onClick={() => void stopWorker('after')}>{stopArmed.after ? 'Click again: stop after this task; queued instructions are cancelled' : 'Stop after this task'}</button>{' '}
         <button type="button" title="The running instruction's programs are stopped at once; this discussion's queued instructions are cancelled, auto dev pauses, and what it left in the worktree is reported" onClick={() => void stopWorker('now')}>{stopArmed.now ? 'Click again: stop now; partial edits may be left' : 'Stop now'}</button>
@@ -890,6 +966,12 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     </form></dialog>}
     <div className="next-pane" hidden={tab !== 'discussion'}>
     {peek && <p>peeking at {displayTitle(peek.name, peek.title)} · read-only</p>}
+    {remote && <div className="remote-view" role="status" aria-label="Viewing a peer">
+      <p>{remote.expired ? 'View expired. Select the received line again.' : remote.line.node + "'s line, round " + remote.line.round + ', received ' + receivedTime(remote.line.receivedAt) + '. Read-only.'}</p>
+      <p className="local-activity">Local {replica?.node}: {thinking ? thinking + ' is thinking' : 'discussion idle'} · {working ? 'Worker ' + working + ' is working' : 'worker idle'}</p>
+      {ownLine && <button type="button" onClick={() => void viewRemote(null)}>Back to {replica?.node}'s line</button>}
+      {newerLine && <button type="button" onClick={() => void viewRemote(newerLine)}>View newer received round {newerLine.round}</button>}
+    </div>}
     {!!(room && !room.active && !peek && !viewLayout && !room.workbench) && <p>{room.brainstorm ? 'Your first message names this brainstorm and saves it here.' : room.research ? 'Your first message names this research board and saves it here.' : 'Your first message starts a new discussion.'}</p>}
     {turnVisible && <p aria-label="Turn status">your turn</p>}
     {busy && <div aria-label="Busy" data-state={busy}>{busy === 'on' ? 'Working…' : 'Action failed'}</div>}
@@ -897,17 +979,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     <section aria-label="Conversation">{messages.map((message, index) => <article key={index} className={'msg' + (message.error ? ' error' : '') + (message.outcome ? ' summary' + (message.outcome === 'agreed' ? '' : ' not-agreed') : '')}>
       <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong><div onClick={(event) => { const element = event.target as Element; const target = element.closest<HTMLAnchorElement>('a.mention'); if (target?.dataset.file) { event.preventDefault(); void showFile(target.dataset.file); } if (element.closest('[data-auto-dev="start"]')) void boardCommand('/autodev'); }} dangerouslySetInnerHTML={{ __html: (() => { const html = peek ? message.html : linkFiles(message.html, knownFiles, room?.active ?? null).html; return autoDev && autoDev.status !== 'running' && autoDev.status !== 'paused' && autoDev.offer && index === summaryIndex ? autoOfferHtml(html, autoDev.offer, autoDev.max) : html; })() }} />
     </article>)}</section>
-    {thinking && <p className="status">… {thinking} is thinking</p>}
+    {thinking && !remote && <p className="status">… {thinking} is thinking</p>}
     </ChatList>
     {tab === 'discussion' && offers.length > 0 && <div aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
     <label><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
     {autoDev?.status === 'paused' && autoDev.offer?.text && <div role="status"><p>Next agreed instruction:</p><p>{autoDev.offer.text}</p><p><button type="button" onClick={() => void boardCommand('/autodev')}>Restart auto dev ({autoDev.max} more)</button> Restarting grants another {autoDev.max} worker cycles.</p></div>}
     {autoDev?.status === 'paused' && autoDev.offer?.error && <div role="status">The latest agreed instruction can’t be sent: {autoDev.offer.error}.</div>}
     {input && <div className="composer">
-      <textarea aria-label="Message to the agents" value={text} disabled={ended} onChange={(event) => setText(event.target.value)}
+      {!remote && <textarea aria-label="Message to the agents" value={text} disabled={ended} onChange={(event) => setText(event.target.value)}
         placeholder={peek ? 'Peeking read-only — click Back to return to the active discussion.' : autoDev?.status === 'running' ? 'Auto dev is running — sending a message pauses it. (Enter sends, Shift+Enter for a new line)' : 'Message to the agents… (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown'}
-        onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
-      <div><button type="button" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)" disabled={sending || ended || !!peek || !room?.active} onClick={() => fileInput.current?.click()}>📎 Attach</button>
+        onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />}
+      <div hidden={!!remote}><button type="button" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)" disabled={sending || ended || !!peek || !room?.active} onClick={() => fileInput.current?.click()}>📎 Attach</button>
         <input ref={fileInput} type="file" aria-label="Attach files" multiple hidden onChange={(event) => { const chosen = Array.from(event.target.files ?? []); setFiles((previous) => [...previous, ...chosen]); event.target.value = ''; }} />
         {files.map((file, index) => <span key={index}>{file.name} · {sizeText(file.size)} <button type="button" title="Remove this attachment" aria-label={`Remove ${file.name}`} disabled={sending} onClick={() => setFiles((previous) => previous.filter((_, i) => i !== index))}>✕</button></span>)}
         {pointed.map((point, index) => <span className="chip" title={point.text} key={index}>{point.label} <button type="button" title="Stop pointing at this" aria-label={`Stop pointing at ${point.label}`} onClick={() => setPointed((previous) => previous.filter((_, i) => i !== index))}>✕</button></span>)}
@@ -930,12 +1012,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       onPointerUp={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = panel.current?.getBoundingClientRect(); if (bounds) resize((layoutRef.current.stacked ? event.clientY - bounds.top : event.clientX - bounds.left) - 3, layoutRef.current.stacked, true); event.currentTarget.releasePointerCapture(event.pointerId); }} />
     <div className="next-side" hidden={layout.sideClosed}>
       <div><button type="button" title={layout.stacked ? 'Place conversation and side pane side by side' : 'Stack conversation above side pane'} onClick={() => applyLayout({ ...layoutRef.current, stacked: !layoutRef.current.stacked }, true, 'split-orient')}>{layout.stacked ? '⇆' : '⇅'}</button> <button type="button" title="Close side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: true }, true, 'side-closed')}>✕</button></div>
-      <div><button type="button" aria-label={peek || filePeek ? 'Explorer tab' : undefined} data-peeking={peek || filePeek ? 'true' : undefined} aria-pressed={subtab === 'explorer'} onClick={() => void reveal()}>Explorer</button> <button type="button" disabled={!doc} aria-pressed={subtab === 'document'} onClick={() => { openDocument(); setSubtab('document'); }}>Document</button></div>
-      <section ref={explorer} aria-label={peek || filePeek ? 'Peeked board files' : 'Explorer files'} hidden={subtab !== 'explorer'}>
-        {(peek || filePeek) && <p>Looking at <b>{displayTitle((peek || filePeek)!.name, (peek || filePeek)!.title)}</b> <button type="button" onClick={() => { if (peek) void backToCurrent(); else setFilePeek(null); }}>Back to current</button></p>}
-        <div><button type="button" disabled={!base} aria-pressed={!rootMode} onClick={() => setExplorerMode('discussion')}>Discussion</button> <button type="button" aria-pressed={rootMode} onClick={() => setExplorerMode('root')}>Room checkout</button> <button type="button" disabled title="Coming soon">Worker copy</button></div>
-        <p>{rootMode ? `${room?.folder?.replace(/\/+$/, '').split('/').at(-1) || 'agent-room'}/ · ${fileDetails?.branch || 'main'}` : `${base}/`}</p>
-        <FileTree files={treeFiles} prefix={rootMode ? '' : base!} doc={doc} unviewable={fileDetails?.unviewable ?? []} expanded={expanded} toggle={(path, open) => setExpanded((previous) => { const next = new Set(previous); if (open) next.add(path); else next.delete(path); return next; })} choose={(file) => { if ((peek || filePeek?.readonly) && !rootMode) { docRef.current = file; setDoc(file); setSubtab('document'); openDocument(); } else void showFile(file); }} />
+      <div><button type="button" aria-label={peek || filePeek || receivedPeek ? 'Explorer tab' : undefined} data-peeking={peek || filePeek || receivedPeek ? 'true' : undefined} aria-pressed={subtab === 'explorer'} onClick={() => void reveal()}>Explorer</button> <button type="button" disabled={!doc} aria-pressed={subtab === 'document'} onClick={() => { openDocument(); setSubtab('document'); }}>Document</button></div>
+      <section ref={explorer} aria-label={peek || filePeek || received ? 'Peeked board files' : 'Explorer files'} hidden={subtab !== 'explorer'}>
+        {receivedPeek && !remote && <p>Looking at <b>{displayTitle(receivedPeek.name, receivedPeek.title ?? undefined)}</b> <button type="button" onClick={() => setReceivedPeek(null)}>Back to current</button></p>}
+        {!receivedPeek && (peek || filePeek) && <p>Looking at <b>{displayTitle((peek || filePeek)!.name, (peek || filePeek)!.title)}</b> <button type="button" onClick={() => { if (peek) void backToCurrent(); else setFilePeek(null); }}>Back to current</button></p>}
+        <div><button type="button" disabled={!base && !received} aria-pressed={received ? explorerMode !== 'root' : !rootMode} onClick={() => setExplorerMode('discussion')}>Discussion</button> <button type="button" aria-pressed={received ? explorerMode === 'root' : rootMode} onClick={() => setExplorerMode('root')}>Room checkout</button> <button type="button" disabled title="Coming soon">Worker copy</button></div>
+        <p>{received && explorerMode !== 'root' ? `${received.node} · round ${received.round}` : rootMode ? `${room?.folder?.replace(/\/+$/, '').split('/').at(-1) || 'agent-room'}/ · ${fileDetails?.branch || 'main'}` : `${base}/`}</p>
+        {received && explorerMode !== 'root' ? <>
+          {remote && <p>{remote.line.node} · round {remote.line.round} · received files</p>}
+          <FileTree files={receivedFiles} prefix="" doc={doc?.startsWith('__received/') ? doc.split('/').slice(4).join('/') : null} unviewable={[]} expanded={expanded} toggle={(path, open) => setExpanded((previous) => { const next = new Set(previous); if (open) next.add(path); else next.delete(path); return next; })}
+            choose={(file) => { const full = '__received/' + received.discussion + '/' + received.node + '/' + received.commit + '/' + file; docRef.current = full; setDoc(full); setSubtab('document'); openDocument(); }} />
+        </> : <FileTree files={treeFiles} prefix={rootMode ? '' : base!} doc={doc} unviewable={fileDetails?.unviewable ?? []} expanded={expanded} toggle={(path, open) => setExpanded((previous) => { const next = new Set(previous); if (open) next.add(path); else next.delete(path); return next; })} choose={(file) => { if ((peek || filePeek?.readonly) && !rootMode) { docRef.current = file; setDoc(file); setSubtab('document'); openDocument(); } else void showFile(file); }} />}
       </section>
       {doc && <section className="next-document" aria-label="Document" hidden={subtab !== 'document'}><p>Selected file: {doc}</p><iframe ref={frame} title="Document viewer" src={doc.split('/').map(encodeURIComponent).join('/')} /></section>}
     </div>
