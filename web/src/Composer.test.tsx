@@ -132,12 +132,14 @@ it('restores a draft after a version refresh and disables input after the room e
   Source.current.send({ type: 'ended' }); expect(box.disabled).toBe(true);
 });
 
-it('does not send the local /docs command while Explorer is unavailable', async () => {
+it('opens Explorer locally for the /docs command', async () => {
+  fetchMock.mockResolvedValue({ ok: true, json: async () => ({ files: ['discussions/example/notes.md'], unviewable: [], branch: 'main' }) });
   setup(); const user = userEvent.setup();
   const box = screen.getByRole('textbox', { name: 'Message to the agents' }) as HTMLTextAreaElement;
   await user.type(box, '/docs{Enter}');
-  expect(screen.getByText('Explorer is not available on this page yet.')).toBeTruthy();
-  expect(fetchMock).not.toHaveBeenCalled(); expect(box.value).toBe('/docs');
+  expect(await screen.findByRole('button', { name: 'notes.md' })).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledWith('__files?detail=1');
+  expect(fetchMock.mock.calls.some(([url]) => url === '__say')).toBe(false); expect(box.value).toBe('');
 });
 
 it('does not erase text entered while an earlier message is being sent', async () => {
@@ -163,8 +165,8 @@ it('does not send normal messages or attachments while peeking but permits comma
   fetchMock.mockResolvedValue(reply(204)); setup(); const user = userEvent.setup();
   Source.current.send({ type: 'reset', input: true, room, messages: [], peek: { name: 'closed' } });
   const box = screen.getByRole('textbox', { name: 'Message to the agents' }) as HTMLTextAreaElement;
-  await user.type(box, 'wrong board{Enter}'); expect(fetchMock).not.toHaveBeenCalled();
+  await user.type(box, 'wrong board{Enter}'); expect(fetchMock.mock.calls.filter(([url]) => url === '__say')).toHaveLength(0);
   await user.clear(box); await user.type(box, '/peek{Enter}');
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ text: '/peek' });
+  await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === '__say')).toHaveLength(1));
+  expect(JSON.parse(fetchMock.mock.calls.find(([url]) => url === '__say')![1].body)).toEqual({ text: '/peek' });
 });

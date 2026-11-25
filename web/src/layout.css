@@ -9,3 +9,6 @@
 .next-side[hidden] { display: none; }
 .next-document { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .next-document iframe { flex: 1; min-height: 0; width: 100%; border: 0; }
+.next-document[hidden], .next-side section[hidden] { display: none; }
+.next-side section[aria-label$="files"] { overflow: auto; min-height: 0; }
+.file-columns { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); }

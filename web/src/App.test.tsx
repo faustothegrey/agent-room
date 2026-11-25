@@ -27,9 +27,9 @@ describe('room shell', () => {
     source.send({ type: 'message', message: { speaker: 'Bo', html: '<p>Live</p>' } });
     expect(screen.getByText('Live')).toBeTruthy();
     source.send({ type: 'thinking', name: 'Ada' });
-    expect(screen.getByText('Ada is thinking…')).toBeTruthy();
+    expect(screen.getByText('… Ada is thinking')).toBeTruthy();
     source.send({ type: 'turn', text: 'your turn' });
-    expect(screen.queryByText('Ada is thinking…')).toBeNull();
+    expect(screen.queryByText('… Ada is thinking')).toBeNull();
     expect(screen.getByText('your turn')).toBeTruthy();
     source.send({ type: 'reset', webVersion: 'one', room: { discussion: 'A room' }, messages: [{ speaker: 'Bo', html: '<p>Live</p>' }] });
     expect(screen.queryByText('there')).toBeNull();

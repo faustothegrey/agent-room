@@ -52,7 +52,7 @@ it('pins live errors until dismissed, counts earlier errors, and retains the com
 it('tracks thinking, your turn, user speech, auto dev and the last two status lines', () => {
   render(<App version="one" refresh={() => {}} />);
   Source.current.send({ type: 'reset', room, messages: [], thinking: 'Ada', status: 'round starting' });
-  expect(screen.getByText('Ada is thinking…')).toBeTruthy();
+  expect(screen.getByText('… Ada is thinking')).toBeTruthy();
   expect(screen.queryByLabelText('Turn status')).toBeNull();
   Source.current.send({ type: 'thinking', name: null });
   Source.current.send({ type: 'turn', text: 'your turn · all passed' });

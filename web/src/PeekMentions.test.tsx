@@ -78,15 +78,17 @@ it('peeks at closed chat and files, keeps live messages out of view, and returns
   expect(screen.getByRole('heading', { name: 'Closed' })).toBeTruthy();
   expect(screen.getByLabelText('Explorer tab').dataset.peeking).toBe('true');
   expect(screen.getByText('closed chat')).toBeTruthy(); expect(screen.queryByText('live before')).toBeNull();
+  await user.click(screen.getByLabelText('Explorer tab'));
   const board = screen.getByLabelText('Peeked board files');
   const notes = await within(board).findByRole('button', { name: 'notes.md' });
-  expect((within(board).getByRole('button', { name: 'archive.zip' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((within(board).getByRole('button', { name: "archive.zip · can't be shown here" }) as HTMLButtonElement).disabled).toBe(true);
   await user.click(notes); expect(screen.getByText(`Selected file: ${paths[3]}`)).toBeTruthy();
   expect(fetchMock.mock.calls.filter(([url]) => url === '__show')).toHaveLength(0);
   Source.current.send({ type: 'message', message: entry('A', '<p>live during</p>') });
   expect(screen.queryByText('live during')).toBeNull();
   const box = screen.getByRole('textbox', { name: 'Message to the agents' });
   await user.type(box, 'do not send{Enter}'); expect(fetchMock.mock.calls.filter(([url]) => url === '__say')).toHaveLength(0);
+  await user.click(screen.getByLabelText('Explorer tab'));
   await user.click(within(board).getByRole('button', { name: 'Back to current' }));
   await waitFor(() => expect(screen.queryByLabelText('Explorer tab')).toBeNull());
   expect(JSON.parse(fetchMock.mock.calls.find(([url]) => url === '__say')![1].body)).toEqual({ text: '/peek' });
@@ -101,6 +103,7 @@ it('peeks at closed chat and files, keeps live messages out of view, and returns
 it('clears a peek when the active discussion changes and keeps file selection outside the peek', async () => {
   setup();
   Source.current.send({ type: 'reset', input: true, room, peek, doc: paths[3], messages: [entry('B', '<p>closed chat</p>')] });
+  await userEvent.setup().click(screen.getByLabelText('Explorer tab'));
   await screen.findByRole('button', { name: 'notes.md' });
   Source.current.send({ type: 'room', room: { ...room, active: 'discussions/new', discussion: 'New' } });
   expect(screen.queryByLabelText('Explorer tab')).toBeNull(); expect(screen.queryByText('closed chat')).toBeNull();

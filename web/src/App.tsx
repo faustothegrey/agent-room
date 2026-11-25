@@ -59,6 +59,16 @@ const displayTitle = (name: string | undefined, title: string | undefined) => {
   return saved && saved !== name ? saved : (name ?? '').replace(/^[0-9]{4}-[0-9]{2}-[0-9]{2}-/, '').replace(/-/g, ' ');
 };
 const binary = /\.(icns|ico|bmp|tiff?|heic|avif|zip|tar|gz|tgz|bz2|xz|7z|rar|zst|dmg|pkg|iso|bin|exe|dll|so|dylib|a|o|wasm|woff2?|ttf|otf|eot|mp3|wav|ogg|flac|m4a|aac|mp4|mov|webm|avi|mkv|sqlite3?|db|pyc|class|jar)$/i;
+const inBoard = (file: string) => { const p = file.split('/'); return (p[0] === 'discussions' || p[0] === 'brainstorms') && (/^\d{4}-\d{2}-\d{2}-/.test(p[1] || '') || p[1] === 'archive' || p[1] === 'deferred'); };
+function FileTree({ files, prefix, doc, unviewable, expanded, toggle, choose }: { files: string[]; prefix: string; doc: string | null; unviewable: string[]; expanded: Set<string>; toggle: (path: string, open: boolean) => void; choose: (path: string) => void }) {
+  const folders = [...new Set(files.filter((f) => f.includes('/')).map((f) => f.split('/')[0]))].sort();
+  const entries = files.filter((f) => !f.includes('/')).sort();
+  const buttons = entries.map((name) => {
+    const file = prefix ? `${prefix}/${name}` : name, disabled = unviewable.includes(file) || binary.test(file);
+    return <button key={file} className={'entry file' + (disabled ? ' unviewable' : file === doc ? ' shown' : '')} aria-current={!disabled && file === doc ? 'true' : undefined} disabled={disabled} title={disabled ? "can't be shown here" : undefined} onClick={() => choose(file)}>{name}{disabled ? " · can't be shown here" : ''}</button>;
+  });
+  return <>{folders.map((folder) => { const path = prefix ? `${prefix}/${folder}` : folder; return <details key={path} open={expanded.has(path)} onToggle={(event) => toggle(path, event.currentTarget.open)}><summary>{folder}/</summary><FileTree files={files.filter((f) => f.startsWith(folder + '/')).map((f) => f.slice(folder.length + 1))} prefix={path} doc={doc} unviewable={unviewable} expanded={expanded} toggle={toggle} choose={choose} /></details>; })}{entries.length > 10 ? <div className="file-columns">{buttons}</div> : buttons}{!folders.length && !entries.length && <span>No files yet.</span>}</>;
+}
 
 export function App({ version, refresh }: Props) {
   const [room, setRoom] = useState<Room | null>(null);
@@ -73,7 +83,11 @@ export function App({ version, refresh }: Props) {
   const knownFilesRef = useRef<string[]>([]);
   const fileLoad = useRef<Promise<FilesResponse> | null>(null);
   const preservePeekDoc = useRef(false);
-  const [peekFiles, setPeekFiles] = useState<FileDetailsResponse | null>(null);
+  const [fileDetails, setFileDetails] = useState<FileDetailsResponse | null>(null);
+  const [subtab, setSubtab] = useState<'explorer' | 'document'>('explorer');
+  const [explorerMode, setExplorerMode] = useState<'discussion' | 'root'>('discussion');
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const explorer = useRef<HTMLElement>(null);
   const [offers, setOffers] = useState<string[]>([]);
   const [doc, setDoc] = useState<string | null>(null);
   const docRef = useRef<string | null>(null);
@@ -180,7 +194,7 @@ export function App({ version, refresh }: Props) {
     const value = prepared.trim();
     if (sending || ended || (!value && !files.length) || (peek && (!value.startsWith('/') || files.length > 0))) return;
     const fail = (reason: string) => addStatus(`✗ ${reason} Nothing was sent.`, true);
-    if (value === '/docs' && !files.length) { addStatus('Explorer is not available on this page yet.', true); return; }
+    if (value === '/docs' && !files.length) { setSubtab('explorer'); openDocument(); void loadDetails(); setText(''); return; }
     if (files.length && value.startsWith('/')) return fail('Attachments go with a message, not a command.');
     const tooBig = files.find((file) => file.size > ATTACH_LIMIT);
     if (tooBig) return fail(`${tooBig.name} is over 25 MB.`);
@@ -214,7 +228,7 @@ export function App({ version, refresh }: Props) {
       if (!(target instanceof Element)) return;
       const ref = target.closest<HTMLElement>('.ref[data-ref]');
       if (!ref || !frame.current?.contentWindow) return;
-      if (event.type === 'click') openDocument();
+      if (event.type === 'click') { openDocument(); setSubtab('document'); }
       const message: HighlightMessage = { type: 'agent-room:highlight', ref: ref.dataset.ref ?? '', on: event.type !== 'mouseout' };
       frame.current.contentWindow.postMessage(message, location.origin);
     };
@@ -242,11 +256,14 @@ export function App({ version, refresh }: Props) {
     })();
     return fileLoad.current;
   };
-  const loadPeekFiles = async (path: string) => {
+  const loadDetails = async () => {
     try {
-      const value: FileDetailsResponse = await (await fetch('__files?detail=1')).json();
-      if (peekRef.current?.path === path && Array.isArray(value.files)) setPeekFiles(value);
-    } catch { if (peekRef.current?.path === path) setPeekFiles(null); }
+      const response = await fetch('__files?detail=1');
+      if (!response.ok) return;
+      const raw: FileDetailsResponse | string[] = await response.json();
+      const value = Array.isArray(raw) ? { files: raw, unviewable: [], branch: null } : raw;
+      if (Array.isArray(value?.files)) setFileDetails(value);
+    } catch {}
   };
   const backToCurrent = async () => {
     preservePeekDoc.current = true;
@@ -254,7 +271,7 @@ export function App({ version, refresh }: Props) {
       const response = await post('__say', { text: '/peek' });
       if (!response.ok) { preservePeekDoc.current = false; addStatus(await response.text(), true); return; }
       // Reset normally arrives first; retain the live transcript if the HTTP reply wins the race.
-      if (peekRef.current) { peekRef.current = null; setPeek(null); setPeekFiles(null); setMessages(liveMessages.current); }
+      if (peekRef.current) { peekRef.current = null; setPeek(null); setMessages(liveMessages.current); }
     } catch (error) { preservePeekDoc.current = false; addStatus(error instanceof Error ? error.message : String(error), true); }
   };
 
@@ -290,14 +307,15 @@ export function App({ version, refresh }: Props) {
         viewing.current = event.viewing;
         setViewLayout(event.viewing && typeof event.viewing === 'object' ? event.viewing as { name?: string; discussion?: string } : null);
         roomRef.current = event.room; peekRef.current = event.peek ?? null;
-        setRoom(event.room); setPeek(event.peek ?? null); setInput(event.input); setPeekFiles(null);
-        if (!preservePeekDoc.current || event.peek) { docRef.current = event.doc ?? null; setDoc(event.doc ?? null); }
+        setRoom(event.room); setPeek(event.peek ?? null); setInput(event.input);
+        if (event.peek) { setExplorerMode('discussion'); void loadDetails(); }
+        else if (event.room?.folder) void loadDetails();
+        if (!preservePeekDoc.current || event.peek) { docRef.current = event.doc ?? null; setDoc(event.doc ?? null); setSubtab(event.doc ? 'document' : 'explorer'); }
         if (!event.peek) preservePeekDoc.current = false;
         offerEpoch.current++; setOffers([]);
         const visible = event.messages.filter((m) => !m.pass && !m.hidden);
         setMessages(visible);
         if (!event.peek) { liveMessages.current = visible; if (visible.length) void loadFiles(); }
-        else if (event.peek.path) void loadPeekFiles(event.peek.path);
         setThinking(event.thinking ?? null); setYourTurn(!event.thinking);
         if (event.status) addStatus(event.status);
         state.command = !!event.busy; updateBusy();
@@ -330,13 +348,15 @@ export function App({ version, refresh }: Props) {
       } else if (event.type === 'busy') {
         state.command = event.on; updateBusy();
       } else if (event.type === 'doc') {
-        docRef.current = event.file; setDoc(event.file); if (event.file) openDocument();
+        docRef.current = event.file; setDoc(event.file); setSubtab(event.file ? 'document' : 'explorer'); if (event.file) openDocument();
       } else if (event.type === 'room') {
         const changed = roomRef.current && roomRef.current.active !== event.room.active;
         if (changed && peekRef.current) {
-          peekRef.current = null; setPeek(null); setPeekFiles(null); setMessages([]); liveMessages.current = []; offerEpoch.current++; setOffers([]);
+          peekRef.current = null; setPeek(null); setMessages([]); liveMessages.current = []; offerEpoch.current++; setOffers([]);
         }
-        roomRef.current = event.room; setRoom(event.room);
+        roomRef.current = event.room; setRoom(event.room); if (event.room.folder) void loadDetails();
+      } else if (event.type === 'files') {
+        setSubtab('explorer'); void loadDetails();
       } else if (event.type === 'ended') {
         setEnded(true); addStatus('This room has ended. You can close this window.'); events.close();
       } else if (event.type === 'restarting') {
@@ -348,19 +368,24 @@ export function App({ version, refresh }: Props) {
 
   const title = displayTitle(peek?.name ?? room?.active?.split('/').at(-1), peek?.title ?? room?.discussion) || 'agent-room';
   const turnVisible = !!room?.started && yourTurn && !thinking && !peek && room.autoDev?.status !== 'running';
-  const boardFiles = peek && peekFiles ? peekFiles.files.filter((file) => file.startsWith(`${peek.path}/`)).sort() : [];
+  const base = peek?.path ?? room?.active ?? null;
+  const rootMode = explorerMode === 'root' || !base;
+  const treeFiles = rootMode ? (fileDetails?.files ?? []).filter((file) => !inBoard(file)) : (fileDetails?.files ?? []).filter((file) => file.startsWith(base + '/')).map((file) => file.slice(base!.length + 1));
+  const reveal = async () => {
+    openDocument(); setSubtab('explorer');
+    const file = docRef.current, prefix = rootMode ? '' : base;
+    if (file && !file.startsWith('__received/') && !viewing.current && (rootMode ? !inBoard(file) : !!prefix && file.startsWith(prefix + '/'))) {
+      const parts = file.split('/'); setExpanded((previous) => { const next = new Set(previous); for (let i = 1; i < parts.length; i++) next.add(parts.slice(0, i).join('/')); return next; });
+    }
+    await loadDetails();
+    requestAnimationFrame(() => explorer.current?.querySelector<HTMLElement>('.shown')?.scrollIntoView?.({ block: 'center' }));
+  };
   return <main>
     <h1>{title}</h1>
     <div ref={panel} className={'next-layout' + (layout.stacked ? ' stacked' : '') + (layout.sideClosed ? ' closed' : '')} style={{ '--left': layout.left ? layout.left + 'px' : '55%', '--top': layout.top ? layout.top + 'px' : '55%' } as React.CSSProperties}>
     <div ref={conversation} className="next-conversation">
     {layout.sideClosed && <button type="button" title="Open side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: false }, true, 'side-closed')}>Open side pane</button>}
-    {peek && <div aria-label="Explorer tab" data-peeking="true">Explorer · peeking</div>}
-    {peek && <section aria-label="Peeked board files">
-      <p>Looking at <b>{displayTitle(peek.name, peek.title)}</b> <button type="button" onClick={() => void backToCurrent()}>Back to current</button></p>
-      <p>peeking at {displayTitle(peek.name, peek.title)} · read-only</p>
-      {boardFiles.map((file) => <button key={file} type="button" disabled={peekFiles?.unviewable?.includes(file) || binary.test(file)} aria-current={doc === file ? 'true' : undefined} onClick={() => { docRef.current = file; setDoc(file); openDocument(); }}>{file.slice(peek.path.length + 1)}</button>)}
-      {peekFiles && boardFiles.length === 0 && <p>No files yet.</p>}
-    </section>}
+    {peek && <p>peeking at {displayTitle(peek.name, peek.title)} · read-only</p>}
     {turnVisible && <p aria-label="Turn status">your turn</p>}
     <section aria-label="Activity" aria-live="polite">
       {failure && <div><span title={failure.error}>✗ {failure.agent} failed {failure.time}: {failure.error.split(/\r?\n/)[0]}{failure.earlier ? ` (+${failure.earlier} earlier)` : ''}</span> <button type="button" title="Dismiss" aria-label="Dismiss pinned error" onClick={() => setFailure(null)}>✕</button></div>}
@@ -370,7 +395,7 @@ export function App({ version, refresh }: Props) {
     <section aria-label="Conversation">{messages.map((message, index) => <article key={index} className={'msg' + (message.error ? ' error' : '') + (message.outcome ? ' summary' + (message.outcome === 'agreed' ? '' : ' not-agreed') : '')}>
       <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong><div onClick={(event) => { const target = (event.target as Element).closest<HTMLAnchorElement>('a.mention'); if (target?.dataset.file) { event.preventDefault(); void showFile(target.dataset.file); } }} dangerouslySetInnerHTML={{ __html: peek ? message.html : linkFiles(message.html, knownFiles, room?.active ?? null).html }} />
     </article>)}</section>
-    {thinking && <p>{thinking} is thinking…</p>}
+    {thinking && <p>… {thinking} is thinking</p>}
     {offers.length > 0 && <div aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
     <label><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
     {input && <div className="composer">
@@ -399,7 +424,14 @@ export function App({ version, refresh }: Props) {
       onPointerUp={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = panel.current?.getBoundingClientRect(); if (bounds) resize((layoutRef.current.stacked ? event.clientY - bounds.top : event.clientX - bounds.left) - 3, layoutRef.current.stacked, true); event.currentTarget.releasePointerCapture(event.pointerId); }} />
     <div className="next-side" hidden={layout.sideClosed}>
       <div><button type="button" title={layout.stacked ? 'Place conversation and side pane side by side' : 'Stack conversation above side pane'} onClick={() => applyLayout({ ...layoutRef.current, stacked: !layoutRef.current.stacked }, true, 'split-orient')}>{layout.stacked ? '⇆' : '⇅'}</button> <button type="button" title="Close side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: true }, true, 'side-closed')}>✕</button></div>
-      {doc && <section className="next-document" aria-label="Document"><p>Selected file: {doc}</p><iframe ref={frame} title="Document viewer" src={doc.split('/').map(encodeURIComponent).join('/')} /></section>}
+      <div><button type="button" aria-label={peek ? 'Explorer tab' : undefined} data-peeking={peek ? 'true' : undefined} aria-pressed={subtab === 'explorer'} onClick={() => void reveal()}>Explorer</button> <button type="button" disabled={!doc} aria-pressed={subtab === 'document'} onClick={() => { openDocument(); setSubtab('document'); }}>Document</button></div>
+      <section ref={explorer} aria-label={peek ? 'Peeked board files' : 'Explorer files'} hidden={subtab !== 'explorer'}>
+        {peek && <p>Looking at <b>{displayTitle(peek.name, peek.title)}</b> <button type="button" onClick={() => void backToCurrent()}>Back to current</button></p>}
+        <div><button type="button" disabled={!base} aria-pressed={!rootMode} onClick={() => setExplorerMode('discussion')}>Discussion</button> <button type="button" aria-pressed={rootMode} onClick={() => setExplorerMode('root')}>Room checkout</button> <button type="button" disabled title="Coming soon">Worker copy</button></div>
+        <p>{rootMode ? `${room?.folder?.replace(/\/+$/, '').split('/').at(-1) || 'agent-room'}/ · ${fileDetails?.branch || 'main'}` : `${base}/`}</p>
+        <FileTree files={treeFiles} prefix={rootMode ? '' : base!} doc={doc} unviewable={fileDetails?.unviewable ?? []} expanded={expanded} toggle={(path, open) => setExpanded((previous) => { const next = new Set(previous); if (open) next.add(path); else next.delete(path); return next; })} choose={(file) => { if (peek && !rootMode) { docRef.current = file; setDoc(file); setSubtab('document'); openDocument(); } else void showFile(file); }} />
+      </section>
+      {doc && <section className="next-document" aria-label="Document" hidden={subtab !== 'document'}><p>Selected file: {doc}</p><iframe ref={frame} title="Document viewer" src={doc.split('/').map(encodeURIComponent).join('/')} /></section>}
     </div>
     </div>
   </main>;
