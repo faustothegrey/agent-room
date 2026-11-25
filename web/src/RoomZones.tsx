@@ -41,10 +41,11 @@ export function providerHealth(monitor: Monitor, provider: string): { level: 'am
 }
 const Tip = ({ children }: { children: ReactNode }) => <span className="hover-detail" role="tooltip">{children}</span>;
 // A provider's name, with its ⚠ and its details on hover or focus.
-function ProviderName({ monitor, provider, display = provider, health = true }: { monitor: Monitor; provider: string; display?: string; health?: boolean }) {
+// Clicking or pressing Enter/Space on the name opens Provider health (openHealth).
+function ProviderName({ monitor, provider, display = provider, health = true, openHealth }: { monitor: Monitor; provider: string; display?: string; health?: boolean; openHealth?: () => void }) {
   const h = health ? providerHealth(monitor, provider) : null;
   if (!health) return <b>{display}</b>;
-  return <b tabIndex={0}>{display}{h?.level && <span className={'alert' + (h.level === 'red' ? ' red' : '')}>⚠</span>}
+  return <b tabIndex={0} role="button" onClick={openHealth} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openHealth?.(); } }}>{display}{h?.level && <span className={'alert' + (h.level === 'red' ? ' red' : '')}>⚠</span>}
     {h && <Tip>{h.lines.map((line, i) => <span key={i} className={line.cls}>{line.text}{line.code && <code>{line.code}</code>}</span>)}</Tip>}</b>;
 }
 function QuotaUpdated({ at }: { at: QuotaAt | null | undefined }) {
@@ -58,9 +59,9 @@ function QuotaUpdated({ at }: { at: QuotaAt | null | undefined }) {
 }
 // The quota gauges, as showQuota does: one bar per window (5h, week) for each provider, yellow
 // under 30% left and red under 10%; providers with no gauges appear only with a health problem.
-export function Gauges({ gauges, at, monitor }: { gauges: Gauge[] | null | undefined; at: QuotaAt | null | undefined; monitor: Monitor }) {
+export function Gauges({ gauges, at, monitor, openHealth }: { gauges: Gauge[] | null | undefined; at: QuotaAt | null | undefined; monitor: Monitor; openHealth?: () => void }) {
   const bare = (shown: Set<string>) => Object.keys(monitor).filter((p) => !shown.has(p) && providerHealth(monitor, p)?.level)
-    .map((p) => <span className="quota" key={'bare ' + p}><ProviderName monitor={monitor} provider={p} /></span>);
+    .map((p) => <span className="quota" key={'bare ' + p}><ProviderName monitor={monitor} provider={p} openHealth={openHealth} /></span>);
   let body: ReactNode;
   if (gauges === undefined) body = bare(new Set());
   else if (gauges === null || !gauges.length) body = <>quota meter not reachable · <QuotaUpdated at={{ measured: null, checked: at?.checked ?? '' }} />{bare(new Set())}</>;
@@ -72,7 +73,7 @@ export function Gauges({ gauges, at, monitor }: { gauges: Gauge[] | null | undef
       else groups.push({ provider: g.provider, group: g.group ?? null, items: [g] });
     }
     body = <><QuotaUpdated at={at} />{groups.map(({ provider, group, items }) => <span className="quota" key={provider + ' ' + group}>
-      <ProviderName monitor={monitor} provider={provider} display={group ?? provider} health={group !== 'argon'} />
+      <ProviderName monitor={monitor} provider={provider} display={group ?? provider} health={group !== 'argon'} openHealth={openHealth} />
       {group !== 'argon' && monitor[provider]?.running != null && <span className="running">{monitor[provider].running} running</span>}
       {items.map((g) => {
         const left = 100 - g.used;
@@ -122,9 +123,9 @@ type Ask = { text: string; buttons: [string, (() => unknown)?][]; done: (value: 
 type Props = {
   roomName: string; folder: string | null; active: string | null; replica: Replica | null; replicaOff: string | null; viewing: ViewedLine | null; newRoom: boolean; readOnly: boolean;
   post: (path: '__newroom' | '__pair', body: NewRoomRequest | PairRequest) => Promise<Response>; status: (text: string, error?: boolean) => void; navigate: (url: string) => void; code: CodeInfo | null | undefined; gauges: Gauge[] | null | undefined; at: QuotaAt | null | undefined; monitor: Monitor;
-  ended: boolean; restarting: boolean; command: (text: string) => void; shutdown: () => void; serverChanged: () => void;
+  openHealth: () => void; ended: boolean; restarting: boolean; command: (text: string) => void; shutdown: () => void; serverChanged: () => void;
 };
-export function RoomZones({ roomName, folder, active, replica, replicaOff, viewing, newRoom, readOnly, post, status, navigate, code, gauges, at, monitor, ended, restarting, command, shutdown, serverChanged }: Props) {
+export function RoomZones({ roomName, folder, active, replica, replicaOff, viewing, newRoom, readOnly, post, status, navigate, code, gauges, at, monitor, openHealth, ended, restarting, command, shutdown, serverChanged }: Props) {
   // A modal question drawn in the page, as ask() does: each button's act runs inside its click (so
   // it may open a window); the promise resolves to what it returns (undefined for Escape).
   const [question, setQuestion] = useState<Ask | null>(null);
@@ -294,6 +295,6 @@ export function RoomZones({ roomName, folder, active, replica, replicaOff, viewi
         <div><button type="button" onClick={() => { peersDialog.current?.close?.(); setPeersOpen(false); }}>Close</button></div>
       </dialog>}
     </div>
-    <div className="server-zone" aria-label="Monitoring"><Gauges gauges={gauges} at={at} monitor={monitor} /></div>
+    <div className="server-zone" aria-label="Monitoring"><Gauges gauges={gauges} at={at} monitor={monitor} openHealth={openHealth} /></div>
   </div>;
 }

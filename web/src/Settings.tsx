@@ -10,7 +10,7 @@ export type Row = { provider: Provider; name: string; model: string; custom: boo
 export const selectedSettings = (data: SettingsReply) => data.started ? data.launchDefaults ?? data.defaults ?? data.settings : data.settings;
 const memberPanelAgents = (data: SettingsReply) => { const current = data.settings.agents; return current.length < 2 || current.length > 3 ? current : selectedSettings(data).agents; };
 const display = (p: string) => p[0].toUpperCase() + p.slice(1);
-const toRow = (a: AgentSettings, models: Models, active = true, automatic = false): Row => ({ provider: a.provider, name: a.name, model: a.model, custom: !!a.model && !models[a.provider]?.some((m) => m.id === a.model), active, automatic });
+export const toRow = (a: AgentSettings, models: Models, active = true, automatic = false): Row => ({ provider: a.provider, name: a.name, model: a.model, custom: !!a.model && !models[a.provider]?.some((m) => m.id === a.model), active, automatic });
 // Member editor state: automatic names and the two-member minimum, one rule for every change.
 export function memberPlan(agents: AgentSettings[], worker: AgentSettings, models: Models, currentWorker = worker) {
   const providers: Provider[] = ['claude', 'codex', 'agy'];
@@ -35,10 +35,10 @@ export function memberPlan(agents: AgentSettings[], worker: AgentSettings, model
   };
 }
 type Plan = ReturnType<typeof memberPlan>;
-const incomplete = (r: Row) => r.active && r.custom && !r.model.trim();
-const choice = (r: Row): AgentSettings => ({ name: r.name.trim(), provider: r.provider, model: r.custom ? r.model.trim() : r.model });
+export const incomplete = (r: Row) => r.active && r.custom && !r.model.trim();
+export const choice = (r: Row): AgentSettings => ({ name: r.name.trim(), provider: r.provider, model: r.custom ? r.model.trim() : r.model });
 // One provider / name / model row (agentRow); a member row also has its On box.
-function AgentRow({ row, models, title, member, locked, disabled, change, commit }: { row: Row; models: Models; title: string; member: boolean; locked: boolean; disabled: boolean; change: (edit: Partial<Row> | 'provider' | 'toggle', value?: string | boolean) => void; commit: () => void }) {
+export function AgentRow({ row, models, title, member, locked, disabled, change, commit }: { row: Row; models: Models; title: string; member: boolean; locked: boolean; disabled: boolean; change: (edit: Partial<Row> | 'provider' | 'toggle', value?: string | boolean) => void; commit: () => void }) {
   const label = (text: string) => member ? text : title + ' ' + text;
   const typed = useRef('');
   return <div className={'agent-row' + (member ? ' member-row' : '')} data-provider={row.provider} data-active={member ? String(row.active) : undefined}>

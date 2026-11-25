@@ -6,14 +6,18 @@ import { WorkerInfoLine, shownWorkerInfo } from './WorkerInfoLine';
 import { RoomZones } from './RoomZones';
 import { FailedAgents, SettingsPanel } from './Settings';
 import { TerminalPane } from './Terminal';
+import { InstructionsPanel, ProvidersPanel, SchedulePanel } from './Services';
+import { providerHealth } from './RoomZones';
 import { Notes, NOTES_DRAFT_KEY, type NoteDraft, type NotesApi } from './Notes';
-import type { NoteRequest, AgentEnabledRequest, SettingsSaveRequest, Gauge, Monitor, NewRoomRequest, PairRequest, QuotaAt, ReceivedLine, Replica, ViewedLine, ViewReply, ViewRequest, AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
+import type { PromptTestRequest, ScheduleRequest, NoteRequest, AgentEnabledRequest, SettingsSaveRequest, Gauge, Monitor, NewRoomRequest, PairRequest, QuotaAt, ReceivedLine, Replica, ViewedLine, ViewReply, ViewRequest, AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
 type StatusLine = { text: string; error: boolean };
 type Failure = { agent: string; error: string; time: string; earlier: number };
 type Layout = { stacked: boolean; sideClosed: boolean; left: number | null; top: number | null };
 type BoardDialog = { kind: 'merge'; name: string; preview: MergePreview; changed: boolean; error?: string } | { kind: 'discard'; name: string; preview: DiscardPreview; changed: boolean; error?: string } | { kind: 'catchup'; name: string; target: string; behind: number; message: string; changed: boolean; error?: string };
+type Service = 'providers' | 'instructions' | 'schedule' | 'notes' | 'terminal';
+const SERVICES: Record<Service, string> = { providers: 'Providers', instructions: 'Instructions', schedule: 'Schedule', notes: 'My notes', terminal: 'Terminal' };
 type OrderKind = 'discussions' | 'brainstorms';
 const orderKey = (folder: string, kind: OrderKind) => `agent-room.${kind === 'discussions' ? 'discussion' : 'brainstorm'}-order:${folder}`;
 function readOrder(folder: string, kind: OrderKind): string[] {
@@ -143,12 +147,14 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   // My notes is offered only on a page opened on this computer, as the server serves it only there.
   const isLocalPage = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
   const [notesKept] = useState<NoteDraft | null>(() => { try { const kept = JSON.parse(sessionStorage.getItem(NOTES_DRAFT_KEY) ?? 'null') as NoteDraft | null; sessionStorage.removeItem(NOTES_DRAFT_KEY); return kept; } catch { return null; } });
-  const [service, setService] = useState<'notes' | 'terminal' | null>(() => notesKept && isLocalPage ? 'notes' : null);
+  const [service, setService] = useState<Service | null>(() => notesKept && isLocalPage ? 'notes' : null);
   const serviceRef = useRef(service); serviceRef.current = service;
   const listBeforeService = useRef<boolean | null>(notesKept && isLocalPage ? (() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } })() : null);
   const notesApi = useRef<NotesApi | null>(null);
   const [shellAlive, setShellAlive] = useState(false);
-  const openService = (name: 'notes' | 'terminal' | null) => {
+  const [healthOpen, setHealthOpen] = useState(false);
+  const [scheduleReload, setScheduleReload] = useState(0);
+  const openService = (name: Service | null) => {
     if (name) { if (serviceRef.current === null) { listBeforeService.current = boardsClosed; setBoardsClosed(true); } serviceRef.current = name; setService(name); return; }
     if (serviceRef.current === null) return;
     serviceRef.current = null; setService(null);
@@ -284,7 +290,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command || state.posting > 0 ? 'on' : null); }, 1500);
     }
   };
-  const post = async (path: '__notes/new' | '__notes/save' | '__notes/remove' | '__settings' | '__agent-enabled' | '__view' | '__pair' | '__newroom' | '/__shutdown' | '/__shutdown?confirmed=yes' | '__say' | '__work' | '__retry' | '__stopworker' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: NoteRequest | SettingsSaveRequest | AgentEnabledRequest | ViewRequest | PairRequest | NewRoomRequest | SayRequest | WorkRequest | RetryRequest | StopWorkerRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
+  const post = async (path: '__schedule' | '__provider-health' | '__prompt-test' | '__notes/new' | '__notes/save' | '__notes/remove' | '__settings' | '__agent-enabled' | '__view' | '__pair' | '__newroom' | '/__shutdown' | '/__shutdown?confirmed=yes' | '__say' | '__work' | '__retry' | '__stopworker' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: Record<string, never> | ScheduleRequest | PromptTestRequest | NoteRequest | SettingsSaveRequest | AgentEnabledRequest | ViewRequest | PairRequest | NewRoomRequest | SayRequest | WorkRequest | RetryRequest | StopWorkerRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
     const state = busyState.current; state.posting++; updateBusy();
     try {
       return await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': client.current }, body: JSON.stringify(body) });
@@ -709,6 +715,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         state.command = event.on; updateBusy();
       } else if (event.type === 'working') {
         setWorking(event.name);
+      } else if (event.type === 'schedule') {
+        if (serviceRef.current === 'schedule') setScheduleReload((n) => n + 1); // only while it is shown
       } else if (event.type === 'replica') {
         setReplica(event.replica);
       } else if (event.type === 'quota') {
@@ -887,7 +895,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     requestAnimationFrame(() => explorer.current?.querySelector<HTMLElement>('.shown')?.scrollIntoView?.({ block: 'center' }));
   };
   return <main>
-    <RoomZones folder={room?.folder ?? null} active={room?.active ?? null} replica={replica} replicaOff={replicaOff} viewing={remote?.line ?? null} newRoom={newRoom} readOnly={!!peek || !!viewLayout}
+    <RoomZones openHealth={() => { setHealthOpen(true); openService('providers'); }} folder={room?.folder ?? null} active={room?.active ?? null} replica={replica} replicaOff={replicaOff} viewing={remote?.line ?? null} newRoom={newRoom} readOnly={!!peek || !!viewLayout}
       post={(path, body) => post(path, body)} status={(text, error) => addStatus(text, error)} navigate={(url) => notesGuard(() => navigate(url))}
       roomName={room?.folder?.replace(/[/]+$/, '').split('/').pop() || room?.folder || 'agent-room'} code={room?.code} gauges={quota.gauges} at={quota.at} monitor={monitor}
       ended={ended} restarting={restarting} command={(text) => void boardCommand(text)} shutdown={() => void shutdownServer()} serverChanged={serverChanged} />
@@ -936,11 +944,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     <div className={'next-workspace' + (boardsClosed ? ' boards-closed' : '') + (service ? ' service-open' : '')}>
     <nav className="control-bar" aria-label="Services">
       <button type="button" className="ctrl-btn" aria-pressed={service === null} title="Boards" onClick={() => { if (service) openService(null); else if (boardsClosed) { setBoardsClosed(false); refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', '0'); } catch {} } }}>▤ Boards</button>
+      <button type="button" className="ctrl-btn" aria-pressed={service === 'providers'} title="Default providers and models for new discussions, and provider health" onClick={() => openService(service === 'providers' ? null : 'providers')}>⚙ Providers</button>
+      <button type="button" className="ctrl-btn" aria-pressed={service === 'instructions'} title="The prompts and rulebooks sent to each agent, and when" onClick={() => openService(service === 'instructions' ? null : 'instructions')}>📜 Instructions</button>
+      <button type="button" className="ctrl-btn" aria-pressed={service === 'schedule'} title="Scheduled tasks and quota guard" onClick={() => openService(service === 'schedule' ? null : 'schedule')}>⏰ Schedule</button>
       {isLocalPage && <button type="button" className="ctrl-btn" aria-pressed={service === 'notes'} title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder." onClick={() => openService(service === 'notes' ? null : 'notes')}>📝 My notes</button>}
       {isLocalPage && <button type="button" className={'ctrl-btn' + (shellAlive ? ' running' : '')} aria-pressed={service === 'terminal'} title="A shell on this computer, in the room's folder. Only from this computer, not from other devices." onClick={() => openService(service === 'terminal' ? null : 'terminal')}>⌨ Terminal</button>}
     </nav>
     <section className="services-panel" aria-label="Services panel" hidden={!service}>
-      <div><span>{service === 'notes' ? 'My notes' : service === 'terminal' ? 'Terminal' : ''}</span> <button type="button" title="Close services panel" aria-label="Close services panel" onClick={() => openService(null)}>✕</button></div>
+      <div><span>{service ? SERVICES[service] : ''}</span> <button type="button" title="Close services panel" aria-label="Close services panel" onClick={() => openService(null)}>✕</button></div>
+      {service === 'providers' && <div><ProvidersPanel open healthOpen={healthOpen} setHealthOpen={setHealthOpen} warning={Object.keys(monitor).some((p) => providerHealth(monitor, p)?.level)} post={(path, body) => post(path, body)} queue={settingsQueue} done={() => openService(null)} /></div>}
+      <div hidden={service !== 'instructions'}><InstructionsPanel open={service === 'instructions'} /></div>
+      <div hidden={service !== 'schedule'}><SchedulePanel open={service === 'schedule'} reload={scheduleReload} post={(path, body) => post(path, body)} /></div>
       {isLocalPage && <div hidden={service !== 'notes'}><Notes open={service === 'notes'} show={() => openService('notes')} api={notesApi} kept={notesKept} post={(path, body) => post(path, body)} /></div>}
       {isLocalPage && <div hidden={service !== 'terminal'}><TerminalPane visible={service === 'terminal'} fitKey={layout} running={setShellAlive} /></div>}
     </section>

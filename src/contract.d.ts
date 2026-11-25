@@ -89,6 +89,30 @@ export interface PairCheck { local: { node: string; root: string; roomId: string
 export interface NoteEntry { id: string; title: string; savedAt: string }
 export type NoteRequest = { text: string } | { id: string; text: string } | { id: string };
 export interface NoteSaved { id: string; title?: string; savedAt: string }
+// GET/POST __schedule (Schedule service): the quota floor and the scheduled research tasks; a POST
+// { action, … } (floor, toggle, delete, add, edit) answers with the new schedule.
+export interface ScheduleRun { at?: string | null; status: 'ran' | 'skipped' | 'stopped' | 'failed' | string; reason?: string | null }
+export interface ScheduleTask { id: string; kind: 'research' | 'recurring'; title?: string | null; board?: string | null; date?: string; time: string; prompt: string; enabled: boolean; running?: boolean; lastRun?: ScheduleRun | null }
+export interface ScheduleData { quotaFloor?: number; tasks: ScheduleTask[] }
+export type ScheduleRequest = { action: 'floor'; quotaFloor: number } | { action: 'toggle'; id: string; enabled: boolean } | { action: 'delete'; id: string }
+  | ({ action: 'add' } | { action: 'edit'; id: string }) & ({ kind: 'research'; title: string; date: string; time: string; prompt: string } | { kind: 'recurring'; title: string; time: string; prompt: string; enabled: boolean });
+// GET __instructions (Instructions service): the prompt catalog, read-only.
+export interface InstructionSet { type: string; pieces: { id: string; intent: string; when: string; content: string }[] }
+// GET __provider-health (POST: check now) and POST __prompt-test { provider, model } (Providers service).
+type HealthError = { at: string; message: string } | null | undefined;
+export interface HealthAgent { role: string; name: string; provider: string; model: string; alignment?: string; enabled?: boolean }
+export interface ProviderHealthReply {
+  cli: Record<string, { path: string; version: string; checked: string } | null>; login: Record<string, { state: string; expiresAt?: string | null; checked: string } | null>;
+  errors: { cli: Record<string, (HealthError & { path?: string }) | { path?: string } | null | undefined>; login: Record<string, HealthError>; leftovers?: HealthError };
+  scheduledProviders: string[]; nextLogin: string | null; catalogs: Record<string, { loaded: boolean; checked: string | null; models: unknown[]; error?: HealthError }>;
+  configured: { room: string; discussion: string | null; agents: HealthAgent[] }[]; defaults: HealthAgent[] | null;
+  promptRunning: string[]; promptResults: { provider: string; model: string; at: string; durationMs: number; outcome: string; reply?: string | null; error?: string | null }[];
+  sessions: { room: string; discussion: string | null; agents: { role: string; name: string; provider: string; id: string | null; lastTurn?: { ended: string; outcome: string; error?: { at: string; message: string } | null } | null }[] }[];
+  leftoversChecked: string | null; nextLeftovers: string | null; running: HealthProgram[]; leftovers: HealthProgram[];
+  quota: { room: string; reachable: boolean | null; measured: string | null; checked: string | null }[];
+}
+export interface HealthProgram { pid: number; provider: string; agent: string; room: string; started?: string | null; unverified?: boolean }
+export interface PromptTestRequest { provider: string; model: string }
 // GET __shell/token (host-shell.mjs, pages on this computer only): the WebSocket's token.
 export interface ShellTokenReply { token: string }
 // GET __rooms: this server's rooms, for Switch room….
@@ -155,7 +179,7 @@ export interface SayAttachment { name: string; data: string }
 export interface AgentSettings { name: string; provider: 'claude' | 'codex' | 'agy'; model: string }
 export interface RoomSettings { agents: AgentSettings[]; worker: AgentSettings; [key: string]: unknown }
 // POST __settings: the settings to save, for the Discussion ('talk') or Worker ('work') panel.
-export type SettingsSaveRequest = RoomSettings & { scope: 'talk' | 'work' };
+export type SettingsSaveRequest = RoomSettings & { scope: 'talk' | 'work' } | { agents: AgentSettings[]; worker: AgentSettings; scope: 'defaults' };
 export interface SettingsSaveReply { applied: boolean; workerApplied?: boolean; settings?: RoomSettings }
 // POST __agent-enabled: an agent of this discussion left out (or back) from its next round; member: from the members panel.
 export interface AgentEnabledRequest { name: string; enabled: boolean; member?: boolean }
