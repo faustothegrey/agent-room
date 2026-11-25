@@ -36,7 +36,8 @@ One Node process serves several rooms, one per folder. Its source modules:
 |---|---|
 | `src/cli.mjs` | Arguments, the server's rooms, each room's input queue, Reload, Restart, Quit room, Shutdown. Never reloaded. |
 | `src/room.mjs` | The main loop: turns, unseen messages, passes, the summary procedure. |
-| `src/ui.mjs` | Room setup, discussions, the worker queues and worktrees, auto dev, checkpoints, commands. |
+| `src/ui.mjs` | Room setup, discussions, checkpoints and commands. |
+| `src/workshop.mjs` | Worker queues, recovery and task execution, workbench instructions, auto dev and summary checks; reloaded with the room. |
 | `src/lanes.mjs` | Worker worktrees, Git snapshots, merge/discard/catch-up actions, worker information, test reports and branch diagrams; reloaded with the room. |
 | `src/agents.mjs` | Provider adapters (Claude, Codex, agy): one CLI process per turn, launch flags, sessions, usage parsing, the record of running programs. |
 | `src/docs.mjs` | Reloadable facade for screen and document routes and live events. |

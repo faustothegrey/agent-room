@@ -7002,6 +7002,13 @@ test('Reload loads the lane diagram module again while preserving live room and 
     ctx.state.transcript.push({ speaker: 'User', text: 'kept across Reload' });
     const state = ctx.state, shop = ctx.shop, session = ctx.sessions.get('worker:Worker'), first = ctx.lanes;
     assert.equal(first.BRANCH_DIAGRAM_LIMIT, 15);
+    const firstWorkshop = ctx.workshopModule;
+    ctx.autoDev = { status: 'running', cycle: 2, limit: 5, lastSteps: 3, reason: null, waiting: true, report: null };
+    ctx.autoDevSent = [4]; ctx.workQueue = Promise.resolve();
+    shop.confirming = true; // simulate a queued task without starting a worker or Git action
+    ui.queueWork(ctx, 'queued across Reload', ctx.autoDev);
+    const run = ctx.autoDev, queued = shop.lanes.get('').tasks[0];
+    assert.equal(queued.text, 'queued across Reload'); assert.equal(queued.run, run);
     let release, reached;
     const blocked = new Promise((resolve) => { release = resolve; });
     const entered = new Promise((resolve) => { reached = resolve; });
@@ -7013,12 +7020,22 @@ test('Reload loads the lane diagram module again while preserving live room and 
     assert.match(text, /if \(own\.disabled\) return \{ lines: \[own\.disabled\]/);
     writeFileSync(file, text.replace('BRANCH_DIAGRAM_LIMIT = 15', 'BRANCH_DIAGRAM_LIMIT = 16')
       .replace('if (own.disabled) return { lines: [own.disabled]', "if (own.disabled) return { lines: ['new: ' + own.disabled]"));
+    const workshopFile = join(root, 'src/workshop.mjs'), workshopText = readFileSync(workshopFile, 'utf8');
+    assert.match(workshopText, /AUTO_DEV_CYCLES = 5/);
+    writeFileSync(workshopFile, workshopText.replace('AUTO_DEV_CYCLES = 5', 'AUTO_DEV_CYCLES = 6'));
     const uiFile = join(root, 'src/ui.mjs'), uiText = readFileSync(uiFile, 'utf8');
     const callback = 'const toScreen = (ctx, event) => ctx.docs.broadcast(ctx.screen, event);';
     assert.ok(uiText.includes(callback));
-    writeFileSync(uiFile, uiText.replace(callback, "const toScreen = (ctx, event) => { ctx.callbackVersion = 'new'; return ctx.docs.broadcast(ctx.screen, event); };"));
+    assert.ok(uiText.includes('  watchMonitor(ctx);\n  startScheduler(ctx);'));
+    writeFileSync(uiFile, uiText.replace(callback, "const toScreen = (ctx, event) => { ctx.callbackVersion = 'new'; return ctx.docs.broadcast(ctx.screen, event); };")
+      .replace('  watchMonitor(ctx);\n  startScheduler(ctx);', '  // Monitor and scheduler are disabled in this isolated Reload test.'));
     const nextUi = await import(pathToFileURL(uiFile).href + '?v=second');
     Object.assign(ctx, await nextUi.load(ctx, '?v=second'));
+    await nextUi.reloaded(ctx);
+    assert.notEqual(ctx.workshopModule, firstWorkshop); assert.equal(nextUi.AUTO_DEV_CYCLES, 6);
+    assert.equal(ctx.autoDev, run); assert.deepEqual(run, { status: 'running', cycle: 2, limit: 5, lastSteps: 3, reason: null, waiting: true, report: null });
+    assert.deepEqual(ctx.autoDevSent, [4]); assert.equal(shop.lanes.get('').tasks[0], queued);
+    assert.equal(queued.run, run); assert.equal(ctx.workPending, 1);
     await nextUi.refreshWorker(ctx, { place: { disabled: 'current' } });
     assert.deepEqual(ctx.screen.workerInfo.lines, ['new: current']);
     assert.equal(ctx.callbackVersion, 'new');
