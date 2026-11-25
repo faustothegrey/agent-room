@@ -18,7 +18,7 @@ it('shows reset and live worker reports, marks news until Worker is opened, and 
   Source.current.send({ type: 'work', message: { speaker: 'Worker', html: '<p>Live report</p>', error: false } });
   const user = userEvent.setup(); expect(screen.getByRole('tab', { name: 'Worker · new' })).toBeTruthy();
   await user.click(screen.getByRole('tab', { name: 'Worker · new' })); expect(screen.getByText('report').tagName).toBe('STRONG');
-  expect(screen.getByText('Live report')).toBeTruthy(); expect(screen.getByText('Prior note')).toBeTruthy();
+  expect(screen.getByText('Live report')).toBeTruthy(); expect(screen.getByText('Worker · Prior note')).toBeTruthy();
   expect(screen.queryByRole('textbox', { name: 'Instruction to the worker' })).toBeNull();
   expect(screen.getByRole('tab', { name: 'Worker' }).getAttribute('aria-selected')).toBe('true');
   await user.click(screen.getByRole('tab', { name: 'Discussion' })); expect(screen.getByText('Discussion text')).toBeTruthy();
@@ -48,4 +48,13 @@ it('hides input without workInput and disables it for read-only and disabled wor
   expect(screen.queryByRole('textbox', { name: 'Instruction to the worker' })).toBeNull();
   Source.current.send({ type: 'reset', room: { ...room, workbench: true }, messages: [], worker: [], input: true, workInput: true, workerInfo: { disabled: true, lines: ['Worker disabled'] } });
   expect((screen.getByRole('textbox', { name: 'Instruction to the worker' }) as HTMLTextAreaElement).disabled).toBe(true);
+});
+
+it('shows a workbench Peek read-only and the worker busy hint', () => {
+  render(<App version="one" refresh={() => {}} />);
+  Source.current.send({ type: 'reset', room, input: true, workInput: true, messages: [], worker, working: 'Worker', peek: { kind: 'workbench', name: 'old', title: 'Old', path: 'discussions/old', messages: [] } });
+  expect(screen.queryByRole('tab', { name: 'Discussion' })).toBeNull();
+  expect(screen.getByText('The worker is busy: what you send now waits for it to finish.')).toBeTruthy();
+  expect((screen.getByRole('textbox', { name: 'Instruction to the worker' }) as HTMLTextAreaElement).disabled).toBe(true);
+  Source.current.send({ type: 'working', name: null }); expect(screen.queryByText('The worker is busy: what you send now waits for it to finish.')).toBeNull();
 });

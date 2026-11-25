@@ -113,6 +113,10 @@ export interface EventsReply extends HttpReply { write(data: string): unknown }
 
 // JSON sent by the conversation composer to POST /__say (with same-page headers).
 export interface SayAttachment { name: string; data: string }
+export interface AgentSettings { name: string; provider: 'claude' | 'codex' | 'agy'; model: string }
+export interface RoomSettings { agents: AgentSettings[]; worker: AgentSettings; [key: string]: unknown }
+export interface SettingsReply { settings: RoomSettings; defaults?: RoomSettings; launchDefaults?: RoomSettings; started: boolean; models: Record<AgentSettings['provider'], { id: string; label: string }[]> }
+export interface RetryRequest { id: string; settings?: RoomSettings & { scope: 'work' } }
 export interface WorkRequest { text: string }
 export interface SayRequest { text: string; files?: SayAttachment[]; confirmed?: boolean }
 export type SayReplyStatus = 204 | 400 | 403 | 409 | 413;

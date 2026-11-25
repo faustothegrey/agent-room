@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './layout.css';
-import type { BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, Room, SayRequest, ScreenEvent, ShowRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
+import type { AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
 type StatusLine = { text: string; error: boolean };
@@ -97,6 +97,11 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [workInput, setWorkInput] = useState(false);
   const [workText, setWorkText] = useState('');
   const [workError, setWorkError] = useState('');
+  const [working, setWorking] = useState<string | null>(null);
+  const [retryBusy, setRetryBusy] = useState<string | null>(null);
+  const [retryDialog, setRetryDialog] = useState<{ id: string; models: SettingsReply['models']; worker: AgentSettings; custom: boolean; error: string; busy: boolean } | null>(null);
+  const retryDialogElement = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => { const element = retryDialogElement.current; if (retryDialog && element && !element.open) { if (typeof element.showModal === 'function') element.showModal(); else element.setAttribute('open', ''); } }, [!!retryDialog]);
   const [tab, setTab] = useState<'discussion' | 'worker'>('discussion');
   const tabRef = useRef(tab); tabRef.current = tab;
   const [workerNews, setWorkerNews] = useState(false);
@@ -225,7 +230,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command || state.posting > 0 ? 'on' : null); }, 1500);
     }
   };
-  const post = async (path: '__say' | '__work' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: SayRequest | WorkRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
+  const post = async (path: '__say' | '__work' | '__retry' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: SayRequest | WorkRequest | RetryRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
     const state = busyState.current; state.posting++; updateBusy();
     try {
       return await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': client.current }, body: JSON.stringify(body) });
@@ -236,6 +241,35 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     if (!instruction || ended || peek || viewLayout) return;
     try { const response = await post('__work', { text: instruction }); if (!response.ok) setWorkError(await response.text()); }
     catch (error) { setWorkError(error instanceof Error ? error.message : String(error)); }
+  };
+  const readSettings = async (): Promise<SettingsReply> => {
+    const response = await fetch('__settings'); if (!response.ok) throw new Error(await response.text());
+    return await response.json() as SettingsReply;
+  };
+  const retry = async (id: string) => {
+    setRetryBusy(id);
+    try { const response = await post('__retry', { id }); if (!response.ok) throw new Error(await response.text()); }
+    catch (error) { setWorkError(error instanceof Error ? error.message : String(error)); setRetryBusy(null); }
+  };
+  const chooseRetry = async (id: string) => {
+    try {
+      const data = await readSettings(), worker = data.settings.worker;
+      const custom = !!worker.model && !data.models[worker.provider].some((model) => model.id === worker.model);
+      setRetryDialog({ id, models: data.models, worker: { ...worker }, custom, error: '', busy: false });
+    } catch (error) { setWorkError(error instanceof Error ? error.message : String(error)); }
+  };
+  const submitRetry = async () => {
+    if (!retryDialog || retryDialog.busy) return;
+    const dialog = retryDialog;
+    if (dialog.custom && !dialog.worker.model.trim()) { setRetryDialog({ ...dialog, error: 'Enter a custom model ID.' }); return; }
+    setRetryDialog({ ...dialog, busy: true, error: '' });
+    try {
+      const data = await readSettings();
+      const current = data.started ? data.launchDefaults ?? data.defaults ?? data.settings : data.settings;
+      const response = await post('__retry', { id: dialog.id, settings: { ...current, worker: { ...dialog.worker, name: dialog.worker.name.trim(), model: dialog.worker.model.trim() }, scope: 'work' } });
+      if (!response.ok) throw new Error(await response.text());
+      setRetryDialog(null);
+    } catch (error) { setRetryDialog({ ...dialog, busy: false, error: error instanceof Error ? error.message : String(error) }); }
   };
   const refreshWorker = () => { void post('__workerinfo', {}).catch(() => {}); };
   const actionReply = async <T,>(path: '__merge' | '__discard' | '__catchup', body: BoardActionRequest): Promise<T> => {
@@ -468,10 +502,10 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       }
       if (event.type === 'reset') {
         setWorkerInfo(event.workerInfo ?? null);
-        setWorkInput(!!event.workInput); setWorkError('');
+        setWorkInput(!!event.workInput); setWorkError(''); setWorking(event.working ?? null); setRetryBusy(null);
         setWorkerMessages(event.worker ?? []);
-        if (event.room?.workbench && !event.peek) { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); }
-        else if (event.room?.research && tabRef.current === 'worker') { tabRef.current = 'discussion'; setTab('discussion'); }
+        if (event.peek ? event.peek.kind === 'workbench' : event.room?.workbench) { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); }
+        else if ((event.peek ? event.peek.kind === 'research' : event.room?.research || roomRef.current?.workbench) && tabRef.current === 'worker') { tabRef.current = 'discussion'; setTab('discussion'); }
         viewing.current = event.viewing;
         setViewLayout(event.viewing && typeof event.viewing === 'object' ? event.viewing as { name?: string; discussion?: string } : null);
         roomRef.current = event.room; peekRef.current = event.peek ?? null;
@@ -483,7 +517,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         offerEpoch.current++; setOffers([]);
         const visible = event.messages.filter((m) => !m.pass && !m.hidden);
         setMessages(visible);
-        if (!event.peek) { liveMessages.current = visible; if (visible.length) void loadFiles(); }
+        if (!event.peek) { liveMessages.current = visible; if (visible.length || event.worker?.length) void loadFiles(); }
         setThinking(event.thinking ?? null); setYourTurn(!event.thinking);
         if (event.status) addStatus(event.status);
         state.command = !!event.busy; updateBusy();
@@ -506,8 +540,22 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
           }
         }
       } else if (event.type === 'work') {
-        if ('note' in event.message) addStatus(event.message.note, !!event.message.error);
-        else { setWorkerMessages((previous) => [...previous, event.message]); if (event.message.speaker !== 'User' && tabRef.current !== 'worker') setWorkerNews(true); }
+        if ('note' in event.message) setWorkerMessages((previous) => [...previous, event.message]);
+        else {
+          const message = event.message;
+          setWorkerMessages((previous) => [...previous, message]);
+          if (message.speaker !== 'User' && tabRef.current !== 'worker') setWorkerNews(true);
+          if (message.speaker === 'User') { offerEpoch.current++; setOffers([]); }
+          const eligible = message.speaker !== 'User' && message.speaker !== 'Relayed from discussion' && !message.error;
+          if (eligible) {
+            const epoch = ++offerEpoch.current, active = roomRef.current?.active ?? null;
+            void loadFiles().then((paths) => {
+              if (epoch !== offerEpoch.current || peekRef.current) return;
+              const found = linkFiles(message.html, paths, active).found.filter((file) => file !== docRef.current).slice(0, 3);
+              if (found.length && followRef.current) void showFile(found[0]); else if (found.length) setOffers(found);
+            });
+          } else void loadFiles();
+        }
       } else if (event.type === 'agent-failure') {
         pin(event.agent, event.error);
       } else if (event.type === 'thinking') {
@@ -519,19 +567,22 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         if (event.error && pendingArchivesRef.current.size) { setPendingArchives(new Set()); void loadDetails(); }
       } else if (event.type === 'busy') {
         state.command = event.on; updateBusy();
+      } else if (event.type === 'working') {
+        setWorking(event.name);
       } else if (event.type === 'workerinfo') {
         setWorkerInfo(event.info);
       } else if (event.type === 'doc') {
         docRef.current = event.file; setDoc(event.file); setSubtab(event.file ? 'document' : 'explorer'); if (event.file) openDocument();
       } else if (event.type === 'room') {
         const changed = roomRef.current && roomRef.current.active !== event.room.active;
+        const wasWorkbench = !!roomRef.current?.workbench;
         if (changed && peekRef.current) {
           peekRef.current = null; setPeek(null); setMessages([]); liveMessages.current = []; offerEpoch.current++; setOffers([]);
         }
         if (changed) setFilePeek(null);
-        roomRef.current = event.room; setRoom(event.room); if (event.room.folder) void loadDetails();
+        roomRef.current = event.room; setRoom(event.room); setRetryBusy(null); if (event.room.folder) void loadDetails();
         if (event.room.workbench && !peekRef.current) { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); }
-        else if (event.room.research && tabRef.current === 'worker') { tabRef.current = 'discussion'; setTab('discussion'); }
+        else if ((event.room.research || wasWorkbench && !event.room.workbench) && tabRef.current === 'worker' && !peekRef.current) { tabRef.current = 'discussion'; setTab('discussion'); }
       } else if (event.type === 'files') {
         setSubtab('explorer'); void loadDetails();
       } else if (event.type === 'moved') {
@@ -735,10 +786,30 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     <div ref={conversation} className="next-conversation">
     {layout.sideClosed && <button type="button" title="Open side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: false }, true, 'side-closed')}>Open side pane</button>}
     <div role="tablist" aria-label="Conversation tabs">
-      {!room?.workbench && <button type="button" role="tab" aria-selected={tab === 'discussion'} onClick={() => { tabRef.current = 'discussion'; setTab('discussion'); }}>Discussion</button>}
-      {!room?.research && <button type="button" role="tab" aria-selected={tab === 'worker'} onClick={() => { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); refreshWorker(); }}>Worker{workerNews ? ' · new' : ''}</button>}
+      {!(peek ? peek.kind === 'workbench' : room?.workbench) && <button type="button" role="tab" aria-selected={tab === 'discussion'} onClick={() => { tabRef.current = 'discussion'; setTab('discussion'); }}>Discussion</button>}
+      {!(peek ? peek.kind === 'research' : room?.research) && <button type="button" role="tab" aria-selected={tab === 'worker'} onClick={() => { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); refreshWorker(); }}>Worker{workerNews ? ' · new' : ''}</button>}
     </div>
-    {tab === 'worker' && <section aria-label="Worker conversation">{workerMessages.map((message, index) => 'note' in message ? <p key={index} className={message.error ? 'status error' : 'status'}>{message.note}</p> : <article key={index} className={'msg' + (message.error ? ' error' : '')}><strong>{message.speaker}{message.error ? ' — failed' : ''}</strong><div dangerouslySetInnerHTML={{ __html: message.html }} /></article>)}{workError && <p className="status error" role="alert">{workError}</p>}{workInput && <textarea aria-label="Instruction to the worker" value={workText} disabled={ended || !!peek || !!viewLayout || !!room?.brainstorm || !!workerInfo?.disabled} placeholder={peek ? 'Peeking read-only — click Back to return to the active discussion.' : viewLayout ? 'Read-only: viewing a peer’s discussion.' : room?.brainstorm ? 'Turn this brainstorm into a discussion to send work.' : workerInfo?.disabled ? workerInfo.lines[0] : room?.workbench && !room.active ? 'First instruction to the worker… (names this workbench and starts it)' : 'Instruction to the worker… (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands.'} onChange={(event) => setWorkText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); const value = workText; setWorkText(''); void sendWork(value); } }} />}</section>}
+    {tab === 'worker' && <section aria-label="Worker conversation">
+      {workerMessages.length === 0 && <p>{room?.workbench ? 'Send your first instruction to name and start this workbench.' : 'Give the worker instructions here. It works alongside the discussion and sees only what you send it.'}</p>}
+      {workerMessages.map((message, index) => 'note' in message ? <p key={index} className={message.error ? 'status error' : 'status'}>Worker · {message.note}</p> : <article key={index} className={'msg' + (message.speaker === 'User' || message.speaker === 'Relayed from discussion' ? ' user' : '') + (message.speaker === 'Worker report' ? ' report' : '') + (message.error ? ' error' : '')}>
+        <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong>
+        <div onClick={(event) => { const target = (event.target as Element).closest<HTMLAnchorElement>('a.mention'); if (target?.dataset.file) { event.preventDefault(); void showFile(target.dataset.file); } }} dangerouslySetInnerHTML={{ __html: linkFiles(message.html, knownFiles, room?.active ?? null).html }} />
+        {message.retryId && message.retryId === room?.retryId && index === workerMessages.findIndex((item) => !('note' in item) && item.retryId === room?.retryId) && <div><button type="button" disabled={retryBusy === message.retryId} onClick={() => void retry(message.retryId!)}>Retry</button> <button type="button" disabled={retryBusy === message.retryId} onClick={() => void chooseRetry(message.retryId!)}>Retry with…</button></div>}
+      </article>)}
+      {workError && <p className="status error" role="alert">{workError}</p>}
+      {offers.length > 0 && <div aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
+      <label><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
+      {working && <p>The worker is busy: what you send now waits for it to finish.</p>}
+      {workInput && <textarea aria-label="Instruction to the worker" value={workText} disabled={ended || !!peek || !!viewLayout || !!room?.brainstorm || !!workerInfo?.disabled} placeholder={peek ? 'Peeking read-only — click Back to return to the active discussion.' : viewLayout ? 'Read-only: viewing a peer’s discussion.' : room?.brainstorm ? 'Turn this brainstorm into a discussion to send work.' : workerInfo?.disabled ? workerInfo.lines[0] : room?.workbench && !room.active ? 'First instruction to the worker… (names this workbench and starts it)' : 'Instruction to the worker… (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands.'} onChange={(event) => setWorkText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); const value = workText; setWorkText(''); void sendWork(value); } }} />}
+    </section>}
+    {retryDialog && <dialog ref={retryDialogElement} aria-label="Retry with…" onCancel={() => setRetryDialog(null)}><form onSubmit={(event) => { event.preventDefault(); void submitRetry(); }}>
+      <h3>Retry with…</h3>
+      <label>Worker provider<select value={retryDialog.worker.provider} onChange={(event) => setRetryDialog({ ...retryDialog, worker: { ...retryDialog.worker, provider: event.target.value as AgentSettings['provider'], model: '' }, custom: false })}><option value="claude">Claude</option><option value="codex">Codex</option><option value="agy">Agy</option></select></label>
+      <label>Worker name<input readOnly value={retryDialog.worker.name} /></label>
+      <label>Worker model<select value={retryDialog.custom ? '__custom' : retryDialog.worker.model} onChange={(event) => setRetryDialog({ ...retryDialog, custom: event.target.value === '__custom', worker: { ...retryDialog.worker, model: event.target.value === '__custom' ? '' : event.target.value } })}><option value="">CLI default</option>{retryDialog.models[retryDialog.worker.provider].map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}<option value="__custom">Custom…</option></select></label>
+      {retryDialog.custom && <label>Worker custom model ID<input placeholder="Model ID" value={retryDialog.worker.model} onChange={(event) => setRetryDialog({ ...retryDialog, worker: { ...retryDialog.worker, model: event.target.value } })} /></label>}
+      <button type="button" onClick={() => setRetryDialog(null)}>Cancel</button> <button type="submit" disabled={retryDialog.busy}>Retry</button>{retryDialog.error && <p role="alert">{retryDialog.error}</p>}
+    </form></dialog>}
     <div hidden={tab !== 'discussion'}>
     {peek && <p>peeking at {displayTitle(peek.name, peek.title)} · read-only</p>}
     {!!(room && !room.active && !peek && !viewLayout && !room.workbench) && <p>{room.brainstorm ? 'Your first message names this brainstorm and saves it here.' : room.research ? 'Your first message names this research board and saves it here.' : 'Your first message starts a new discussion.'}</p>}
@@ -752,7 +823,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong><div onClick={(event) => { const target = (event.target as Element).closest<HTMLAnchorElement>('a.mention'); if (target?.dataset.file) { event.preventDefault(); void showFile(target.dataset.file); } }} dangerouslySetInnerHTML={{ __html: peek ? message.html : linkFiles(message.html, knownFiles, room?.active ?? null).html }} />
     </article>)}</section>
     {thinking && <p>… {thinking} is thinking</p>}
-    {offers.length > 0 && <div aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
+    {tab === 'discussion' && offers.length > 0 && <div aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
     <label><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
     {input && <div className="composer">
       <textarea aria-label="Message to the agents" value={text} disabled={ended} onChange={(event) => setText(event.target.value)}

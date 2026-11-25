@@ -140,3 +140,22 @@ it('shows archived and brainstorm peeks by their paths and falls back to a frien
   expect(await screen.findByRole('button', { name: 'notes.md' })).toBeTruthy();
   expect(screen.getByText('archived')).toBeTruthy();
 });
+
+it('links Worker reports and offers live Worker mentions, including follow and user dismissal', async () => {
+  setup();
+  Source.current.send({ type: 'reset', input: true, room, doc: null, peek: null, messages: [], worker: [entry('Worker report', '<p>README.md</p>')] });
+  const user = userEvent.setup(); await user.click(screen.getByRole('tab', { name: 'Worker' }));
+  expect(await screen.findByRole('link', { name: 'README.md' })).toBeTruthy();
+  Source.current.send({ type: 'work', message: entry('Worker report', '<p>notes.md</p>') });
+  const offers = await screen.findByLabelText('File mentions');
+  await user.click(within(offers).getByRole('button', { name: '📄 Show notes.md' }));
+  expect(JSON.parse(fetchMock.mock.calls.find(([url]) => url === '__show')![1].body)).toEqual({ file: paths[1] });
+  await user.click(screen.getByRole('checkbox', { name: 'Follow mentions' }));
+  Source.current.send({ type: 'work', message: entry('Worker report', '<p>./drawings/flow.svg</p>') });
+  await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === '__show')).toHaveLength(2));
+  await user.click(screen.getByRole('checkbox', { name: 'Follow mentions' }));
+  Source.current.send({ type: 'work', message: entry('Worker report', '<p>notes.md</p>') });
+  await screen.findByLabelText('File mentions');
+  Source.current.send({ type: 'work', message: entry('User', '<p>hello</p>') });
+  expect(screen.queryByLabelText('File mentions')).toBeNull();
+});
