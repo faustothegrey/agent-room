@@ -18,7 +18,7 @@ const frame = () => screen.getByTitle('Document viewer') as HTMLIFrameElement;
 beforeEach(() => {
   fetchMock.mockReset(); localStorage.clear();
   fetchMock.mockImplementation(async (url: string) => ({ ok: true, text: async () => '1', json: async () => url.includes('detail=1') ? { files: ['discussions/closed/other file.svg'], unviewable: [] } : ['discussions/live/notes.md'] }));
-  vi.stubGlobal('fetch', fetchMock); vi.stubGlobal('EventSource', Source);
+  vi.stubGlobal('fetch', (...args: unknown[]) => args[0] === '__health' ? new Promise(() => {}) : fetchMock(...args)); vi.stubGlobal('EventSource', Source);
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 

@@ -17,7 +17,7 @@ const setup = (input = true, active: string | null = room.active) => {
   render(<App version="one" refresh={() => {}} />);
   Source.current.send({ type: 'reset', input, room: { ...room, active }, messages: [], busy: false });
 };
-beforeEach(() => { sessionStorage.clear(); fetchMock.mockReset(); vi.stubGlobal('EventSource', Source); vi.stubGlobal('fetch', fetchMock); });
+beforeEach(() => { sessionStorage.clear(); fetchMock.mockReset(); vi.stubGlobal('EventSource', Source); vi.stubGlobal('fetch', (...args: unknown[]) => args[0] === '__health' ? new Promise(() => {}) : fetchMock(...args)); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it('sends Enter, preserves Shift+Enter and passes @names and slash commands to the room', async () => {

@@ -56,10 +56,16 @@ export interface Room {
   workbenches: string[]; researches: string[]; researchStats: Record<string, ResearchStats>; members: unknown[];
   failedAgents: { name: string; disabled: boolean }[]; autoDev: AutoDev | null; workerStop: WorkerStop | null;
   retryId: string | null; transcript: string | null; checkpoints: BoardCheckpoint[]; closedDiscussions: string[];
-  closingDiscussions: Record<string, string>; busyWorkers: string[]; back: unknown; code: unknown;
+  closingDiscussions: Record<string, string>; busyWorkers: string[]; back: unknown; code: CodeInfo | null;
   rollbacks: BoardRollback[]; multi: boolean; open: OpenBoard[];
 }
-export type Monitor = Record<string, { login: unknown; running: number; leftovers: unknown[]; inRoom: boolean }>;
+export interface MonitorLogin { state: 'ok' | 'ending' | 'expired' | 'out' | 'unknown' | 'unmonitored'; expiresAt?: string | null; error?: string | null }
+export interface Leftover { pid: number; agent: string; room: string; started: string; provider: string; unverified?: boolean }
+export type Monitor = Record<string, { login: MonitorLogin | null; running: number; leftovers: Leftover[]; inRoom: boolean }>;
+// The checkout the server runs (codeInfo in ui.mjs), shown beside the server's state.
+export interface CodeInfo { path: string; branch: string | null; commit: string | null; dirty: boolean; startedAt?: string | null; reloaded?: { at: string; commit: string | null; dirty: boolean } }
+// GET __health (the heartbeat, every 3 s); 404 when this room is no longer on the server.
+export interface HealthReply { app: 'agent-room'; pid: number; root: string; startedAt: string | null; discussion: string | null; pages: number }
 export interface Replica { node: string; addresses: string[]; roomId: string; project: string | null; own: Record<string, unknown>; received: unknown[]; peers: unknown[] }
 export interface ResetEvent {
   type: 'reset'; messages: MessageView[]; doc?: string | null; thinking?: string | null;

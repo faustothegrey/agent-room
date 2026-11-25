@@ -1,9 +1,10 @@
 /// <reference types="vite/client" />
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './layout.css';
-import { ChatList } from './ChatList';
+import { ChatList, type ChatMemory } from './ChatList';
 import { WorkerInfoLine, shownWorkerInfo } from './WorkerInfoLine';
-import type { AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
+import { RoomZones } from './RoomZones';
+import type { Gauge, Monitor, QuotaAt, AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
 type StatusLine = { text: string; error: boolean };
@@ -220,6 +221,10 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [busy, setBusy] = useState<'on' | 'failed' | null>(null);
   const [input, setInput] = useState(false);
   const [ended, setEnded] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [quota, setQuota] = useState<{ gauges: Gauge[] | null | undefined; at: QuotaAt | null | undefined }>({ gauges: undefined, at: null });
+  const [monitor, setMonitor] = useState<Monitor>({});
+  const workChatMemory = useRef<ChatMemory | null>(null);
   const [text, setText] = useState(() => { try { const saved = sessionStorage.getItem('next-composer-draft') ?? ''; sessionStorage.removeItem('next-composer-draft'); return saved; } catch { return ''; } });
   const draft = useRef(text); draft.current = text;
   const [files, setFiles] = useState<File[]>([]);
@@ -247,7 +252,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command || state.posting > 0 ? 'on' : null); }, 1500);
     }
   };
-  const post = async (path: '__say' | '__work' | '__retry' | '__stopworker' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: SayRequest | WorkRequest | RetryRequest | StopWorkerRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
+  const post = async (path: '/__shutdown' | '/__shutdown?confirmed=yes' | '__say' | '__work' | '__retry' | '__stopworker' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: SayRequest | WorkRequest | RetryRequest | StopWorkerRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
     const state = busyState.current; state.posting++; updateBusy();
     try {
       return await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': client.current }, body: JSON.stringify(body) });
@@ -298,6 +303,16 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       setRetryDialog(null);
     } catch (error) { setRetryDialog({ ...dialog, busy: false, error: error instanceof Error ? error.message : String(error) }); }
   };
+  // Shutdown server: the server's own address (as the Dock app's Quit uses), not this room's.
+  const shutdownServer = async () => {
+    try {
+      const response = await post('/__shutdown', {});
+      if (response.status === 409) {
+        if (window.confirm(await response.text())) { const retry = await post('/__shutdown?confirmed=yes', {}); if (!retry.ok) addStatus(await retry.text(), true); }
+      } else if (!response.ok) addStatus(await response.text(), true);
+    } catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
+  };
+  const serverChanged = () => { try { sessionStorage.setItem('next-composer-draft', draft.current); } catch {} refresh(); };
   const refreshWorker = () => { void post('__workerinfo', {}).catch(() => {}); };
   const actionReply = async <T,>(path: '__merge' | '__discard' | '__catchup', body: BoardActionRequest): Promise<T> => {
     const response = await post(path, body); if (!response.ok) throw new Error(await response.text()); return await response.json() as T;
@@ -412,8 +427,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     setOffers([]); offerEpoch.current++;
     try { await post('__show', { file }); } catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
   };
+  // As the legacy send: Restart and Shutdown warn about rooms still running a round or a worker
+  // instruction (409), and go ahead only once the User confirms.
   const boardCommand = async (text: string) => {
-    try { const response = await post('__say', { text }); if (!response.ok) addStatus(await response.text(), true); }
+    try {
+      let response = await post('__say', { text });
+      if (response.status === 409 && (text === '/restart' || text === '/shutdown')) {
+        if (!window.confirm(await response.text())) return;
+        response = await post('__say', { text, confirmed: true });
+      }
+      if (!response.ok) addStatus(await response.text(), true);
+    }
     catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
   };
   const archiveBoard = async (path: string, ref: string) => {
@@ -529,6 +553,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       }
       if (event.type === 'reset') {
         setWorkerInfo(event.workerInfo ?? null);
+        setMonitor(event.monitor ?? {}); setQuota({ gauges: event.quota, at: event.quotaAt });
         setWorkInput(!!event.workInput); setWorking(event.working ?? null); setRetryBusy(null);
         setWorkerMessages((event.worker ?? []).filter((m) => !('note' in m))); setWorkerHint(!event.worker?.length); setChatReset((n) => n + 1);
         for (const m of event.worker ?? []) if ('note' in m) addStatus(m.note, !!m.error, 'Worker');
@@ -597,6 +622,10 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         state.command = event.on; updateBusy();
       } else if (event.type === 'working') {
         setWorking(event.name);
+      } else if (event.type === 'quota') {
+        setQuota({ gauges: event.gauges, at: event.at });
+      } else if (event.type === 'monitor') {
+        setMonitor(event.monitor ?? {});
       } else if (event.type === 'workerinfo') {
         setWorkerInfo(event.info);
       } else if (event.type === 'doc') {
@@ -626,7 +655,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       } else if (event.type === 'ended') {
         setEnded(true); addStatus('This room has ended. You can close this window.'); events.close();
       } else if (event.type === 'restarting') {
-        setEnded(true); state.command = true; updateBusy(); addStatus('Restarting the server: this page reloads when the new one answers.'); events.close();
+        setEnded(true); setRestarting(true); state.command = true; updateBusy(); addStatus('Restarting the server: this page reloads when the new one answers.'); events.close();
       }
     };
     return () => { events.close(); clearTimeout(state.show); clearTimeout(state.fail); state.show = undefined; state.fail = undefined; };
@@ -765,6 +794,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     requestAnimationFrame(() => explorer.current?.querySelector<HTMLElement>('.shown')?.scrollIntoView?.({ block: 'center' }));
   };
   return <main>
+    <RoomZones roomName={room?.folder?.replace(/[/]+$/, '').split('/').pop() || room?.folder || 'agent-room'} code={room?.code} gauges={quota.gauges} at={quota.at} monitor={monitor}
+      ended={ended} restarting={restarting} command={(text) => void boardCommand(text)} shutdown={() => void shutdownServer()} serverChanged={serverChanged} />
     <h1>{title}</h1>
     {autoDev?.status === 'running' && <span>Auto dev running · cycle {autoDev.cycle} of {autoDev.max} · {autoDev.waiting ? 'worker is working' : 'discussion is reviewing'}</span>}
     {autoDev?.status === 'paused' && <span>Auto dev paused · {autoDev.reason}</span>}
@@ -832,7 +863,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     </div>
     {tab === 'worker' && <section className="next-pane" aria-label="Worker conversation">
       <WorkerInfoLine info={shownWorkerInfo(workerInfo, !!room?.brainstorm, !!peek || !!viewLayout)} />
-      <ChatList endLabel="Scroll to latest worker messages" resetKey={chatReset}>
+      <ChatList endLabel="Scroll to latest worker messages" resetKey={chatReset} memory={workChatMemory}>
       {workerHint && <p className="status">{room?.workbench ? 'Send your first instruction to name and start this workbench.' : 'Give the worker instructions here. It works alongside the discussion and sees only what you send it.'}</p>}
       {workerMessages.map((message, index) => 'note' in message ? null : <article key={index} className={'msg' + (message.speaker === 'User' || message.speaker === 'Relayed from discussion' ? ' user' : '') + (message.speaker === 'Worker report' ? ' report' : '') + (message.error ? ' error' : '')}>
         <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong>

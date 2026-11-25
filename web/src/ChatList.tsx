@@ -1,18 +1,23 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
 // A chat list that follows new content while it is already at the bottom (within 40 px), and
 // offers a ↓ button to jump to the end otherwise, as makeChat does on /__room. Whether the list
 // follows is decided by where it was before the change: by the last scroll, or a resize of the
 // list itself. A new resetKey (a reset event cleared it) starts at the bottom again.
+// A list that leaves the page (the Worker tab while Discussion is shown) keeps its place in
+// `memory`, so coming back shows it where it was, as the hidden list does on /__room.
+export type ChatMemory = { top: number; stick: boolean; reset: number };
 const atBottom = (list: HTMLElement) => list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-export function ChatList({ endLabel, resetKey, children }: { endLabel: string; resetKey: number; children: ReactNode }) {
+export function ChatList({ endLabel, resetKey, memory, children }: { endLabel: string; resetKey: number; memory?: RefObject<ChatMemory | null>; children: ReactNode }) {
   const list = useRef<HTMLDivElement>(null);
-  const stick = useRef(true), lastReset = useRef(resetKey);
+  const saved = memory?.current, restored = useRef(!!saved && saved.reset === resetKey && !saved.stick);
+  const stick = useRef(restored.current ? false : true), lastReset = useRef(resetKey);
+  const remember = (el: HTMLElement) => { if (memory) memory.current = { top: el.scrollTop, stick: stick.current, reset: lastReset.current }; };
   const [endHidden, setEndHidden] = useState(true);
   const updateEnd = () => { const el = list.current; if (el) setEndHidden(atBottom(el)); };
   useEffect(() => {
     const el = list.current; if (!el) return;
-    const onScroll = () => { stick.current = atBottom(el); updateEnd(); };
+    const onScroll = () => { stick.current = atBottom(el); updateEnd(); remember(el); };
     el.addEventListener('scroll', onScroll);
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(onScroll);
     observer?.observe(el);
@@ -21,8 +26,9 @@ export function ChatList({ endLabel, resetKey, children }: { endLabel: string; r
   useLayoutEffect(() => {
     const el = list.current; if (!el) return;
     if (lastReset.current !== resetKey) { lastReset.current = resetKey; stick.current = true; }
-    if (stick.current) el.scrollTop = el.scrollHeight;
-    updateEnd();
+    if (restored.current && saved) { restored.current = false; el.scrollTop = saved.top; }
+    else if (stick.current) el.scrollTop = el.scrollHeight;
+    updateEnd(); remember(el);
   });
   const toEnd = () => {
     const el = list.current; if (!el) return;
