@@ -25,7 +25,7 @@ it('offers retry only on the current report, posts its id, and enables again aft
   expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
   fetchMock.mockImplementation(async (url: string) => url === '__retry' ? reply('Retry refused', false) : reply([]));
   await user.click(screen.getByRole('button', { name: 'Retry' }));
-  expect((await screen.findByRole('alert')).textContent).toBe('Retry refused');
+  await waitFor(() => expect(within(screen.getByRole('log', { name: 'System messages' })).getByText('Worker · Retry refused').className).toBe('status error'));
   expect(JSON.parse(fetchMock.mock.calls.find(([url]) => url === '__retry')![1].body)).toEqual({ id: 'retry-1' });
   expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(false);
   Source.current.send({ type: 'room', room: { ...room, retryId: null } }); expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
@@ -50,7 +50,7 @@ it('chooses provider and model, validates custom ID and submits with freshly rea
 it('keeps retry-with failures in the dialog and reports settings-load errors as Worker errors', async () => {
   setup(); const user = userEvent.setup(); await user.click(screen.getByRole('tab', { name: 'Worker' }));
   fetchMock.mockImplementation(async (url: string) => url === '__settings' ? reply('Settings unavailable', false) : reply([]));
-  await user.click(screen.getByRole('button', { name: 'Retry with…' })); expect((await screen.findByRole('alert')).textContent).toBe('Settings unavailable');
+  await user.click(screen.getByRole('button', { name: 'Retry with…' })); await waitFor(() => expect(within(screen.getByRole('log', { name: 'System messages' })).getByText('Worker · Settings unavailable').className).toBe('status error'));
   fetchMock.mockImplementation(async (url: string) => url === '__settings' ? reply(settings) : url === '__retry' ? reply('Retry refused', false) : reply([]));
   await user.click(screen.getByRole('button', { name: 'Retry with…' })); const dialog = await screen.findByRole('dialog', { name: 'Retry with…' });
   await user.click(within(dialog).getByRole('button', { name: 'Retry' })); expect((await within(dialog).findByRole('alert')).textContent).toBe('Retry refused');

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from './App';
 class Source {
@@ -37,7 +37,7 @@ it('sends text-only work on Enter, preserves Shift+Enter and clears text when a 
   expect(box.placeholder).toContain('First instruction');
   await user.type(box, 'First{Shift>}{Enter}{/Shift}instruction'); expect(box.value).toBe('First\ninstruction');
   await user.type(box, '{Enter}'); expect(box.value).toBe('');
-  await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Worker unavailable'));
+  await waitFor(() => expect(within(screen.getByRole('log', { name: 'System messages' })).getByText('Worker · Worker unavailable').className).toBe('status error'));
   const call = fetchMock.mock.calls.find(([url]) => url === '__work');
   expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ text: 'First\ninstruction' });
 });

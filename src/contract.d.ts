@@ -40,7 +40,8 @@ export interface Gauge { provider: string; group?: string; label: string; used: 
 export interface QuotaAt { measured: string | null; checked: string }
 export interface WorkerPending { lane: string | null; branch: string; ahead: number; dirty: boolean; conflicts: string[] }
 export interface MergeReadiness { canMerge: boolean; catchUp: boolean; disabledReason?: string | null; targetBranch?: string | null; behind?: number }
-export interface WorkerInfo { lines: string[]; disabled?: boolean; error?: boolean; lanes?: unknown[]; pending?: WorkerPending[]; discardable?: string[]; mergeable?: Record<string, MergeReadiness>; merged?: string[] }
+export interface WorkerLane { summary: string; lines: string[]; own?: boolean; diagram?: { note?: string; graph?: string } }
+export interface WorkerInfo { lines: string[]; disabled?: boolean; error?: boolean; lanes?: WorkerLane[]; pending?: WorkerPending[]; discardable?: string[]; mergeable?: Record<string, MergeReadiness>; merged?: string[] }
 export interface OpenBoard { url: string; current: boolean; title: string; active: string | null; brainstorm: boolean; workbench: boolean; research: boolean; started: boolean; working: boolean; workerBusy: boolean; ongoing: boolean; waitingForInput?: boolean; waitingReason?: string | null; readyForAutoDev?: boolean; workReady?: boolean }
 export interface BoardCheckpoint { name: string; title?: string; at?: string; kind?: string; summary?: boolean }
 export interface BoardRollback { name: string; status: string; report?: string | null; commit?: string | null }

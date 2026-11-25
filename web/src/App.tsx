@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './layout.css';
+import { ChatList } from './ChatList';
+import { WorkerInfoLine, shownWorkerInfo } from './WorkerInfoLine';
 import type { AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
@@ -106,7 +108,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [workerMessages, setWorkerMessages] = useState<WorkerMessage[]>([]);
   const [workInput, setWorkInput] = useState(false);
   const [workText, setWorkText] = useState('');
-  const [workError, setWorkError] = useState('');
+  const [workerHint, setWorkerHint] = useState(true);
+  const [chatReset, setChatReset] = useState(0);
   const [working, setWorking] = useState<string | null>(null);
   const [stopArmed, setStopArmed] = useState<{ after: boolean; now: boolean }>({ after: false, now: false });
   const stopTimers = useRef<Partial<Record<'after' | 'now', ReturnType<typeof setTimeout>>>>({});
@@ -234,11 +237,12 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       if (!state.fail) setBusy(null);
     }
   };
-  const addStatus = (text: string, error = false) => {
+  // The Activity area's moving status: its last two lines; a Worker error doesn't flash the busy bar.
+  const addStatus = (text: string, error = false, source?: 'Worker') => {
     if (!text) return;
-    setStatus((lines) => [...lines, { text, error }].slice(-2));
+    setStatus((lines) => [...lines, { text: (source ? source + ' · ' : '') + text, error }].slice(-2));
     const state = busyState.current;
-    if (error && (state.command || state.posting > 0 || Date.now() - state.ended <= 1500)) {
+    if (error && source !== 'Worker' && (state.command || state.posting > 0 || Date.now() - state.ended <= 1500)) {
       setBusy('failed'); clearTimeout(state.fail);
       state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command || state.posting > 0 ? 'on' : null); }, 1500);
     }
@@ -249,11 +253,12 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       return await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': client.current }, body: JSON.stringify(body) });
     } finally { state.posting--; updateBusy(); }
   };
+  const workerError = (error: unknown) => addStatus(error instanceof Error ? error.message : String(error), true, 'Worker');
   const sendWork = async (value: string) => {
     const instruction = value.trim();
     if (!instruction || ended || peek || viewLayout) return;
-    try { const response = await post('__work', { text: instruction }); if (!response.ok) setWorkError(await response.text()); }
-    catch (error) { setWorkError(error instanceof Error ? error.message : String(error)); }
+    try { const response = await post('__work', { text: instruction }); if (!response.ok) workerError(await response.text()); }
+    catch (error) { workerError(error); }
   };
   const stopWorker = async (mode: 'after' | 'now') => {
     if (!stopArmed[mode]) {
@@ -262,7 +267,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       return;
     }
     try { const response = await post('__stopworker', { mode }); if (!response.ok) throw new Error(await response.text()); }
-    catch (error) { setWorkError(error instanceof Error ? error.message : String(error)); }
+    catch (error) { workerError(error); }
   };
   const readSettings = async (): Promise<SettingsReply> => {
     const response = await fetch('__settings'); if (!response.ok) throw new Error(await response.text());
@@ -271,14 +276,14 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const retry = async (id: string) => {
     setRetryBusy(id);
     try { const response = await post('__retry', { id }); if (!response.ok) throw new Error(await response.text()); }
-    catch (error) { setWorkError(error instanceof Error ? error.message : String(error)); setRetryBusy(null); }
+    catch (error) { workerError(error); setRetryBusy(null); }
   };
   const chooseRetry = async (id: string) => {
     try {
       const data = await readSettings(), worker = data.settings.worker;
       const custom = !!worker.model && !data.models[worker.provider].some((model) => model.id === worker.model);
       setRetryDialog({ id, models: data.models, worker: { ...worker }, custom, error: '', busy: false });
-    } catch (error) { setWorkError(error instanceof Error ? error.message : String(error)); }
+    } catch (error) { workerError(error); }
   };
   const submitRetry = async () => {
     if (!retryDialog || retryDialog.busy) return;
@@ -524,8 +529,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       }
       if (event.type === 'reset') {
         setWorkerInfo(event.workerInfo ?? null);
-        setWorkInput(!!event.workInput); setWorkError(''); setWorking(event.working ?? null); setRetryBusy(null);
-        setWorkerMessages(event.worker ?? []);
+        setWorkInput(!!event.workInput); setWorking(event.working ?? null); setRetryBusy(null);
+        setWorkerMessages((event.worker ?? []).filter((m) => !('note' in m))); setWorkerHint(!event.worker?.length); setChatReset((n) => n + 1);
+        for (const m of event.worker ?? []) if ('note' in m) addStatus(m.note, !!m.error, 'Worker');
         if (event.peek ? event.peek.kind === 'workbench' : event.room?.workbench) { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); }
         else if ((event.peek ? event.peek.kind === 'research' : event.room?.research || roomRef.current?.workbench) && tabRef.current === 'worker') { tabRef.current = 'discussion'; setTab('discussion'); }
         viewing.current = event.viewing;
@@ -562,7 +568,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
           }
         }
       } else if (event.type === 'work') {
-        if ('note' in event.message) setWorkerMessages((previous) => [...previous, event.message]);
+        if ('note' in event.message) addStatus(event.message.note, !!event.message.error, 'Worker'); // a marker or an error, as on /__room
         else {
           const message = event.message;
           setWorkerMessages((previous) => [...previous, message]);
@@ -627,6 +633,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   }, [version, refresh, navigate]);
 
   const title = displayTitle(peek?.name ?? room?.active?.split('/').at(-1), peek?.title ?? room?.discussion) || 'agent-room';
+  const busyWorkers = (room?.open ?? []).filter((entry) => entry.working);
   const turnVisible = !!room?.started && yourTurn && !thinking && !peek && room.autoDev?.status !== 'running';
   const base = filePeek?.path ?? peek?.path ?? room?.active ?? null;
   const rootMode = explorerMode === 'root' || !base;
@@ -793,6 +800,13 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {boardDialog.error && <p role="alert">{boardDialog.error}</p>}
       <button type="button" disabled={dialogBusy} onClick={() => setBoardDialog(null)}>Cancel</button> <button type="button" disabled={dialogBusy} onClick={() => void confirmBoardAction()}>{boardDialog.kind === 'merge' ? 'Confirm ' + boardDialog.preview.title : boardDialog.kind === 'discard' ? 'Confirm Close and Discard' : 'Catch up with ' + boardDialog.target}</button>
     </dialog>}
+    <div className="disc-zone" aria-label="Activity">
+      <section aria-label="System messages" role="log" aria-live="polite" aria-relevant="additions">
+        {failure && <div className="pinned-error"><span title={failure.error}>✗ {failure.agent} failed {failure.time}: {failure.error.split(/\r?\n/)[0]}{failure.earlier ? ` (+${failure.earlier} earlier)` : ''}</span> <button type="button" title="Dismiss" aria-label="Dismiss pinned error" onClick={() => setFailure(null)}>✕</button></div>}
+        {status.map((line, index) => <p key={index} className={line.error ? 'status error' : 'status'} title={line.text}>{line.text}</p>)}
+      </section>
+      {busyWorkers.length > 0 && <div className="disc-workers" aria-live="polite">{busyWorkers.map((entry) => <span key={entry.url}><span className="busy-dot">● </span>{displayTitle(entry.active?.split('/').at(-1), entry.title)} · Worker is working</span>)}</div>}
+    </div>
     <div className={'next-workspace' + (boardsClosed ? ' boards-closed' : '')}>
     <aside className="next-boards" aria-label="Boards">
       <div><b hidden={boardsClosed}>Boards</b> <button type="button" aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} }}>{boardsClosed ? '»' : '«'}</button></div>
@@ -816,14 +830,16 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {!(peek ? peek.kind === 'workbench' : room?.workbench) && <button type="button" role="tab" aria-selected={tab === 'discussion'} onClick={() => { tabRef.current = 'discussion'; setTab('discussion'); }}>Discussion</button>}
       {!(peek ? peek.kind === 'research' : room?.research) && <button type="button" role="tab" aria-selected={tab === 'worker'} onClick={() => { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); refreshWorker(); }}>Worker{workerNews ? ' · new' : ''}</button>}
     </div>
-    {tab === 'worker' && <section aria-label="Worker conversation">
-      {workerMessages.length === 0 && <p>{room?.workbench ? 'Send your first instruction to name and start this workbench.' : 'Give the worker instructions here. It works alongside the discussion and sees only what you send it.'}</p>}
-      {workerMessages.map((message, index) => 'note' in message ? <p key={index} className={message.error ? 'status error' : 'status'}>Worker · {message.note}</p> : <article key={index} className={'msg' + (message.speaker === 'User' || message.speaker === 'Relayed from discussion' ? ' user' : '') + (message.speaker === 'Worker report' ? ' report' : '') + (message.error ? ' error' : '')}>
+    {tab === 'worker' && <section className="next-pane" aria-label="Worker conversation">
+      <WorkerInfoLine info={shownWorkerInfo(workerInfo, !!room?.brainstorm, !!peek || !!viewLayout)} />
+      <ChatList endLabel="Scroll to latest worker messages" resetKey={chatReset}>
+      {workerHint && <p className="status">{room?.workbench ? 'Send your first instruction to name and start this workbench.' : 'Give the worker instructions here. It works alongside the discussion and sees only what you send it.'}</p>}
+      {workerMessages.map((message, index) => 'note' in message ? null : <article key={index} className={'msg' + (message.speaker === 'User' || message.speaker === 'Relayed from discussion' ? ' user' : '') + (message.speaker === 'Worker report' ? ' report' : '') + (message.error ? ' error' : '')}>
         <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong>
         <div onClick={(event) => { const target = (event.target as Element).closest<HTMLAnchorElement>('a.mention'); if (target?.dataset.file) { event.preventDefault(); void showFile(target.dataset.file); } }} dangerouslySetInnerHTML={{ __html: linkFiles(message.html, knownFiles, room?.active ?? null).html }} />
         {message.retryId && message.retryId === room?.retryId && index === workerMessages.findIndex((item) => !('note' in item) && item.retryId === room?.retryId) && <div><button type="button" disabled={retryBusy === message.retryId} onClick={() => void retry(message.retryId!)}>Retry</button> <button type="button" disabled={retryBusy === message.retryId} onClick={() => void chooseRetry(message.retryId!)}>Retry with…</button></div>}
       </article>)}
-      {workError && <p className="status error" role="alert">{workError}</p>}
+      </ChatList>
       {offers.length > 0 && <div aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
       <label><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
       {working && <p>The worker is busy: what you send now waits for it to finish.</p>}
@@ -841,19 +857,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {retryDialog.custom && <label>Worker custom model ID<input placeholder="Model ID" value={retryDialog.worker.model} onChange={(event) => setRetryDialog({ ...retryDialog, worker: { ...retryDialog.worker, model: event.target.value } })} /></label>}
       <button type="button" onClick={() => setRetryDialog(null)}>Cancel</button> <button type="submit" disabled={retryDialog.busy}>Retry</button>{retryDialog.error && <p role="alert">{retryDialog.error}</p>}
     </form></dialog>}
-    <div hidden={tab !== 'discussion'}>
+    <div className="next-pane" hidden={tab !== 'discussion'}>
     {peek && <p>peeking at {displayTitle(peek.name, peek.title)} · read-only</p>}
     {!!(room && !room.active && !peek && !viewLayout && !room.workbench) && <p>{room.brainstorm ? 'Your first message names this brainstorm and saves it here.' : room.research ? 'Your first message names this research board and saves it here.' : 'Your first message starts a new discussion.'}</p>}
     {turnVisible && <p aria-label="Turn status">your turn</p>}
-    <section aria-label="Activity" aria-live="polite">
-      {failure && <div><span title={failure.error}>✗ {failure.agent} failed {failure.time}: {failure.error.split(/\r?\n/)[0]}{failure.earlier ? ` (+${failure.earlier} earlier)` : ''}</span> <button type="button" title="Dismiss" aria-label="Dismiss pinned error" onClick={() => setFailure(null)}>✕</button></div>}
-      {status.map((line, index) => <p key={index} className={line.error ? 'status error' : 'status'} title={line.text}>{line.text}</p>)}
-    </section>
     {busy && <div aria-label="Busy" data-state={busy}>{busy === 'on' ? 'Working…' : 'Action failed'}</div>}
+    <ChatList endLabel="Scroll to latest discussion messages" resetKey={chatReset}>
     <section aria-label="Conversation">{messages.map((message, index) => <article key={index} className={'msg' + (message.error ? ' error' : '') + (message.outcome ? ' summary' + (message.outcome === 'agreed' ? '' : ' not-agreed') : '')}>
       <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong><div onClick={(event) => { const element = event.target as Element; const target = element.closest<HTMLAnchorElement>('a.mention'); if (target?.dataset.file) { event.preventDefault(); void showFile(target.dataset.file); } if (element.closest('[data-auto-dev="start"]')) void boardCommand('/autodev'); }} dangerouslySetInnerHTML={{ __html: (() => { const html = peek ? message.html : linkFiles(message.html, knownFiles, room?.active ?? null).html; return autoDev && autoDev.status !== 'running' && autoDev.status !== 'paused' && autoDev.offer && index === summaryIndex ? autoOfferHtml(html, autoDev.offer, autoDev.max) : html; })() }} />
     </article>)}</section>
-    {thinking && <p>… {thinking} is thinking</p>}
+    {thinking && <p className="status">… {thinking} is thinking</p>}
+    </ChatList>
     {tab === 'discussion' && offers.length > 0 && <div aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
     <label><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
     {autoDev?.status === 'paused' && autoDev.offer?.text && <div role="status"><p>Next agreed instruction:</p><p>{autoDev.offer.text}</p><p><button type="button" onClick={() => void boardCommand('/autodev')}>Restart auto dev ({autoDev.max} more)</button> Restarting grants another {autoDev.max} worker cycles.</p></div>}
