@@ -102,6 +102,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   useEffect(() => () => { for (const timer of Object.values(creationTimers.current)) clearTimeout(timer); }, []);
   const [armedActions, setArmedActions] = useState<Record<string, boolean>>({});
   const [rowMenu, setRowMenu] = useState<string | null>(null);
+  const [pendingArchives, setPendingArchives] = useState<Set<string>>(() => new Set());
+  const pendingArchivesRef = useRef(pendingArchives); pendingArchivesRef.current = pendingArchives;
   const rowMenuRef = useRef<string | null>(null); rowMenuRef.current = rowMenu;
   const actionTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const actionsMenu = useRef<HTMLDetailsElement>(null);
@@ -285,6 +287,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     try { const response = await post('__say', { text }); if (!response.ok) addStatus(await response.text(), true); }
     catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
   };
+  const archiveBoard = async (path: string, ref: string) => {
+    if (ended || pendingArchives.has(path)) return;
+    setPendingArchives((previous) => new Set(previous).add(path));
+    try {
+      const response = await post('__say', { text: '/move ' + ref + ' archive' });
+      if (response.ok) return;
+      addStatus(await response.text(), true);
+    } catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
+    setPendingArchives((previous) => { const next = new Set(previous); next.delete(path); return next; });
+    void loadDetails();
+  };
   const createBoard = (command: string) => {
     if (!room?.multi && room?.started && !armedCreation[command]) {
       setArmedCreation((previous) => ({ ...previous, [command]: true }));
@@ -417,6 +430,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         setThinking(null); setYourTurn(true); addStatus(event.text);
       } else if (event.type === 'note') {
         addStatus(event.text, !!event.error);
+        if (event.error && pendingArchivesRef.current.size) { setPendingArchives(new Set()); void loadDetails(); }
       } else if (event.type === 'busy') {
         state.command = event.on; updateBusy();
       } else if (event.type === 'workerinfo') {
@@ -433,6 +447,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       } else if (event.type === 'files') {
         setSubtab('explorer'); void loadDetails();
       } else if (event.type === 'moved') {
+        setPendingArchives((previous) => { const next = new Set(previous); next.delete(event.from); return next; });
         const folder = roomRef.current?.folder, name = event.from?.split('/').at(-1);
         if (folder && name) {
           const kind: OrderKind = event.from.startsWith('brainstorms/') ? 'brainstorms' : 'discussions';
@@ -506,6 +521,13 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
             {closed && !isResearch && <button type="button" title="Look at this closed board read-only: its conversation and files, without reopening it." onClick={() => { setRowMenu(null); setExplorerMode('discussion'); setSubtab('explorer'); void boardCommand('/peek ' + ref); }}>Peek chat &amp; files</button>}
           </>}
           {!archived && (!closed || brainstorm) && <button type="button" disabled={brainstorm && !(current || open)} title={brainstorm && !(current || open) ? 'It is not open' : undefined} onClick={() => { setRowMenu(null); void boardCommand('/close ' + ref); }}>{!brainstorm && !isResearch && workerInfo?.pending?.some((item) => item.lane === name) ? 'Close with pending work' : 'Close'}</button>}
+          {archived ? <>
+            <button type="button" onClick={() => { setRowMenu(null); void boardCommand('/move ' + ref + ' active'); }}>Make active</button>
+            {path.includes('/archive/') ? <button type="button" disabled={!brainstorm && !closed} title={!brainstorm && !closed ? `Close the ${isResearch ? 'research board' : 'discussion'} before moving it into deferred/.` : undefined} onClick={() => { setRowMenu(null); void boardCommand('/move ' + ref + ' deferred'); }}>Defer</button> : <button type="button" disabled={(!brainstorm && !closed) || pendingArchives.has(path)} aria-busy={pendingArchives.has(path)} title={!brainstorm && !closed ? `Close the ${isResearch ? 'research board' : 'discussion'} before moving it into archive/.` : undefined} onClick={() => void archiveBoard(path, ref)}>Archive</button>}
+          </> : <>
+            <button type="button" disabled={current || !closed || pendingArchives.has(path)} aria-busy={pendingArchives.has(path)} title={!closed ? `Close the ${isResearch ? 'research board' : brainstorm ? 'brainstorm' : 'discussion'} before moving it into archive/.` : current && !brainstorm ? `The ${isResearch ? 'research board' : 'discussion'} in use cannot be moved` : `Move the whole ${isResearch ? 'research board' : brainstorm ? 'brainstorm' : 'discussion'} into archive/`} onClick={() => void archiveBoard(path, ref)}>Archive</button>
+            <button type="button" disabled={current || !closed} title={!closed ? `Close the ${isResearch ? 'research board' : brainstorm ? 'brainstorm' : 'discussion'} before moving it into deferred/.` : current && !brainstorm ? `The ${isResearch ? 'research board' : 'discussion'} in use cannot be moved` : `Move the whole ${isResearch ? 'research board' : brainstorm ? 'brainstorm' : 'discussion'} into deferred/`} onClick={() => { setRowMenu(null); void boardCommand('/move ' + ref + ' deferred'); }}>Defer</button>
+          </>}
           {ordering && <><button type="button" aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => { setRowMenu(null); reorder(name, index - 1); }}>Move up</button><button type="button" aria-label={`Move ${label} down`} disabled={index === ordering.names.length - 1} onClick={() => { setRowMenu(null); reorder(name, index + 1); }}>Move down</button></>}
         </div>
       </details>}
