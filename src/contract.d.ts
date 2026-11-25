@@ -42,7 +42,8 @@ export interface WorkerPending { lane: string | null; branch: string; ahead: num
 export interface MergeReadiness { canMerge: boolean; catchUp: boolean; disabledReason?: string | null }
 export interface WorkerInfo { lines: string[]; disabled?: boolean; error?: boolean; lanes?: unknown[]; pending?: WorkerPending[]; discardable?: string[]; mergeable?: Record<string, MergeReadiness>; merged?: string[] }
 export interface OpenBoard { url: string; current: boolean; title: string; active: string | null; brainstorm: boolean; workbench: boolean; research: boolean; started: boolean; working: boolean; workerBusy: boolean; ongoing: boolean; waitingForInput?: boolean; waitingReason?: string | null; readyForAutoDev?: boolean; workReady?: boolean }
-export interface BoardCheckpoint { name: string; title?: string; at?: string; kind?: string }
+export interface BoardCheckpoint { name: string; title?: string; at?: string; kind?: string; summary?: boolean }
+export interface BoardRollback { name: string; status: string; report?: string | null; commit?: string | null }
 export interface ResearchStats { laps: number; priorUnknown?: boolean; lastRun?: string | null; nextRun?: string | null }
 export interface Room {
   folder: string; agents: string[]; worker: string; workerModel: string | null;
@@ -52,7 +53,7 @@ export interface Room {
   failedAgents: { name: string; disabled: boolean }[]; autoDev: { status: string | null; [key: string]: unknown } | null; workerStop: unknown;
   retryId: string | null; transcript: string | null; checkpoints: BoardCheckpoint[]; closedDiscussions: string[];
   closingDiscussions: Record<string, string>; busyWorkers: string[]; back: unknown; code: unknown;
-  rollbacks: unknown[]; multi: boolean; open: OpenBoard[];
+  rollbacks: BoardRollback[]; multi: boolean; open: OpenBoard[];
 }
 export type Monitor = Record<string, { login: unknown; running: number; leftovers: unknown[]; inRoom: boolean }>;
 export interface Replica { node: string; addresses: string[]; roomId: string; project: string | null; own: Record<string, unknown>; received: unknown[]; peers: unknown[] }
