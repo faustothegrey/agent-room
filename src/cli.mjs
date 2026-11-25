@@ -5,7 +5,7 @@
 // One process serves several rooms, one per folder (identified by its real path). Each room's
 // conversation lives in its own `ctx`, with its own input queue, so it carries over a reload and a
 // round in one room never waits for another. Keep this file small: changes here need a restart.
-import { realpathSync, watch, mkdtempSync, renameSync, rmSync, existsSync } from 'node:fs';
+import { realpathSync, watch, mkdtempSync, renameSync, rmSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
@@ -79,6 +79,26 @@ let ui = await import(`./ui.mjs?v=${Date.now()}`);
 if (values.help) {
   console.log(ui.USAGE);
   process.exit(0);
+}
+
+// A direct start needs a current page too; dev mode builds in its existing background watcher.
+function webNeedsBuild() {
+  const index = resolve(webRoot, 'dist/index.html');
+  if (!existsSync(index)) return true;
+  const built = statSync(index).mtimeMs;
+  function newer(dir) {
+    return readdirSync(dir, { withFileTypes: true }).some((entry) => {
+      if (dir === webRoot && (entry.name === 'dist' || entry.name.startsWith('.dist-stage-'))) return false;
+      const path = resolve(dir, entry.name);
+      return entry.isDirectory() ? newer(path) : statSync(path).mtimeMs > built;
+    });
+  }
+  return newer(webRoot);
+}
+if (!values.dev) {
+  try {
+    if (webNeedsBuild()) { await buildWeb(); console.log('Web build complete.'); }
+  } catch (err) { console.error(`Web build failed; the existing room is still available: ${err.message}`); }
 }
 
 const END = Symbol('end'); // pushed into a room's input when the whole server ends

@@ -18,7 +18,7 @@
     "test:web": "vitest run --environment jsdom web/src"
   },
   "engines": {
-    "node": ">=20"
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.1.0",

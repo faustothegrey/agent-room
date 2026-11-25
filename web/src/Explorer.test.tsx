@@ -38,6 +38,7 @@ it('shows a nested discussion tree, disables unavailable files, and opens files 
 it('shows room checkout without dated boards and lays out long file levels in columns', async () => {
   render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
   await screen.findByRole('button', { name: 'notes.md' }); await user.click(screen.getByRole('button', { name: 'Room checkout' }));
+  expect(screen.getByText('room/ · main')).toBeTruthy();
   expect(screen.getAllByRole('button', { name: 'README.md' })).toHaveLength(2);
   await user.click(screen.getByText('discussions/')); expect(within(screen.getByLabelText('Explorer files')).getAllByRole('button', { name: 'README.md' })).toHaveLength(2);
   expect(screen.queryByText('2026-11-20-live/')).toBeNull(); expect(screen.queryByText('archive/')).toBeNull();
@@ -63,3 +64,11 @@ it('opens Peek tree files locally and returns without re-entering Peek', async (
   await waitFor(() => expect(screen.queryByLabelText('Explorer tab')).toBeNull());
   await user.click(screen.getByRole('button', { name: 'Explorer' })); expect(screen.queryByLabelText('Explorer tab')).toBeNull();
 });
+
+ it('omits an absent checkout branch', async () => {
+  fetchMock.mockImplementation(async (url: string) => url === '__files?detail=1' ? { ok: true, json: async () => ({ files, unviewable: [], branch: null }) } : { ok: true, text: async () => '', json: async () => files });
+  render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
+  await screen.findByRole('button', { name: 'notes.md' }); await user.click(screen.getByRole('button', { name: 'Room checkout' }));
+  expect(screen.getByText('room/')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Room checkout' }).getAttribute('title')).toBeNull();
+ });

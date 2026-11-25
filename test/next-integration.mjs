@@ -112,3 +112,47 @@ test('Reload loads each extracted document module again', { timeout: 30000 }, as
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('direct start builds a missing or stale page and survives a failed build', { timeout: 60000 }, async () => {
+  const { cpSync, existsSync, readFileSync, statSync, utimesSync, readdirSync, mkdirSync } = await import('node:fs');
+  const { spawn } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const source = fileURLToPath(new URL('../', import.meta.url));
+  const root = mkdtempSync(join(tmpdir(), 'next-direct-'));
+  for (const name of ['src', 'rulebooks', 'web']) cpSync(join(source, name), join(root, name), { recursive: true, filter: (p) => !p.includes('/web/dist') });
+  symlinkSync(join(source, 'node_modules'), join(root, 'node_modules'), 'dir');
+  const run = async (missing = false) => {
+    const cli = spawn(process.execPath, [join(root, 'src/cli.mjs'), '--cwd', root, '--port', '0'], { env: { ...process.env, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    cli.stdout.on('data', (d) => { output += d; }); cli.stderr.on('data', (d) => { output += d; });
+    try {
+      const end = Date.now() + 20000;
+      while (!output.match(/Discussion screen: (http:\/\/[^/]+)/)) {
+        if (cli.exitCode !== null || Date.now() > end) throw new Error(output);
+        await new Promise((ok) => setTimeout(ok, 50));
+      }
+      const origin = output.match(/Discussion screen: (http:\/\/[^/]+)/)[1];
+      assert.equal((await fetch(origin + '/__room')).status, 200);
+      if (missing) { const page = await fetch(origin + '/__next'); assert.equal(page.status, 404); assert.match(await page.text(), /Web build missing/); }
+      return output;
+    } finally {
+      cli.kill('SIGTERM');
+      await new Promise((ok) => cli.exitCode !== null ? ok() : cli.once('exit', ok));
+    }
+  };
+  try {
+    assert.match(await run(), /Web build complete/);
+    const index = join(root, 'web/dist/index.html'); assert.ok(existsSync(index));
+    assert.doesNotMatch(await run(), /Web build complete/);
+    const app = join(root, 'web/src/App.tsx'), original = readFileSync(app, 'utf8');
+    const future = new Date(statSync(index).mtimeMs + 2000); utimesSync(app, future, future);
+    assert.match(await run(), /Web build complete/);
+    writeFileSync(app, 'invalid !!! syntax'); utimesSync(app, new Date(Date.now() + 4000), new Date(Date.now() + 4000));
+    assert.match(await run(), /Web build failed/); assert.ok(existsSync(index));
+    writeFileSync(app, original);
+    rmSync(join(root, 'web/dist'), { recursive: true, force: true });
+    rmSync(join(root, 'node_modules')); mkdirSync(join(root, 'node_modules'));
+    for (const name of readdirSync(join(source, 'node_modules'))) if (name !== 'vite') symlinkSync(join(source, 'node_modules', name), join(root, 'node_modules', name));
+    assert.match(await run(true), /Web build failed/); assert.equal(existsSync(index), false);
+  } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+});
