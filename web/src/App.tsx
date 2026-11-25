@@ -5,6 +5,7 @@ import { ChatList, type ChatMemory } from './ChatList';
 import { WorkerInfoLine, shownWorkerInfo } from './WorkerInfoLine';
 import { RoomZones } from './RoomZones';
 import { FailedAgents, SettingsPanel } from './Settings';
+import { TerminalPane } from './Terminal';
 import { Notes, NOTES_DRAFT_KEY, type NoteDraft, type NotesApi } from './Notes';
 import type { NoteRequest, AgentEnabledRequest, SettingsSaveRequest, Gauge, Monitor, NewRoomRequest, PairRequest, QuotaAt, ReceivedLine, Replica, ViewedLine, ViewReply, ViewRequest, AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
@@ -142,11 +143,12 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   // My notes is offered only on a page opened on this computer, as the server serves it only there.
   const isLocalPage = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
   const [notesKept] = useState<NoteDraft | null>(() => { try { const kept = JSON.parse(sessionStorage.getItem(NOTES_DRAFT_KEY) ?? 'null') as NoteDraft | null; sessionStorage.removeItem(NOTES_DRAFT_KEY); return kept; } catch { return null; } });
-  const [service, setService] = useState<'notes' | null>(() => notesKept && isLocalPage ? 'notes' : null);
+  const [service, setService] = useState<'notes' | 'terminal' | null>(() => notesKept && isLocalPage ? 'notes' : null);
   const serviceRef = useRef(service); serviceRef.current = service;
   const listBeforeService = useRef<boolean | null>(notesKept && isLocalPage ? (() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } })() : null);
   const notesApi = useRef<NotesApi | null>(null);
-  const openService = (name: 'notes' | null) => {
+  const [shellAlive, setShellAlive] = useState(false);
+  const openService = (name: 'notes' | 'terminal' | null) => {
     if (name) { if (serviceRef.current === null) { listBeforeService.current = boardsClosed; setBoardsClosed(true); } serviceRef.current = name; setService(name); return; }
     if (serviceRef.current === null) return;
     serviceRef.current = null; setService(null);
@@ -935,10 +937,12 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     <nav className="control-bar" aria-label="Services">
       <button type="button" className="ctrl-btn" aria-pressed={service === null} title="Boards" onClick={() => { if (service) openService(null); else if (boardsClosed) { setBoardsClosed(false); refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', '0'); } catch {} } }}>▤ Boards</button>
       {isLocalPage && <button type="button" className="ctrl-btn" aria-pressed={service === 'notes'} title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder." onClick={() => openService(service === 'notes' ? null : 'notes')}>📝 My notes</button>}
+      {isLocalPage && <button type="button" className={'ctrl-btn' + (shellAlive ? ' running' : '')} aria-pressed={service === 'terminal'} title="A shell on this computer, in the room's folder. Only from this computer, not from other devices." onClick={() => openService(service === 'terminal' ? null : 'terminal')}>⌨ Terminal</button>}
     </nav>
     <section className="services-panel" aria-label="Services panel" hidden={!service}>
-      <div><span>{service === 'notes' ? 'My notes' : ''}</span> <button type="button" title="Close services panel" aria-label="Close services panel" onClick={() => openService(null)}>✕</button></div>
+      <div><span>{service === 'notes' ? 'My notes' : service === 'terminal' ? 'Terminal' : ''}</span> <button type="button" title="Close services panel" aria-label="Close services panel" onClick={() => openService(null)}>✕</button></div>
       {isLocalPage && <div hidden={service !== 'notes'}><Notes open={service === 'notes'} show={() => openService('notes')} api={notesApi} kept={notesKept} post={(path, body) => post(path, body)} /></div>}
+      {isLocalPage && <div hidden={service !== 'terminal'}><TerminalPane visible={service === 'terminal'} fitKey={layout} running={setShellAlive} /></div>}
     </section>
     <aside className="next-boards" aria-label="Boards">
       <div><b hidden={boardsClosed}>Boards</b> <button type="button" aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); if (serviceRef.current === null) { try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} } }}>{boardsClosed ? '»' : '«'}</button></div>

@@ -108,3 +108,7 @@
 .peer-dot.up { color: #22c55e; } .peer-dot.down { color: #ef4444; }
 .local-label, .local-activity { font-size: .75rem; opacity: .75; }
 .remote-view { border: 1px solid #ccc; border-radius: 6px; padding: .3rem .6rem; }
+.ctrl-btn.running::after { content: ""; display: inline-block; width: 7px; height: 7px; margin-left: .25rem; border-radius: 50%; background: #22c55e; }
+.terminal-service { display: flex; flex-direction: column; min-height: 0; height: calc(100vh - 9rem); }
+.terminal-bar { display: flex; align-items: center; gap: .5rem; font-size: .75rem; }
+.hostshell-term { flex: 1; min-height: 0; }

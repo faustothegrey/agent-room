@@ -89,6 +89,8 @@ export interface PairCheck { local: { node: string; root: string; roomId: string
 export interface NoteEntry { id: string; title: string; savedAt: string }
 export type NoteRequest = { text: string } | { id: string; text: string } | { id: string };
 export interface NoteSaved { id: string; title?: string; savedAt: string }
+// GET __shell/token (host-shell.mjs, pages on this computer only): the WebSocket's token.
+export interface ShellTokenReply { token: string }
 // GET __rooms: this server's rooms, for Switch room….
 export interface RoomEntry { id: string; path: string; root: string; discussion: string | null; pages: number | null; current: boolean }
 // POST __newroom: {} asks the server's folder chooser; { token } creates the room it asked about; { token, cancel: true } drops it.
