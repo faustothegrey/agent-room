@@ -3524,6 +3524,19 @@ test('started discussion settings preserve the local worker and permit names fro
   assert.deepEqual(readDefaults(file), { agents: laterAgents, worker: defaultWorker });
 });
 
+test('saving settings after reload uses the reloaded modules', async () => {
+  const version = '?settings-reload-test';
+  const { load: reloadedLoad, saveSettings } = await import('../src/ui.mjs' + version);
+  const instructions = await import('../src/instructions.mjs' + version);
+  const ctx = { ...freshCtx(), workerSpec: 'codex:W' };
+  Object.assign(ctx, await reloadedLoad(ctx, version));
+  const file = `${await tmp('reloaded-settings-')}/defaults.json`;
+  await saveSettings(ctx, { agents: [{ provider: 'claude', name: 'A', model: '' }, { provider: 'codex', name: 'B', model: '' }],
+    worker: { provider: 'claude', name: 'W', model: '' }, scope: 'work' }, file);
+  assert.equal(ctx.instructions, instructions);
+  assert.equal(ctx.worker.provider, 'claude');
+});
+
 test('new screen discussions and terminal sessions use the saved worker default', async () => {
   const { mkdirSync, writeFileSync } = await import('node:fs');
   const { join } = await import('node:path');

@@ -217,7 +217,7 @@ export async function saveSettings(ctx, value, file = defaultsFile()) {
   validateSettings({ agents: (scope !== 'work' ? settings.agents : launch.agents.split(',').map((s) => parseSpec(s))),
     worker: applied && scope !== 'talk' ? worker : parseSpec(launch.worker, true) });
   // Build first so validation/loading errors cannot replace defaults or the running room.
-  const loaded = await load(next, '');
+  const loaded = await load(next, new URL(import.meta.url).search);
   if (applied || JSON.stringify(saved) !== JSON.stringify(defaults)) {
     mkdirSync(dirname(file), { recursive: true });
     const temp = `${file}.${process.pid}.tmp`;
@@ -1961,7 +1961,7 @@ async function defaultsForNew(ctx, { reloadAgents = false } = {}) {
   if (worker) sessions.set(`worker:${worker.name}`, workerSpec === ctx.workerSpec ? ctx.sessions.get(`worker:${worker.name}`) ?? {} : {});
   const state = { ...ctx.state, seen: new Map() };
   const next = { ...ctx, discussion: null, agentSpecs, workerSpec, sessions, state };
-  const loaded = await load(next, '');
+  const loaded = await load(next, new URL(import.meta.url).search);
   Object.assign(ctx, { room: loaded.room, worker: loaded.worker, makeWorker: loaded.makeWorker, closingStatement: loaded.closingStatement, rulebooks: loaded.rulebooks, agentSpecs, workerSpec, sessions, state });
   wire(ctx);
 }
