@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import './layout.css';
-import type { AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
+import type { AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
 type StatusLine = { text: string; error: boolean };
@@ -64,6 +64,16 @@ function linkFiles(html: string, files: string[], active: string | null) {
   }
   return { html: container.innerHTML, found };
 }
+function autoOfferHtml(html: string, offer: { text?: string; error?: string }, max: number) {
+  const container = document.createElement('div'); container.innerHTML = html;
+  const box = document.createElement('div'); box.className = 'autodev-offer';
+  if (offer.text) {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Start auto dev'; button.dataset.autoDev = 'start';
+    box.append(button, document.createTextNode(`Sends this instruction as cycle 1 of up to ${max}.`));
+  } else { const text = document.createElement('span'); text.textContent = `Auto dev can’t send this instruction: ${offer.error}.`; box.append(text); }
+  const after = [...container.children].find((child) => /^(Later|Outcome:)/.test(child.textContent?.trim() ?? ''));
+  container.insertBefore(box, after ?? null); return container.innerHTML;
+}
 const displayTitle = (name: string | undefined, title: string | undefined) => {
   const saved = typeof title === 'string' ? title.trim() : '';
   return saved && saved !== name ? saved : (name ?? '').replace(/^[0-9]{4}-[0-9]{2}-[0-9]{2}-/, '').replace(/-/g, ' ');
@@ -98,6 +108,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [workText, setWorkText] = useState('');
   const [workError, setWorkError] = useState('');
   const [working, setWorking] = useState<string | null>(null);
+  const [stopArmed, setStopArmed] = useState<{ after: boolean; now: boolean }>({ after: false, now: false });
+  const stopTimers = useRef<Partial<Record<'after' | 'now', ReturnType<typeof setTimeout>>>>({});
+  useEffect(() => () => { for (const timer of Object.values(stopTimers.current)) clearTimeout(timer); }, []);
   const [retryBusy, setRetryBusy] = useState<string | null>(null);
   const [retryDialog, setRetryDialog] = useState<{ id: string; models: SettingsReply['models']; worker: AgentSettings; custom: boolean; error: string; busy: boolean } | null>(null);
   const retryDialogElement = useRef<HTMLDialogElement>(null);
@@ -230,7 +243,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command || state.posting > 0 ? 'on' : null); }, 1500);
     }
   };
-  const post = async (path: '__say' | '__work' | '__retry' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: SayRequest | WorkRequest | RetryRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
+  const post = async (path: '__say' | '__work' | '__retry' | '__stopworker' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: SayRequest | WorkRequest | RetryRequest | StopWorkerRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
     const state = busyState.current; state.posting++; updateBusy();
     try {
       return await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': client.current }, body: JSON.stringify(body) });
@@ -240,6 +253,15 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     const instruction = value.trim();
     if (!instruction || ended || peek || viewLayout) return;
     try { const response = await post('__work', { text: instruction }); if (!response.ok) setWorkError(await response.text()); }
+    catch (error) { setWorkError(error instanceof Error ? error.message : String(error)); }
+  };
+  const stopWorker = async (mode: 'after' | 'now') => {
+    if (!stopArmed[mode]) {
+      setStopArmed((previous) => ({ ...previous, [mode]: true }));
+      stopTimers.current[mode] = setTimeout(() => { setStopArmed((previous) => ({ ...previous, [mode]: false })); delete stopTimers.current[mode]; }, 4000);
+      return;
+    }
+    try { const response = await post('__stopworker', { mode }); if (!response.ok) throw new Error(await response.text()); }
     catch (error) { setWorkError(error instanceof Error ? error.message : String(error)); }
   };
   const readSettings = async (): Promise<SettingsReply> => {
@@ -720,6 +742,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const inactive = ['archive', 'deferred'].flatMap((section) => ['discussions', 'brainstorms'].flatMap((kind) => namesUnder(`${kind}/${section}`).map((name) => ({ name, path: `${kind}/${section}/${name}`, brainstorm: kind === 'brainstorms' }))));
   const sectionToggle = (key: string, open: boolean) => setBoardSections((previous) => { if (previous.has(key) === open) return previous; const next = new Set(previous); if (open) next.add(key); else next.delete(key); return next; });
   const canAct = !!(room && input && !peek && !viewLayout);
+  const autoDev = canAct && !room?.workbench ? room?.autoDev : null;
+  const summaryIndex = messages.findLastIndex((message) => message.outcome === 'agreed');
   const canSummary = !!(room && !peek && !viewLayout && !room.workbench);
   const canClose = !!(canAct && room?.multi && (room.active || room.brainstorm || room.workbench || room.research || (room.open?.length ?? 0) > 1));
   const lane = !room?.brainstorm && !room?.research && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
@@ -735,6 +759,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   };
   return <main>
     <h1>{title}</h1>
+    {autoDev?.status === 'running' && <span>Auto dev running · cycle {autoDev.cycle} of {autoDev.max} · {autoDev.waiting ? 'worker is working' : 'discussion is reviewing'}</span>}
+    {autoDev?.status === 'paused' && <span>Auto dev paused · {autoDev.reason}</span>}
+    {autoDev?.status === 'finished' && <span>Auto dev finished · review and merge its worker branch</span>}
     {(canSummary || canAct) && <details ref={actionsMenu} className="actions-menu" onToggle={(event) => { if (event.currentTarget.open) { setRowMenu(null); refreshWorker(); } }}>
       <summary aria-label="Discussion actions" title="Actions">Actions</summary>
       <div>
@@ -800,6 +827,10 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {offers.length > 0 && <div aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
       <label><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
       {working && <p>The worker is busy: what you send now waits for it to finish.</p>}
+      {input && !peek && !viewLayout && room?.workerStop && !room.workerStop.now && <div>
+        <button type="button" disabled={room.workerStop.after} title="The running instruction finishes and is reported as usual; this discussion's queued instructions are cancelled, and auto dev pauses" onClick={() => void stopWorker('after')}>{stopArmed.after ? 'Click again: stop after this task; queued instructions are cancelled' : 'Stop after this task'}</button>{' '}
+        <button type="button" title="The running instruction's programs are stopped at once; this discussion's queued instructions are cancelled, auto dev pauses, and what it left in the worktree is reported" onClick={() => void stopWorker('now')}>{stopArmed.now ? 'Click again: stop now; partial edits may be left' : 'Stop now'}</button>
+      </div>}
       {workInput && <textarea aria-label="Instruction to the worker" value={workText} disabled={ended || !!peek || !!viewLayout || !!room?.brainstorm || !!workerInfo?.disabled} placeholder={peek ? 'Peeking read-only — click Back to return to the active discussion.' : viewLayout ? 'Read-only: viewing a peer’s discussion.' : room?.brainstorm ? 'Turn this brainstorm into a discussion to send work.' : workerInfo?.disabled ? workerInfo.lines[0] : room?.workbench && !room.active ? 'First instruction to the worker… (names this workbench and starts it)' : 'Instruction to the worker… (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands.'} onChange={(event) => setWorkText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); const value = workText; setWorkText(''); void sendWork(value); } }} />}
     </section>}
     {retryDialog && <dialog ref={retryDialogElement} aria-label="Retry with…" onCancel={() => setRetryDialog(null)}><form onSubmit={(event) => { event.preventDefault(); void submitRetry(); }}>
@@ -820,14 +851,16 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     </section>
     {busy && <div aria-label="Busy" data-state={busy}>{busy === 'on' ? 'Working…' : 'Action failed'}</div>}
     <section aria-label="Conversation">{messages.map((message, index) => <article key={index} className={'msg' + (message.error ? ' error' : '') + (message.outcome ? ' summary' + (message.outcome === 'agreed' ? '' : ' not-agreed') : '')}>
-      <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong><div onClick={(event) => { const target = (event.target as Element).closest<HTMLAnchorElement>('a.mention'); if (target?.dataset.file) { event.preventDefault(); void showFile(target.dataset.file); } }} dangerouslySetInnerHTML={{ __html: peek ? message.html : linkFiles(message.html, knownFiles, room?.active ?? null).html }} />
+      <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong><div onClick={(event) => { const element = event.target as Element; const target = element.closest<HTMLAnchorElement>('a.mention'); if (target?.dataset.file) { event.preventDefault(); void showFile(target.dataset.file); } if (element.closest('[data-auto-dev="start"]')) void boardCommand('/autodev'); }} dangerouslySetInnerHTML={{ __html: (() => { const html = peek ? message.html : linkFiles(message.html, knownFiles, room?.active ?? null).html; return autoDev && autoDev.status !== 'running' && autoDev.status !== 'paused' && autoDev.offer && index === summaryIndex ? autoOfferHtml(html, autoDev.offer, autoDev.max) : html; })() }} />
     </article>)}</section>
     {thinking && <p>… {thinking} is thinking</p>}
     {tab === 'discussion' && offers.length > 0 && <div aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
     <label><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
+    {autoDev?.status === 'paused' && autoDev.offer?.text && <div role="status"><p>Next agreed instruction:</p><p>{autoDev.offer.text}</p><p><button type="button" onClick={() => void boardCommand('/autodev')}>Restart auto dev ({autoDev.max} more)</button> Restarting grants another {autoDev.max} worker cycles.</p></div>}
+    {autoDev?.status === 'paused' && autoDev.offer?.error && <div role="status">The latest agreed instruction can’t be sent: {autoDev.offer.error}.</div>}
     {input && <div className="composer">
       <textarea aria-label="Message to the agents" value={text} disabled={ended} onChange={(event) => setText(event.target.value)}
-        placeholder={peek ? 'Peeking read-only — click Back to return to the active discussion.' : 'Message to the agents… (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown'}
+        placeholder={peek ? 'Peeking read-only — click Back to return to the active discussion.' : autoDev?.status === 'running' ? 'Auto dev is running — sending a message pauses it. (Enter sends, Shift+Enter for a new line)' : 'Message to the agents… (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown'}
         onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
       <div><button type="button" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)" disabled={sending || ended || !!peek || !room?.active} onClick={() => fileInput.current?.click()}>📎 Attach</button>
         <input ref={fileInput} type="file" aria-label="Attach files" multiple hidden onChange={(event) => { const chosen = Array.from(event.target.files ?? []); setFiles((previous) => [...previous, ...chosen]); event.target.value = ''; }} />

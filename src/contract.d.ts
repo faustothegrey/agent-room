@@ -45,12 +45,15 @@ export interface OpenBoard { url: string; current: boolean; title: string; activ
 export interface BoardCheckpoint { name: string; title?: string; at?: string; kind?: string; summary?: boolean }
 export interface BoardRollback { name: string; status: string; report?: string | null; commit?: string | null }
 export interface ResearchStats { laps: number; priorUnknown?: boolean; lastRun?: string | null; nextRun?: string | null }
+export interface AutoDev { status: 'running' | 'paused' | 'finished' | null; cycle: number; max: number; reason: string | null; waiting: boolean; offer: { text?: string; error?: string } | null }
+export interface WorkerStop { after: boolean; now: boolean }
+export interface StopWorkerRequest { mode: 'after' | 'now' }
 export interface Room {
   folder: string; agents: string[]; worker: string; workerModel: string | null;
   cliSessions: unknown; discussion: string; active: string | null; started: boolean;
   fresh: boolean; brainstorm: boolean; workbench: boolean; research: boolean;
   workbenches: string[]; researches: string[]; researchStats: Record<string, ResearchStats>; members: unknown[];
-  failedAgents: { name: string; disabled: boolean }[]; autoDev: { status: string | null; [key: string]: unknown } | null; workerStop: unknown;
+  failedAgents: { name: string; disabled: boolean }[]; autoDev: AutoDev | null; workerStop: WorkerStop | null;
   retryId: string | null; transcript: string | null; checkpoints: BoardCheckpoint[]; closedDiscussions: string[];
   closingDiscussions: Record<string, string>; busyWorkers: string[]; back: unknown; code: unknown;
   rollbacks: BoardRollback[]; multi: boolean; open: OpenBoard[];
