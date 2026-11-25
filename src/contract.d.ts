@@ -84,6 +84,11 @@ export interface ViewReply { viewing: ViewedLine | true | null }
 // POST __pair: { peer } checks (both rooms' folders), { peer, confirm: true } pairs.
 export interface PairRequest { peer: string; confirm?: boolean }
 export interface PairCheck { local: { node: string; root: string; roomId: string | null }; peer: { node: string; root: string } }
+// My notes (notes.mjs, this computer only): GET __notes lists them, GET __notes/read?id= reads one
+// ({ …entry, text }); POST __notes/new { text }, __notes/save { id, text } (404: removed meanwhile), __notes/remove { id }.
+export interface NoteEntry { id: string; title: string; savedAt: string }
+export type NoteRequest = { text: string } | { id: string; text: string } | { id: string };
+export interface NoteSaved { id: string; title?: string; savedAt: string }
 // GET __rooms: this server's rooms, for Switch room….
 export interface RoomEntry { id: string; path: string; root: string; discussion: string | null; pages: number | null; current: boolean }
 // POST __newroom: {} asks the server's folder chooser; { token } creates the room it asked about; { token, cancel: true } drops it.

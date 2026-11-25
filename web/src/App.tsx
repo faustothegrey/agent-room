@@ -5,7 +5,8 @@ import { ChatList, type ChatMemory } from './ChatList';
 import { WorkerInfoLine, shownWorkerInfo } from './WorkerInfoLine';
 import { RoomZones } from './RoomZones';
 import { FailedAgents, SettingsPanel } from './Settings';
-import type { AgentEnabledRequest, SettingsSaveRequest, Gauge, Monitor, NewRoomRequest, PairRequest, QuotaAt, ReceivedLine, Replica, ViewedLine, ViewReply, ViewRequest, AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
+import { Notes, NOTES_DRAFT_KEY, type NoteDraft, type NotesApi } from './Notes';
+import type { NoteRequest, AgentEnabledRequest, SettingsSaveRequest, Gauge, Monitor, NewRoomRequest, PairRequest, QuotaAt, ReceivedLine, Replica, ViewedLine, ViewReply, ViewRequest, AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
 type StatusLine = { text: string; error: boolean };
@@ -136,6 +137,23 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const preservePeekDoc = useRef(false);
   const [fileDetails, setFileDetails] = useState<FileDetailsResponse | null>(null);
   const [boardsClosed, setBoardsClosed] = useState(() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } });
+  // Services (openService on /__room): a panel beside the board; opening one folds the Boards list
+  // (unsaved) and closing it restores the list. While one is open, divider drags aren't saved.
+  // My notes is offered only on a page opened on this computer, as the server serves it only there.
+  const isLocalPage = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
+  const [notesKept] = useState<NoteDraft | null>(() => { try { const kept = JSON.parse(sessionStorage.getItem(NOTES_DRAFT_KEY) ?? 'null') as NoteDraft | null; sessionStorage.removeItem(NOTES_DRAFT_KEY); return kept; } catch { return null; } });
+  const [service, setService] = useState<'notes' | null>(() => notesKept && isLocalPage ? 'notes' : null);
+  const serviceRef = useRef(service); serviceRef.current = service;
+  const listBeforeService = useRef<boolean | null>(notesKept && isLocalPage ? (() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } })() : null);
+  const notesApi = useRef<NotesApi | null>(null);
+  const openService = (name: 'notes' | null) => {
+    if (name) { if (serviceRef.current === null) { listBeforeService.current = boardsClosed; setBoardsClosed(true); } serviceRef.current = name; setService(name); return; }
+    if (serviceRef.current === null) return;
+    serviceRef.current = null; setService(null);
+    if (listBeforeService.current !== null) { setBoardsClosed(listBeforeService.current); listBeforeService.current = null; }
+  };
+  useEffect(() => { if (serviceRef.current) setBoardsClosed(true); }, []); // a note kept across a refresh reopens My notes
+  const keepNoteDraft = () => { try { const kept = notesApi.current?.draft(); if (kept) sessionStorage.setItem(NOTES_DRAFT_KEY, JSON.stringify(kept)); } catch {} };
   const [armedCreation, setArmedCreation] = useState<Record<string, boolean>>({});
   const creationTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   useEffect(() => () => { for (const timer of Object.values(creationTimers.current)) clearTimeout(timer); }, []);
@@ -221,7 +239,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     const minimum = stacked ? 140 : available > 0 && available < 520 ? Math.max(120, Math.floor(available / 2)) : 260;
     const size = Math.round(Math.max(minimum, Math.min(Math.max(minimum, available - minimum), position)));
     const next = { ...layoutRef.current, [stacked ? 'top' : 'left']: size };
-    applyLayout(next, save, stacked ? 'top' : 'left');
+    applyLayout(next, save && serviceRef.current === null, stacked ? 'top' : 'left');
   };
   const offerEpoch = useRef(0);
   const [follow, setFollow] = useState(() => { try { return localStorage.getItem('agent-room.followMentions') === '1'; } catch { return false; } });
@@ -264,7 +282,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       state.fail = setTimeout(() => { state.fail = undefined; setBusy(state.command || state.posting > 0 ? 'on' : null); }, 1500);
     }
   };
-  const post = async (path: '__settings' | '__agent-enabled' | '__view' | '__pair' | '__newroom' | '/__shutdown' | '/__shutdown?confirmed=yes' | '__say' | '__work' | '__retry' | '__stopworker' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: SettingsSaveRequest | AgentEnabledRequest | ViewRequest | PairRequest | NewRoomRequest | SayRequest | WorkRequest | RetryRequest | StopWorkerRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
+  const post = async (path: '__notes/new' | '__notes/save' | '__notes/remove' | '__settings' | '__agent-enabled' | '__view' | '__pair' | '__newroom' | '/__shutdown' | '/__shutdown?confirmed=yes' | '__say' | '__work' | '__retry' | '__stopworker' | '__show' | '__workerinfo' | '__merge' | '__discard' | '__catchup' | '__cancelclose', body: NoteRequest | SettingsSaveRequest | AgentEnabledRequest | ViewRequest | PairRequest | NewRoomRequest | SayRequest | WorkRequest | RetryRequest | StopWorkerRequest | ShowRequest | WorkerInfoRequest | BoardActionRequest) => {
     const state = busyState.current; state.posting++; updateBusy();
     try {
       return await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-view-client': client.current }, body: JSON.stringify(body) });
@@ -325,7 +343,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       } else if (!response.ok) addStatus(await response.text(), true);
     } catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
   };
-  const serverChanged = () => { try { sessionStorage.setItem('next-composer-draft', draft.current); } catch {} refresh(); };
+  const serverChanged = () => { try { sessionStorage.setItem('next-composer-draft', draft.current); } catch {} keepNoteDraft(); refresh(); };
   // View chat: pins a received line for this browser and shows its chat read-only; null goes back.
   const viewRemote = async (line: ReceivedLine | ViewedLine | null) => {
     try {
@@ -369,6 +387,16 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     document.addEventListener('toggle', opened, true);
     return () => document.removeEventListener('toggle', opened, true);
   }, []);
+  // Unsaved notes are never dropped without asking: switching board or room waits for the answer.
+  const notesGuard = (act: () => void, cancel?: () => void) => { if (notesApi.current) notesApi.current.guard(act, cancel); else act(); };
+  useEffect(() => {
+    const leave = (event: MouseEvent) => {
+      const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('.next-boards a[href]') : null;
+      if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || !notesApi.current?.dirty()) return;
+      event.preventDefault(); const url = link.href; notesApi.current.guard(() => navigate(url));
+    };
+    document.addEventListener('click', leave); return () => document.removeEventListener('click', leave);
+  }, [navigate]);
   const refreshWorker = () => { void post('__workerinfo', {}).catch(() => {}); };
   const actionReply = async <T,>(path: '__merge' | '__discard' | '__catchup', body: BoardActionRequest): Promise<T> => {
     const response = await post(path, body); if (!response.ok) throw new Error(await response.text()); return await response.json() as T;
@@ -605,7 +633,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       const event = JSON.parse(data) as ScreenEvent;
       if ('webVersion' in event && event.webVersion && version && event.webVersion !== version) {
         try { sessionStorage.setItem('next-composer-draft', draft.current); } catch {}
-        refresh(); return;
+        keepNoteDraft(); refresh(); return;
       }
       if (event.type === 'reset') {
         setWorkerInfo(event.workerInfo ?? null);
@@ -858,7 +886,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   };
   return <main>
     <RoomZones folder={room?.folder ?? null} active={room?.active ?? null} replica={replica} replicaOff={replicaOff} viewing={remote?.line ?? null} newRoom={newRoom} readOnly={!!peek || !!viewLayout}
-      post={(path, body) => post(path, body)} status={(text, error) => addStatus(text, error)} navigate={navigate}
+      post={(path, body) => post(path, body)} status={(text, error) => addStatus(text, error)} navigate={(url) => notesGuard(() => navigate(url))}
       roomName={room?.folder?.replace(/[/]+$/, '').split('/').pop() || room?.folder || 'agent-room'} code={room?.code} gauges={quota.gauges} at={quota.at} monitor={monitor}
       ended={ended} restarting={restarting} command={(text) => void boardCommand(text)} shutdown={() => void shutdownServer()} serverChanged={serverChanged} />
     <h1>{title}</h1>
@@ -903,9 +931,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       </section>
       {busyWorkers.length > 0 && <div className="disc-workers" aria-live="polite">{busyWorkers.map((entry) => <span key={entry.url}><span className="busy-dot">● </span>{displayTitle(entry.active?.split('/').at(-1), entry.title)} · Worker is working</span>)}</div>}
     </div>
-    <div className={'next-workspace' + (boardsClosed ? ' boards-closed' : '')}>
+    <div className={'next-workspace' + (boardsClosed ? ' boards-closed' : '') + (service ? ' service-open' : '')}>
+    <nav className="control-bar" aria-label="Services">
+      <button type="button" className="ctrl-btn" aria-pressed={service === null} title="Boards" onClick={() => { if (service) openService(null); else if (boardsClosed) { setBoardsClosed(false); refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', '0'); } catch {} } }}>▤ Boards</button>
+      {isLocalPage && <button type="button" className="ctrl-btn" aria-pressed={service === 'notes'} title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder." onClick={() => openService(service === 'notes' ? null : 'notes')}>📝 My notes</button>}
+    </nav>
+    <section className="services-panel" aria-label="Services panel" hidden={!service}>
+      <div><span>{service === 'notes' ? 'My notes' : ''}</span> <button type="button" title="Close services panel" aria-label="Close services panel" onClick={() => openService(null)}>✕</button></div>
+      {isLocalPage && <div hidden={service !== 'notes'}><Notes open={service === 'notes'} show={() => openService('notes')} api={notesApi} kept={notesKept} post={(path, body) => post(path, body)} /></div>}
+    </section>
     <aside className="next-boards" aria-label="Boards">
-      <div><b hidden={boardsClosed}>Boards</b> <button type="button" aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} }}>{boardsClosed ? '»' : '«'}</button></div>
+      <div><b hidden={boardsClosed}>Boards</b> <button type="button" aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); if (serviceRef.current === null) { try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} } }}>{boardsClosed ? '»' : '«'}</button></div>
       {!boardsClosed && <div className="boards-list">
         {!!(room && input && !peek && !viewLayout) && <div className="boards-new">
           {!!(room.active || room.brainstorm || room.workbench || room.research) && <button type="button" title={room.multi ? 'Open a new discussion beside this one, which stays open (click it in Boards to show it again).' : 'End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.'} onClick={() => createBoard('/new')}>{armedCreation['/new'] ? 'Click again: this session ends and the chat clears' : '+ New discussion'}</button>}
