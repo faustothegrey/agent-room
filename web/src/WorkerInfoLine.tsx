@@ -72,7 +72,7 @@ function Lane({ lane, error }: { lane: WorkerLane; error: boolean }) {
 export function WorkerInfoLine({ info }: { info: WorkerInfo | null }) {
   if (!info) return null;
   const error = !!(info.error || info.disabled);
-  return <div className="winfo" aria-label="Worker info" aria-live="polite">
+  return <div id="winfo" className="winfo" aria-label="Worker info" aria-live="polite">
     {info.lanes
       ? info.lanes.map((lane) => <Lane key={'lane ' + lane.summary.split(' · ')[0]} lane={lane} error={error} />)
       : info.lines.map((line, index) => <Line key={lineKey(line, index)} line={line} error={error} />)}

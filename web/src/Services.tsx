@@ -170,7 +170,7 @@ function Health({ open, post }: { open: boolean; post: ProvidersPost }) {
     }
     for (const q of data.quota) line('Quota meter · room ' + q.room + ': ' + (q.reachable === null ? 'not checked' : q.reachable ? 'reachable' : 'not reachable') + ' · measured ' + (q.measured || 'unknown') + ' · checked ' + when(q.checked));
   }
-  return <><button type="button" disabled={busy} onClick={() => void load(true)}>Check now</button><div role="status" aria-label="Provider health">{error || lines}</div></>;
+  return <><button type="button" id="health-check" disabled={busy} onClick={() => void load(true)}>Check now</button><div id="provider-health" role="status" aria-label="Provider health">{error || lines}</div></>;
 }
 // The Providers page: the defaults for new discussions, members and worker together, saved to the
 // shared defaults file (every room); before this discussion starts they apply to it too.
@@ -213,7 +213,7 @@ export function ProvidersPanel({ open, healthOpen, setHealthOpen, warning, post,
     if (edit === 'provider' || edit === 'toggle' || 'custom' in edit) save();
   };
   return <div className="providers">
-    <form className="providers-panel" aria-label="Default providers" onSubmit={(e) => { e.preventDefault(); save(); }}>
+    <form className="providers-panel" id="providers-form" aria-label="Default providers" onSubmit={(e) => { e.preventDefault(); save(); }}>
       {panel && <p className="settings-hint">{panel.started ? 'Defaults for new discussions, in this room and every other. This discussion has started: it keeps its agents and worker (change those in its own tabs).' : 'Defaults for new discussions, in this room and every other. This discussion hasn’t started, so they apply to it too.'}</p>}
       <h3 className="providers-heading">Discussion members</h3>
       {panel?.agents.map((row, i) => <AgentRow key={i} row={row} models={panel.models} title={'Agent ' + (i + 1)} member={!!panel.plan} locked={!!panel.plan?.locked(i)} disabled={false} change={change(row, i)} commit={save} />)}
@@ -224,8 +224,8 @@ export function ProvidersPanel({ open, healthOpen, setHealthOpen, warning, post,
       <p className="settings-status" role="status">{status}</p>
       <button type="button" onClick={done}>Go to the discussion</button>
     </form>
-    <details ref={health} className="providers-panel" onToggle={(e) => setHealthOpen(e.currentTarget.open)}>
-      <summary>Provider health · all rooms on this server {warning && <span className="health-warning">⚠</span>}</summary>
+    <details ref={health} id="health-details" className="providers-panel" onToggle={(e) => setHealthOpen(e.currentTarget.open)}>
+      <summary>Provider health · all rooms on this server {warning && <span id="health-warning">⚠</span>}</summary>
       <Health open={open && healthOpen} post={post} />
     </details>
   </div>;

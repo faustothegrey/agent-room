@@ -77,10 +77,10 @@ export function TerminalPane({ visible, fitKey, running }: { visible: boolean; f
     requestAnimationFrame(() => { if (shell.current !== s || !s.fit) return; try { s.fit.fit(); if (opening) s.term?.focus(); } catch {} });
   }, [visible, fitKey]);
   useEffect(() => () => { const s = shell.current; shell.current = null; try { s?.ws?.close(); } catch {} try { s?.term?.dispose(); } catch {} }, []);
-  return <div className="terminal-service">
-    <div className="terminal-bar"><span role="status">{status}</span>
+  return <div className="terminal-service view">
+    <div id="terminal-bar" className="terminal-bar"><span id="terminal-status" role="status">{status}</span>
       {!alive && <button type="button" title="Start a fresh shell" onClick={() => void open()}>Start shell</button>}
       {alive && <button type="button" title="Stop the running shell" onClick={close}>End shell</button>}</div>
-    <div ref={box} className="hostshell-term" aria-label="Terminal" />
+    <div ref={box} id="hostshell-term" className="hostshell-term" aria-label="Terminal" />
   </div>;
 }

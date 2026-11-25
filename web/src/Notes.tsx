@@ -99,19 +99,19 @@ export function Notes({ open, show, post, api, kept }: { open: boolean; show: ()
       loadNotes().catch(() => {});
     }], ['Cancel']] });
   };
-  return <div className="notes-body">
-    <div className="notes-side">
-      <button type="button" title="Start a new note: the first line is its title" onClick={() => guard(() => { edit(null, ''); setStatus({ text: 'A new note: the first line is its title. Nothing is saved until Save.' }); box.current?.focus(); })}>New</button>
-      <div aria-label="Notes">{list.length ? list.map((n) => <button type="button" key={n.id} className={'note' + (n.id === editor.id ? ' on' : '')} title={n.title}
+  return <div id="notes-body" className="notes-body">
+    <div id="notes-side" className="notes-side">
+      <button type="button" id="notes-new" title="Start a new note: the first line is its title" onClick={() => guard(() => { edit(null, ''); setStatus({ text: 'A new note: the first line is its title. Nothing is saved until Save.' }); box.current?.focus(); })}>New</button>
+      <div id="notes-list" aria-label="Notes">{list.length ? list.map((n) => <button type="button" key={n.id} className={'note' + (n.id === editor.id ? ' on' : '')} title={n.title}
         onClick={() => { if (n.id !== live.current.editor.id) guard(() => void readNote(n.id)); }}>{n.title}<span className="when">Saved {new Date(n.savedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span></button>)
         : <span className="hint">No notes yet.</span>}</div>
     </div>
-    <div className="notes-main">
-      {ask && <div role="alertdialog" aria-label={ask.text}><span>{ask.text}</span> <span ref={askButtons}>{ask.buttons.map(([label, act]) => <button type="button" key={label} onClick={() => { setAsk(null); act?.(); }}>{label}</button>)}</span></div>}
-      <textarea ref={box} aria-label="Note" placeholder="Choose a note, or New. The first line is the note's title." disabled={!editor.editing} value={text} onChange={(e) => setText(e.target.value)} />
-      <div><button type="button" disabled={!editor.editing || saving} title="Save this note (nothing is saved until you press Save)" onClick={() => void save()}>Save</button>
+    <div id="notes-main" className="notes-main">
+      {ask && <div id="notes-ask" role="alertdialog" aria-label={ask.text}><span id="notes-ask-text">{ask.text}</span> <span id="notes-ask-buttons" ref={askButtons}>{ask.buttons.map(([label, act]) => <button type="button" key={label} onClick={() => { setAsk(null); act?.(); }}>{label}</button>)}</span></div>}
+      <textarea ref={box} className="box" id="notes-text" aria-label="Note" placeholder="Choose a note, or New. The first line is the note's title." disabled={!editor.editing} value={text} onChange={(e) => setText(e.target.value)} />
+      <div id="notes-bar"><button type="button" disabled={!editor.editing || saving} title="Save this note (nothing is saved until you press Save)" onClick={() => void save()}>Save</button>
         <button type="button" disabled={!editor.editing} onClick={remove}>{editor.id || !editor.editing ? 'Remove' : 'Discard'}</button>
-        <span role="status" className={status.error ? 'error' : undefined}>{status.text}</span></div>
+        <span id="notes-status" role="status" className={status.error ? 'error' : undefined}>{status.text}</span></div>
     </div>
   </div>;
 }

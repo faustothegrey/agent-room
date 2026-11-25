@@ -142,7 +142,7 @@ export function SettingsPanel({ scope, room, post, queue, openSignal }: { scope:
 export function FailedAgents({ agents, post, status }: { agents: Room['failedAgents'] | undefined; post: Post; status: (text: string) => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   if (!agents?.length) return null;
-  return <div className="failed-agents" role="status" aria-label="Failed agents">{agents.map((agent) => <div key={agent.name}>
+  return <div id="failed-agents" className="failed-agents" role="status" aria-label="Failed agents">{agents.map((agent) => <div key={agent.name}>
     <span>{agent.name + (agent.disabled ? ' is disabled. ' : ' failed. ')}</span>
     <button type="button" disabled={busy === agent.name} onClick={async () => {
       setBusy(agent.name);

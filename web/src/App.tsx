@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import './legacy.css';
 import './layout.css';
 import { ChatList, type ChatMemory } from './ChatList';
 import { WorkerInfoLine, shownWorkerInfo } from './WorkerInfoLine';
@@ -97,7 +98,7 @@ function FileTree({ files, prefix, doc, unviewable, expanded, toggle, choose }: 
     const file = prefix ? `${prefix}/${name}` : name, disabled = unviewable.includes(file) || binary.test(file);
     return <button key={file} className={'entry file' + (disabled ? ' unviewable' : file === doc ? ' shown' : '')} aria-current={!disabled && file === doc ? 'true' : undefined} disabled={disabled} title={disabled ? "can't be shown here" : undefined} onClick={() => choose(file)}>{name}{disabled ? " · can't be shown here" : ''}</button>;
   });
-  return <>{folders.map((folder) => { const path = prefix ? `${prefix}/${folder}` : folder; return <details key={path} open={expanded.has(path)} onToggle={(event) => toggle(path, event.currentTarget.open)}><summary>{folder}/</summary><FileTree files={files.filter((f) => f.startsWith(folder + '/')).map((f) => f.slice(folder.length + 1))} prefix={path} doc={doc} unviewable={unviewable} expanded={expanded} toggle={toggle} choose={choose} /></details>; })}{entries.length > 10 ? <div className="file-columns">{buttons}</div> : buttons}{!folders.length && !entries.length && <span>No files yet.</span>}</>;
+  return <>{folders.map((folder) => { const path = prefix ? `${prefix}/${folder}` : folder; return <details key={path} className="inline-folder" open={expanded.has(path)} onToggle={(event) => toggle(path, event.currentTarget.open)}><summary>{folder}/</summary><FileTree files={files.filter((f) => f.startsWith(folder + '/')).map((f) => f.slice(folder.length + 1))} prefix={path} doc={doc} unviewable={unviewable} expanded={expanded} toggle={toggle} choose={choose} /></details>; })}{entries.length > 10 ? <div className="file-columns">{buttons}</div> : buttons}{!folders.length && !entries.length && <span>No files yet.</span>}</>;
 }
 
 const navigatePage = (url: string) => window.location.assign(url);
@@ -871,8 +872,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     const archivedState = archived ? (path.includes('/archive/') ? 'archived' : 'deferred') + (brainstorm ? ' brainstorm' : isResearch ? ' research' : '') + (!brainstorm && closed ? ' · closed' : '') + closingText + (isDiscussion && workerInfo?.merged?.includes(name) ? ' · merged' : '') : null;
     const index = ordering?.names.indexOf(name) ?? -1;
     const reorder = (from: string, to: number) => { if (!ordering) return; const next = ordering.names.filter((item) => item !== from); next.splice(Math.max(0, Math.min(to, next.length)), 0, from); saveOrder(ordering.kind, next); };
-    return <div className="board-row" key={path} onDragOver={(event) => { if (dragged && ordering?.kind === dragged.kind) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } }} onDrop={(event) => { if (!dragged || !ordering || dragged.kind !== ordering.kind || dragged.name === name) return; event.preventDefault(); const remaining = dragged.names.filter((item) => item !== dragged.name); const bounds = event.currentTarget.getBoundingClientRect(); const target = remaining.indexOf(name); if (target < 0) return; remaining.splice(target + (event.clientY > bounds.top + bounds.height / 2 ? 1 : 0), 0, dragged.name); saveOrder(dragged.kind, remaining); setDragged(null); }}>
-      {ordering && ordering.names.length > 1 && <span draggable title="Drag to reorder" aria-label={`Drag ${label} to reorder`} onDragStart={(event) => { setDragged({ kind: ordering.kind, name, names: ordering.names }); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', name); }} onDragEnd={() => setDragged(null)}>⠿</span>}
+    return <div className={'board-row row discussion-row' + (current ? ' in-use' : '') + (peek?.path === path || filePeek?.path === path ? ' peeking' : '')} key={path} onDragOver={(event) => { if (dragged && ordering?.kind === dragged.kind) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } }} onDrop={(event) => { if (!dragged || !ordering || dragged.kind !== ordering.kind || dragged.name === name) return; event.preventDefault(); const remaining = dragged.names.filter((item) => item !== dragged.name); const bounds = event.currentTarget.getBoundingClientRect(); const target = remaining.indexOf(name); if (target < 0) return; remaining.splice(target + (event.clientY > bounds.top + bounds.height / 2 ? 1 : 0), 0, dragged.name); saveOrder(dragged.kind, remaining); setDragged(null); }}>
+      {ordering && ordering.names.length > 1 && <span className="drag-handle" draggable title="Drag to reorder" aria-label={`Drag ${label} to reorder`} onDragStart={(event) => { setDragged({ kind: ordering.kind, name, names: ordering.names }); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', name); }} onDragEnd={() => setDragged(null)}>⠿</span>}
+      <div className="discussion-block">
       {open ? <a className={'entry ' + kind} title={path} href={open.url.replace(/__room(?=([?#]|$))/, '__next')}>{content}</a> : <button type="button" className={'entry ' + kind} title={path} aria-current={current ? 'true' : undefined} onClick={action}>{content}</button>}
       <div className="local-label" title={tooltip || undefined}>{archivedState ?? (state + suffix + (isDiscussion && entry?.working ? ' · worker working' : '') + closingText + changed)}</div>
       {isDiscussion && !archived && work && <div className="worker-pending">⚠ Worker: {pendingText}</div>}
@@ -880,8 +882,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {isResearch && <div className="local-label"><span className={count > 30 ? 'research-laps-high' : undefined}>Laps: {stats?.priorUnknown ? '≥' : ''}{count}</span> · Last: {date(stats?.lastRun)} · Next: {date(stats?.nextRun)}</div>}
       {!!(room && input && !viewing.current && isDiscussion && closing === 'waiting') && <button type="button" onClick={() => void cancelClose(name)}>Cancel close</button>}
       {!!(room && input && !viewing.current && rollback?.report) && <details><summary>Rollback report · {rollback.status}</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{rollback.report}</pre></details>}
-      {!!(room && input && !viewing.current) && <details className="row-menu" open={rowMenu === path} onToggle={(event) => { const isOpen = event.currentTarget.open; if (isOpen && rowMenuRef.current !== path) { if (actionsMenu.current) actionsMenu.current.open = false; rowMenuRef.current = path; setRowMenu(path); refreshWorker(); } else if (!isOpen && rowMenuRef.current === path) { rowMenuRef.current = null; setRowMenu(null); } }}>
-        <summary aria-label={`Board actions for ${label}`} title="Actions">⋯</summary><div className="row-menu-items" hidden={rowMenu !== path}>
+      </div>
+      {!!(room && input && !viewing.current) && <details className="menu row-menu" open={rowMenu === path} onToggle={(event) => { const isOpen = event.currentTarget.open; if (isOpen && rowMenuRef.current !== path) { if (actionsMenu.current) actionsMenu.current.open = false; rowMenuRef.current = path; setRowMenu(path); refreshWorker(); } else if (!isOpen && rowMenuRef.current === path) { rowMenuRef.current = null; setRowMenu(null); } }}>
+        <summary aria-label={`Board actions for ${label}`} title="Actions">⋯</summary><div className="row-menu-items menu-items" hidden={rowMenu !== path}>
           {current && peek && <button type="button" title={`Return to this ${isResearch ? 'research board' : brainstorm ? 'brainstorm' : 'discussion'}: leave the peek.`} onClick={() => { setRowMenu(null); void backToCurrent(); }}>Back to this {isResearch ? 'research board' : brainstorm ? 'brainstorm' : 'discussion'}</button>}
           {!current && <>
             {open && !open.started && !brainstorm ? <a href={open.url.replace(/__room(?=([?#]|$))/, '__next')} title={`Show this open ${isResearch ? 'research board' : 'discussion'}: it has not started yet`}>Go to</a> : <button type="button" title={resumeTitle} onClick={() => { setRowMenu(null); if (open) { const url = open.url.replace(/__room(?=([?#]|$))/, '__next'); notesGuard(() => navigate(url)); } else void boardCommand('/resume ' + ref); }}>{open && brainstorm ? 'Go to' : closed ? 'Resume' : 'Continue'}</button>}
@@ -925,9 +928,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const unstarted = (room?.open ?? []).filter((entry) => !entry.current && !entry.active);
   const openUnstarted = (researchBoard: boolean) => unstarted.filter((entry) => !!entry.research === researchBoard).map((entry) => {
     const state = entry.ongoing || entry.working ? 'ongoing' : !entry.started ? 'not started' : entry.waitingForInput ? 'waiting for input' : entry.readyForAutoDev ? 'ready for auto dev' : entry.workReady && !entry.workbench && !entry.brainstorm ? 'work ready' : 'idle';
-    return <div className="board-row" key={entry.url}><a href={entry.url.replace(/__room(?=([?#]|$))/, '__next')}>{entry.workbench ? '🔧 ' : entry.research ? '🔬 ' : ''}{entry.title}</a><div className="local-label" title={state === 'waiting for input' ? entry.waitingReason || undefined : undefined}>{state}{entry.working && !researchBoard ? ' · worker working' : ''}</div>{researchBoard && <div className="local-label">Laps: 0 · Last: — · Next: —</div>}</div>;
+    return <div className="board-row row discussion-row" key={entry.url}><a href={entry.url.replace(/__room(?=([?#]|$))/, '__next')}>{entry.workbench ? '🔧 ' : entry.research ? '🔬 ' : ''}{entry.title}</a><div className="local-label" title={state === 'waiting for input' ? entry.waitingReason || undefined : undefined}>{state}{entry.working && !researchBoard ? ' · worker working' : ''}</div>{researchBoard && <div className="local-label">Laps: 0 · Last: — · Next: —</div>}</div>;
   });
   const remoteOnly = replica ? replica.received.filter((line) => !line.local && !foundDiscussions.some((name) => replica.own[name]?.discussion === line.discussion)) : [];
+  // The sections' hints, as renderBoards writes them on /__room (the first message's effect, or how to add one).
+  const canAddBoards = !!(room && input && !peek && !viewLayout); // canAct, defined further down
+  const workerNow = room?.open?.find((entry) => entry.current)?.working ? ' · worker working' : '';
+  const discussionsHint = room?.brainstorm && canAddBoards ? 'A brainstorm is shown: it is listed in Brainstorms. Turn it into a discussion (Actions ▾ in the discussion header) to have it here.'
+    : !activeDiscussions.length && !unstarted.some((entry) => !entry.research) && !replica?.received.some((line) => !line.local) ? (room?.started ? '' : 'No active discussions: your first message starts one.') + workerNow
+    : room && !room.started && canAddBoards ? 'Your first message starts a new discussion, or click a board to switch or peek.' + workerNow : '';
+  const researchHint = room?.research && !room.active && canAddBoards ? 'Your first message names this research board and saves it here.' : !research.length && !unstarted.some((entry) => entry.research) ? 'No research boards yet: + New research above starts one.' : '';
+  const brainstormsHint = room?.brainstorm && !room.active && canAddBoards ? 'Your first message names this brainstorm and saves it here.' : !orderedBrainstorms.length ? 'No brainstorms yet: + New brainstorm above starts one.' : '';
   const inactive = ['archive', 'deferred'].flatMap((section) => ['discussions', 'brainstorms'].flatMap((kind) => namesUnder(`${kind}/${section}`).map((name) => ({ name, path: `${kind}/${section}/${name}`, brainstorm: kind === 'brainstorms' }))));
   const sectionToggle = (key: string, open: boolean) => setBoardSections((previous) => { if (previous.has(key) === open) return previous; const next = new Set(previous); if (open) next.add(key); else next.delete(key); return next; });
   const canAct = !!(room && input && !peek && !viewLayout);
@@ -935,6 +946,12 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const summaryIndex = messages.findLastIndex((message) => message.outcome === 'agreed');
   const canSummary = !!(room && !peek && !viewLayout && !room.workbench);
   const canClose = !!(canAct && room?.multi && (room.active || room.brainstorm || room.workbench || room.research || (room.open?.length ?? 0) > 1));
+  // The status line under the title, for the selected tab (talkStatus on /__room): the closing
+  // phase, the worker's state on the Worker tab, the peek or view, who is thinking, or your turn.
+  const closingNow = !peek && !remote && room && !room.brainstorm && room.active?.startsWith('discussions/') ? room.closingDiscussions?.[room.active.slice('discussions/'.length)] ?? null : null;
+  const discStatus = closingNow === 'waiting' ? 'closing · waiting for worker' : closingNow === 'writing' ? 'closing · writing statement'
+    : tab === 'worker' ? (working ? working + ' is working' : 'idle') : !room ? '' : peek ? 'peeking at ' + displayTitle(peek.name, peek.title) + ' · read-only'
+    : remote || viewLayout ? 'read-only' : thinking ? thinking + ' is thinking' : room.autoDev?.status === 'running' ? '' : turnVisible ? 'your turn' : '';
   const lane = !room?.brainstorm && !room?.research && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
   const closeLabel = room?.brainstorm ? 'Close brainstorm' : room?.research ? 'Close' : lane && workerInfo?.pending?.some((item) => item.lane === lane) ? 'Close with pending work' : 'Close';
   const reveal = async () => {
@@ -946,29 +963,23 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     await loadDetails();
     requestAnimationFrame(() => explorer.current?.querySelector<HTMLElement>('.shown')?.scrollIntoView?.({ block: 'center' }));
   };
-  return <main>
+  return <main className={'app' + (boardsClosed ? ' list-collapsed' : '') + (service ? ' service-open' : '')}>
+    <header id="header">
     <RoomZones openHealth={() => { setHealthOpen(true); openService('providers'); }} folder={room?.folder ?? null} active={room?.active ?? null} replica={replica} replicaOff={replicaOff} viewing={remote?.line ?? null} newRoom={newRoom} readOnly={!!peek || !!viewLayout}
       post={(path, body) => post(path, body)} status={(text, error) => addStatus(text, error)} navigate={(url) => notesGuard(() => navigate(url))}
       roomName={room?.folder?.replace(/[/]+$/, '').split('/').pop() || room?.folder || 'agent-room'} code={room?.code} gauges={quota.gauges} at={quota.at} monitor={monitor}
-      ended={ended} restarting={restarting} command={(text) => void boardCommand(text)} shutdown={() => void shutdownServer()} serverChanged={serverChanged} />
-    <h1>{title}</h1>
-    {autoDev?.status === 'running' && <span>Auto dev running · cycle {autoDev.cycle} of {autoDev.max} · {autoDev.waiting ? 'worker is working' : 'discussion is reviewing'}</span>}
-    {autoDev?.status === 'paused' && <span>Auto dev paused · {autoDev.reason}</span>}
-    {autoDev?.status === 'finished' && <span>Auto dev finished · review and merge its worker branch</span>}
-    {(canSummary || canAct) && <details ref={actionsMenu} className="actions-menu" onToggle={(event) => { if (event.currentTarget.open) { setRowMenu(null); refreshWorker(); } }}>
-      <summary aria-label="Discussion actions" title="Actions">Actions</summary>
-      <div>
-        {canSummary && <button type="button" onClick={() => runAction('summary', '/summary', false)}>Summarize</button>}
-        {canAct && <button type="button" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker." onClick={() => runAction('workbench', '/workbench', !room?.multi && !!room?.started)}>{armedActions.workbench ? 'Click again: this session ends and the chat clears' : 'New workbench'}</button>}
-        {canAct && <button type="button" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker." onClick={() => runAction('research', '/research', !room?.multi && !!room?.started)}>{armedActions.research ? 'Click again: this session ends and the chat clears' : 'New research'}</button>}
-        {canAct && room?.active && (room.brainstorm || room.research) && <button type="button" title={room.research ? 'Keep the folder and start fresh discussion sessions; linked recurring tasks are turned off.' : 'Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder.'} onClick={() => runAction('convert', '/convert ' + room.active, true)}>{armedActions.convert ? room.research ? 'Click again: research sessions end and scheduled tasks turn off' : 'Click again: it moves to discussions/' : 'Turn into a discussion'}</button>}
-        {canAct && room?.active && room.brainstorm && <button type="button" title="Move it to discussions/ with a .research marker: the same agents start fresh sessions with the research rulebook, briefed from its transcripts and latest summary." onClick={() => runAction('convert-research', '/convert ' + room.active + ' research', true)}>{armedActions['convert-research'] ? 'Click again: it moves to discussions/ as a research board' : 'Turn into research'}</button>}
-        {canClose && <button type="button" title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions." onClick={() => runAction('close', '/close', !!room?.started)}>{armedActions.close ? 'Click again: this discussion closes (its agents stop)' : closeLabel}</button>}
-        {canClose && lane && !room?.closedDiscussions?.includes(lane) && mergeControls(lane)}
-      </div>
-    </details>}
-    {!!(room && input && !peek && !viewLayout && room.multi && !room.active && (room.brainstorm || room.workbench || room.research || (room.open?.length ?? 0) > 1)) && <button type="button" title="Discard this new board and return to the board you came from" onClick={() => void boardCommand('/cancel')}>Cancel</button>}
-    {boardDialog && <dialog ref={dialogElement} aria-label={boardDialog.kind === 'merge' ? boardDialog.preview.title : boardDialog.kind === 'discard' ? `Close and Discard ${boardDialog.name}?` : `Catch up with ${boardDialog.target}?`} className="board-dialog" onCancel={(event) => { event.preventDefault(); if (!dialogBusy) setBoardDialog(null); }}>
+      ended={ended} restarting={restarting} command={(text) => void boardCommand(text)} shutdown={() => void shutdownServer()} serverChanged={serverChanged}>
+    <div id="disc-zone" className="zone disc-zone" aria-label="Activity">
+      <section id="system-messages" aria-label="System messages" role="log" aria-live="polite" aria-relevant="additions">
+        {failure && <div id="pinned-error" className="pinned-error"><span title={failure.error}>✗ {failure.agent} failed {failure.time}: {failure.error.split(/\r?\n/)[0]}{failure.earlier ? ` (+${failure.earlier} earlier)` : ''}</span> <button type="button" title="Dismiss" aria-label="Dismiss pinned error" onClick={() => setFailure(null)}>✕</button></div>}
+        {status.map((line, index) => <p key={index} className={line.error ? 'status error' : 'status'} title={line.text}>{line.text}</p>)}
+      </section>
+      {busyWorkers.length > 0 && <div id="disc-workers" className="disc-workers" aria-live="polite">{busyWorkers.map((entry) => <span key={entry.url}><span className="busy-dot">● </span>{displayTitle(entry.active?.split('/').at(-1), entry.title)} · Worker is working</span>)}</div>}
+    </div>
+    </RoomZones>
+    {busy && <div id="busy" aria-label="Busy" data-state={busy}><span hidden>{busy === 'on' ? 'Working…' : 'Action failed'}</span></div>}
+    </header>
+    {boardDialog && <dialog ref={dialogElement} aria-label={boardDialog.kind === 'merge' ? boardDialog.preview.title : boardDialog.kind === 'discard' ? `Close and Discard ${boardDialog.name}?` : `Catch up with ${boardDialog.target}?`} className="board-dialog discard-dialog" onCancel={(event) => { event.preventDefault(); if (!dialogBusy) setBoardDialog(null); }}>
       <h3>{boardDialog.kind === 'merge' ? boardDialog.preview.title : boardDialog.kind === 'discard' ? `Close and Discard ${boardDialog.name}?` : `Catch up with ${boardDialog.target}?`}</h3>
       {boardDialog.changed && <p className="discard-warn">{boardDialog.kind === 'merge' ? 'The room branch or worktree changed since your first click. Review the updated preview below and confirm again.' : boardDialog.kind === 'discard' ? 'The worktree or branch changed since your first click. Review the updated list below and confirm again.' : 'The target or readiness changed. Review the updated information and confirm again.'}</p>}
       {boardDialog.kind === 'catchup' ? <p>{boardDialog.message}</p> : boardDialog.kind === 'merge' ? <>
@@ -986,70 +997,86 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {boardDialog.error && <p role="alert">{boardDialog.error}</p>}
       <button type="button" disabled={dialogBusy} onClick={() => setBoardDialog(null)}>Cancel</button> <button type="button" disabled={dialogBusy} onClick={() => void confirmBoardAction()}>{boardDialog.kind === 'merge' ? 'Confirm ' + boardDialog.preview.title : boardDialog.kind === 'discard' ? 'Confirm Close and Discard' : 'Catch up with ' + boardDialog.target}</button>
     </dialog>}
-    <div className="disc-zone" aria-label="Activity">
-      <section aria-label="System messages" role="log" aria-live="polite" aria-relevant="additions">
-        {failure && <div className="pinned-error"><span title={failure.error}>✗ {failure.agent} failed {failure.time}: {failure.error.split(/\r?\n/)[0]}{failure.earlier ? ` (+${failure.earlier} earlier)` : ''}</span> <button type="button" title="Dismiss" aria-label="Dismiss pinned error" onClick={() => setFailure(null)}>✕</button></div>}
-        {status.map((line, index) => <p key={index} className={line.error ? 'status error' : 'status'} title={line.text}>{line.text}</p>)}
-      </section>
-      {busyWorkers.length > 0 && <div className="disc-workers" aria-live="polite">{busyWorkers.map((entry) => <span key={entry.url}><span className="busy-dot">● </span>{displayTitle(entry.active?.split('/').at(-1), entry.title)} · Worker is working</span>)}</div>}
-    </div>
-    <div className={'next-workspace' + (boardsClosed ? ' boards-closed' : '') + (service ? ' service-open' : '')}>
-    <nav className="control-bar" aria-label="Services">
-      <button type="button" className="ctrl-btn" aria-pressed={service === null} title="Boards" onClick={() => { if (service) openService(null); else if (boardsClosed) { setBoardsClosed(false); refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', '0'); } catch {} } }}>▤ Boards</button>
-      <button type="button" className="ctrl-btn" aria-pressed={service === 'providers'} title="Default providers and models for new discussions, and provider health" onClick={() => openService(service === 'providers' ? null : 'providers')}>⚙ Providers</button>
-      <button type="button" className="ctrl-btn" aria-pressed={service === 'instructions'} title="The prompts and rulebooks sent to each agent, and when" onClick={() => openService(service === 'instructions' ? null : 'instructions')}>📜 Instructions</button>
-      <button type="button" className="ctrl-btn" aria-pressed={service === 'schedule'} title="Scheduled tasks and quota guard" onClick={() => openService(service === 'schedule' ? null : 'schedule')}>⏰ Schedule</button>
-      {isLocalPage && <button type="button" className="ctrl-btn" aria-pressed={service === 'notes'} title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder." onClick={() => openService(service === 'notes' ? null : 'notes')}>📝 My notes</button>}
-      {isLocalPage && <button type="button" className={'ctrl-btn' + (shellAlive ? ' running' : '')} aria-pressed={service === 'terminal'} title="A shell on this computer, in the room's folder. Only from this computer, not from other devices." onClick={() => openService(service === 'terminal' ? null : 'terminal')}>⌨ Terminal</button>}
+    <nav id="control-bar" aria-label="Services">
+      <button type="button" className="ctrl-btn" id="ctrl-boards" aria-pressed={service === null} title="Boards and conversation" onClick={() => { if (service) openService(null); else if (boardsClosed) { setBoardsClosed(false); refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', '0'); } catch {} } }}><span className="ctrl-ico">💬</span> <span className="ctrl-lbl">Boards</span></button>
+      <button type="button" className="ctrl-btn" aria-pressed={service === 'providers'} title="Default providers and models for new discussions, and provider health" onClick={() => openService(service === 'providers' ? null : 'providers')}><span className="ctrl-ico">⚙</span> <span className="ctrl-lbl">Providers</span></button>
+      <button type="button" className="ctrl-btn" aria-pressed={service === 'instructions'} title="The prompts and rulebooks sent to each agent, and when" onClick={() => openService(service === 'instructions' ? null : 'instructions')}><span className="ctrl-ico">📜</span> <span className="ctrl-lbl">Instructions</span></button>
+      <button type="button" className="ctrl-btn" aria-pressed={service === 'schedule'} title="Scheduled tasks and quota guard" onClick={() => openService(service === 'schedule' ? null : 'schedule')}><span className="ctrl-ico">⏰</span> <span className="ctrl-lbl">Schedule</span></button>
+      {isLocalPage && <button type="button" className="ctrl-btn" aria-pressed={service === 'notes'} title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder." onClick={() => openService(service === 'notes' ? null : 'notes')}><span className="ctrl-ico">📝</span> <span className="ctrl-lbl">My notes</span></button>}
+      {isLocalPage && <button type="button" id="ctrl-terminal" className={'ctrl-btn' + (shellAlive ? ' running' : '')} aria-pressed={service === 'terminal'} title="A shell on this computer, in the room's folder. Only from this computer, not from other devices." onClick={() => openService(service === 'terminal' ? null : 'terminal')}><span className="ctrl-ico">⌨</span> <span className="ctrl-lbl">Terminal</span></button>}
     </nav>
-    <section className="services-panel" aria-label="Services panel" hidden={!service}>
-      <div><span>{service ? SERVICES[service] : ''}</span> <button type="button" title="Close services panel" aria-label="Close services panel" onClick={() => openService(null)}>✕</button></div>
-      {service === 'providers' && <div><ProvidersPanel open healthOpen={healthOpen} setHealthOpen={setHealthOpen} warning={Object.keys(monitor).some((p) => providerHealth(monitor, p)?.level)} post={(path, body) => post(path, body)} queue={settingsQueue} done={() => openService(null)} /></div>}
-      <div hidden={service !== 'instructions'}><InstructionsPanel open={service === 'instructions'} /></div>
-      <div hidden={service !== 'schedule'}><SchedulePanel open={service === 'schedule'} reload={scheduleReload} post={(path, body) => post(path, body)} /></div>
-      {isLocalPage && <div hidden={service !== 'notes'}><Notes open={service === 'notes'} show={() => openService('notes')} api={notesApi} kept={notesKept} post={(path, body) => post(path, body)} /></div>}
-      {isLocalPage && <div hidden={service !== 'terminal'}><TerminalPane visible={service === 'terminal'} fitKey={layout} running={setShellAlive} /></div>}
+    <section id="services-panel" aria-label="Services panel" hidden={!service}>
+      <div id="services-bar"><span id="services-title">{service ? SERVICES[service] : ''}</span><button type="button" className="pane-ctrl" title="Close services panel" aria-label="Close services panel" onClick={() => openService(null)}>✕</button></div>
+      {service === 'providers' && <div className="view" id="providers"><ProvidersPanel open healthOpen={healthOpen} setHealthOpen={setHealthOpen} warning={Object.keys(monitor).some((p) => providerHealth(monitor, p)?.level)} post={(path, body) => post(path, body)} queue={settingsQueue} done={() => openService(null)} /></div>}
+      <div className="view" id="instructions" hidden={service !== 'instructions'}><InstructionsPanel open={service === 'instructions'} /></div>
+      <div className="view" id="schedule" hidden={service !== 'schedule'}><SchedulePanel open={service === 'schedule'} reload={scheduleReload} post={(path, body) => post(path, body)} /></div>
+      {isLocalPage && <div className="view" id="notes" hidden={service !== 'notes'}><Notes open={service === 'notes'} show={() => openService('notes')} api={notesApi} kept={notesKept} post={(path, body) => post(path, body)} /></div>}
+      {isLocalPage && <div className="view" id="terminal" hidden={service !== 'terminal'}><TerminalPane visible={service === 'terminal'} fitKey={layout} running={setShellAlive} /></div>}
     </section>
-    <aside className="next-boards" aria-label="Boards">
-      <div><b hidden={boardsClosed}>Boards</b> <button type="button" aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); if (serviceRef.current === null) { try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} } }}>{boardsClosed ? '»' : '«'}</button></div>
-      {!boardsClosed && <div className="boards-list">
-        {!!(room && input && !peek && !viewLayout) && <div className="boards-new">
+    <aside id="list-panel" className="next-boards" aria-label="Boards">
+      <div id="list-head">{!boardsClosed && <span id="list-title">Boards</span>}<button type="button" id="list-toggle" title={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); if (serviceRef.current === null) { try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} } }}>{boardsClosed ? '»' : '«'}</button></div>
+      {!boardsClosed && <>
+        {!!(room && input && !peek && !viewLayout) && <div id="list-new" className="boards-new">
           {!!(room.active || room.brainstorm || room.workbench || room.research) && <button type="button" title={room.multi ? 'Open a new discussion beside this one, which stays open (click it in Boards to show it again).' : 'End this session: the chat clears and your next message starts a new discussion. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.'} onClick={() => createBoard('/new')}>{armedCreation['/new'] ? 'Click again: this session ends and the chat clears' : '+ New discussion'}</button>}
           <button type="button" title={room.multi ? 'A conversation with the same agents, beside the open discussions and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that.' : 'A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a discussion for that. It ends this session.'} onClick={() => createBoard('/brainstorm')}>{armedCreation['/brainstorm'] ? 'Click again: this session ends and the chat clears' : '+ New brainstorm'}</button>
           <button type="button" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker." onClick={() => createBoard('/workbench')}>{armedCreation['/workbench'] ? 'Click again: this session ends and the chat clears' : '+ New workbench'}</button>
           <button type="button" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker." onClick={() => createBoard('/research')}>{armedCreation['/research'] ? 'Click again: this session ends and the chat clears' : '+ New research'}</button>
         </div>}
-        <details open={boardSections.has('discussions')} onToggle={(e) => sectionToggle('discussions', e.currentTarget.open)}><summary>Discussions ({activeDiscussions.length + unstarted.filter((entry) => !entry.research).length})</summary>{openUnstarted(false)}{workerInfo?.pending?.filter((item) => !activeDiscussions.includes(item.lane ?? '')).map((item) => <div className="worker-pending" key={item.branch}>⚠ {item.branch}: {[item.ahead && `${item.ahead} ${item.ahead === 1 ? 'commit' : 'commits'} not merged into main`, item.dirty && 'uncommitted changes'].filter(Boolean).join(' · ')}</div>)}{activeDiscussions.map((name) => boardRow(name, 'discussions/' + name, false, false, canOrder ? { kind: 'discussions', names: activeDiscussions } : undefined))}</details>
-        <details open={boardSections.has('research')} onToggle={(e) => sectionToggle('research', e.currentTarget.open)}><summary>Research ({research.length + unstarted.filter((entry) => entry.research).length})</summary>{openUnstarted(true)}{research.map((name) => boardRow(name, 'discussions/' + name, false))}</details>
-        <details open={boardSections.has('brainstorms')} onToggle={(e) => sectionToggle('brainstorms', e.currentTarget.open)}><summary>Brainstorms ({orderedBrainstorms.length})</summary>{orderedBrainstorms.map((name) => boardRow(name, 'brainstorms/' + name, true, false, canOrder ? { kind: 'brainstorms', names: orderedBrainstorms } : undefined))}</details>
-        <details open={boardSections.has('archived-deferred')} onToggle={(e) => sectionToggle('archived-deferred', e.currentTarget.open)}><summary>Archived · Deferred ({inactive.length})</summary>{inactive.map(({ name, path, brainstorm }) => boardRow(name, path, brainstorm, true))}</details>
-        {remoteOnly.length > 0 && <details open={boardSections.has('peers')} onToggle={(e) => sectionToggle('peers', e.currentTarget.open)}><summary>Received from peers ({remoteOnly.length})</summary>{remoteOnly.map((line) => {
+        <div id="list-pane"><div id="board-list">
+        <details className="list-section" open={boardSections.has('discussions')} onToggle={(e) => sectionToggle('discussions', e.currentTarget.open)}><summary>Discussions ({activeDiscussions.length + unstarted.filter((entry) => !entry.research).length})</summary>{openUnstarted(false)}{workerInfo?.pending?.filter((item) => !activeDiscussions.includes(item.lane ?? '')).map((item) => <div className="worker-pending" key={item.branch}>⚠ {item.branch}: {[item.ahead && `${item.ahead} ${item.ahead === 1 ? 'commit' : 'commits'} not merged into main`, item.dirty && 'uncommitted changes'].filter(Boolean).join(' · ')}</div>)}{activeDiscussions.map((name) => boardRow(name, 'discussions/' + name, false, false, canOrder ? { kind: 'discussions', names: activeDiscussions } : undefined))}{discussionsHint && <span className="hint">{discussionsHint}</span>}</details>
+        <details className="list-section" open={boardSections.has('research')} onToggle={(e) => sectionToggle('research', e.currentTarget.open)}><summary>Research ({research.length + unstarted.filter((entry) => entry.research).length})</summary>{openUnstarted(true)}{research.map((name) => boardRow(name, 'discussions/' + name, false))}{researchHint && <span className="hint">{researchHint}</span>}</details>
+        <details className="list-section" open={boardSections.has('brainstorms')} onToggle={(e) => sectionToggle('brainstorms', e.currentTarget.open)}><summary>Brainstorms ({orderedBrainstorms.length})</summary>{orderedBrainstorms.map((name) => boardRow(name, 'brainstorms/' + name, true, false, canOrder ? { kind: 'brainstorms', names: orderedBrainstorms } : undefined))}{brainstormsHint && <span className="hint">{brainstormsHint}</span>}</details>
+        <details className="list-section" open={boardSections.has('archived-deferred')} onToggle={(e) => sectionToggle('archived-deferred', e.currentTarget.open)}><summary>Archived · Deferred ({inactive.length})</summary>{inactive.map(({ name, path, brainstorm }) => boardRow(name, path, brainstorm, true))}</details>
+        {remoteOnly.length > 0 && <details className="list-section" open={boardSections.has('peers')} onToggle={(e) => sectionToggle('peers', e.currentTarget.open)}><summary>Received from peers ({remoteOnly.length})</summary>{remoteOnly.map((line) => {
           const folderName = line.name || line.local || line.discussion, label = displayTitle(folderName, line.title ?? undefined), key = 'peer:' + line.discussion + ':' + line.node;
           const peekReceived = () => { setRowMenu(null); setFilePeek(null); setReceivedPeek({ discussion: line.discussion, node: line.node, commit: line.commit, round: line.round, name: folderName, title: line.title ?? null }); setExplorerMode('discussion'); setSubtab('explorer'); openDocument(); };
-          return <div key={key} className={'board-row' + (receivedPeek?.discussion === line.discussion ? ' peeking' : '')}>
+          return <div key={key} className={'board-row row discussion-row' + (receivedPeek?.discussion === line.discussion ? ' peeking' : '')}>
             <button type="button" title={line.local ? 'discussions/' + line.local : /^\d{4}-\d{2}-\d{2}-/.test(folderName) ? 'discussions/' + folderName : folderName} onClick={peekReceived}>{label}</button>
             <div className="local-label">{line.node} · round {line.round}</div>
-            <details className="row-menu" open={rowMenu === key} onToggle={(event) => { const isOpen = event.currentTarget.open; if (isOpen && rowMenuRef.current !== key) { rowMenuRef.current = key; setRowMenu(key); } else if (!isOpen && rowMenuRef.current === key) { rowMenuRef.current = null; setRowMenu(null); } }}>
-              <summary aria-label={`Board actions for ${label}`} title="Actions">⋯</summary><div className="row-menu-items" hidden={rowMenu !== key}>
+            <details className="menu row-menu" open={rowMenu === key} onToggle={(event) => { const isOpen = event.currentTarget.open; if (isOpen && rowMenuRef.current !== key) { rowMenuRef.current = key; setRowMenu(key); } else if (!isOpen && rowMenuRef.current === key) { rowMenuRef.current = null; setRowMenu(null); } }}>
+              <summary aria-label={`Board actions for ${label}`} title="Actions">⋯</summary><div className="row-menu-items menu-items" hidden={rowMenu !== key}>
                 <button type="button" title="View this peer’s discussion in full, read-only" onClick={() => { setRowMenu(null); void viewRemote(line); }}>View chat</button>
                 <button type="button" title="Peek at this received discussion’s files in Explorer" onClick={peekReceived}>Peek files</button>
               </div>
             </details>
           </div>;
         })}</details>}
-      </div>}
+        </div></div>
+      </>}
     </aside>
-    <div ref={panel} className={'next-layout' + (layout.stacked ? ' stacked' : '') + (layout.sideClosed ? ' closed' : '')} style={{ '--left': layout.left ? layout.left + 'px' : '55%', '--top': layout.top ? layout.top + 'px' : '55%' } as React.CSSProperties}>
-    <div ref={conversation} className="next-conversation">
-    {layout.sideClosed && <button type="button" title="Open side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: false }, true, 'side-closed')}>Open side pane</button>}
-    <div role="tablist" aria-label="Conversation tabs">
-      {!(peek ? peek.kind === 'workbench' : room?.workbench) && <button type="button" role="tab" aria-selected={tab === 'discussion'} onClick={() => { tabRef.current = 'discussion'; setTab('discussion'); }}>Discussion</button>}
-      {!(peek ? peek.kind === 'research' : room?.research) && <button type="button" role="tab" aria-selected={tab === 'worker'} onClick={() => { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); refreshWorker(); }}>Worker{workerNews ? ' · new' : ''}</button>}
+    {!boardsClosed && <div id="list-split" />}
+    <div ref={panel} id="main-panel" className={'next-layout' + (layout.stacked ? ' stacked' : '') + (layout.sideClosed ? ' closed side-closed' : '')} style={{ '--left': layout.left ? layout.left + 'px' : '55%', '--top': layout.top ? layout.top + 'px' : '55%' } as React.CSSProperties}>
+    <div id="disc-header" aria-label="Current discussion">
+    {(canSummary || canAct) && <details ref={actionsMenu} id="actions-menu" className="menu actions-menu" onToggle={(event) => { if (event.currentTarget.open) { setRowMenu(null); refreshWorker(); } }}>
+      <summary aria-label="Discussion actions" title="Actions">Actions</summary>
+      <div className="menu-items">
+        {canSummary && <button type="button" onClick={() => runAction('summary', '/summary', false)}>Summarize</button>}
+        {canAct && <button type="button" title="Open a workbench: a board with only the worker, for one small fix. Your first message names it and goes straight to the worker." onClick={() => runAction('workbench', '/workbench', !room?.multi && !!room?.started)}>{armedActions.workbench ? 'Click again: this session ends and the chat clears' : 'New workbench'}</button>}
+        {canAct && <button type="button" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker." onClick={() => runAction('research', '/research', !room?.multi && !!room?.started)}>{armedActions.research ? 'Click again: this session ends and the chat clears' : 'New research'}</button>}
+        {canAct && room?.active && (room.brainstorm || room.research) && <button type="button" title={room.research ? 'Keep the folder and start fresh discussion sessions; linked recurring tasks are turned off.' : 'Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder.'} onClick={() => runAction('convert', '/convert ' + room.active, true)}>{armedActions.convert ? room.research ? 'Click again: research sessions end and scheduled tasks turn off' : 'Click again: it moves to discussions/' : 'Turn into a discussion'}</button>}
+        {canAct && room?.active && room.brainstorm && <button type="button" title="Move it to discussions/ with a .research marker: the same agents start fresh sessions with the research rulebook, briefed from its transcripts and latest summary." onClick={() => runAction('convert-research', '/convert ' + room.active + ' research', true)}>{armedActions['convert-research'] ? 'Click again: it moves to discussions/ as a research board' : 'Turn into research'}</button>}
+        {canClose && <button type="button" title="Close this discussion: its agents stop; the other open discussions stay. Its checkpoint is kept: Resume it from Discussions." onClick={() => runAction('close', '/close', !!room?.started)}>{armedActions.close ? 'Click again: this discussion closes (its agents stop)' : closeLabel}</button>}
+        {canClose && lane && !room?.closedDiscussions?.includes(lane) && mergeControls(lane)}
+      </div>
+    </details>}
+    <div id="disc-info"><h1 id="disc" data-active={!peek && !remote && room?.active ? 'true' : 'false'}>{title}</h1>
+      <span id="disc-status" aria-live="polite">{discStatus === 'your turn' ? <span aria-label="Turn status">your turn</span> : discStatus}</span>
+    {autoDev?.status === 'running' && <span id="disc-autodev">Auto dev running · cycle {autoDev.cycle} of {autoDev.max} · {autoDev.waiting ? 'worker is working' : 'discussion is reviewing'}</span>}
+    {autoDev?.status === 'paused' && <span id="disc-autodev" className="paused">Auto dev paused · {autoDev.reason}</span>}
+    {autoDev?.status === 'finished' && <span id="disc-autodev">Auto dev finished · review and merge its worker branch</span>}
     </div>
-    {tab === 'worker' && <section className="next-pane" aria-label="Worker conversation">
+    {!!(room && input && !peek && !viewLayout && room.multi && !room.active && (room.brainstorm || room.workbench || room.research || (room.open?.length ?? 0) > 1)) && <button type="button" id="cancel-creation" title="Discard this new board and return to the board you came from" onClick={() => void boardCommand('/cancel')}>Cancel</button>}
+    </div>
+    <div ref={conversation} id="left" className="next-conversation">
+    <div id="tabs" role="tablist" aria-label="Conversation tabs">
+      {!(peek ? peek.kind === 'workbench' : room?.workbench) && <button type="button" role="tab" id="tab-talk" className={'tab' + (tab === 'discussion' ? ' on' : '')} aria-selected={tab === 'discussion'} onClick={() => { tabRef.current = 'discussion'; setTab('discussion'); }}>Discussion</button>}
+      {!(peek ? peek.kind === 'research' : room?.research) && <button type="button" role="tab" id="tab-work" className={'tab' + (tab === 'worker' ? ' on' : '') + (workerNews ? ' news' : '')} aria-label={workerNews ? 'Worker · new' : 'Worker'} aria-selected={tab === 'worker'} onClick={() => { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); refreshWorker(); }}>Worker{working ? ' …' : ''}</button>}
+      <span id="tab-controls">{layout.sideClosed && <button type="button" className="pane-ctrl" title="Open side pane" aria-label="Open side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: false }, true, 'side-closed')}>◫ Side pane</button>}</span>
+    </div>
+    {tab === 'worker' && <section className="view next-pane" id="work" aria-label="Worker conversation">
       <SettingsPanel scope="work" room={room} post={(path, body) => post(path, body)} queue={settingsQueue} />
       <WorkerInfoLine info={shownWorkerInfo(workerInfo, !!room?.brainstorm, !!peek || !!viewLayout)} />
-      <ChatList endLabel="Scroll to latest worker messages" resetKey={chatReset} memory={workChatMemory}>
+      <ChatList id="wchat" endLabel="Scroll to latest worker messages" resetKey={chatReset} memory={workChatMemory}>
       {workerHint && <p className="status">{room?.workbench ? 'Send your first instruction to name and start this workbench.' : 'Give the worker instructions here. It works alongside the discussion and sees only what you send it.'}</p>}
       {workerMessages.map((message, index) => 'note' in message ? null : <article key={index} className={'msg' + (message.speaker === 'User' || message.speaker === 'Relayed from discussion' ? ' user' : '') + (message.speaker === 'Worker report' ? ' report' : '') + (message.error ? ' error' : '')}>
         <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong>
@@ -1057,15 +1084,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         {message.retryId && message.retryId === room?.retryId && index === workerMessages.findIndex((item) => !('note' in item) && item.retryId === room?.retryId) && <div><button type="button" disabled={retryBusy === message.retryId} onClick={() => void retry(message.retryId!)}>Retry</button> <button type="button" disabled={retryBusy === message.retryId} onClick={() => void chooseRetry(message.retryId!)}>Retry with…</button></div>}
       </article>)}
       </ChatList>
-      {offers.length > 0 && <div aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
-      <label><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
-      {working && <p>The worker is busy: what you send now waits for it to finish.</p>}
-      {remote && <div className="remote-view"><p>Read-only: viewing {remote.line.node}'s line.</p>{ownLine && <button type="button" onClick={() => void viewRemote(null)}>Back to {replica?.node}'s line</button>}</div>}
-      {input && !peek && !viewLayout && room?.workerStop && !room.workerStop.now && <div>
+      <div className="composer" id="wcomposer">
+      {offers.length > 0 && <div className="mention-offer" aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
+      <label className="follow-label" title="When an agent or the worker names a file in a new message, show it here at once (this browser only)"><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
+      {working && <p className="hint" id="whint">The worker is busy: what you send now waits for it to finish.</p>}
+      {remote && <div className="remote-view" id="work-remote-view"><p>Read-only: viewing {remote.line.node}'s line.</p>{ownLine && <button type="button" onClick={() => void viewRemote(null)}>Back to {replica?.node}'s line</button>}</div>}
+      {input && !peek && !viewLayout && room?.workerStop && !room.workerStop.now && <div className="tools" id="wstop">
         <button type="button" disabled={room.workerStop.after} title="The running instruction finishes and is reported as usual; this discussion's queued instructions are cancelled, and auto dev pauses" onClick={() => void stopWorker('after')}>{stopArmed.after ? 'Click again: stop after this task; queued instructions are cancelled' : 'Stop after this task'}</button>{' '}
         <button type="button" title="The running instruction's programs are stopped at once; this discussion's queued instructions are cancelled, auto dev pauses, and what it left in the worktree is reported" onClick={() => void stopWorker('now')}>{stopArmed.now ? 'Click again: stop now; partial edits may be left' : 'Stop now'}</button>
       </div>}
-      {workInput && <textarea aria-label="Instruction to the worker" value={workText} disabled={ended || !!peek || !!viewLayout || !!room?.brainstorm || !!workerInfo?.disabled} placeholder={peek ? 'Peeking read-only — click Back to return to the active discussion.' : viewLayout ? 'Read-only: viewing a peer’s discussion.' : room?.brainstorm ? 'Turn this brainstorm into a discussion to send work.' : workerInfo?.disabled ? workerInfo.lines[0] : room?.workbench && !room.active ? 'First instruction to the worker… (names this workbench and starts it)' : 'Instruction to the worker… (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands.'} onChange={(event) => setWorkText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); const value = workText; setWorkText(''); void sendWork(value); } }} />}
+      {workInput && <textarea className="box" id="wbox" aria-label="Instruction to the worker" value={workText} disabled={ended || !!peek || !!viewLayout || !!room?.brainstorm || !!workerInfo?.disabled} placeholder={peek ? 'Peeking read-only — click Back to return to the active discussion.' : viewLayout ? 'Read-only: viewing a peer’s discussion.' : room?.brainstorm ? 'Turn this brainstorm into a discussion to send work.' : workerInfo?.disabled ? workerInfo.lines[0] : room?.workbench && !room.active ? 'First instruction to the worker… (names this workbench and starts it)' : 'Instruction to the worker… (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands.'} onChange={(event) => setWorkText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); const value = workText; setWorkText(''); void sendWork(value); } }} />}
+      </div>
     </section>}
     {retryDialog && <dialog ref={retryDialogElement} aria-label="Retry with…" onCancel={() => setRetryDialog(null)}><form onSubmit={(event) => { event.preventDefault(); void submitRetry(); }}>
       <h3>Retry with…</h3>
@@ -1075,43 +1104,41 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {retryDialog.custom && <label>Worker custom model ID<input placeholder="Model ID" value={retryDialog.worker.model} onChange={(event) => setRetryDialog({ ...retryDialog, worker: { ...retryDialog.worker, model: event.target.value } })} /></label>}
       <button type="button" onClick={() => setRetryDialog(null)}>Cancel</button> <button type="submit" disabled={retryDialog.busy}>Retry</button>{retryDialog.error && <p role="alert">{retryDialog.error}</p>}
     </form></dialog>}
-    <div className="next-pane" hidden={tab !== 'discussion'}>
-    {peek && <p>peeking at {displayTitle(peek.name, peek.title)} · read-only</p>}
-    {remote && <div className="remote-view" role="status" aria-label="Viewing a peer">
+    <div className="view next-pane" id="talk" hidden={tab !== 'discussion'}>
+    {remote && <div className="remote-view" id="remote-view" role="status" aria-label="Viewing a peer">
       <p>{remote.expired ? 'View expired. Select the received line again.' : remote.line.node + "'s line, round " + remote.line.round + ', received ' + receivedTime(remote.line.receivedAt) + '. Read-only.'}</p>
       <p className="local-activity">Local {replica?.node}: {thinking ? thinking + ' is thinking' : 'discussion idle'} · {working ? 'Worker ' + working + ' is working' : 'worker idle'}</p>
       {ownLine && <button type="button" onClick={() => void viewRemote(null)}>Back to {replica?.node}'s line</button>}
       {newerLine && <button type="button" onClick={() => void viewRemote(newerLine)}>View newer received round {newerLine.round}</button>}
     </div>}
-    {!!(room && !room.active && !peek && !viewLayout && !room.workbench) && <p>{room.brainstorm ? 'Your first message names this brainstorm and saves it here.' : room.research ? 'Your first message names this research board and saves it here.' : 'Your first message starts a new discussion.'}</p>}
-    {turnVisible && <p aria-label="Turn status">your turn</p>}
-    {busy && <div aria-label="Busy" data-state={busy}>{busy === 'on' ? 'Working…' : 'Action failed'}</div>}
     {!peek && !viewLayout && !room?.workbench && <SettingsPanel scope="talk" room={room} post={(path, body) => post(path, body)} queue={settingsQueue} openSignal={membersOpen} />}
     <FailedAgents agents={room?.failedAgents} post={(path, body) => post(path, body)} status={(text) => addStatus(text, true)} />
-    <ChatList endLabel="Scroll to latest discussion messages" resetKey={chatReset}>
+    <ChatList id="chat" endLabel="Scroll to latest discussion messages" resetKey={chatReset}>
     <section aria-label="Conversation">{messages.map((message, index) => <article key={index} className={'msg' + (message.error ? ' error' : '') + (message.outcome ? ' summary' + (message.outcome === 'agreed' ? '' : ' not-agreed') : '')}>
       <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong><div onClick={(event) => { const element = event.target as Element; const target = element.closest<HTMLAnchorElement>('a.mention'); if (target?.dataset.file) { event.preventDefault(); void showFile(target.dataset.file); } if (element.closest('[data-auto-dev="start"]')) void boardCommand('/autodev'); }} dangerouslySetInnerHTML={{ __html: (() => { const html = peek ? message.html : linkFiles(message.html, knownFiles, room?.active ?? null).html; return autoDev && autoDev.status !== 'running' && autoDev.status !== 'paused' && autoDev.offer && index === summaryIndex ? autoOfferHtml(html, autoDev.offer, autoDev.max) : html; })() }} />
     </article>)}</section>
     {thinking && !remote && <p className="status">… {thinking} is thinking</p>}
     </ChatList>
-    {tab === 'discussion' && offers.length > 0 && <div aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
-    <label><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
-    {autoDev?.status === 'paused' && autoDev.offer?.text && <div role="status"><p>Next agreed instruction:</p><p>{autoDev.offer.text}</p><p><button type="button" onClick={() => void boardCommand('/autodev')}>Restart auto dev ({autoDev.max} more)</button> Restarting grants another {autoDev.max} worker cycles.</p></div>}
-    {autoDev?.status === 'paused' && autoDev.offer?.error && <div role="status">The latest agreed instruction can’t be sent: {autoDev.offer.error}.</div>}
-    {input && <div className="composer">
-      {!remote && <textarea aria-label="Message to the agents" value={text} disabled={ended} onChange={(event) => setText(event.target.value)}
+    <div className="composer" id="composer">
+    {tab === 'discussion' && offers.length > 0 && <div className="mention-offer" aria-label="File mentions">{offers.map((file) => <button type="button" key={file} title={`Show ${file} in Document`} onClick={() => void showFile(file)}>📄 Show {file.split('/').at(-1)}</button>)} <button type="button" title="Dismiss" aria-label="Dismiss file mentions" onClick={() => { offerEpoch.current++; setOffers([]); }}>✕</button></div>}
+    <label className="follow-label" title="When an agent or the worker names a file in a new message, show it here at once (this browser only)"><input type="checkbox" checked={follow} onChange={(event) => { const checked = event.target.checked; setFollow(checked); try { localStorage.setItem('agent-room.followMentions', checked ? '1' : '0'); } catch {} }} /> Follow mentions</label>
+    {autoDev?.status === 'paused' && autoDev.offer?.text && <div id="autodev" className="paused" role="status"><p>Next agreed instruction:</p><p>{autoDev.offer.text}</p><p><button type="button" onClick={() => void boardCommand('/autodev')}>Restart auto dev ({autoDev.max} more)</button> Restarting grants another {autoDev.max} worker cycles.</p></div>}
+    {autoDev?.status === 'paused' && autoDev.offer?.error && <div id="autodev" className="paused" role="status">The latest agreed instruction can’t be sent: {autoDev.offer.error}.</div>}
+    {input && <>
+      {!remote && <textarea className="box" id="box" aria-label="Message to the agents" value={text} disabled={ended} onChange={(event) => setText(event.target.value)}
         placeholder={peek ? 'Peeking read-only — click Back to return to the active discussion.' : autoDev?.status === 'running' ? 'Auto dev is running — sending a message pauses it. (Enter sends, Shift+Enter for a new line)' : 'Message to the agents… (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown'}
         onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />}
-      <div hidden={!!remote}><button type="button" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)" disabled={sending || ended || !!peek || !room?.active} onClick={() => fileInput.current?.click()}>📎 Attach</button>
+      <div id="attach-row" hidden={!!remote}><button type="button" id="attach" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)" disabled={sending || ended || !!peek || !room?.active} onClick={() => fileInput.current?.click()}>📎 Attach</button>
         <input ref={fileInput} type="file" aria-label="Attach files" multiple hidden onChange={(event) => { const chosen = Array.from(event.target.files ?? []); setFiles((previous) => [...previous, ...chosen]); event.target.value = ''; }} />
-        {files.map((file, index) => <span key={index}>{file.name} · {sizeText(file.size)} <button type="button" title="Remove this attachment" aria-label={`Remove ${file.name}`} disabled={sending} onClick={() => setFiles((previous) => previous.filter((_, i) => i !== index))}>✕</button></span>)}
+        {files.map((file, index) => <span className="chip" key={index}>{file.name} · {sizeText(file.size)} <button type="button" title="Remove this attachment" aria-label={`Remove ${file.name}`} disabled={sending} onClick={() => setFiles((previous) => previous.filter((_, i) => i !== index))}>✕</button></span>)}
         {pointed.map((point, index) => <span className="chip" title={point.text} key={index}>{point.label} <button type="button" title="Stop pointing at this" aria-label={`Stop pointing at ${point.label}`} onClick={() => setPointed((previous) => previous.filter((_, i) => i !== index))}>✕</button></span>)}
         {sending && files.length > 0 && <span>Saving the attachments…</span>}
       </div>
-    </div>}
+    </>}
     </div>
     </div>
-    <div ref={divider} role="separator" tabIndex={0} aria-label="Resize conversation and side pane" aria-orientation={layout.stacked ? 'horizontal' : 'vertical'} className="next-divider"
+    </div>
+    <div ref={divider} role="separator" tabIndex={0} aria-label="Resize conversation and side pane" aria-orientation={layout.stacked ? 'horizontal' : 'vertical'} id="split" className="next-divider" title="Drag to resize"
       onKeyDown={(event) => {
         const stacked = layoutRef.current.stacked;
         if (!(stacked ? ['ArrowUp', 'ArrowDown'] : ['ArrowLeft', 'ArrowRight']).includes(event.key)) return;
@@ -1123,26 +1150,27 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       onPointerMove={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = panel.current?.getBoundingClientRect(); if (bounds) resize((layoutRef.current.stacked ? event.clientY - bounds.top : event.clientX - bounds.left) - 3, layoutRef.current.stacked, false); }}
       onPointerCancel={(event) => { const bounds = panel.current?.getBoundingClientRect(); if (bounds) resize((layoutRef.current.stacked ? event.clientY - bounds.top : event.clientX - bounds.left) - 3, layoutRef.current.stacked, true); }}
       onPointerUp={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = panel.current?.getBoundingClientRect(); if (bounds) resize((layoutRef.current.stacked ? event.clientY - bounds.top : event.clientX - bounds.left) - 3, layoutRef.current.stacked, true); event.currentTarget.releasePointerCapture(event.pointerId); }} />
-    <div className="next-side" hidden={layout.sideClosed}>
-      <div><button type="button" title={layout.stacked ? 'Place conversation and side pane side by side' : 'Stack conversation above side pane'} onClick={() => applyLayout({ ...layoutRef.current, stacked: !layoutRef.current.stacked }, true, 'split-orient')}>{layout.stacked ? '⇆' : '⇅'}</button> <button type="button" title="Close side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: true }, true, 'side-closed')}>✕</button></div>
-      <div><button type="button" aria-label={peek || filePeek || receivedPeek ? 'Explorer tab' : undefined} data-peeking={peek || filePeek || receivedPeek ? 'true' : undefined} aria-pressed={subtab === 'explorer'} onClick={() => void reveal()}>Explorer</button> <button type="button" disabled={!doc} aria-pressed={subtab === 'document'} onClick={() => { openDocument(); setSubtab('document'); }}>Document</button></div>
-      <section ref={explorer} aria-label={peek || filePeek || received ? 'Peeked board files' : 'Explorer files'} hidden={subtab !== 'explorer'}>
-        {receivedPeek && !remote && <p>Looking at <b>{displayTitle(receivedPeek.name, receivedPeek.title ?? undefined)}</b> <button type="button" onClick={() => setReceivedPeek(null)}>Back to current</button></p>}
-        {!receivedPeek && (peek || filePeek) && <p>Looking at <b>{displayTitle((peek || filePeek)!.name, (peek || filePeek)!.title)}</b> <button type="button" onClick={() => { if (peek) void backToCurrent(); else setFilePeek(null); }}>Back to current</button></p>}
-        <div><button type="button" disabled={!base && !received} aria-pressed={received ? explorerMode !== 'root' : !rootMode} onClick={() => setExplorerMode('discussion')}>Discussion</button> <button type="button" aria-pressed={received ? explorerMode === 'root' : rootMode} onClick={() => setExplorerMode('root')}>Room checkout</button> <button type="button" disabled title="Coming soon">Worker copy</button></div>
-        <p>{received && explorerMode !== 'root' ? `${received.node} · round ${received.round}` : rootMode ? `${room?.folder?.replace(/\/+$/, '').split('/').at(-1) || 'agent-room'}/ · ${fileDetails?.branch || 'main'}` : `${base}/`}</p>
+    <div id="right" className="next-side" hidden={layout.sideClosed}>
+      <div id="subtabs"><button type="button" id="tab-explorer" className={'tab' + (subtab === 'explorer' ? ' on' : '') + (peek || filePeek || receivedPeek ? ' peeking' : '')} aria-label={peek || filePeek || receivedPeek ? 'Explorer tab' : undefined} data-peeking={peek || filePeek || receivedPeek ? 'true' : undefined} aria-pressed={subtab === 'explorer'} onClick={() => void reveal()}>Explorer</button><button type="button" id="tab-document" className={'tab' + (subtab === 'document' ? ' on' : '')} disabled={!doc} title={doc ? undefined : 'Choose a file in Explorer'} aria-pressed={subtab === 'document'} onClick={() => { openDocument(); setSubtab('document'); }}>Document</button>
+        <span id="side-controls"><button type="button" className="pane-ctrl" title={layout.stacked ? 'Place conversation and side pane side by side' : 'Stack conversation above side pane'} onClick={() => applyLayout({ ...layoutRef.current, stacked: !layoutRef.current.stacked }, true, 'split-orient')}>{layout.stacked ? '⇆' : '⇅'}</button><button type="button" className="pane-ctrl" title="Close side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: true }, true, 'side-closed')}>✕</button></span></div>
+      <div className="view" id="explorer" hidden={subtab !== 'explorer'}><div id="pane">
+      <section ref={explorer} id="files" aria-label={peek || filePeek || received ? 'Peeked board files' : 'Explorer files'} hidden={subtab !== 'explorer'}>
+        {receivedPeek && !remote && <p className="peek-banner">Looking at <b>{displayTitle(receivedPeek.name, receivedPeek.title ?? undefined)}</b> <button type="button" onClick={() => setReceivedPeek(null)}>Back to current</button></p>}
+        {!receivedPeek && (peek || filePeek) && <p className="peek-banner">Looking at <b>{displayTitle((peek || filePeek)!.name, (peek || filePeek)!.title)}</b> <button type="button" onClick={() => { if (peek) void backToCurrent(); else setFilePeek(null); }}>Back to current</button></p>}
+        <div className="explorer-bar"><button type="button" className={(received ? explorerMode !== 'root' : !rootMode) ? 'on' : undefined} disabled={!base && !received} aria-pressed={received ? explorerMode !== 'root' : !rootMode} onClick={() => setExplorerMode('discussion')}>Discussion</button><button type="button" className={(received ? explorerMode === 'root' : rootMode) ? 'on' : undefined} aria-pressed={received ? explorerMode === 'root' : rootMode} onClick={() => setExplorerMode('root')}>Room checkout</button><button type="button" disabled title="Coming soon">Worker copy</button></div>
+        <p className="explorer-sub">{received && explorerMode !== 'root' ? `${received.node} · round ${received.round}` : rootMode ? `${room?.folder?.replace(/\/+$/, '').split('/').at(-1) || 'agent-room'}/ · ${fileDetails?.branch || 'main'}` : `${base}/`}</p>
         {received && explorerMode !== 'root' ? <>
           {remote && <p>{remote.line.node} · round {remote.line.round} · received files</p>}
           <FileTree files={receivedFiles} prefix="" doc={doc?.startsWith('__received/') ? doc.split('/').slice(4).join('/') : null} unviewable={[]} expanded={expanded} toggle={(path, open) => setExpanded((previous) => { const next = new Set(previous); if (open) next.add(path); else next.delete(path); return next; })}
             choose={(file) => { const full = '__received/' + received.discussion + '/' + received.node + '/' + received.commit + '/' + file; docRef.current = full; setDoc(full); setSubtab('document'); openDocument(); }} />
         </> : <FileTree files={treeFiles} prefix={rootMode ? '' : base!} doc={doc} unviewable={fileDetails?.unviewable ?? []} expanded={expanded} toggle={(path, open) => setExpanded((previous) => { const next = new Set(previous); if (open) next.add(path); else next.delete(path); return next; })} choose={(file) => { if ((peek || filePeek?.readonly) && !rootMode) { docRef.current = file; setDoc(file); setSubtab('document'); openDocument(); } else void showFile(file); }} />}
       </section>
-      {doc && <section className="next-document" aria-label="Document" hidden={subtab !== 'document'}><div className="doc-bar"><details className="menu doc-menu" onToggle={(e) => { if (e.currentTarget.open) void loadSiblings(); }}><summary title="Other files in this folder"><span className="doc-current" title={doc}>{docLabel(doc)}</span></summary>
-          <div className="menu-items" aria-label="Other files in this folder">{siblings === null ? null : siblings.length ? siblings.map((f) => <button type="button" key={f.path} className={f.shown ? 'shown' : undefined} disabled={f.cantShow} title={f.cantShow ? "can't be shown here" : undefined}
+      </div></div>
+      {doc && <section className="view next-document" id="document" aria-label="Document" hidden={subtab !== 'document'}><div className="doc-bar" id="bar"><details className="menu doc-menu" id="doc-menu" onToggle={(e) => { if (e.currentTarget.open) void loadSiblings(); }}><summary title="Other files in this folder"><span className="doc-current" id="current" title={doc}>{docLabel(doc)}</span></summary>
+          <div className="menu-items" id="siblings" aria-label="Other files in this folder">{siblings === null ? null : siblings.length ? siblings.map((f) => <button type="button" key={f.path} className={f.shown ? 'shown' : undefined} disabled={f.cantShow} title={f.cantShow ? "can't be shown here" : undefined}
             onClick={(e) => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; if (f.cantShow || f.shown) return; if (f.received) { docRef.current = f.path; setDoc(f.path); } else void showFile(f.path); }}>{f.label}</button>) : 'No other files here.'}</div></details>
-          {transcriptDoc && <button type="button" title="Ask the agents to read this transcript in full" onClick={() => { tabRef.current = 'discussion'; setTab('discussion'); const root = room!.folder.endsWith('/') ? room!.folder : room!.folder + '/'; void boardCommand('Please read this transcript of an earlier session in full, as background for our discussion: ' + root + doc); }}>Send to agents</button>}
-        </div><iframe ref={frame} title="Document viewer" src={doc.split('/').map(encodeURIComponent).join('/')} /></section>}
-    </div>
+          {transcriptDoc && <button type="button" id="feed" title="Ask the agents to read this transcript in full" onClick={() => { tabRef.current = 'discussion'; setTab('discussion'); const root = room!.folder.endsWith('/') ? room!.folder : room!.folder + '/'; void boardCommand('Please read this transcript of an earlier session in full, as background for our discussion: ' + root + doc); }}>Send to agents</button>}
+        </div><div id="docpane"><iframe ref={frame} id="doc" title="Document viewer" src={doc.split('/').map(encodeURIComponent).join('/')} /></div></section>}
     </div>
     </div>
   </main>;

@@ -5,5 +5,7 @@ export default defineConfig({
   root: 'web',
   base: './',
   plugins: [react()],
-  build: { outDir: 'dist' },
+  // Keep the room page's CSS as written: light-dark() is supported by these browsers, so it isn't
+  // rewritten into variables that follow only the OS theme.
+  build: { outDir: 'dist', cssTarget: ['chrome123', 'safari17.5', 'firefox120', 'edge123'] },
 });

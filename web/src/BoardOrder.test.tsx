@@ -15,7 +15,7 @@ let paths: string[];
 const room = { folder, active: `discussions/${alpha}`, discussion: 'Alpha', started: true, workbenches: [], researches: [], closedDiscussions: [], checkpoints: [], open: [], autoDev: { status: null } };
 const key = (kind: string, root = folder) => `agent-room.${kind}-order:${root}`;
 const setup = () => { render(<App version="one" refresh={() => {}} />); Source.current.send({ type: 'reset', room, messages: [], input: true, doc: null }); };
-const rowTitles = (section: string) => [...screen.getByText(section).parentElement!.querySelectorAll('.board-row > button.entry')].map((item) => item.textContent);
+const rowTitles = (section: string) => [...screen.getByText(section).parentElement!.querySelectorAll('.board-row > .discussion-block > button.entry')].map((item) => item.textContent);
 beforeEach(() => { localStorage.clear(); paths = [`discussions/${alpha}/notes.md`, `discussions/${beta}/notes.md`, `brainstorms/${idea}/notes.md`, `brainstorms/${other}/notes.md`]; vi.stubGlobal('EventSource', Source); vi.stubGlobal('fetch', vi.fn(async (url: string) => ({ ok: true, json: async () => url.includes('detail=1') ? { files: paths, unviewable: [], branch: null } : paths, text: async () => '' }))); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 

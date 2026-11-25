@@ -84,7 +84,7 @@ export function Gauges({ gauges, at, monitor, openHealth }: { gauges: Gauge[] | 
       })}
     </span>)}{bare(new Set(gauges.map((g) => g.provider)))}</>;
   }
-  return <span className="gauges" aria-label="Subscription usage">{body}</span>;
+  return <span id="gauges" aria-label="Subscription usage">{body}</span>;
 }
 // The version the server runs, as showVersion does: snapshots taken at start and at the last Reload.
 function version(c: CodeInfo | null | undefined): { text: string; title: string } {
@@ -121,11 +121,11 @@ function replicaLine(replica: Replica, active: string | null, viewing: ViewedLin
 }
 type Ask = { text: string; buttons: [string, (() => unknown)?][]; done: (value: unknown) => void };
 type Props = {
-  roomName: string; folder: string | null; active: string | null; replica: Replica | null; replicaOff: string | null; viewing: ViewedLine | null; newRoom: boolean; readOnly: boolean;
+  children?: ReactNode; roomName: string; folder: string | null; active: string | null; replica: Replica | null; replicaOff: string | null; viewing: ViewedLine | null; newRoom: boolean; readOnly: boolean;
   post: (path: '__newroom' | '__pair', body: NewRoomRequest | PairRequest) => Promise<Response>; status: (text: string, error?: boolean) => void; navigate: (url: string) => void; code: CodeInfo | null | undefined; gauges: Gauge[] | null | undefined; at: QuotaAt | null | undefined; monitor: Monitor;
   openHealth: () => void; ended: boolean; restarting: boolean; command: (text: string) => void; shutdown: () => void; serverChanged: () => void;
 };
-export function RoomZones({ roomName, folder, active, replica, replicaOff, viewing, newRoom, readOnly, post, status, navigate, code, gauges, at, monitor, openHealth, ended, restarting, command, shutdown, serverChanged }: Props) {
+export function RoomZones({ children, roomName, folder, active, replica, replicaOff, viewing, newRoom, readOnly, post, status, navigate, code, gauges, at, monitor, openHealth, ended, restarting, command, shutdown, serverChanged }: Props) {
   // A modal question drawn in the page, as ask() does: each button's act runs inside its click (so
   // it may open a window); the promise resolves to what it returns (undefined for Escape).
   const [question, setQuestion] = useState<Ask | null>(null);
@@ -247,10 +247,11 @@ export function RoomZones({ roomName, folder, active, replica, replicaOff, viewi
     return () => { stopped = true; clearInterval(timer); };
   }, []);
   const v = version(code);
-  return <div className="next-zones">
-    <div className="room-zone" aria-label="Room">
-      <details className="menu" ref={roomMenu} onToggle={(e) => { if (e.currentTarget.open && serverMenu.current) serverMenu.current.open = false; }}>
-        <summary><b>{roomName}</b></summary>
+  // The header's grid items, as on /__room: the Room zone, then `children` (the Activity zone), then Monitoring.
+  return <>
+    <div id="room-zone" className="zone" aria-label="Room"><div className="zone-line">
+      <details className="menu" id="room-menu" ref={roomMenu} onToggle={(e) => { if (e.currentTarget.open && serverMenu.current) serverMenu.current.open = false; }}>
+        <summary><b id="room-name">{roomName}</b></summary>
         <div className="menu-items">
           <button type="button" disabled={switching} onClick={() => void switchRoom()}>Switch room…</button>
           {newRoom && <button type="button" title="Choose a folder and open its room in a new window, creating one there if you confirm. This room keeps running." onClick={() => void openRoom()}>Open room in folder…</button>}
@@ -258,18 +259,11 @@ export function RoomZones({ roomName, folder, active, replica, replicaOff, viewi
           <hr aria-hidden="true" />
           <button type="button" className="danger" title="End this room only: its agents and worker stop. The server's other rooms keep running." onClick={() => twice('quit', () => command('/quit'))}>{armed.quit ? 'Click again to quit this room' : 'Quit room'}</button></div>
       </details>
-      <span className="hover-detail" role="tooltip" aria-label="Room details">{folder && <code>{folder}</code>}{replica && <span>{replicaLine(replica, active, viewing, location.port)}</span>}</span>
-      {rooms && <select aria-label="Running rooms" value="" onChange={(e) => chooseRoom(e.target.value)}>
-        <option value="">Choose a running room…</option>
-        {([['tab', 'Switch this tab to'], ['window', 'Open in new window']] as const).map(([mode, heading]) => <optgroup key={mode} label={heading}>{rooms.map((r) => {
-          const open = !r.current && (r.pages ?? 0) > 0;
-          const pages = r.pages == null ? '' : ' · ' + r.pages + (r.pages === 1 ? ' page' : ' pages') + ' open';
-          return <option key={r.id} value={mode + ':' + r.path} disabled={r.current || open}>{r.root + ' · ' + (r.discussion || 'No discussion started') + pages + (r.current ? ' (current)' : open ? ' (open in another window)' : '')}</option>;
-        })}</optgroup>)}
-      </select>}
-      <span className="server-head">
-        <details className="menu" ref={serverMenu} onToggle={(e) => { if (e.currentTarget.open && roomMenu.current) roomMenu.current.open = false; }}>
-          <summary><span className="server" data-state={server.state ?? undefined} title={server.title}><i key={server.beat} className={server.state === 'up' ? 'beat on' : 'beat'} aria-hidden="true" />Server</span></summary>
+      <span id="replica-header" className="hover-detail" role="tooltip" aria-label="Room details">{folder && <code>{folder}</code>}{replica && <span>{replicaLine(replica, active, viewing, location.port)}</span>}</span>
+      </div><div id="server-box">
+      <span id="server-head">
+        <details className="menu" id="server-menu" ref={serverMenu} onToggle={(e) => { if (e.currentTarget.open && roomMenu.current) roomMenu.current.open = false; }}>
+          <summary><span id="server" className="server" data-state={server.state ?? undefined} title={server.title}><i id="beat" key={server.beat} className={server.state === 'up' ? 'on' : undefined} aria-hidden="true" />Server</span></summary>
           <div className="menu-items">
             {!readOnly && <button type="button" onClick={() => { closeMenus(); command('/reload'); }}>Reload</button>}
             <button type="button" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear." onClick={() => twice('restart', () => command('/restart'))}>{armed.restart ? 'Click again: the chat clears' : 'Restart'}</button>
@@ -277,13 +271,22 @@ export function RoomZones({ roomName, folder, active, replica, replicaOff, viewi
             <button type="button" className="danger" title="End every room on this server, then the server." onClick={() => twice('shutdown', shutdown)}>{armed.shutdown ? 'Click again: every room ends' : 'Shutdown server'}</button>
           </div>
         </details>
-        <span className="hover-detail" role="tooltip" aria-label="Server state"><span>{server.text}</span><span title={v.title}>{v.text}</span></span>
+        <span id="server-details" className="hover-detail" role="tooltip" aria-label="Server state"><span id="server-text">{server.text}</span><span id="code" title={v.title}>{v.text}</span></span>
       </span>
-      {down > 0 && <button type="button" className="peer-warning" title={downText} aria-label={downText} onClick={() => setPeersOpen(true)}>⚠</button>}
-      {question && <dialog ref={askDialog} className="ask" aria-label={question.text} onCancel={(e) => { e.preventDefault(); answer(); }}>
-        <p>{question.text}</p><div>{question.buttons.map(([label, act], i) => <button type="button" key={label} autoFocus={i === question.buttons.length - 1} onClick={() => answer(act)}>{label}</button>)}</div>
+      {down > 0 && <button type="button" id="peer-warning" title={downText} aria-label={downText} onClick={() => setPeersOpen(true)}>⚠</button>}
+      </div>
+      {rooms && <select id="rooms" aria-label="Running rooms" value="" onChange={(e) => chooseRoom(e.target.value)}>
+        <option value="">Choose a running room…</option>
+        {([['tab', 'Switch this tab to'], ['window', 'Open in new window']] as const).map(([mode, heading]) => <optgroup key={mode} label={heading}>{rooms.map((r) => {
+          const open = !r.current && (r.pages ?? 0) > 0;
+          const pages = r.pages == null ? '' : ' · ' + r.pages + (r.pages === 1 ? ' page' : ' pages') + ' open';
+          return <option key={r.id} value={mode + ':' + r.path} disabled={r.current || open}>{r.root + ' · ' + (r.discussion || 'No discussion started') + pages + (r.current ? ' (current)' : open ? ' (open in another window)' : '')}</option>;
+        })}</optgroup>)}
+      </select>}
+      {question && <dialog ref={askDialog} id="ask" aria-label={question.text} onCancel={(e) => { e.preventDefault(); answer(); }}>
+        <p id="ask-text">{question.text}</p><div id="ask-buttons">{question.buttons.map(([label, act], i) => <button type="button" key={label} autoFocus={i === question.buttons.length - 1} onClick={() => answer(act)}>{label}</button>)}</div>
       </dialog>}
-      {peersOpen && <dialog ref={peersDialog} className="peers" aria-label="Peers" onCancel={(e) => { e.preventDefault(); setPeersOpen(false); }}>
+      {peersOpen && <dialog ref={peersDialog} id="peers" aria-label="Peers" onCancel={(e) => { e.preventDefault(); setPeersOpen(false); }}>
         {(replica || replicaOff) && <h3>Peers</h3>}
         {!replica && replicaOff && <p className="status">{replicaOff}</p>}
         {replica?.peers.map((peer) => <div className="peer-row" key={peer.name} title={peer.error ?? undefined}>
@@ -292,9 +295,10 @@ export function RoomZones({ roomName, folder, active, replica, replicaOff, viewi
           {!peer.paired && <button type="button" onClick={() => void pair(peer.name)}>Pair with {peer.name}…</button>}
           {' · project ' + (peer.project?.commit ? peer.project.commit + (peer.project.dirty ? '+' : '') : 'version unavailable')}
         </div>)}
-        <div><button type="button" onClick={() => { peersDialog.current?.close?.(); setPeersOpen(false); }}>Close</button></div>
+        <div id="peers-buttons"><button type="button" onClick={() => { peersDialog.current?.close?.(); setPeersOpen(false); }}>Close</button></div>
       </dialog>}
     </div>
-    <div className="server-zone" aria-label="Monitoring"><Gauges gauges={gauges} at={at} monitor={monitor} openHealth={openHealth} /></div>
-  </div>;
+    {children}
+    <div id="server-zone" className="zone" aria-label="Monitoring"><div id="monitor"><Gauges gauges={gauges} at={at} monitor={monitor} openHealth={openHealth} /></div></div>
+  </>;
 }

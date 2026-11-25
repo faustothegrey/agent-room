@@ -42,7 +42,7 @@ it('sends the first message to name an unnamed discussion, brainstorm or researc
   setup({ active: null, multi: true });
   const user = userEvent.setup();
   for (const [extra, hint, message] of [
-    [{}, 'Your first message starts a new discussion.', 'A discussion'],
+    [{ started: false }, 'No active discussions: your first message starts one.', 'A discussion'],
     [{ brainstorm: true }, 'Your first message names this brainstorm and saves it here.', 'An idea'],
     [{ research: true }, 'Your first message names this research board and saves it here.', 'A question'],
   ] as const) {

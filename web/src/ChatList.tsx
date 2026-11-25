@@ -8,7 +8,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 // `memory`, so coming back shows it where it was, as the hidden list does on /__room.
 export type ChatMemory = { top: number; stick: boolean; reset: number };
 const atBottom = (list: HTMLElement) => list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-export function ChatList({ endLabel, resetKey, memory, children }: { endLabel: string; resetKey: number; memory?: RefObject<ChatMemory | null>; children: ReactNode }) {
+export function ChatList({ id, endLabel, resetKey, memory, children }: { id?: string; endLabel: string; resetKey: number; memory?: RefObject<ChatMemory | null>; children: ReactNode }) {
   const list = useRef<HTMLDivElement>(null);
   const saved = memory?.current, restored = useRef(!!saved && saved.reset === resetKey && !saved.stick);
   const stick = useRef(restored.current ? false : true), lastReset = useRef(resetKey);
@@ -37,7 +37,7 @@ export function ChatList({ endLabel, resetKey, memory, children }: { endLabel: s
     else el.scrollTop = el.scrollHeight;
   };
   return <div className="chat-wrap">
-    <div ref={list} className="chat">{children}</div>
+    <div ref={list} className="chat" id={id}>{children}</div>
     <button type="button" className="scroll-end" aria-label={endLabel} title="Scroll to latest messages" hidden={endHidden} onClick={toEnd}>↓</button>
   </div>;
 }
