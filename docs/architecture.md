@@ -38,13 +38,17 @@ One Node process serves several rooms, one per folder. Its source modules:
 | `src/room.mjs` | The main loop: turns, unseen messages, passes, the summary procedure. |
 | `src/ui.mjs` | Room setup, discussions, the worker queues and worktrees, auto dev, checkpoints, commands. |
 | `src/agents.mjs` | Provider adapters (Claude, Codex, agy): one CLI process per turn, launch flags, sessions, usage parsing, the record of running programs. |
-| `src/docs.mjs` | HTTP server, the browser screen, document rendering, live events. |
+| `src/docs.mjs` | Reloadable facade for screen and document routes and live events. |
+| `src/docs-routes.mjs`, `src/docs-http.mjs`, `src/docs-files.mjs`, `src/docs-next.mjs` | Room endpoints, document viewer and file serving, and built page assets. |
+| `web/` | React and TypeScript room page, styles and component tests; Vite builds it into `web/dist/`. |
 | `src/host-shell.mjs` | The Terminal pane's shell (this computer only). |
 | `src/replicate.mjs` | Optional replication of discussions to peer servers (`--node`, `--peer`). |
 | `src/usage.mjs` | Token totals and the optional quota meter. |
 | `src/instructions.mjs` | Prompt builders and the instruction catalog displayed in the Instructions panel. |
 | `src/mcp.mjs` | Read-only MCP stdio service for listing rooms and discussions. |
 | `src/notes.mjs` | The Notes pane: the User's own notes, kept on this computer only, never replicated nor shown to agents. |
+
+The single Node server serves the built room page at `/__room` (and each room’s `/r/<room>/__room`); `/__next` bookmarks redirect there. `npm start` builds and watches `web/` in the background. A direct start builds when the page is missing or older than its sources; build failure leaves the server running. Open pages compare the built-asset version on the room event stream after a rebuild or Reload.
 
 ## The main loop
 

@@ -5,7 +5,9 @@
 // One process serves several rooms, one per folder (identified by its real path). Each room's
 // conversation lives in its own `ctx`, with its own input queue, so it carries over a reload and a
 // round in one room never waits for another. Keep this file small: changes here need a restart.
-import { realpathSync, watch } from 'node:fs';
+import { realpathSync, watch, mkdtempSync, renameSync, rmSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
 import { basename, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -20,6 +22,7 @@ const { values } = parseArgs({
     open: { type: 'boolean' },
     reopen: { type: 'string' },
     dev: { type: 'boolean' },
+    'build-web': { type: 'boolean' },
     node: { type: 'string' },
     peer: { type: 'string', multiple: true },
     // Used by Restart only: another room to bring back, as JSON { cwd, agents, worker, reopen?, context? }.
@@ -42,12 +45,60 @@ let restored;
 try { restored = (values.room ?? []).map((r) => JSON.parse(r)); }
 catch { console.error('--room expects the JSON that Restart writes'); process.exit(1); }
 
+// The build command is shared by npm and dev mode. Vite never writes the live directory.
+const webRoot = fileURLToPath(new URL('../web/', import.meta.url));
+function buildWeb() {
+  const stage = mkdtempSync(resolve(webRoot, '.dist-stage-'));
+  const dist = resolve(webRoot, 'dist'), backup = stage + '-old';
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const vite = fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url));
+  return new Promise((ok, fail) => execFile(process.execPath, [vite, 'build', '--config', 'web/vite.config.ts', '--outDir', stage], { cwd: root }, (err, stdout, stderr) => {
+    if (err) {
+      try { rmSync(stage, { recursive: true, force: true }); } catch {}
+      return fail(new Error((stderr || stdout || err.message).trim()));
+    }
+    let backed = false;
+    try {
+      if (existsSync(dist)) { renameSync(dist, backup); backed = true; }
+      try { renameSync(stage, dist); }
+      catch (e) { if (backed) renameSync(backup, dist); throw e; }
+      if (backed) rmSync(backup, { recursive: true, force: true });
+      ok(stdout);
+    } catch (e) { try { rmSync(stage, { recursive: true, force: true }); } catch {} fail(e); }
+  }));
+}
+if (values['build-web']) {
+  try { process.stdout.write(await buildWeb()); }
+  catch (err) { console.error(`Web build failed: ${err.message}`); process.exitCode = 1; }
+  process.exit();
+}
+
 // The latest loaded code (each room also keeps the version it last applied, in ctx.ui). The query
 // defeats the module cache; ui.load imports the rest with the same tag.
 let ui = await import(`./ui.mjs?v=${Date.now()}`);
 if (values.help) {
   console.log(ui.USAGE);
   process.exit(0);
+}
+
+// A direct start needs a current page too; dev mode builds in its existing background watcher.
+function webNeedsBuild() {
+  const index = resolve(webRoot, 'dist/index.html');
+  if (!existsSync(index)) return true;
+  const built = statSync(index).mtimeMs;
+  function newer(dir) {
+    return readdirSync(dir, { withFileTypes: true }).some((entry) => {
+      if (dir === webRoot && (entry.name === 'dist' || entry.name.startsWith('.dist-stage-'))) return false;
+      const path = resolve(dir, entry.name);
+      return entry.isDirectory() ? newer(path) : statSync(path).mtimeMs > built;
+    });
+  }
+  return newer(webRoot);
+}
+if (!values.dev) {
+  try {
+    if (webNeedsBuild()) { await buildWeb(); console.log('Web build complete.'); }
+  } catch (err) { console.error(`Web build failed; the existing room is still available: ${err.message}`); }
 }
 
 const END = Symbol('end'); // pushed into a room's input when the whole server ends
@@ -227,7 +278,43 @@ for (const r of restored) {
   try { await addRoom(r.cwd, { agents: r.agents, worker: r.worker, reopen: r.reopen, context: r.context }); }
   catch (err) { console.error(`✗ The room in ${r.cwd} could not be restored: ${err.message}`); }
 }
-if (values.dev && !noScreen) watchSource();
+if (values.dev) {
+  watchWeb();
+  if (!noScreen) watchSource();
+}
+
+// Build in the background: the existing room must start even if Vite is absent or the build fails.
+// Coalesce edits, and serialize builds so an older result cannot overwrite a newer one.
+function watchWeb() {
+  let running = false, pending = false, timer;
+  const build = async () => {
+    if (running) { pending = true; return; }
+    running = true;
+    try {
+      await buildWeb();
+      console.log('Web build complete.');
+      for (const ctx of hub.rooms.values()) {
+        ctx.docs?.notifyNext(ctx.screen);
+        ctx.docs?.broadcast(ctx.screen, { type: 'reloaded', page: ctx.docs.PAGE, webVersion: ctx.docs.nextVersion() });
+      }
+    } catch (err) {
+      for (const ctx of hub.rooms.values()) report(ctx, `Web build failed; the existing room is still available: ${err.message}`);
+    }
+    running = false;
+    if (pending) { pending = false; build(); }
+  };
+  try {
+    const watcher = watch(new URL('../web/', import.meta.url), { recursive: true }, (_, file) => {
+      if (!file || file.startsWith('.dist-stage-') || file === 'dist' || file.startsWith(`dist/`) || file.startsWith(`dist\\`)) return;
+      clearTimeout(timer);
+      timer = setTimeout(build, 300);
+    });
+    watcher.on('error', (err) => { for (const ctx of hub.rooms.values()) report(ctx, `Web watcher failed: ${err.message}`); });
+  } catch (err) {
+    for (const ctx of hub.rooms.values()) report(ctx, `Web watcher failed: ${err.message}`);
+  }
+  build();
+}
 
 // --dev: saving a module in src/ or a rulebook reloads every room (after a round in progress, like
 // the button); an editor's burst of events makes one reload. This file can't reload: it asks for Restart.

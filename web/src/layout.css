@@ -1,0 +1,47 @@
+/* Rules for the React page's own markup, on top of legacy.css (the room page's stylesheet). Where the
+   React structure differs from /__room's (extra wrappers, buttons instead of tabs, attributes instead
+   of classes), these rules give it the same look. */
+[hidden] { display: none !important; } /* React hides with the attribute; legacy rules set display on many elements */
+#root { display: contents; }
+.app > header { min-width: 0; }
+.ctrl-btn[aria-pressed="true"] { background: #3b82f624; border-color: #3b82f666; color: CanvasText; font-weight: 600; }
+#services-panel > .view { flex: 1; min-height: 0; overflow-y: auto; }
+#services-panel > #terminal, #services-panel > #notes { overflow: hidden; }
+/* The title is a heading for screen readers, styled as /__room's #disc line. */
+h1#disc { margin: 0; font: inherit; font-size: .85rem; color: var(--dim); line-height: 1.35; }
+h1#disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
+#disc-zone .busy-dot { color: #f59e0b; }
+#disc-workers > span { white-space: nowrap; }
+#busy[data-state] > span { display: none; }
+/* Boards: rows without a drag handle or menu keep the legacy row layout. */
+#board-list .discussion-row > a.entry, #board-list .discussion-row > button.entry { flex: 1; min-width: 0; }
+#board-list .entry.discussion::before { content: '💬'; } #board-list .entry.brainstorm::before { content: '💡'; }
+.row-menu-items { min-width: 12rem; }
+.row-menu .row-menu-items { left: auto; right: 0; }
+#board-list details:not(.menu) > summary { cursor: pointer; }
+/* Composer pieces that are direct children on /__next. */
+.composer .mention-offer { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-bottom: .35rem; font-size: .8rem; }
+#attach-row .chip { display: inline-flex; align-items: center; gap: .25rem; padding: .05rem .2rem .05rem .5rem; border: 1px solid var(--line); border-radius: 9px; margin-right: .3rem; }
+#attach-row .chip button { border: 0; background: none; padding: 0 .25rem; font-size: .8rem; cursor: pointer; }
+#wstop { margin-top: .4rem; }
+.first-hint { margin: .5rem 1rem 0; }
+/* Messages: the speaker line is a <strong> on /__next (.who on /__room). */
+.msg > strong { display: block; font-weight: 600; font-size: .85rem; margin-bottom: .2rem; }
+#remote-view, #work-remote-view { margin: .5rem .6rem; }
+/* Side pane: Explorer and Document as buttons styled as the legacy tabs. */
+#subtabs .tab { border-radius: 0; }
+#tab-explorer.peeking::after { content: ' ●'; color: #f59e0b; }
+#files > section, #files { min-width: 0; }
+#files details > summary { cursor: pointer; }
+#document { min-height: 0; }
+#docpane { display: flex; flex-direction: column; }
+#docpane iframe { flex: 1; min-height: 0; }
+#siblings button.shown { font-weight: 600; }
+/* Services. */
+.terminal-service { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; }
+#notes-body { height: 100%; }
+#notes-main textarea { flex: 1; min-height: 0; }
+#ask > div, #peers-buttons { display: flex; justify-content: flex-end; gap: .5rem; }
+.discard-dialog::backdrop, #ask::backdrop, #peers::backdrop { background: #0006; }
+.discard-dialog code { overflow-wrap: anywhere; }
+.agent-settings form { margin: 0; }

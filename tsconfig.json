@@ -4,7 +4,15 @@
     "checkJs": false,
     "noEmit": true,
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "module": "preserve",
+    "moduleResolution": "bundler"
   },
-  "include": ["src/**/*.mjs", "src/**/*.d.ts"]
+  "include": [
+    "src/**/*.mjs",
+    "src/**/*.d.ts",
+    "web/**/*.ts",
+    "web/**/*.tsx"
+  ]
 }
