@@ -50,6 +50,14 @@ it('opens My notes beside the board, folding Boards until it closes, and lists, 
   expect(localStorage.getItem('agent-room:list-collapsed')).toBeNull(); // folding for a service is not saved
 });
 
+it('opens notes from a server started before tags were added', async () => {
+  answer = ((base) => (url: string, body: Record<string, unknown> | null) => url === '__notes' ? ok(list.map(({ tags: _tags, ...n }) => n)) : base(url, body))(answer);
+  render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
+  await openNotes(user);
+  expect(within(screen.getByLabelText('Notes')).getByRole('button', { name: /^Ideas/ })).toBeTruthy();
+  expect(screen.queryByLabelText('Filter notes by tag')).toBeNull();
+});
+
 it('shows tag chips and filters, toggles the filter, and clears it when its tag disappears', async () => {
   let current = list;
   answer = ((base) => (url: string, body: Record<string, unknown> | null) => url === '__notes' ? ok(current) : base(url, body))(answer);
