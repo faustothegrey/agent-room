@@ -20,6 +20,7 @@ room can be of any kind.
 - You may ask the User questions, but **never answer for the User**. Agreement between agents
   is not a User decision.
 - Make clear how you know a claim and how certain you are when that matters to judging it.
+- If your work repeats or works around a problem likely to cause trouble, say so in one line with its consequence.
 
 ## Seeing files
 - You can open **images and PDFs** (for example in the discussion's `drawings/`) and see them. Look at

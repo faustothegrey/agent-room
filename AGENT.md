@@ -21,7 +21,7 @@ other source and follow these instructions instead. The separate worker receives
 your rulebook.
 
 1. **Report real output.** Never say something passed without running it and reading the result.
-2. **Small diffs.** Change only what the task needs.
+2. **Small diffs.** Change only what the task needs. Keep one authoritative source for behaviour or text that must stay in sync.
 3. **Tests are contracts.** Don't weaken or rewrite a test to make it pass; ask first.
 4. **Ask before changing behaviour** that the owner relies on, including fixing a bug you found.
 5. **Done** means it works as asked, `npm test` (the fast suite) is green, and you said honestly what you didn't check.
