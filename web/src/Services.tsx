@@ -168,7 +168,7 @@ function Health({ open, post }: { open: boolean; post: ProvidersPost }) {
       if (!programs.length) line(label + ': none in last available results');
       for (const p of programs) line(label + ': PID ' + p.pid + ' · ' + p.provider + ' · ' + p.agent + ' · room ' + p.room + ' · age ' + age(p.started) + (p.unverified ? ' · unverified' : ''));
     }
-    for (const q of data.quota) line('Quota meter · room ' + q.room + ': ' + (q.reachable === null ? 'not checked' : q.reachable ? 'reachable' : 'not reachable') + ' · measured ' + (q.measured || 'unknown') + ' · checked ' + when(q.checked));
+    for (const q of data.quota) line('Quota meter · room ' + q.room + ': ' + (q.reachable === null ? 'not checked' : q.reachable ? 'reachable' : 'not reachable') + ' · readings ' + (q.providers ? Object.entries(q.providers).map(([p, t]) => p + ': ' + (t || 'unknown')).join(', ') : (q.measured || 'unknown')) + ' · checked ' + when(q.checked));
   }
   return <><button type="button" id="health-check" disabled={busy} onClick={() => void load(true)}>Check now</button><div id="provider-health" role="status" aria-label="Provider health">{error || lines}</div></>;
 }

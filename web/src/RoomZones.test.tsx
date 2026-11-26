@@ -84,9 +84,9 @@ it('shows the heartbeat every three seconds, refreshes for a new server, and say
 it('shows the quota gauges with their windows, thresholds, tooltips and updated time', () => {
   render(<App version="one" refresh={() => {}} />);
   reset({ quota: [{ provider: 'claude', label: '5h', used: 75, resets: '13:00' }, { provider: 'claude', label: 'week', used: 95, resets: 'Mon 09:00' }, { provider: 'codex', label: '5h', used: 10, resets: null }],
-    quotaAt: { measured: new Date().toLocaleDateString('sv') + ' 08:11:00', checked: new Date().toISOString() }, monitor: { claude: { login: { state: 'ok', expiresAt: null }, running: 2, leftovers: [], inRoom: true } } });
+    quotaAt: { measured: new Date().toLocaleDateString('sv') + ' 08:11:00', providers: { claude: new Date().toLocaleDateString('sv') + ' 08:11:00' }, checked: new Date().toISOString() }, monitor: { claude: { login: { state: 'ok', expiresAt: null }, running: 2, leftovers: [], inRoom: true } } });
   const usage = screen.getByLabelText('Subscription usage');
-  expect(within(usage).getByText(/^on\s+08:11$/).title).toMatch(/^Measured by the quota meter at .* 08:11:00\. The room last asked the meter at/);
+  expect(within(usage).getByText(/^\d+m old$/).title).toMatch(/^Reading at .* 08:11:00\. The room last checked at/);
   const gauges = usage.querySelectorAll('.gauge');
   expect([...gauges].map((g) => g.className)).toEqual(['gauge warn', 'gauge high', 'gauge']);
   expect(gauges[1].firstElementChild?.textContent).toBe('wk');

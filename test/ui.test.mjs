@@ -5124,8 +5124,8 @@ test('discussion and brainstorm prompts (including summary turns) start with eac
   ];
   ctx.screen.quotaAt = { measured: `${today} 09:42:00`, checked: now.toISOString() };
   const fakeQuota = {
-    claude: { ok: true, parsed: { current_session: { used_percent: 70 }, current_week_all_models: { used_percent: 31 } } },
-    codex: { ok: true, parsed: { five_hour_limit: { used_percent: 20 }, weekly_limit: { used_percent: 3 } } },
+    claude: { ok: true, updated_at: `${today} 09:42:00`, parsed: { current_session: { used_percent: 70 }, current_week_all_models: { used_percent: 31 } } },
+    codex: { ok: true, updated_at: `${today} 09:42:00`, parsed: { five_hour_limit: { used_percent: 20 }, weekly_limit: { used_percent: 3 } } },
     last_update: `${today} 09:42:00`,
   };
   let meterCallsDuringRound = 0;
@@ -5142,20 +5142,20 @@ test('discussion and brainstorm prompts (including summary turns) start with eac
   await handleLine('hello', ctx);
   assert.equal(meterCallsDuringRound, 0);
   // First turn of each agent: none yet + own provider's cached quota only.
-  assert.match(aPrompts[0], /^\[your reported usage this session: none yet · claude quota 70% used 5h \/ 31% used week, meter at 09:42\]\n\nYou are A/);
+  assert.match(aPrompts[0], /^\[your reported usage this session: none yet · claude quota 70% used 5h \/ 31% used week, reading \d+m old\]\n\nYou are A/);
   assert.doesNotMatch(aPrompts[0].split('\n')[0], /codex/);
-  assert.match(bPrompts[0], /^\[your reported usage this session: none yet · codex quota 20% used 5h \/ 3% used week, meter at 09:42\]\n\nYou are B/);
+  assert.match(bPrompts[0], /^\[your reported usage this session: none yet · codex quota 20% used 5h \/ 3% used week, reading \d+m old\]\n\nYou are B/);
   assert.doesNotMatch(bPrompts[0].split('\n')[0], /claude/);
   // Second turn within the same round: reads updated ctx.totals, never the other agent's figures.
-  assert.match(aPrompts[1], /^\[your reported usage this session: 1 turn, 1\.2k in \(800 cached\) \/ 150 out · claude quota 70% used 5h \/ 31% used week, meter at 09:42\]\n\n/);
-  assert.match(bPrompts[1], /^\[your reported usage this session: 1 turn, 900 in \(100 cached\) \/ 50 out · codex quota 20% used 5h \/ 3% used week, meter at 09:42\]\n\n/);
+  assert.match(aPrompts[1], /^\[your reported usage this session: 1 turn, 1\.2k in \(800 cached\) \/ 150 out · claude quota 70% used 5h \/ 31% used week, reading \d+m old\]\n\n/);
+  assert.match(bPrompts[1], /^\[your reported usage this session: 1 turn, 900 in \(100 cached\) \/ 50 out · codex quota 20% used 5h \/ 3% used week, reading \d+m old\]\n\n/);
   // Summary turn (auto-summarize) also carries the updated line.
-  assert.match(aPrompts[2], /^\[your reported usage this session: 2 turns, 2\.4k in \(1\.6k cached\) \/ 300 out · claude quota 70% used 5h \/ 31% used week, meter at 09:42\]\n\n/);
+  assert.match(aPrompts[2], /^\[your reported usage this session: 2 turns, 2\.4k in \(1\.6k cached\) \/ 300 out · claude quota 70% used 5h \/ 31% used week, reading \d+m old\]\n\n/);
   assert.match(aPrompts[2], /asked for a summary/);
 
   // Brainstorm prompt also carries the line at the top.
   ctx.state.brainstorm = true;
-  assert.match(ctx.room.promptFor(a), /^\[your reported usage this session: 3 turns, 3\.6k in \(2\.4k cached\) \/ 450 out · claude quota 70% used 5h \/ 31% used week, meter at 09:42\]\n\n/);
+  assert.match(ctx.room.promptFor(a), /^\[your reported usage this session: 3 turns, 3\.6k in \(2\.4k cached\) \/ 450 out · claude quota 70% used 5h \/ 31% used week, reading \d+m old\]\n\n/);
 });
 
 test('worker prompt starts with only the worker\'s own usage line from ctx.totals and cached quota', async () => {
@@ -5187,7 +5187,7 @@ test('worker prompt starts with only the worker\'s own usage line from ctx.total
   queueWork(ctx, 'first work');
   await ctx.workQueue;
   assert.equal(meterCallsBeforeTurn, 0);
-  assert.match(got[0], /^\[your reported usage this session: none yet · codex quota 20% used 5h \/ 3% used week, meter at 09:42\]\n\n/);
+  assert.match(got[0], /^\[your reported usage this session: none yet · codex quota 20% used 5h \/ 3% used week, reading \d+m old\]\n\n/);
   assert.doesNotMatch(got[0].split('\n')[0], /claude|99\.0k/);
 
   // Restore cached quota (refreshQuota after turn 1 overwrote it with null because our stub returned null) and run turn 2.
@@ -5195,7 +5195,7 @@ test('worker prompt starts with only the worker\'s own usage line from ctx.total
   ctx.screen.quotaAt = { measured: `${today} 09:43:00`, checked: now.toISOString() };
   queueWork(ctx, 'second work');
   await ctx.workQueue;
-  assert.match(got[1], /^\[your reported usage this session: 1 turn, 5\.0k in \(3\.0k cached\) \/ 400 out · codex quota 21% used 5h \/ 4% used week, meter at 09:43\]\n\nsecond work$/);
+  assert.match(got[1], /^\[your reported usage this session: 1 turn, 5\.0k in \(3\.0k cached\) \/ 400 out · codex quota 21% used 5h \/ 4% used week, reading \d+m old\]\n\nsecond work$/);
 });
 
 test('a detached worker from another discussion reports usage unavailable instead of none yet or the new discussion\'s totals', async () => {
@@ -5232,7 +5232,7 @@ test('a detached worker from another discussion reports usage unavailable instea
   releaseFirst('first done');
   await ctx.workQueue;
   assert.equal(got.length, 2);
-  assert.match(got[1], /^\[your reported usage this session: usage unavailable · codex quota 20% used 5h \/ 3% used week, meter at 09:42\]\n\nqueued from old discussion$/);
+  assert.match(got[1], /^\[your reported usage this session: usage unavailable · codex quota 20% used 5h \/ 3% used week, reading \d+m old\]\n\nqueued from old discussion$/);
   assert.doesNotMatch(got[1].split('\n')[0], /none yet|77\.0k/);
 });
 
@@ -6842,7 +6842,7 @@ test('research scheduler applies the real quota guard before creating a board an
   const docs = await import('../src/docs.mjs');
   const cwd = await tmp('research-quota-');
   const now = new Date(2026, 10, 21, 3, 0);
-  const healthy = { claude: { ok: true, parsed: { current_session: { used_percent: 20 }, current_week_all_models: { used_percent: 10 } } }, last_update: '2026-11-21 02:58:00' };
+  const healthy = { claude: { ok: true, updated_at: '2026-11-21 02:58:00', parsed: { current_session: { used_percent: 20 }, current_week_all_models: { used_percent: 10 } } }, last_update: '2026-11-21 02:58:00' };
   let quota = null, turns = 0, board;
   const state = { transcript: [], seen: new Map() };
   const ctx = { cwd, scheduleFile: `${cwd}/schedule.json`, agentSpecs: 'claude:A', workerSpec: 'claude:Worker', state,
@@ -6854,15 +6854,15 @@ test('research scheduler applies the real quota guard before creating a board an
     board = next;
     const agent = { name: 'A', provider: 'claude', turn: async () => {
       turns++;
-      quota = { ...healthy, claude: { ok: true, parsed: { current_session: { used_percent: 65 }, current_week_all_models: { used_percent: 10 } } } };
+      quota = { ...healthy, claude: { ok: true, updated_at: '2026-11-21 02:58:00', parsed: { current_session: { used_percent: 65 }, current_week_all_models: { used_percent: 10 } } } };
       return 'A finding';
     } };
     return { room: createRoom([agent], next.state), worker: { name: 'Worker' }, docs, usage: ctx.usage };
   };
   for (const [reading, reason] of [
     [null, /unavailable|missing|reachable/i],
-    [{ ...healthy, last_update: '2026-11-21 02:00:00' }, /stale/i],
-    [{ ...healthy, claude: { ok: true, parsed: { current_session: { used_percent: 55 }, current_week_all_models: { used_percent: 10 } } } }, /45% remaining/i],
+    [{ ...healthy, claude: { ...healthy.claude, updated_at: '2026-11-21 02:00:00' } }, /stale/i],
+    [{ ...healthy, claude: { ok: true, updated_at: '2026-11-21 02:58:00', parsed: { current_session: { used_percent: 55 }, current_week_all_models: { used_percent: 10 } } } }, /45% remaining/i],
   ]) {
     quota = reading;
     const skipped = await runScheduledTask(ctx, id, { now, loadRoom });
@@ -7136,10 +7136,11 @@ test('Reload preserves per-context quota, per-workshop schedule and server monit
     const b = await make(roomA, roomA + '#second');
     const c = await make(roomB, roomB);
     assert.equal(a.shop, b.shop); assert.notEqual(a.shop, c.shop);
-    assert.equal(made.length, 7); assert.equal(active.size, 7);
+    assert.equal(made.length, 8); assert.equal(active.size, 8);
     assert.equal(made.filter((t) => t.ms === 15_000).length, 2);
     assert.equal(made.filter((t) => t.ms === 60_000).length, 4); // three quotas and one leftovers
     assert.equal(made.filter((t) => t.ms === 600_000).length, 1);
+    assert.equal(made.filter((t) => t.ms === 120_000).length, 1);
     const quotas = [a.quotaTimer, b.quotaTimer, c.quotaTimer], timers = [...hub.monitorTimers], schedules = [a.shop.schedulerTimer, c.shop.schedulerTimer];
     const oldQuota = a.refreshQuota, oldLogin = hub.checkLogins, oldLeftovers = hub.checkLeftovers, oldSchedule = a.shop.checkSchedule;
     const oldMonitor = a.monitorModule, oldScheduler = a.schedulerModule;
@@ -7162,7 +7163,7 @@ test('Reload preserves per-context quota, per-workshop schedule and server monit
     assert.notEqual(hub.checkLeftovers, oldLeftovers); assert.notEqual(a.shop.checkSchedule, oldSchedule);
     assert.deepEqual([a.quotaTimer, b.quotaTimer, c.quotaTimer], quotas);
     assert.deepEqual(hub.monitorTimers, timers); assert.deepEqual([a.shop.schedulerTimer, c.shop.schedulerTimer], schedules);
-    assert.equal(made.length, 7); assert.equal(active.size, 7);
+    assert.equal(made.length, 8); assert.equal(active.size, 8);
     const calls = [];
     a.refreshQuota = () => calls.push('quota'); hub.checkLogins = () => calls.push('login');
     hub.checkLeftovers = () => calls.push('leftovers'); a.shop.checkSchedule = () => calls.push('schedule');
@@ -7171,7 +7172,7 @@ test('Reload preserves per-context quota, per-workshop schedule and server monit
     a.stopped = true; nextUi.ended(a); assert.ok(active.has(schedules[0]));
     b.stopped = true; nextUi.ended(b); assert.ok(!active.has(schedules[0]));
     c.stopped = true; nextUi.ended(c); assert.ok(!active.has(schedules[1]));
-    assert.deepEqual([...active], timers); // monitor timers are server-wide, not owned by rooms
+    assert.deepEqual(new Set(active), new Set([...timers, hub.quotaCacheTimer])); // server-wide timers outlive rooms
   } finally {
     globalThis.setInterval = originalSet; globalThis.clearInterval = originalClear;
     rmSync(root, { recursive: true, force: true, maxRetries: 5 });

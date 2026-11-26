@@ -771,7 +771,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
         usageUnavailable: worker !== ctx.worker,
         provider: worker.provider,
         gauges: ctx.screen?.quota,
-        measured: ctx.screen?.quotaAt?.measured,
+        measured: ctx.screen?.quotaAt?.providers ?? ctx.screen?.quotaAt?.measured,
       });
       const prompt = `${makeUsageLine()}\n\n` + interrupted + brief + tree + commit + workbenchNote + retryBrief + leftover + merge + (history ? instr.workerHistory(history, text) : text);
       // Stopped while its worktree was prepared: its worker never starts.
