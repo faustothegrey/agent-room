@@ -13,7 +13,6 @@ type Mermaid = { initialize(options: object): void; render(id: string, source: s
 const win = () => window as unknown as { mermaid?: Mermaid };
 let mermaidReady: Promise<Mermaid> | null = null, diagramSeq = 0;
 const diagramCache = new Map<string, string>();
-const dark = () => typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
 function loadMermaid(): Promise<Mermaid> {
   const loaded = win().mermaid; if (loaded) return Promise.resolve(loaded);
   return mermaidReady ??= new Promise((done, fail) => {
@@ -22,7 +21,7 @@ function loadMermaid(): Promise<Mermaid> {
     script.onload = () => {
       const m = win().mermaid;
       if (!m) { mermaidReady = null; fail(new Error('Mermaid failed to load')); return; }
-      m.initialize({ startOnLoad: false, securityLevel: 'strict', theme: dark() ? 'dark' : 'default' });
+      m.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark' });
       done(m);
     };
     script.onerror = () => { mermaidReady = null; fail(new Error('Could not load Mermaid')); };
@@ -31,9 +30,9 @@ function loadMermaid(): Promise<Mermaid> {
 }
 // A lane's branch diagram, drawn (with Mermaid, loaded once) only while its section is open.
 function BranchDiagram({ graph }: { graph: string }) {
-  const [shown, setShown] = useState<{ svg?: string; error?: string }>(() => ({ svg: diagramCache.get((dark() ? 'dark' : 'default') + '\n' + graph) }));
+  const [shown, setShown] = useState<{ svg?: string; error?: string }>(() => ({ svg: diagramCache.get('dark\n' + graph) }));
   useEffect(() => {
-    const key = (dark() ? 'dark' : 'default') + '\n' + graph;
+    const key = 'dark\n' + graph;
     const cached = diagramCache.get(key); if (cached) { setShown({ svg: cached }); return; }
     let live = true; setShown({});
     loadMermaid().then((m) => {

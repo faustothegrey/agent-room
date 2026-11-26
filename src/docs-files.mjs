@@ -253,7 +253,7 @@ function page(title, body, watch, base = '/') {
   const home = `<a href="${esc(base)}">all files</a>`, mtime = `${base}__mtime?f=`;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>${esc(title)}</title><style>
-:root { color-scheme: light dark; }
+:root { color-scheme: dark; }
 body { font: 16px/1.55 -apple-system, system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
 img { max-width: 100%; } img.preview { display: block; margin: .5rem 0; }
 pre, code { background: #8881; border-radius: 4px; } pre { padding: .75rem; overflow-x: auto; } code { padding: 0 .2em; }
@@ -261,7 +261,7 @@ table { border-collapse: collapse; } th, td { border: 1px solid #8886; padding: 
 .sheet-box { overflow-x: auto; margin: 1rem 0; }
 .sheet { font: 13px/1.4 ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; }
 .sheet th { font-weight: 400; opacity: .6; background: #8881; } .sheet td.num { text-align: right; }
-.sheet td.formula { color: #2f6fde; } @media (prefers-color-scheme: dark) { .sheet td.formula { color: #7aa7ff; } }
+.sheet td.formula { color: #7aa7ff; }
 .sheet td { cursor: pointer; } .sheet td:hover { background: #2f6fde1f; }
 .sheet td.hl { outline: 2px solid #e07a10; outline-offset: -2px; background: #e07a1026; }
 .mermaid-box { margin: 1rem 0; overflow-x: auto; } .mermaid-box svg { max-width: 100%; height: auto; }
@@ -292,7 +292,7 @@ if (window.vegaEmbed) for (const box of document.querySelectorAll('.vl-box')) {
   };
   let spec;
   try { spec = JSON.parse(src.textContent); } catch (err) { fail(err); continue; }
-  vegaEmbed(box, spec, { renderer: 'svg', actions: false, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : undefined })
+  vegaEmbed(box, spec, { renderer: 'svg', actions: false, theme: 'dark' })
     .then(({ view }) => { views.push(view); view.addEventListener('click', (e, item) => pointAtDatum(item)); }).catch(fail);
 }
 // A chart item's plain fields, as "day: 16 Nov, runs: 42": not Vega's own (_x, and the
@@ -316,7 +316,7 @@ function chartItems() {
 // Mermaid blocks: drawn here, with mermaid's strict security (no scripts or click handlers from
 // the source). A source with an error shows mermaid's message under it.
 if (window.mermaid) {
-  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default', flowchart: { htmlLabels: false } });
+  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark', flowchart: { htmlLabels: false } });
   let n = 0;
   for (const box of document.querySelectorAll('.mermaid-box')) {
     const src = box.querySelector('.mermaid-src'), id = 'mermaid-' + (++n);
