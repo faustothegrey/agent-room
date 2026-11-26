@@ -11,7 +11,7 @@ class Source {
 }
 const room = { folder: '/room', discussion: 'Live', active: 'discussions/2026-11-25-live', started: true, multi: true, brainstorm: false, research: false, workbench: false, members: [], failedAgents: [],
   open: [{ url: '/r/b/__room', current: false, title: 'Other board', active: null, brainstorm: false, workbench: false, research: false, started: false, working: false, workerBusy: false, ongoing: false }] };
-const list = [{ id: '20261125-080000-aaaaaaaa', title: 'Plan', savedAt: '2026-11-25T08:00:00Z' }, { id: '20261125-090000-bbbbbbbb', title: 'Ideas', savedAt: '2026-11-25T09:00:00Z' }];
+const list = [{ id: '20261125-080000-aaaaaaaa', title: 'Plan', tags: ['work', 'big idea'], savedAt: '2026-11-25T08:00:00Z' }, { id: '20261125-090000-bbbbbbbb', title: 'Ideas', tags: ['work'], savedAt: '2026-11-25T09:00:00Z' }];
 const ok = (body: unknown = {}) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
 let answer: (url: string, body: Record<string, unknown> | null) => unknown;
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => url === '__health' ? new Promise(() => {}) : answer(url, init?.body ? JSON.parse(String(init.body)) : null));
@@ -48,6 +48,26 @@ it('opens My notes beside the board, folding Boards until it closes, and lists, 
   await user.click(within(panel()).getByRole('button', { name: 'Close services panel' }));
   expect(panel().hidden).toBe(true); expect(screen.getByRole('button', { name: 'Collapse boards list' })).toBeTruthy();
   expect(localStorage.getItem('agent-room:list-collapsed')).toBeNull(); // folding for a service is not saved
+});
+
+it('shows tag chips and filters, toggles the filter, and clears it when its tag disappears', async () => {
+  let current = list;
+  answer = ((base) => (url: string, body: Record<string, unknown> | null) => url === '__notes' ? ok(current) : base(url, body))(answer);
+  render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
+  await openNotes(user);
+  const filters = within(screen.getByLabelText('Filter notes by tag'));
+  const rows = within(screen.getByLabelText('Notes'));
+  expect(rows.getByRole('button', { name: /^Plan/ }).textContent).toContain('#big idea');
+  await user.click(filters.getByRole('button', { name: '#big idea' }));
+  expect(rows.queryByRole('button', { name: /^Ideas/ })).toBeNull();
+  await user.click(filters.getByRole('button', { name: '#big idea' }));
+  expect(rows.getByRole('button', { name: /^Ideas/ })).toBeTruthy();
+  await user.click(filters.getByRole('button', { name: '#big idea' }));
+  current = [list[1]];
+  await user.click(within(panel()).getByRole('button', { name: 'Close services panel' }));
+  await user.click(screen.getByRole('button', { name: '📝 My notes' }));
+  await waitFor(() => expect(rows.getByRole('button', { name: /^Ideas/ })).toBeTruthy());
+  expect(filters.queryByRole('button', { name: '#big idea' })).toBeNull();
 });
 
 it('asks before dropping unsaved changes inside the panel, and removes or discards notes after asking', async () => {

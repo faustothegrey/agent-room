@@ -86,7 +86,7 @@ export interface PairRequest { peer: string; confirm?: boolean }
 export interface PairCheck { local: { node: string; root: string; roomId: string | null }; peer: { node: string; root: string } }
 // My notes (notes.mjs, this computer only): GET __notes lists them, GET __notes/read?id= reads one
 // ({ …entry, text }); POST __notes/new { text }, __notes/save { id, text } (404: removed meanwhile), __notes/remove { id }.
-export interface NoteEntry { id: string; title: string; savedAt: string }
+export interface NoteEntry { id: string; title: string; tags: string[]; savedAt: string }
 export type NoteRequest = { text: string } | { id: string; text: string } | { id: string };
 export interface NoteSaved { id: string; title?: string; savedAt: string }
 // GET/POST __schedule (Schedule service): the quota floor and the scheduled research tasks; a POST

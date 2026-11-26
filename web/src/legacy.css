@@ -264,6 +264,9 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #notes-list .note { display: block; width: 100%; text-align: left; border: 0; border-radius: 4px; background: none; padding: .2rem .4rem; font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #notes-list .note:hover { background: #8882; } #notes-list .note.on { background: #3b82f622; }
 #notes-list .when { display: block; color: var(--dim); font-size: .7rem; } #notes-list .hint { font-size: .8rem; }
+#notes-filters, #notes-list .note-tags { display: flex; flex-wrap: wrap; gap: .2rem; }
+#notes-filters button, #notes-list .note-tag { font-size: .7rem; border-radius: 1em; padding: .1rem .4rem; background: #8882; }
+#notes-filters button[aria-pressed="true"] { background: #3b82f655; }
 #notes-main { display: flex; flex-direction: column; gap: .3rem; min-width: 0; min-height: 0; padding: .3rem; }
 #notes-text { flex: 1; min-height: 0; resize: none; font-family: ui-monospace, Menlo, monospace; font-size: .8rem; }
 #notes-bar { display: flex; gap: .4rem; align-items: center; font-size: .8rem; } #notes-bar button { font-size: .8rem; }

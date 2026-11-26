@@ -15,11 +15,31 @@ export const notesDirectory = (dir) => join(homedir(), '.local', 'share', 'agent
   createHash('sha256').update(realpathSync(dir)).digest('hex'));
 const ID = /^\d{8}-\d{6}-[0-9a-f]{8}$/;
 const newId = () => new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15) + '-' + randomBytes(4).toString('hex');
-// The first line, without Markdown's heading marks, for the list.
-const titleOf = (text) => text.split('\n')[0].replace(/^\s*#+\s*/, '').trim() || 'Untitled';
+// A last non-empty line is tags only if every token is a complete tag.
+const metadata = (text) => {
+  const lines = text.split('\n'), last = lines.findLastIndex((line) => line.trim());
+  const line = last < 0 ? '' : lines[last].trim();
+  const token = /#(?:([\p{L}\p{N}_-]+)|\[([^\[\]\r\n]+)\])/uy;
+  const tags = []; let pos = 0;
+  while (pos < line.length) {
+    token.lastIndex = pos;
+    const match = token.exec(line);
+    if (!match) return { tags: [], title: titleOf(lines[0]) };
+    const tag = (match[1] ?? match[2]).trim().replace(/\s+/g, ' ').toLowerCase();
+    if (!tag) return { tags: [], title: titleOf(lines[0]) };
+    tags.push(tag); pos = token.lastIndex;
+    if (pos < line.length) {
+      const spaces = /^[ \t]+/.exec(line.slice(pos));
+      if (!spaces) return { tags: [], title: titleOf(lines[0]) };
+      pos += spaces[0].length;
+    }
+  }
+  return { tags: [...new Set(tags)], title: last === 0 && tags.length ? 'Untitled' : titleOf(lines[0]) };
+};
+const titleOf = (line) => line.replace(/^\s*#+\s*/, '').trim() || 'Untitled';
 const entry = (folder, id) => {
   const file = join(folder, id + '.md'), text = readFileSync(file, 'utf8');
-  return { id, title: titleOf(text), savedAt: statSync(file).mtime.toISOString(), text };
+  return { id, ...metadata(text), savedAt: statSync(file).mtime.toISOString(), text };
 };
 
 export function listNotes(dir) {
