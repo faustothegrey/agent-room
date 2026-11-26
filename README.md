@@ -576,21 +576,11 @@ discussion and New brainstorm do too (on the screen they leave the discussion an
 
 `/usage` reports session token totals for discussion agents and the worker.
 Claude's reported dollar value is an API-price equivalent, not your subscription bill.
-Header gauges show **percent used**, for each provider's five-hour and weekly windows, plus
-reset times, and when the meter last measured them, as `on HH:MM` (hover for when the room last asked). Yellow means under 30% remains; red means under 10% remains.
+Header gauges show **percent used**, reset times, and each provider's reading age (hover for its timestamp). Yellow means under 30% remains; red means under 10% remains.
 
-Quotas come from the optional local meter at `http://127.0.0.1:9899` (override with
-`AGENT_ROOM_METER`). They refresh every minute and after turns. If the meter is unavailable,
-the header and usage report say so; the room still works. For Agy, the meter’s Antigravity
-model entries supply the highest used percentage in each available window. Agy login is not monitored.
+The server reads Claude's cached usage from `~/.claude.json`, the newest Codex rate-limit event under `~/.codex/sessions`, and Agy with `agy -p /usage --output-format json`. One background cache polls every two minutes; requests never wait for Agy. Claude and Codex readings retain the time the provider recorded them, so they can become stale while idle. The quota guard rejects each provider's reading when it is over 15 minutes old. Set `AGENT_ROOM_METER` to use that HTTP meter's `/usage` instead. The room still works when readings are unavailable. Agy login is not monitored.
 
-Each prompt to a discussion agent (in discussions and brainstorms, summary turns included) and to
-the worker starts with one line showing only that agent's own cumulative reported session usage
-(turns, input with cached, output) and its own provider's cached quota windows, with percentages
-labelled as used and the meter's measurement time ("none yet" when no turns have been reported,
-"usage unavailable" when a worker from another discussion runs a task whose session totals aren't
-loaded here, or "quota unavailable"
-when there is no meter data for its provider), without adding a meter request per turn.
+Each discussion agent and worker prompt starts with its own cumulative reported session usage and cached provider quota, including its reading age. Missing usage or quota is reported as unavailable.
 
 ## Launch options and commands
 
@@ -944,7 +934,7 @@ agent-room's source.
 | `src/host-shell.mjs` | The Terminal service's shell: token endpoint, WebSocket, host-only checks and shell lifetime. |
 | `src/notes.mjs` | The My notes service's storage and endpoints: list, read, create, save and remove, with the Terminal's host-only checks. |
 | `src/replicate.mjs` | Separate discussion Git storage, pairing, background transfer and immutable received snapshots. |
-| `src/usage.mjs` | Token accounting, optional quota-meter data and the providers' login status. |
+| `src/usage.mjs` | Token accounting, cached quota readings and the providers' login status. |
 | `src/mcp.mjs` | Read-only MCP stdio service (`list_rooms`, `list_discussions`) for local clients such as Hermes. |
 
 Run `npm test` for the fast suite and the TypeScript check of opted-in JavaScript, `npm run test:slow` for the slow suite, or `npm run test:all` for both. Tests exercise provider arguments with fake runners, round logic, HTTP endpoints,

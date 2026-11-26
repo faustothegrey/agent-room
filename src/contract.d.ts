@@ -37,7 +37,7 @@ export interface Peek {
   doc: string | null;
 }
 export interface Gauge { provider: string; group?: string; label: string; used: number; resets: string | null }
-export interface QuotaAt { measured: string | null; checked: string }
+export interface QuotaAt { measured: string | null; providers?: Record<string, string | null>; checked: string }
 export interface WorkerPending { lane: string | null; branch: string; ahead: number; dirty: boolean; conflicts: string[] }
 export interface MergeReadiness { canMerge: boolean; catchUp: boolean; disabledReason?: string | null; targetBranch?: string | null; behind?: number }
 export interface WorkerLane { summary: string; lines: string[]; own?: boolean; diagram?: { note?: string; graph?: string } }
@@ -109,7 +109,7 @@ export interface ProviderHealthReply {
   promptRunning: string[]; promptResults: { provider: string; model: string; at: string; durationMs: number; outcome: string; reply?: string | null; error?: string | null }[];
   sessions: { room: string; discussion: string | null; agents: { role: string; name: string; provider: string; id: string | null; lastTurn?: { ended: string; outcome: string; error?: { at: string; message: string } | null } | null }[] }[];
   leftoversChecked: string | null; nextLeftovers: string | null; running: HealthProgram[]; leftovers: HealthProgram[];
-  quota: { room: string; reachable: boolean | null; measured: string | null; checked: string | null }[];
+  quota: { room: string; reachable: boolean | null; measured: string | null; providers?: Record<string, string | null>; checked: string | null }[];
 }
 export interface HealthProgram { pid: number; provider: string; agent: string; room: string; started?: string | null; unverified?: boolean }
 export interface PromptTestRequest { provider: string; model: string }

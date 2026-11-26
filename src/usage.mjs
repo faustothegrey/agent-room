@@ -1,11 +1,14 @@
 // Usage stats: token counts per turn (from the CLIs' own output, via agent.lastUsage) and
-// subscription quotas from an optional local quota meter (AGENT_ROOM_METER, or port 9899).
+// subscription quotas from a background cache, or an optional HTTP meter.
 // Missing quota data does not prevent the room from running.
 // Loaded by ui.mjs, so /reload swaps it too.
 
 import { execFile } from 'node:child_process';
+import { readdir, readFile, stat, mkdtemp, rm } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-export const METER_URL = process.env.AGENT_ROOM_METER ?? 'http://127.0.0.1:9899';
+export const METER_URL = process.env.AGENT_ROOM_METER || null;
 export const QUOTA_STALE_MS = 15 * 60_000;
 
 // Parse the meter's `last_update` timestamp ("YYYY-MM-DD HH:MM:SS" in local time, or ISO with zone).
@@ -28,14 +31,12 @@ export function checkQuotaFloor(quota, providers, floor = 50, { now = Date.now()
   const unique = [...new Set(providers)].filter(Boolean);
   if (!unique.length) return { ok: true };
   if (!quota || typeof quota !== 'object') return { ok: false, reason: 'quota meter reading is missing' };
-  const measuredMs = parseMeterTime(quota.last_update);
-  if (measuredMs === null) return { ok: false, reason: 'quota meter timestamp is missing or unreadable' };
-  const ageMs = now - measuredMs;
-  if (ageMs > maxAgeMs) {
-    const mins = Math.round(ageMs / 60_000);
-    return { ok: false, reason: `quota meter reading is stale (${mins}m old, updated ${quota.last_update})` };
-  }
   for (const p of unique) {
+    const measured = quota?.[p === 'agy' ? 'antigravity' : p]?.updated_at;
+    const measuredMs = parseMeterTime(measured);
+    if (measuredMs === null) return { ok: false, reason: `${p} quota timestamp is missing or unreadable` };
+    const ageMs = now - measuredMs;
+    if (ageMs > maxAgeMs) return { ok: false, reason: `${p} quota reading is stale (${Math.round(ageMs / 60_000)}m old, updated ${measured})` };
     const gauges = quotaGauges(quota, [p]);
     const has5h = gauges.some((g) => g.label === '5h');
     const hasWeek = gauges.some((g) => g.label === 'week');
@@ -70,14 +71,117 @@ export function formatUsage(u) {
   return `${k(u.input)} in · ${k(u.output)} out${typeof u.cost === 'number' ? ` · $${u.cost.toFixed(2)}` : ''}`;
 }
 
-// The meter's /usage JSON, or null if it can't be read within the timeout.
+// Shared by all rooms; the server owns and starts the polling timer.
+let quotaCache = { value: null };
+export function useQuotaCache(cache) { quotaCache = cache; }
+const stamp = (ms) => new Date(ms).toISOString();
+function quotaWindow(used, reset) {
+  if (used == null || !Number.isFinite(Number(used))) return null;
+  let n = Number(used), out = {};
+  const ms = typeof reset === 'number' ? reset * 1000 : Date.parse(reset);
+  if (Number.isFinite(ms)) {
+    const d = new Date(ms);
+    if (ms <= Date.now()) { n = 0; out.expired = true; }
+    out.resets_at = d.toISOString();
+    out.resets = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} on ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  }
+  out.used_percent = Math.max(0, Math.min(100, Math.round(n)));
+  out.left_percent = 100 - out.used_percent;
+  return out;
+}
+export async function readClaudeQuota(path = join(process.env.CLAUDE_CONFIG_DIR || homedir(), '.claude.json')) {
+  try {
+    const data = JSON.parse(await readFile(path, 'utf8')), c = data.cachedUsageUtilization;
+    if (!c || (c.accountUuid != null && c.accountUuid !== data.oauthAccount?.accountUuid) || !Number.isFinite(Number(c.fetchedAtMs)) || c.fetchedAtMs == null) return { ok: false, source: 'claude.json' };
+    const parsed = {};
+    for (const [key, source] of [['current_session', 'five_hour'], ['current_week_all_models', 'seven_day']]) {
+      const w = c.utilization?.[source], value = w && quotaWindow(w.utilization, w.resets_at);
+      if (value) parsed[key] = value;
+    }
+    return { ok: !!Object.keys(parsed).length, source: 'claude.json', updated_at: stamp(Number(c.fetchedAtMs)), parsed };
+  } catch { return { ok: false, source: 'claude.json' }; }
+}
+export async function readCodexQuota(root = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'sessions')) {
+  const files = [];
+  async function walk(dir) {
+    let entries; try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+    await Promise.all(entries.map(async (e) => {
+      const path = join(dir, e.name);
+      if (e.isDirectory()) await walk(path);
+      else if (e.isFile() && e.name.endsWith('.jsonl')) { try { files.push({ path, mtime: (await stat(path)).mtimeMs }); } catch {} }
+    }));
+  }
+  await walk(root); files.sort((a, b) => b.mtime - a.mtime);
+  let best;
+  for (const f of files) {
+    let data; try { data = await readFile(f.path, 'utf8'); } catch { continue; }
+    for (const line of data.split('\n')) {
+      if (!line.includes('"rate_limits"')) continue;
+      try {
+        const ev = JSON.parse(line), rl = ev.payload?.rate_limits, time = Date.parse(ev.timestamp);
+        if (rl && (rl.limit_id == null || rl.limit_id === 'codex') && (rl.primary || rl.secondary) && Number.isFinite(time) && (!best || time > best.time)) best = { time, rl };
+      } catch {}
+    }
+  }
+  if (!best) return { ok: false, source: 'codex-sessions' };
+  const parsed = {};
+  for (const [slot, fallback] of [['primary', 'five_hour_limit'], ['secondary', 'weekly_limit']]) {
+    const w = best.rl[slot]; if (!w) continue;
+    const value = quotaWindow(w.used_percent, w.resets_at);
+    if (value) parsed[w.window_minutes === 300 ? 'five_hour_limit' : w.window_minutes === 10080 ? 'weekly_limit' : fallback] = { ...value, window_minutes: w.window_minutes };
+  }
+  if (best.rl.plan_type) parsed.plan_type = best.rl.plan_type;
+  return { ok: !!(parsed.five_hour_limit || parsed.weekly_limit), source: 'codex-sessions', updated_at: stamp(best.time), parsed };
+}
+export function parseAgyQuota(data, now = Date.now()) {
+  const groups = {}, models = [];
+  for (const g of data?.command?.data?.groups ?? []) {
+    const buckets = g.buckets ?? [], ids = buckets.map((b) => String(b.id ?? ''));
+    const key = ids.some((i) => i.includes('argon')) || /argon/i.test(g.name ?? '') ? 'argon' : ids.map((i) => /^(.*?)-(?:weekly|5h)$/.exec(i)?.[1]).find(Boolean) || String(g.name ?? 'group').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    const windows = {};
+    for (const b of buckets) {
+      if (b.remaining_fraction == null || !Number.isFinite(Number(b.remaining_fraction))) continue;
+      const value = quotaWindow((1 - Number(b.remaining_fraction)) * 100, b.reset_time);
+      const window = b.window || (String(b.id).includes('weekly') ? 'weekly' : '5h');
+      windows[window] = { ...value, id: b.id };
+      models.push({ label: `${g.name} (${b.name})`, group: key, window, ...value });
+    }
+    if (Object.keys(windows).length) groups[key] = { name: g.name, description: g.description, windows, highest_used_percent: Math.max(...Object.values(windows).map((w) => w.used_percent)) };
+  }
+  const parsed = { groups, models };
+  if (models.length) { const top = models.reduce((a, b) => a.used_percent >= b.used_percent ? a : b); Object.assign(parsed, { highest_used_percent: top.used_percent, lowest_left_percent: 100 - top.used_percent, highest_used_group: top.group }); }
+  return { ok: !!models.length, source: 'agy-json', updated_at: stamp(now), parsed };
+}
+export async function readAgyQuota(exec = execFile) {
+  let dir;
+  try {
+    dir = await mkdtemp(join(tmpdir(), 'agy-quota-'));
+    const stdout = await new Promise((resolve, reject) => { const child = exec('agy', ['-p', '/usage', '--output-format', 'json'], { cwd: dir, timeout: 30_000, maxBuffer: 4 * 1024 * 1024 }, (err, out) => err ? reject(err) : resolve(String(out))); child?.stdin?.end(); });
+    const data = JSON.parse(stdout.slice(stdout.indexOf('{')));
+    if (data.status != null && data.status !== 'SUCCESS') throw new Error('agy status ' + data.status);
+    return parseAgyQuota(data);
+  } catch { return { ok: false, source: 'agy-json' }; }
+  finally { if (dir) await rm(dir, { recursive: true, force: true }); }
+}
+export async function refreshQuotaCache(cache = quotaCache, readers = [readClaudeQuota, readCodexQuota, readAgyQuota]) {
+  if (cache.running) return;
+  cache.running = true;
+  try {
+    await Promise.all(['claude', 'codex', 'antigravity'].map((key, i) => [key, readers[i]]).map(async ([key, read]) => {
+      const result = await read();
+      const value = { ...cache.value, last_update: stamp(Date.now()) };
+      if (result.ok || !value[key]) value[key] = result;
+      cache.value = value;
+    }));
+  } finally { cache.running = false; }
+}
+// The override keeps the old HTTP behavior; internal reads return the background snapshot immediately.
 export async function fetchQuota(url = METER_URL, timeoutMs = 1500) {
+  if (!url) return quotaCache.value;
   try {
     const res = await fetch(`${url}/usage`, { signal: AbortSignal.timeout(timeoutMs) });
     return res.ok ? await res.json() : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 // Each provider's quota windows as [label, { used_percent, resets }] pairs; empty if unavailable.
@@ -148,21 +252,17 @@ export function quotaGauges(quota, providers) {
     if (groups) return [['gemini', '5h', '5h'], ['gemini', 'week', 'weekly'], ['argon', 'week', 'weekly']]
       .flatMap(([group, label, window]) => {
         const x = groups[group]?.windows?.[window];
-        return typeof x?.used_percent === 'number' ? [{ provider: p, group, label, used: x.used_percent, resets: resetTime(x.resets, quota.last_update) }] : [];
+        return typeof x?.used_percent === 'number' ? [{ provider: p, group, label, used: x.used_percent, resets: resetTime(x.resets, quota?.[p === 'agy' ? 'antigravity' : p]?.updated_at ?? quota.last_update) }] : [];
       });
-    return windows(quota, p).map(([label, x]) => ({ provider: p, label, used: x.used_percent, resets: resetTime(x.resets, quota.last_update) }));
+    return windows(quota, p).map(([label, x]) => ({ provider: p, label, used: x.used_percent, resets: resetTime(x.resets, quota?.[p === 'agy' ? 'antigravity' : p]?.updated_at ?? quota.last_update) }));
   });
 }
 
 // One-line self-usage header for an agent's or worker's prompt, holding only that agent's own
 // cumulative reported session total and its own provider's cached quota snapshot.
 function meterTime(measured, now = new Date()) {
-  if (!measured) return '';
-  const text = String(measured).trim();
-  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(text);
-  if (!m) return text;
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  return m[1] === today ? m[2] : `${m[1]} ${m[2]}`;
+  const ms = parseMeterTime(measured);
+  return ms === null ? '' : `${Math.max(0, Math.floor((now.getTime() - ms) / 60_000))}m old`;
 }
 
 function formatProviderGauges(gauges, provider) {
@@ -185,8 +285,8 @@ export function agentUsageLine({ total, usageUnavailable = false, provider, gaug
       ? `${total.turns} turn${total.turns === 1 ? '' : 's'}, ${k(total.input)} in (${k(total.cached)} cached) / ${k(total.output)} out`
       : 'none yet';
   const quotaText = formatProviderGauges(gauges, provider);
-  const at = quotaText ? meterTime(measured, now) : '';
-  const quotaPart = quotaText ? `${quotaText}${at ? `, meter at ${at}` : ''}` : 'quota unavailable';
+  const at = quotaText ? meterTime(typeof measured === 'object' && measured ? measured[provider] : measured, now) : '';
+  const quotaPart = quotaText ? `${quotaText}${at ? `, reading ${at}` : ''}` : 'quota unavailable';
   return `[your reported usage this session: ${usagePart} · ${quotaPart}]`;
 }
 
@@ -200,13 +300,13 @@ export function usageReport({ totals, agents, quota, url = METER_URL }) {
       (typeof t.cost === 'number' ? ` · $${t.cost.toFixed(2)} at API prices` : ''));
   }
   if (!quota) {
-    lines.push(`Subscription quota: the meter at ${url} is not reachable (best-effort; skipped).`);
+    lines.push(url ? `Subscription quota: the meter at ${url} is not reachable (best-effort; skipped).` : 'Subscription quota: readings unavailable (best-effort; skipped).');
     return lines.join('\n');
   }
-  lines.push(`Subscription quota (meter, updated ${quota.last_update ?? '?'}):`);
+  lines.push('Subscription quota:');
   for (const p of [...new Set(agents.map((a) => a.provider))]) {
     const w = windows(quota, p);
-    lines.push(`  ${p.padEnd(10)} ${w.length ? w.map(([label, x]) => `${label} ${x.used_percent}% used${x.resets ? ` (at ${resetTime(x.resets, quota.last_update)})` : ''}`).join(' · ') : 'unavailable'}`);
+    lines.push(`  ${p.padEnd(10)} ${w.length ? w.map(([label, x]) => `${label} ${x.used_percent}% used${x.resets ? ` (at ${resetTime(x.resets, quota?.[p === 'agy' ? 'antigravity' : p]?.updated_at ?? quota.last_update)})` : ''}`).join(' · ') : 'unavailable'}${quota[p === 'agy' ? 'antigravity' : p]?.updated_at ? ` (updated ${quota[p === 'agy' ? 'antigravity' : p].updated_at}, ${meterTime(quota[p === 'agy' ? 'antigravity' : p].updated_at)})` : ''}`);
   }
   return lines.join('\n');
 }

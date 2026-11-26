@@ -50,11 +50,10 @@ function ProviderName({ monitor, provider, display = provider, health = true, op
 }
 function QuotaUpdated({ at }: { at: QuotaAt | null | undefined }) {
   const checked = at?.checked ? new Date(at.checked) : null;
-  // The meter reports local time as "YYYY-MM-DD HH:MM:SS"; a day other than today is shown too.
-  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(at?.measured ?? '');
-  const today = new Date().toLocaleDateString('sv');
-  const text = m ? 'on\n' + (m[1] === today ? '' : m[1] + ' ') + m[2] : checked ? 'checked ' + hhmm(checked) : '';
-  const title = (at?.measured ? 'Measured by the quota meter at ' + at.measured + '. ' : '') + (checked ? 'The room last asked the meter at ' + hhmm(checked) + ' (every minute, and after each turn).' : '');
+  const measured = at?.measured ? new Date(at.measured.replace(' ', 'T')) : null;
+  const age = measured && !Number.isNaN(measured.getTime()) ? Math.max(0, Math.floor((Date.now() - measured.getTime()) / 60000)) : null;
+  const text = age == null ? (checked ? 'checked ' + hhmm(checked) : '') : `${age}m old`;
+  const title = (at?.measured ? 'Reading at ' + at.measured + '. ' : '') + (checked ? 'The room last checked at ' + hhmm(checked) + '.' : '');
   return <span className="updated" title={title}>{text}</span>;
 }
 // The quota gauges, as showQuota does: one bar per window (5h, week) for each provider, yellow
@@ -72,8 +71,8 @@ export function Gauges({ gauges, at, monitor, openHealth }: { gauges: Gauge[] | 
       if (last && last.provider === g.provider && last.group === (g.group ?? null)) last.items.push(g);
       else groups.push({ provider: g.provider, group: g.group ?? null, items: [g] });
     }
-    body = <><QuotaUpdated at={at} />{groups.map(({ provider, group, items }) => <span className="quota" key={provider + ' ' + group}>
-      <ProviderName monitor={monitor} provider={provider} display={group ?? provider} health={group !== 'argon'} openHealth={openHealth} />
+    body = <>{groups.map(({ provider, group, items }) => <span className="quota" key={provider + ' ' + group}>
+      <QuotaUpdated at={{ measured: at?.providers?.[provider] ?? null, checked: at?.checked ?? '' }} /><ProviderName monitor={monitor} provider={provider} display={group ?? provider} health={group !== 'argon'} openHealth={openHealth} />
       {group !== 'argon' && monitor[provider]?.running != null && <span className="running">{monitor[provider].running} running</span>}
       {items.map((g) => {
         const left = 100 - g.used;
