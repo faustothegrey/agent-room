@@ -45,3 +45,7 @@ h1#disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
 .discard-dialog::backdrop, #ask::backdrop, #peers::backdrop { background: #0006; }
 .discard-dialog code { overflow-wrap: anywhere; }
 .agent-settings form { margin: 0; }
+.capture-outline { position: fixed; pointer-events: none; z-index: 2147483647; outline: 2px solid #f04b28; outline-offset: 1px; }
+.capture-tools, .capture-chip { margin-bottom: .35rem; font-size: .85rem; }
+.capture-chip { display: flex; align-items: start; gap: .4rem; }
+.capture-chip pre { white-space: pre-wrap; margin: .3rem 0; }

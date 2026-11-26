@@ -54,7 +54,7 @@ export interface Member { provider: AgentSettings['provider']; name: string; mod
 export interface CliSession { name: string; provider: string; id: string | null }
 export interface CliSessions { agents: CliSession[]; worker: CliSession | null }
 export interface Room {
-  folder: string; agents: string[]; worker: string; workerModel: string | null;
+  folder: string; ownCheckout?: boolean; agents: string[]; worker: string; workerModel: string | null;
   cliSessions: CliSessions | null; discussion: string; active: string | null; started: boolean;
   fresh: boolean; brainstorm: boolean; workbench: boolean; research: boolean;
   workbenches: string[]; researches: string[]; researchStats: Record<string, ResearchStats>; members: Member[];

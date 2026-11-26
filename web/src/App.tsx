@@ -115,8 +115,35 @@ function FileTree({ files, prefix, doc, unviewable, expanded, toggle, choose }: 
   return <>{folders.map((folder) => { const path = prefix ? `${prefix}/${folder}` : folder; return <details key={path} className="inline-folder" open={expanded.has(path)} onToggle={(event) => toggle(path, event.currentTarget.open)}><summary>{folder}/</summary><FileTree files={files.filter((f) => f.startsWith(folder + '/')).map((f) => f.slice(folder.length + 1))} prefix={path} doc={doc} unviewable={unviewable} expanded={expanded} toggle={toggle} choose={choose} /></details>; })}{entries.length > 10 ? <div className="file-columns">{buttons}</div> : buttons}{!folders.length && !entries.length && <span>No files yet.</span>}</>;
 }
 
+function captureClues(element: Element): string {
+  const parts: string[] = [];
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const parent = walker.currentNode.parentElement;
+    if (!parent || parent.closest('input, textarea, [contenteditable]:not([contenteditable="false"])')) continue;
+    let visible = true;
+    for (let node: Element | null = parent; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden') { visible = false; break; }
+    }
+    if (visible) parts.push(walker.currentNode.textContent ?? '');
+  }
+  const text = parts.join(' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const describe = (el: Element) => el.tagName.toLowerCase() + [...el.classList].map((c) => '.' + c).join('');
+  const path: string[] = [];
+  for (let node: Element | null = element.parentElement; node && path.length < 4; node = node.parentElement) path.push(describe(node));
+  const rect = element.getBoundingClientRect();
+  return `Element: ${describe(element)}\nText: ${text || '(none)'}\naria-label: ${element.getAttribute('aria-label') ?? '(none)'}\nTitle: ${element.getAttribute('title') ?? '(none)'}\nPosition: x=${Math.round(rect.x)}, y=${Math.round(rect.y)}; size: ${Math.round(rect.width)} × ${Math.round(rect.height)} px\nAncestors: ${path.join(' ← ') || '(none)'}`;
+}
+
 const navigatePage = (url: string) => window.location.assign(url);
 export function App({ version, refresh, navigate = navigatePage }: Props) {
+  const [capturing, setCapturing] = useState(false);
+  const [captures, setCaptures] = useState<{ id: number; clue: string }[]>([]);
+  const nextCaptureId = useRef(0);
+  const pointer = useRef<{ x: number; y: number } | null>(null);
+  const [outline, setOutline] = useState<DOMRect | null>(null);
+  const focusWorker = useRef(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [workerInfo, setWorkerInfo] = useState<WorkerInfo | null>(null);
   const [boardDialog, setBoardDialog] = useState<BoardDialog | null>(null);
@@ -348,10 +375,47 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     } finally { state.posting--; updateBusy(); }
   };
   const workerError = (error: unknown) => addStatus(error instanceof Error ? error.message : String(error), true, 'Worker');
+  useEffect(() => {
+    const remember = (event: MouseEvent) => { pointer.current = { x: event.clientX, y: event.clientY }; };
+    document.addEventListener('mousemove', remember, true);
+    return () => document.removeEventListener('mousemove', remember, true);
+  }, []);
+  useEffect(() => {
+    if (!capturing) { setOutline(null); return; }
+    let frame = 0;
+    const target = () => pointer.current ? document.elementFromPoint(pointer.current.x, pointer.current.y) : null;
+    const refreshOutline = () => setOutline(target()?.getBoundingClientRect() ?? null);
+    const afterChange = () => { refreshOutline(); cancelAnimationFrame(frame); frame = requestAnimationFrame(refreshOutline); };
+    const click = (event: MouseEvent) => { pointer.current = { x: event.clientX, y: event.clientY }; afterChange(); };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setCapturing(false); }
+      else if (event.altKey && event.code === 'KeyP') {
+        event.preventDefault(); event.stopPropagation();
+        const element = target();
+        if (element) {
+          const clue = captureClues(element);
+          setCaptures((previous) => [...previous, { id: nextCaptureId.current++, clue }]);
+          focusWorker.current = true; tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false);
+        }
+        setCapturing(false);
+      }
+    };
+    document.addEventListener('mousemove', refreshOutline, true); document.addEventListener('click', click, true);
+    document.addEventListener('scroll', afterChange, true); document.addEventListener('keydown', key, true);
+    return () => { cancelAnimationFrame(frame); document.removeEventListener('mousemove', refreshOutline, true); document.removeEventListener('click', click, true); document.removeEventListener('scroll', afterChange, true); document.removeEventListener('keydown', key, true); };
+  }, [capturing]);
+  const shownBoard = JSON.stringify([room?.folder, room?.active, room?.workbench, room?.brainstorm, room?.research, peek?.path, viewLayout?.name, viewLayout?.discussion]);
+  const previousBoard = useRef(shownBoard);
+  useLayoutEffect(() => {
+    if (previousBoard.current !== shownBoard) { setCaptures([]); setCapturing(false); previousBoard.current = shownBoard; }
+  }, [shownBoard]);
+  useEffect(() => { if (focusWorker.current) { document.getElementById('wbox')?.focus(); focusWorker.current = false; } });
   const sendWork = async (value: string) => {
-    const instruction = value.trim();
-    if (!instruction || ended || peek || viewLayout) return;
-    try { const response = await post('__work', { text: instruction }); if (!response.ok) workerError(await response.text()); }
+    const message = value.trim();
+    const included = captures;
+    const instruction = [...included.map((capture) => capture.clue), message].filter(Boolean).join('\n\n');
+    if (!message || ended || peek || viewLayout) return;
+    try { const response = await post('__work', { text: instruction }); if (!response.ok) workerError(await response.text()); else { const sent = new Set(included.map((capture) => capture.id)); setCaptures((previous) => previous.filter((capture) => !sent.has(capture.id))); } }
     catch (error) { workerError(error); }
   };
   const stopWorker = async (mode: 'after' | 'now') => {
@@ -1010,6 +1074,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     requestAnimationFrame(() => explorer.current?.querySelector<HTMLElement>('.shown')?.scrollIntoView?.({ block: 'center' }));
   };
   return <main className={'app' + (boardsClosed ? ' list-collapsed' : '') + (service ? ' service-open' : '')} style={{ '--list': listWidth + 'px' } as React.CSSProperties}>
+    {capturing && outline && <div aria-hidden="true" className="capture-outline" style={{ left: outline.left, top: outline.top, width: outline.width, height: outline.height }} />}
     <header id="header">
     <RoomZones openHealth={() => { setHealthOpen(true); openService('providers'); }} folder={room?.folder ?? null} active={room?.active ?? null} replica={replica} replicaOff={replicaOff} viewing={remote?.line ?? null} newRoom={newRoom} readOnly={!!peek || !!viewLayout}
       post={(path, body) => post(path, body)} status={(text, error) => addStatus(text, error)} navigate={(url) => notesGuard(() => navigate(url))}
@@ -1138,6 +1203,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         <button type="button" disabled={room.workerStop.after} title="The running instruction finishes and is reported as usual; this discussion's queued instructions are cancelled, and auto dev pauses" onClick={() => void stopWorker('after')}>{stopArmed.after ? 'Click again: stop after this task; queued instructions are cancelled' : 'Stop after this task'}</button>{' '}
         <button type="button" title="The running instruction's programs are stopped at once; this discussion's queued instructions are cancelled, auto dev pauses, and what it left in the worktree is reported" onClick={() => void stopWorker('now')}>{stopArmed.now ? 'Click again: stop now; partial edits may be left' : 'Stop now'}</button>
       </div>}
+      {workInput && room?.ownCheckout && !room.brainstorm && !room.research && !peek && !viewLayout && <div className="capture-tools"><button type="button" disabled={ended || !!workerInfo?.disabled} aria-pressed={capturing} onClick={() => setCapturing((active) => !active)}>{capturing ? 'Cancel capture' : 'Capture'}</button>{capturing && <span> Point at an element and press Alt+P; Esc cancels.</span>}</div>}
+      {captures.map((capture, index) => <div className="capture-chip" key={capture.id}><details><summary>Captured element {index + 1}</summary><pre>{capture.clue}</pre></details><button type="button" aria-label={`Remove captured element ${index + 1}`} onClick={() => setCaptures((previous) => previous.filter((item) => item.id !== capture.id))}>✕</button></div>)}
       {workInput && <textarea className="box" id="wbox" aria-label="Instruction to the worker" value={workText} disabled={ended || !!peek || !!viewLayout || !!room?.brainstorm || !!workerInfo?.disabled} placeholder={peek ? 'Peeking read-only — click Back to return to the active discussion.' : viewLayout ? 'Read-only: viewing a peer’s discussion.' : room?.brainstorm ? 'Turn this brainstorm into a discussion to send work.' : workerInfo?.disabled ? workerInfo.lines[0] : room?.workbench && !room.active ? 'First instruction to the worker… (names this workbench and starts it)' : 'Instruction to the worker… (Enter sends, Shift+Enter for a new line). It sees only what you send here; it can edit files and run commands.'} onChange={(event) => setWorkText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); const value = workText; setWorkText(''); void sendWork(value); } }} />}
       </div>
     </section>}
