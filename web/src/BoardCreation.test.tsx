@@ -27,6 +27,20 @@ it('creates each supported board beside the current one and follows the goto to 
   Source.current.send({ type: 'goto', url: '/r/next/__room' }); expect(navigate).toHaveBeenCalledWith('/r/next/__room');
 });
 
+it('places creation buttons in their matching collapsible sections', async () => {
+  setup(); const user = userEvent.setup();
+  for (const [section, labels] of [
+    ['Discussions (0)', ['+ New discussion', '+ New workbench']],
+    ['Research (0)', ['+ New research']],
+    ['Brainstorms (0)', ['+ New brainstorm']],
+  ] as const) {
+    const summary = screen.getByText(section), details = summary.closest('details')!;
+    for (const label of labels) expect(within(details).getByRole('button', { name: label })).toBeTruthy();
+    await user.click(summary);
+    await waitFor(() => expect(details.open).toBe(false));
+  }
+});
+
 it('requires a second click in a started single-session room and lets the warning expire', async () => {
   setup({ multi: false }); const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: '+ New brainstorm' }));
