@@ -86,14 +86,14 @@ it('shows the quota gauges with their windows, thresholds, tooltips and updated 
   reset({ quota: [{ provider: 'claude', label: '5h', used: 75, resets: '13:00' }, { provider: 'claude', label: 'week', used: 95, resets: 'Mon 09:00' }, { provider: 'codex', label: '5h', used: 10, resets: null }],
     quotaAt: { measured: new Date().toLocaleDateString('sv') + ' 08:11:00', providers: { claude: new Date().toLocaleDateString('sv') + ' 08:11:00' }, checked: new Date().toISOString() }, monitor: { claude: { login: { state: 'ok', expiresAt: null }, running: 2, leftovers: [], inRoom: true } } });
   const usage = screen.getByLabelText('Subscription usage');
-  expect(within(usage).getByText(/^\d+m old$/).title).toMatch(/^Reading at .* 08:11:00\. The room last checked at/);
+  expect(within(usage).getByText(/^\d+m$/).title).toMatch(/^Reading at .* 08:11:00\. The room last checked at/);
   const gauges = usage.querySelectorAll('.gauge');
   expect([...gauges].map((g) => g.className)).toEqual(['gauge warn', 'gauge high', 'gauge']);
   expect(gauges[1].firstElementChild?.textContent).toBe('wk');
   expect((gauges[0].querySelector('.bar i') as HTMLElement).style.width).toBe('75%');
   expect(gauges[0].querySelector('[role=tooltip]')?.textContent).toBe('Resets at 13:00claude 5h: 75% used');
   expect(gauges[1].querySelector('[role=tooltip]')?.textContent).toBe('claude week: 95% used, at Mon 09:00');
-  expect(within(usage).getByText('2 running')).toBeTruthy();
+  expect(within(usage).getByText('2 r')).toBeTruthy();
   Source.current.send({ type: 'quota', gauges: null, at: { measured: null, checked: new Date().toISOString() } });
   expect(usage.textContent).toMatch(/^quota meter not reachable · checked /);
 });
