@@ -11,6 +11,12 @@ export type NoteDraft = { id: string | null; base: string; text: string };
 export const NOTES_DRAFT_KEY = 'next-notes-draft';
 type Ask = { text: string; buttons: [string, (() => void)?][] };
 type Post = (path: '__notes/new' | '__notes/save' | '__notes/remove', body: NoteRequest) => Promise<Response>;
+// Derive the same color wherever a tag appears, without storing a separate palette.
+const tagColor = (tag: string) => {
+  let hash = 0;
+  for (const char of tag) hash = (Math.imul(hash, 31) + char.codePointAt(0)!) >>> 0;
+  return { backgroundColor: `hsl(${hash % 360} 75% 50% / 25%)` };
+};
 const titleOf = (text: string) => text.split('\n')[0].replace(/^\s*#+\s*/, '').trim() || 'Untitled';
 export function Notes({ open, show, post, api, kept }: { open: boolean; show: () => void; post: Post; api: MutableRefObject<NotesApi | null>; kept: NoteDraft | null }) {
   const [list, setList] = useState<NoteEntry[]>([]);
@@ -107,9 +113,9 @@ export function Notes({ open, show, post, api, kept }: { open: boolean; show: ()
   return <div id="notes-body" className="notes-body">
     <div id="notes-side" className="notes-side">
       <button type="button" id="notes-new" title="Start a new note: the first line is its title" onClick={() => guard(() => { edit(null, ''); setStatus({ text: 'A new note: the first line is its title. Nothing is saved until Save.' }); box.current?.focus(); })}>New</button>
-      {tags.length > 0 && <div id="notes-filters" aria-label="Filter notes by tag">{tags.map((tag) => <button type="button" key={tag} aria-pressed={filter === tag} onClick={() => setFilter(filter === tag ? null : tag)}>#{tag}</button>)}</div>}
+      {tags.length > 0 && <div id="notes-filters" aria-label="Filter notes by tag">{tags.map((tag) => <button type="button" key={tag} style={tagColor(tag)} aria-pressed={filter === tag} onClick={() => setFilter(filter === tag ? null : tag)}>#{tag}</button>)}</div>}
       <div id="notes-list" aria-label="Notes">{visible.length ? visible.map((n) => <button type="button" key={n.id} className={'note' + (n.id === editor.id ? ' on' : '')} title={n.title}
-        onClick={() => { if (n.id !== live.current.editor.id) guard(() => void readNote(n.id)); }}>{n.title}<span className="when">Saved {new Date(n.savedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>{n.tags.length > 0 && <span className="note-tags">{n.tags.map((tag) => <span className="note-tag" key={tag}>#{tag}</span>)}</span>}</button>)
+        onClick={() => { if (n.id !== live.current.editor.id) guard(() => void readNote(n.id)); }}>{n.title}<span className="when">Saved {new Date(n.savedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>{n.tags.length > 0 && <span className="note-tags">{n.tags.map((tag) => <span className="note-tag" key={tag} style={tagColor(tag)}>#{tag}</span>)}</span>}</button>)
         : <span className="hint">No notes yet.</span>}</div>
     </div>
     <div id="notes-main" className="notes-main">
