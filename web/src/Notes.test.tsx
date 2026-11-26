@@ -66,6 +66,11 @@ it('shows tag chips and filters, toggles the filter, and clears it when its tag 
   const filters = within(screen.getByLabelText('Filter notes by tag'));
   const rows = within(screen.getByLabelText('Notes'));
   expect(rows.getByRole('button', { name: /^Plan/ }).textContent).toContain('#big idea');
+  const workFilter = filters.getByRole('button', { name: '#work' });
+  const workChips = rows.getAllByText('#work');
+  expect(workFilter.style.backgroundColor).toBeTruthy();
+  expect(workChips.map((chip) => chip.style.backgroundColor)).toEqual([workFilter.style.backgroundColor, workFilter.style.backgroundColor]);
+  expect(filters.getByRole('button', { name: '#big idea' }).style.backgroundColor).not.toBe(workFilter.style.backgroundColor);
   await user.click(filters.getByRole('button', { name: '#big idea' }));
   expect(rows.queryByRole('button', { name: /^Ideas/ })).toBeNull();
   await user.click(filters.getByRole('button', { name: '#big idea' }));
