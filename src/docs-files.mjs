@@ -254,7 +254,7 @@ function page(title, body, watch, base = '/') {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>${esc(title)}</title><style>
 :root { color-scheme: dark; }
-body { font: 16px/1.55 -apple-system, system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+body { font: 14px/1.55 -apple-system, system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
 img { max-width: 100%; } img.preview { display: block; margin: .5rem 0; }
 pre, code { background: #8881; border-radius: 4px; } pre { padding: .75rem; overflow-x: auto; } code { padding: 0 .2em; }
 table { border-collapse: collapse; } th, td { border: 1px solid #8886; padding: .3rem .6rem; }

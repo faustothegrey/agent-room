@@ -73,7 +73,7 @@ it('resizes with keyboard and pointer and saves the selected orientation', () =>
   const p = layout(); p.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 700 } as DOMRect);
   const conv = document.querySelector('.next-conversation') as HTMLDivElement;
   conv.getBoundingClientRect = () => ({ width: 500, height: 300 } as DOMRect);
-  const split = screen.getByRole('separator');
+  const split = screen.getByRole('separator', { name: 'Resize conversation and side pane' });
   fireEvent.keyDown(split, { key: 'ArrowRight' }); expect(state('alpha').left).toBe(524);
   fireEvent.click(screen.getByTitle('Stack conversation above side pane'));
   fireEvent.keyDown(split, { key: 'ArrowDown' }); expect(state('alpha').top).toBe(324);
@@ -82,4 +82,39 @@ it('resizes with keyboard and pointer and saves the selected orientation', () =>
   pointer('pointerdown', 350); pointer('pointermove', 390);
   expect(state('alpha').top).toBe(324);
   pointer('pointerup', 410); expect(state('alpha').top).toBe(407);
+});
+
+function drag(split: HTMLElement, points: [number, number][]) {
+  Object.assign(split, { setPointerCapture: vi.fn(), hasPointerCapture: () => true, releasePointerCapture: vi.fn() });
+  points.forEach(([x, y], index) => {
+    const type = index === 0 ? 'pointerdown' : index === points.length - 1 ? 'pointerup' : 'pointermove';
+    const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: y });
+    Object.defineProperty(event, 'pointerId', { value: 1 }); fireEvent(split, event);
+  });
+}
+
+it('resizes and snap-collapses Boards, restoring its pre-drag width on reopening', () => {
+  render(<App version="one" refresh={() => {}} />); reset();
+  const boards = screen.getByLabelText('Boards');
+  boards.getBoundingClientRect = () => ({ left: 62, width: 240 } as DOMRect);
+  let split = screen.getByRole('separator', { name: 'Resize Boards list' });
+  drag(split, [[305, 0], [365, 0]]);
+  expect(localStorage.getItem('agent-room:list-width')).toBe('300');
+  split = screen.getByRole('separator', { name: 'Resize Boards list' });
+  drag(split, [[365, 0], [220, 0], [120, 0]]);
+  expect(localStorage.getItem('agent-room:list-width')).toBe('300');
+  expect(localStorage.getItem('agent-room:list-collapsed')).toBe('1');
+  fireEvent.click(screen.getByTitle('Expand boards list'));
+  expect((document.querySelector('.app') as HTMLElement).style.getPropertyValue('--list')).toBe('300px');
+});
+
+it.each([false, true])('snap-collapses the side pane and restores its pre-drag size (stacked: %s)', (stacked) => {
+  localStorage.setItem(key('alpha'), JSON.stringify({ ...initial, stacked }));
+  render(<App version="one" refresh={() => {}} />); reset();
+  layout().getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 700 } as DOMRect);
+  const split = screen.getByRole('separator', { name: 'Resize conversation and side pane' });
+  drag(split, stacked ? [[0, 303], [0, 500], [0, 650]] : [[503, 0], [700, 0], [950, 0]]);
+  expect(state('alpha')).toEqual({ ...initial, stacked, sideClosed: true });
+  fireEvent.click(screen.getByTitle('Open side pane'));
+  expect(state('alpha')).toEqual({ ...initial, stacked });
 });
