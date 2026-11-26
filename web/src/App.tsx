@@ -209,7 +209,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     if (listBeforeService.current !== null) { setBoardsClosed(listBeforeService.current); listBeforeService.current = null; }
   };
   useEffect(() => { if (serviceRef.current) setBoardsClosed(true); }, []); // a note kept across a refresh reopens My notes
-  const keepNoteDraft = () => { try { const kept = notesApi.current?.draft(); if (kept) sessionStorage.setItem(NOTES_DRAFT_KEY, JSON.stringify(kept)); } catch {} };
+  const keepNoteDraft = () => { try { const kept = notesApi.current?.draft(); if (kept) sessionStorage.setItem(NOTES_DRAFT_KEY, JSON.stringify(kept)); return true; } catch { return false; } };
   const [armedCreation, setArmedCreation] = useState<Record<string, boolean>>({});
   const creationTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   useEffect(() => () => { for (const timer of Object.values(creationTimers.current)) clearTimeout(timer); }, []);
@@ -896,8 +896,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         void loadDetails();
       } else if (event.type === 'goto') {
         if (noteBrainstorm.current !== null) {
-          try { keepNoteDraft(); sessionStorage.setItem('next-notes-hidden', '1'); sessionStorage.setItem('next-composer-draft', noteBrainstorm.current); } catch {}
-          notesApi.current?.allowLeave(); noteBrainstorm.current = null;
+          const kept = keepNoteDraft();
+          try { sessionStorage.setItem('next-notes-hidden', '1'); sessionStorage.setItem('next-composer-draft', noteBrainstorm.current); } catch {}
+          if (kept) notesApi.current?.allowLeave(); noteBrainstorm.current = null;
         }
         navigate(event.url);
       } else if (event.type === 'ended') {

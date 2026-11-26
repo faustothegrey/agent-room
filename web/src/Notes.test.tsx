@@ -194,3 +194,15 @@ it('disables brainstorm for blank notes and unavailable boards', async () => {
   expect(panel().hidden).toBe(true); expect((screen.getByLabelText('Message to the agents') as HTMLTextAreaElement).value).toBe('Plan\nfirst edited');
   await openNotes(user); expect(note().value).toBe('Plan\nfirst edited');
 });
+
+it('keeps the leave warning when storing the unsaved note fails', async () => {
+  const navigate = vi.fn(); render(<App version="one" refresh={() => {}} navigate={navigate} />); reset(); const user = userEvent.setup();
+  await openNotes(user); await user.click(within(panel()).getByRole('button', { name: /^Plan/ }));
+  await waitFor(() => expect(note().value).toBe('Plan\nfirst')); await user.type(note(), ' edited');
+  await user.click(within(panel()).getByRole('button', { name: '💡 Brainstorm' }));
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+  Source.current.send({ type: 'goto', url: '/new/__room' });
+  expect(navigate).toHaveBeenCalledWith('/new/__room');
+  const leave = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(leave); expect(leave.defaultPrevented).toBe(true);
+  expect(note().value).toBe('Plan\nfirst edited');
+});
