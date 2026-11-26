@@ -194,9 +194,10 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   // My notes is offered only on a page opened on this computer, as the server serves it only there.
   const isLocalPage = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
   const [notesKept] = useState<NoteDraft | null>(() => { try { const kept = JSON.parse(sessionStorage.getItem(NOTES_DRAFT_KEY) ?? 'null') as NoteDraft | null; sessionStorage.removeItem(NOTES_DRAFT_KEY); return kept; } catch { return null; } });
-  const [service, setService] = useState<Service | null>(() => notesKept && isLocalPage ? 'notes' : null);
+  const [notesHidden] = useState(() => { try { const hidden = sessionStorage.getItem('next-notes-hidden') === '1'; sessionStorage.removeItem('next-notes-hidden'); return hidden; } catch { return false; } });
+  const [service, setService] = useState<Service | null>(() => notesKept && isLocalPage && !notesHidden ? 'notes' : null);
   const serviceRef = useRef(service); serviceRef.current = service;
-  const listBeforeService = useRef<boolean | null>(notesKept && isLocalPage ? (() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } })() : null);
+  const listBeforeService = useRef<boolean | null>(notesKept && isLocalPage && !notesHidden ? (() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } })() : null);
   const notesApi = useRef<NotesApi | null>(null);
   const [shellAlive, setShellAlive] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
@@ -681,13 +682,18 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     setPendingArchives((previous) => { const next = new Set(previous); next.delete(path); return next; });
     void loadDetails();
   };
-  const createBoard = (command: string) => {
+  const noteBrainstorm = useRef<string | null>(null);
+  const createBoard = (command: string, noteText?: string) => {
     if (!room?.multi && room?.started && !armedCreation[command]) {
       setArmedCreation((previous) => ({ ...previous, [command]: true }));
       creationTimers.current[command] = setTimeout(() => { setArmedCreation((previous) => ({ ...previous, [command]: false })); delete creationTimers.current[command]; }, 4000);
       return;
     }
-    void boardCommand(command);
+    if (noteText === undefined) { void boardCommand(command); return; }
+    noteBrainstorm.current = noteText;
+    void post('__say', { text: command }).then(async (response) => {
+      if (!response.ok) { noteBrainstorm.current = null; addStatus(await response.text(), true); return; }
+    }).catch((error) => { noteBrainstorm.current = null; addStatus(error instanceof Error ? error.message : String(error), true); });
   };
   const runAction = (key: string, command: string, confirm: boolean) => {
     if (confirm && !armedActions[key]) {
@@ -780,6 +786,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       if ('webVersion' in event && event.webVersion && version && event.webVersion !== version) {
         try { sessionStorage.setItem('next-composer-draft', draft.current); sessionStorage.setItem('next-work-draft', workDraft.current); } catch {}
         keepNoteDraft(); refresh(); return;
+      }
+      if ((event.type === 'reset' || event.type === 'room') && event.room?.brainstorm && !event.room.active && noteBrainstorm.current !== null) {
+        setText(noteBrainstorm.current); openService(null); noteBrainstorm.current = null;
       }
       if (event.type === 'reset') {
         setWorkerInfo(event.workerInfo ?? null);
@@ -886,6 +895,10 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         }
         void loadDetails();
       } else if (event.type === 'goto') {
+        if (noteBrainstorm.current !== null) {
+          try { keepNoteDraft(); sessionStorage.setItem('next-notes-hidden', '1'); sessionStorage.setItem('next-composer-draft', noteBrainstorm.current); } catch {}
+          notesApi.current?.allowLeave(); noteBrainstorm.current = null;
+        }
         navigate(event.url);
       } else if (event.type === 'ended') {
         setEnded(true); addStatus('This room has ended. You can close this window.'); events.close();
@@ -1042,7 +1055,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   });
   const remoteOnly = replica ? replica.received.filter((line) => !line.local && !foundDiscussions.some((name) => replica.own[name]?.discussion === line.discussion)) : [];
   // The sections' hints, as renderBoards writes them on /__room (the first message's effect, or how to add one).
-  const canAddBoards = !!(room && input && !peek && !viewLayout); // canAct, defined further down
+  const canAddBoards = !!(room && input && !ended && !peek && !viewLayout); // canAct, defined further down
   const workerNow = room?.open?.find((entry) => entry.current)?.working ? ' · worker working' : '';
   const discussionsHint = room?.brainstorm && canAddBoards ? ''
     : !activeDiscussions.length && !unstarted.some((entry) => !entry.research) && !replica?.received.some((line) => !line.local) ? (room?.started ? '' : 'No active discussions: your first message starts one.') + workerNow
@@ -1121,7 +1134,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {service === 'providers' && <div className="view" id="providers"><ProvidersPanel open healthOpen={healthOpen} setHealthOpen={setHealthOpen} warning={Object.keys(monitor).some((p) => providerHealth(monitor, p)?.level)} post={(path, body) => post(path, body)} queue={settingsQueue} done={() => openService(null)} /></div>}
       <div className="view" id="instructions" hidden={service !== 'instructions'}><InstructionsPanel open={service === 'instructions'} /></div>
       <div className="view" id="schedule" hidden={service !== 'schedule'}><SchedulePanel open={service === 'schedule'} reload={scheduleReload} post={(path, body) => post(path, body)} /></div>
-      {isLocalPage && <div className="view" id="notes" hidden={service !== 'notes'}><Notes open={service === 'notes'} show={() => openService('notes')} api={notesApi} kept={notesKept} post={(path, body) => post(path, body)} /></div>}
+      {isLocalPage && <div className="view" id="notes" hidden={service !== 'notes'}><Notes open={service === 'notes'} show={() => openService('notes')} api={notesApi} kept={notesKept} brainstorm={(value) => createBoard('/brainstorm', value)} brainstormDisabled={canAddBoards ? '' : ended ? 'This room has ended.' : peek ? 'Leave the peek to create a brainstorm.' : viewLayout ? 'This view is read-only.' : 'A brainstorm cannot be created here.'} armed={!!armedCreation['/brainstorm']} post={(path, body) => post(path, body)} /></div>}
       {isLocalPage && <div className="view" id="terminal" hidden={service !== 'terminal'}><TerminalPane visible={service === 'terminal'} fitKey={layout} running={setShellAlive} /></div>}
     </section>
     <aside ref={listPanel} id="list-panel" className="next-boards" aria-label="Boards">

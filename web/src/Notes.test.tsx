@@ -148,3 +148,49 @@ it('does not save divider drags while a service is open', async () => {
   fireEvent.keyDown(screen.getByRole('separator', { name: 'Resize conversation and side pane' }), { key: 'ArrowRight' });
   expect(JSON.parse(localStorage.getItem(key)!).left).toBeGreaterThan(0);
 });
+
+it('prefills a new brainstorm across navigation and keeps the unsaved note hidden', async () => {
+  const navigate = vi.fn(); render(<App version="one" refresh={() => {}} navigate={navigate} />); reset(); const user = userEvent.setup();
+  await openNotes(user); await user.click(within(panel()).getByRole('button', { name: /^Plan/ }));
+  await waitFor(() => expect(note().value).toBe('Plan\nfirst')); await user.type(note(), ' edited');
+  await user.click(within(panel()).getByRole('button', { name: '💡 Brainstorm' }));
+  await waitFor(() => expect(bodies('__say')).toContainEqual({ text: '/brainstorm' }));
+  Source.current.send({ type: 'goto', url: '/new/__room' });
+  expect(navigate).toHaveBeenCalledWith('/new/__room');
+  const leave = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(leave); expect(leave.defaultPrevented).toBe(false);
+  cleanup(); render(<App version="one" refresh={() => {}} />); reset();
+  expect(panel().hidden).toBe(true); expect((screen.getByLabelText('Message to the agents') as HTMLTextAreaElement).value).toBe('Plan\nfirst edited');
+  await openNotes(user); expect(note().value).toBe('Plan\nfirst edited');
+  expect(bodies('__notes/save')).toEqual([]);
+});
+
+it('requires confirmation in single-board rooms and preserves edits on failure', async () => {
+  answer = ((base) => (url: string, body: Record<string, unknown> | null) => url === '__say' ? { ok: false, status: 500, text: async () => 'Failed' } : base(url, body))(answer);
+  render(<App version="one" refresh={() => {}} />); Source.current.send({ type: 'reset', room: { ...room, multi: false }, messages: [], worker: [], input: true, workInput: true, webVersion: 'one' });
+  const user = userEvent.setup(); await openNotes(user); await user.click(within(panel()).getByRole('button', { name: /^Plan/ }));
+  await waitFor(() => expect(note().value).toBe('Plan\nfirst')); await user.type(note(), ' edited');
+  await user.click(within(panel()).getByRole('button', { name: '💡 Brainstorm' })); expect(bodies('__say')).toEqual([]);
+  expect(note().value).toBe('Plan\nfirst edited'); await user.click(within(panel()).getByRole('button', { name: /Click again/ }));
+  await waitFor(() => expect(bodies('__say')).toContainEqual({ text: '/brainstorm' })); expect(note().value).toBe('Plan\nfirst edited'); expect(panel().hidden).toBe(false);
+});
+
+it('disables brainstorm for blank notes and unavailable boards', async () => {
+  render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup(); await openNotes(user);
+  const button = () => within(panel()).getByRole('button', { name: '💡 Brainstorm' }) as HTMLButtonElement;
+  expect(button().disabled).toBe(true); expect(button().title).toMatch(/note first/i);
+  await user.click(within(panel()).getByRole('button', { name: 'New' })); await user.type(note(), 'Idea'); expect(button().disabled).toBe(false);
+  Source.current.send({ type: 'reset', room, messages: [], worker: [], input: true, workInput: true, peek: { path: 'x' }, webVersion: 'one' });
+  expect(button().disabled).toBe(true); expect(button().title).toMatch(/peek/i);
+  Source.current.send({ type: 'reset', room, messages: [], worker: [], input: true, workInput: true, viewing: { name: 'peer', discussion: 'other' }, webVersion: 'one' });
+  expect(button().disabled).toBe(true); expect(button().title).toMatch(/read-only/i);
+  Source.current.send({ type: 'ended' }); expect(button().disabled).toBe(true); expect(button().title).toMatch(/ended/i);
+});
+
+ it('prefills an in-place brainstorm and retains the note', async () => {
+  render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup(); await openNotes(user);
+  await user.click(within(panel()).getByRole('button', { name: /^Plan/ })); await waitFor(() => expect(note().value).toBe('Plan\nfirst'));
+  await user.type(note(), ' edited'); await user.click(within(panel()).getByRole('button', { name: '💡 Brainstorm' }));
+  Source.current.send({ type: 'room', room: { ...room, active: null, brainstorm: true } });
+  expect(panel().hidden).toBe(true); expect((screen.getByLabelText('Message to the agents') as HTMLTextAreaElement).value).toBe('Plan\nfirst edited');
+  await openNotes(user); expect(note().value).toBe('Plan\nfirst edited');
+});
