@@ -57,6 +57,29 @@ test('notes: create, list, read, save exactly as typed, remove; stored outside t
   } finally { s.close(); t.close(); }
 });
 
+test('notes: tags require the entire last non-empty line and never supply the title', async () => {
+  const s = await serve(room());
+  try {
+    const cases = [
+      ['Title\n#Work #[ Big   Idea ] #work #[big idea]\n\n', 'Title', ['work', 'big idea']],
+      ['#solo', 'Untitled', ['solo']],
+      ['#[ Only   Tags ]', 'Untitled', ['only tags']],
+      ['Title\n#', 'Title', []],
+      ['# Heading', 'Heading', []],
+      ['Title\n#[unclosed', 'Title', []],
+      ['Title\n#work ordinary', 'Title', []],
+      ['Title\n#work #[ ]', 'Title', []],
+      ['Title\n#work\nordinary', 'Title', []],
+    ];
+    for (const [text, title, tags] of cases) {
+      const created = await (await s.post('__notes/new', { text })).json();
+      assert.equal(created.title, title, text); assert.deepEqual(created.tags, tags, text);
+      const listed = (await s.list()).find((n) => n.id === created.id);
+      assert.deepEqual(listed.tags, tags, text);
+    }
+  } finally { s.close(); }
+});
+
 test('notes: bad ids, bodies and methods are refused; ids never reach outside the folder', async () => {
   const s = await serve(room());
   try {

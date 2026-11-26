@@ -16,6 +16,7 @@ export function Notes({ open, show, post, api, kept }: { open: boolean; show: ()
   const [list, setList] = useState<NoteEntry[]>([]);
   const [editor, setEditor] = useState<{ id: string | null; base: string; editing: boolean }>({ id: null, base: '', editing: false });
   const [text, setText] = useState('');
+  const [filter, setFilter] = useState<string | null>(null);
   const [status, setStatus] = useState<{ text: string; error?: boolean }>({ text: '' });
   const [ask, setAsk] = useState<Ask | null>(null);
   const [saving, setSaving] = useState(false);
@@ -30,7 +31,8 @@ export function Notes({ open, show, post, api, kept }: { open: boolean; show: ()
   const loadNotes = async () => {
     const r = await fetch('__notes', { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status + ' ' + await r.text());
-    const value = await r.json() as NoteEntry[]; setList(value); return value;
+    const value = await r.json() as NoteEntry[]; setList(value);
+    setFilter((tag) => tag && value.some((n) => n.tags.includes(tag)) ? tag : null); return value;
   };
   // Runs act now, or once the User agrees to discard the unsaved changes (cancel: if they don't).
   const guard = (act: () => void, cancel?: () => void) => {
@@ -99,11 +101,14 @@ export function Notes({ open, show, post, api, kept }: { open: boolean; show: ()
       loadNotes().catch(() => {});
     }], ['Cancel']] });
   };
+  const tags = [...new Set(list.flatMap((n) => n.tags))].sort();
+  const visible = filter ? list.filter((n) => n.tags.includes(filter)) : list;
   return <div id="notes-body" className="notes-body">
     <div id="notes-side" className="notes-side">
       <button type="button" id="notes-new" title="Start a new note: the first line is its title" onClick={() => guard(() => { edit(null, ''); setStatus({ text: 'A new note: the first line is its title. Nothing is saved until Save.' }); box.current?.focus(); })}>New</button>
-      <div id="notes-list" aria-label="Notes">{list.length ? list.map((n) => <button type="button" key={n.id} className={'note' + (n.id === editor.id ? ' on' : '')} title={n.title}
-        onClick={() => { if (n.id !== live.current.editor.id) guard(() => void readNote(n.id)); }}>{n.title}<span className="when">Saved {new Date(n.savedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span></button>)
+      {tags.length > 0 && <div id="notes-filters" aria-label="Filter notes by tag">{tags.map((tag) => <button type="button" key={tag} aria-pressed={filter === tag} onClick={() => setFilter(filter === tag ? null : tag)}>#{tag}</button>)}</div>}
+      <div id="notes-list" aria-label="Notes">{visible.length ? visible.map((n) => <button type="button" key={n.id} className={'note' + (n.id === editor.id ? ' on' : '')} title={n.title}
+        onClick={() => { if (n.id !== live.current.editor.id) guard(() => void readNote(n.id)); }}>{n.title}<span className="when">Saved {new Date(n.savedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>{n.tags.length > 0 && <span className="note-tags">{n.tags.map((tag) => <span className="note-tag" key={tag}>#{tag}</span>)}</span>}</button>)
         : <span className="hint">No notes yet.</span>}</div>
     </div>
     <div id="notes-main" className="notes-main">
