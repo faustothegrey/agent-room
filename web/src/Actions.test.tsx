@@ -22,9 +22,9 @@ it('refreshes worker information on opening Actions and sends Summarize and New 
   setup(); const user = userEvent.setup(); await user.click(screen.getByLabelText('Discussion actions'));
   await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === '__workerinfo')).toHaveLength(1));
   await user.click(screen.getByRole('button', { name: 'Summarize' })); await waitFor(() => expect(says()).toContain('/summary'));
-  await user.click(screen.getByLabelText('Discussion actions')); await user.click(screen.getByRole('button', { name: 'New research' }));
+  await user.click(screen.getByLabelText('Discussion actions')); await user.click(screen.getByText('New research', { selector: 'button' }));
   await waitFor(() => expect(says()).toContain('/research'));
-  await user.click(screen.getByLabelText('Discussion actions')); await user.click(screen.getByRole('button', { name: 'New workbench' }));
+  await user.click(screen.getByLabelText('Discussion actions')); await user.click(screen.getByText('New workbench', { selector: 'button' }));
   await waitFor(() => expect(says()).toContain('/workbench'));
 });
 

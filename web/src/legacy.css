@@ -188,8 +188,11 @@ body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 #list-title { font-size: .75rem; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #list-toggle { border: 0; background: none; padding: .1rem .35rem; font-size: .95rem; line-height: 1; color: var(--dim); }
 #list-toggle:hover { background: #8882; color: CanvasText; }
-.boards-new { display: flex; flex-wrap: wrap; gap: .35rem; padding: .4rem .5rem; }
-.boards-new button { flex: 1 1 auto; font-size: .73rem; padding: .28rem .45rem; white-space: nowrap; text-align: center; }
+.boards-header { display: inline-flex; align-items: center; width: calc(100% - 1.2em); }
+.boards-new { display: inline-flex; gap: .2rem; margin-left: auto; }
+.boards-new button { font-size: .73rem; padding: .1rem .25rem; white-space: nowrap; }
+.boards-new button.armed { outline: 2px solid #d88a00; background: #d88a0033; }
+.boards-creation-warning { display: block; margin: .25rem 0 0; color: CanvasText; text-transform: none; letter-spacing: normal; }
 #list-pane { flex: 1; min-height: 0; overflow-y: auto; }
 .app.list-collapsed #list-title, .app.list-collapsed #list-pane { display: none; }
 .app.list-collapsed #list-head { justify-content: center; padding: .35rem 0; }
