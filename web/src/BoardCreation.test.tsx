@@ -20,7 +20,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 it('creates each supported board beside the current one and follows the goto to its React page', async () => {
   setup(); const user = userEvent.setup(), boards = screen.getByLabelText('Boards');
-  for (const [label, command] of [['+ New discussion', '/new'], ['+ New brainstorm', '/brainstorm'], ['+ New workbench', '/workbench'], ['+ New research', '/research']]) {
+  for (const [label, command] of [['New discussion', '/new'], ['New brainstorm', '/brainstorm'], ['New workbench', '/workbench'], ['New research', '/research']]) {
     await user.click(within(boards).getByRole('button', { name: label }));
     await waitFor(() => expect(says()).toContain(command));
   }
@@ -30,26 +30,38 @@ it('creates each supported board beside the current one and follows the goto to 
 it('places creation buttons in their matching collapsible sections', async () => {
   setup(); const user = userEvent.setup();
   for (const [section, labels] of [
-    ['Discussions (0)', ['+ New discussion', '+ New workbench']],
-    ['Research (0)', ['+ New research']],
-    ['Brainstorms (0)', ['+ New brainstorm']],
+    ['Discussions (0)', ['New discussion', 'New workbench']],
+    ['Research (0)', ['New research']],
+    ['Brainstorms (0)', ['New brainstorm']],
   ] as const) {
     const summary = screen.getByText(section), details = summary.closest('details')!;
     for (const label of labels) expect(within(details).getByRole('button', { name: label })).toBeTruthy();
     await user.click(summary);
     await waitFor(() => expect(details.open).toBe(false));
+    for (const label of labels) {
+      const button = within(details).getByRole('button', { name: label });
+      await user.click(button);
+      expect(details.open).toBe(false);
+    }
   }
 });
 
 it('requires a second click in a started single-session room and lets the warning expire', async () => {
   setup({ multi: false }); const user = userEvent.setup();
-  await user.click(screen.getByRole('button', { name: '+ New brainstorm' }));
-  expect(says()).toEqual([]); expect(screen.getByRole('button', { name: 'Click again: this session ends and the chat clears' })).toBeTruthy();
-  await user.click(screen.getByRole('button', { name: 'Click again: this session ends and the chat clears' }));
+  await user.click(screen.getByRole('button', { name: 'New brainstorm' }));
+  const button = screen.getByRole('button', { name: 'New brainstorm' });
+  const details = button.closest('details')!;
+  expect(says()).toEqual([]); expect(button.classList.contains('armed')).toBe(true);
+  await user.click(within(details).getByText('Brainstorms (0)'));
+  expect(details.open).toBe(false);
+  expect(within(details).getByText('Click again: this session ends and the chat clears')).toBeTruthy();
+  await user.click(button);
+  expect(details.open).toBe(false);
   await waitFor(() => expect(says()).toEqual(['/brainstorm']));
-  vi.useFakeTimers(); fireEvent.click(screen.getByRole('button', { name: '+ New research' }));
+  vi.useFakeTimers(); fireEvent.click(within(screen.getByLabelText('Boards')).getByRole('button', { name: 'New research' }));
   await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
-  expect(screen.getByRole('button', { name: '+ New research' })).toBeTruthy(); expect(says()).toEqual(['/brainstorm']);
+  expect(within(screen.getByLabelText('Boards')).getByRole('button', { name: 'New research' }).classList.contains('armed')).toBe(false);
+  expect(within(screen.getByText('Research (0)').closest('details')!).queryByText('Click again: this session ends and the chat clears')).toBeNull(); expect(says()).toEqual(['/brainstorm']);
 });
 
 it('sends the first message to name an unnamed discussion, brainstorm or research board', async () => {
@@ -77,9 +89,9 @@ it('offers Cancel only for an unnamed multi-room creation and sends /cancel', as
 it('hides creation while peeking or in terminal mode and shows a failed request', async () => {
   setup(); const user = userEvent.setup();
   fetchMock.mockImplementation(async (url: string) => url === '__say' ? { ok: false, text: async () => 'Cannot start now' } : { ok: true, json: async () => ({ files: [], unviewable: [], branch: null }) });
-  await user.click(screen.getByRole('button', { name: '+ New research' })); expect(await screen.findByText('Cannot start now')).toBeTruthy();
+  await user.click(within(screen.getByLabelText('Boards')).getByRole('button', { name: 'New research' })); expect(await screen.findByText('Cannot start now')).toBeTruthy();
   Source.current.send({ type: 'reset', room, input: true, doc: null, messages: [], peek: { name: 'old', title: 'Old', path: 'discussions/old' } });
-  expect(screen.queryByRole('button', { name: '+ New research' })).toBeNull();
+  expect(within(screen.getByLabelText('Boards')).queryByRole('button', { name: 'New research' })).toBeNull();
   Source.current.send({ type: 'reset', room, input: false, doc: null, messages: [], peek: null });
-  expect(screen.queryByRole('button', { name: '+ New brainstorm' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'New brainstorm' })).toBeNull();
 });
