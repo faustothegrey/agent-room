@@ -6,7 +6,7 @@ import type { NoteEntry, NoteRequest, NoteSaved } from '../../src/contract';
 // panel, keeping unsaved edits; they are never dropped without asking: inside the panel before
 // another note or New, before switching board or room (guard), the browser's leave-page warning
 // otherwise, and a refresh after a code change keeps them (draft).
-export type NotesApi = { dirty: () => boolean; draft: () => NoteDraft | null; guard: (act: () => void, cancel?: () => void) => void };
+export type NotesApi = { dirty: () => boolean; draft: () => NoteDraft | null; guard: (act: () => void, cancel?: () => void) => void; allowLeave: () => void };
 export type NoteDraft = { id: string | null; base: string; text: string };
 export const NOTES_DRAFT_KEY = 'next-notes-draft';
 type Ask = { text: string; buttons: [string, (() => void)?][] };
@@ -18,7 +18,7 @@ const tagColor = (tag: string) => {
   return { backgroundColor: `hsl(${hash % 360} 75% 50% / 25%)` };
 };
 const titleOf = (text: string) => text.split('\n')[0].replace(/^\s*#+\s*/, '').trim() || 'Untitled';
-export function Notes({ open, show, post, api, kept }: { open: boolean; show: () => void; post: Post; api: MutableRefObject<NotesApi | null>; kept: NoteDraft | null }) {
+export function Notes({ open, show, post, api, kept, brainstorm, brainstormDisabled, armed }: { open: boolean; show: () => void; post: Post; api: MutableRefObject<NotesApi | null>; kept: NoteDraft | null; brainstorm: (text: string) => void; brainstormDisabled: string; armed: boolean }) {
   const [list, setList] = useState<NoteEntry[]>([]);
   const [editor, setEditor] = useState<{ id: string | null; base: string; editing: boolean }>({ id: null, base: '', editing: false });
   const [text, setText] = useState('');
@@ -49,15 +49,16 @@ export function Notes({ open, show, post, api, kept }: { open: boolean; show: ()
       ['Discard changes', () => { setText(live.current.editor.base); live.current.text = live.current.editor.base; act(); }],
       ['Keep editing', () => { cancel?.(); box.current?.focus(); }]] });
   };
-  api.current = { dirty, guard, draft: () => dirty() ? { id: live.current.editor.id, base: live.current.editor.base, text: live.current.text } : null };
+  const leaving = useRef(false);
+  api.current = { dirty, guard, allowLeave: () => { leaving.current = true; }, draft: () => dirty() ? { id: live.current.editor.id, base: live.current.editor.base, text: live.current.text } : null };
   useEffect(() => {
-    const leave = (e: BeforeUnloadEvent) => { if (dirty()) { e.preventDefault(); e.returnValue = ''; } };
+    const leave = (e: BeforeUnloadEvent) => { if (dirty() && !leaving.current) { e.preventDefault(); e.returnValue = ''; } };
     addEventListener('beforeunload', leave); return () => removeEventListener('beforeunload', leave);
   }, []);
   // Opening the service lists the notes; a draft kept across a refresh comes back in the editor.
   const restored = useRef(false);
   useEffect(() => {
-    if (!open) return;
+    if (!open && (!kept || restored.current)) return;
     const draft = !restored.current ? kept : null; restored.current = true;
     if (draft) edit(draft.id, draft.text, draft.base);
     loadNotes().then((found) => {
@@ -123,6 +124,7 @@ export function Notes({ open, show, post, api, kept }: { open: boolean; show: ()
       <textarea ref={box} className="box" id="notes-text" aria-label="Note" placeholder="Choose a note, or New. The first line is the note's title." disabled={!editor.editing} value={text} onChange={(e) => setText(e.target.value)} />
       <div id="notes-bar"><button type="button" disabled={!editor.editing || saving} title="Save this note (nothing is saved until you press Save)" onClick={() => void save()}>Save</button>
         <button type="button" disabled={!editor.editing} onClick={remove}>{editor.id || !editor.editing ? 'Remove' : 'Discard'}</button>
+        <button type="button" disabled={!editor.editing || !text.trim() || !!brainstormDisabled} title={!editor.editing || !text.trim() ? 'Write a note first.' : brainstormDisabled || (armed ? 'Click again: this session ends and the chat clears' : 'Start a brainstorm with this note in the message box')} onClick={() => brainstorm(live.current.text)}>{armed ? 'Click again: this session ends and the chat clears' : '💡 Brainstorm'}</button>
         <span id="notes-status" role="status" className={status.error ? 'error' : undefined}>{status.text}</span></div>
     </div>
   </div>;
