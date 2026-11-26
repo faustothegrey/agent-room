@@ -1044,7 +1044,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   // The sections' hints, as renderBoards writes them on /__room (the first message's effect, or how to add one).
   const canAddBoards = !!(room && input && !peek && !viewLayout); // canAct, defined further down
   const workerNow = room?.open?.find((entry) => entry.current)?.working ? ' · worker working' : '';
-  const discussionsHint = room?.brainstorm && canAddBoards ? 'A brainstorm is shown: it is listed in Brainstorms. Turn it into a discussion (Actions ▾ in the discussion header) to have it here.'
+  const discussionsHint = room?.brainstorm && canAddBoards ? ''
     : !activeDiscussions.length && !unstarted.some((entry) => !entry.research) && !replica?.received.some((line) => !line.local) ? (room?.started ? '' : 'No active discussions: your first message starts one.') + workerNow
     : room && !room.started && canAddBoards ? 'Your first message starts a new discussion, or click a board to switch or peek.' + workerNow : '';
   const researchHint = room?.research && !room.active && canAddBoards ? 'Your first message names this research board and saves it here.' : !research.length && !unstarted.some((entry) => entry.research) ? 'No research boards yet: use the 🔬 icon in the header to start one.' : '';
