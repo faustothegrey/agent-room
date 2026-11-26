@@ -291,6 +291,8 @@ export async function load(ctx, v) {
   const monitorModule = await import(`./monitor.mjs${v}`);
   const schedulerModule = await import(`./scheduler.mjs${v}`);
   const usage = await import(`./usage.mjs${v}`);
+  const hub = hubOf(ctx);
+  usage.useQuotaCache(hub.quotaCache ??= { value: null });
   // Replication is loaded only with --node.
   const replicate = ctx.node ? await import(`./replicate.mjs${v}`) : null;
   // The room's identity on its server: its folder's real path, and the id in its addresses.
@@ -747,8 +749,8 @@ export async function start(ctx) {
   // Calls through ctx, so after a reload it runs the new code.
   ctx.quotaTimer ??= setInterval(() => ctx.refreshQuota?.(), 60_000).unref();
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
-  ctx.refreshQuota();
   watchMonitor(ctx);
+  ctx.refreshQuota();
   startScheduler(ctx);
   ctx.code = { ...await codeInfo(), startedAt: ctx.screen.startedAt };
   if (ctx.replica) { ctx.project = await codeInfo(ctx.cwd); await pushReplica(ctx); }
