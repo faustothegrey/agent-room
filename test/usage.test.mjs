@@ -1,7 +1,7 @@
 import { test } from './helpers/test.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, utimes, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addUsage, agentUsageLine, checkLogin, checkQuotaFloor, fetchQuota, parseClaudeAuth, parseCodexLogin, formatUsage, quotaGauges, quotaSummary, usageReport, readClaudeQuota, readCodexQuota, parseAgyQuota, refreshQuotaCache, useQuotaCache } from '../src/usage.mjs';
@@ -252,7 +252,7 @@ test('internal readers preserve provider reading times and parse quota windows',
   const dir = await mkdtemp(join(tmpdir(), 'quota-test-'));
   try {
     const claude = join(dir, '.claude.json');
-    await writeFile(claude, JSON.stringify({ oauthAccount: { accountUuid: 'a' }, cachedUsageUtilization: { accountUuid: 'a', fetchedAtMs: 1700000000000, utilization: { five_hour: { utilization: 20 }, seven_day: { utilization: 30 } } } }));
+    await writeFile(claude, JSON.stringify({ oauthAccount: { accountUuid: 'a' }, cachedUsageUtilization: { accountUuid: 'a', fetchedAtMs: 1700000000000, utilization: { five_hour: { utilization: 20, resets_at: '2023-11-14T22:14:00Z' }, seven_day: { utilization: 30 } } } }));
     const c = await readClaudeQuota(claude);
     assert.equal(c.updated_at, '2023-11-14T22:13:20.000Z');
     assert.equal(c.parsed.current_session.used_percent, 20);
@@ -280,4 +280,52 @@ test('background quota cache returns immediately while Agy is pending and retain
   await refreshQuotaCache(cache, [async () => ({ ok: false }), async () => ({ ok: false }), async () => ({ ok: false })]);
   assert.equal((await fetchQuota()).claude.updated_at, '2026-01-01');
   useQuotaCache({ value: null });
+});
+
+
+test('Codex reads at most 30 newest files and stops after the first with a valid event', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'codex-files-'));
+  try {
+    const event = (used) => JSON.stringify({ timestamp: '2026-01-01T00:00:00Z', payload: { rate_limits: { primary: { used_percent: used } } } });
+    for (let i = 0; i < 32; i++) {
+      const path = join(dir, `${i}.jsonl`);
+      await writeFile(path, i === 1 || i === 31 ? event(i) : '{}');
+      await utimes(path, new Date(1700000000000 + i * 1000), new Date(1700000000000 + i * 1000));
+    }
+    const read = [];
+    const result = await readCodexQuota(dir, async (path, encoding) => { read.push(path); return readFile(path, encoding); });
+    assert.equal(result.parsed.five_hour_limit.used_percent, 31);
+    assert.deepEqual(read, [join(dir, '31.jsonl')]);
+    await writeFile(join(dir, '31.jsonl'), '{}');
+    await utimes(join(dir, '31.jsonl'), new Date(1700000031000), new Date(1700000031000));
+    read.length = 0;
+    assert.equal((await readCodexQuota(dir, async (path, encoding) => { read.push(path); return readFile(path, encoding); })).ok, false);
+    assert.equal(read.length, 30);
+    assert.ok(!read.includes(join(dir, '1.jsonl')));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('quota guard rejects a window after its reset until a later reading arrives', async () => {
+  const measured = '2026-11-26T12:00:00Z', reset = '2026-11-26T12:05:00Z';
+  const quota = { claude: { ok: true, updated_at: measured, parsed: {
+    current_session: { used_percent: 20, resets_at: reset }, current_week_all_models: { used_percent: 10 },
+  } } };
+  assert.equal(checkQuotaFloor(quota, ['claude'], 50, { now: Date.parse('2026-11-26T12:04:00Z') }).ok, true);
+  assert.match(checkQuotaFloor(quota, ['claude'], 50, { now: Date.parse('2026-11-26T12:05:00Z') }).reason, /claude 5h.*reset/);
+  quota.claude.updated_at = '2026-11-26T12:06:00Z';
+  assert.equal(checkQuotaFloor(quota, ['claude'], 50, { now: Date.parse('2026-11-26T12:07:00Z') }).ok, true);
+  const http = { codex: { ok: true, updated_at: '2026-11-26 12:00:00', parsed: {
+    five_hour_limit: { used_percent: 20 }, weekly_limit: { used_percent: 10, resets: '12:05' },
+  } } };
+  const server = createServer((req, res) => res.end(JSON.stringify(http)));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const reading = await fetchQuota(`http://127.0.0.1:${server.address().port}`);
+    assert.match(checkQuotaFloor(reading, ['codex'], 50, { now: new Date(2026, 10, 26, 12, 6).getTime() }).reason, /codex week.*reset/);
+  } finally { server.close(); }
+  const agy = { antigravity: { ok: true, updated_at: measured, parsed: { groups: {
+    gemini: { windows: { '5h': { used_percent: 1 }, weekly: { used_percent: 1 } } },
+    argon: { windows: { weekly: { used_percent: 1, resets_at: reset } } },
+  } } } };
+  assert.match(checkQuotaFloor(agy, ['agy'], 50, { now: Date.parse('2026-11-26T12:06:00Z') }).reason, /agy \(argon\) week.*reset/);
 });

@@ -44,6 +44,18 @@ export function checkQuotaFloor(quota, providers, floor = 50, { now = Date.now()
       const missing = [!has5h && '5h', !hasWeek && 'weekly'].filter(Boolean).join(' and ');
       return { ok: false, reason: `${p} ${missing} quota reading is missing` };
     }
+    const block = quota[p === 'agy' ? 'antigravity' : p];
+    const readings = p === 'agy' && block?.parsed?.groups
+      ? Object.entries(block.parsed.groups).flatMap(([group, data]) => Object.entries(data?.windows ?? {})
+        .map(([name, window]) => ({ label: `${p} (${group}) ${name === 'weekly' ? 'week' : name}`, window })))
+      : p === 'agy' && Array.isArray(block?.parsed?.models)
+        ? block.parsed.models.map((w) => ({ label: `${p}${w.group ? ` (${w.group})` : ''} ${w.window === 'weekly' ? 'week' : w.window}`, window: w }))
+        : windows(quota, p).map(([label, window]) => ({ label: `${p} ${label}`, window }));
+    for (const { label, window } of readings) {
+      if (!window) continue;
+      const reset = quotaResetTime(window, measuredMs);
+      if (reset !== null && reset > measuredMs && reset <= now) return { ok: false, reason: `${label} quota reset since its reading; a new reading is required` };
+    }
     for (const g of gauges) {
       const remaining = 100 - g.used;
       if (remaining < floor) {
@@ -81,7 +93,6 @@ function quotaWindow(used, reset) {
   const ms = typeof reset === 'number' ? reset * 1000 : Date.parse(reset);
   if (Number.isFinite(ms)) {
     const d = new Date(ms);
-    if (ms <= Date.now()) { n = 0; out.expired = true; }
     out.resets_at = d.toISOString();
     out.resets = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} on ${d.getDate()} ${MONTHS[d.getMonth()]}`;
   }
@@ -101,7 +112,7 @@ export async function readClaudeQuota(path = join(process.env.CLAUDE_CONFIG_DIR 
     return { ok: !!Object.keys(parsed).length, source: 'claude.json', updated_at: stamp(Number(c.fetchedAtMs)), parsed };
   } catch { return { ok: false, source: 'claude.json' }; }
 }
-export async function readCodexQuota(root = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'sessions')) {
+export async function readCodexQuota(root = join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'sessions'), readSession = readFile) {
   const files = [];
   async function walk(dir) {
     let entries; try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
@@ -113,8 +124,8 @@ export async function readCodexQuota(root = join(process.env.CODEX_HOME || join(
   }
   await walk(root); files.sort((a, b) => b.mtime - a.mtime);
   let best;
-  for (const f of files) {
-    let data; try { data = await readFile(f.path, 'utf8'); } catch { continue; }
+  for (const f of files.slice(0, 30)) {
+    let data; try { data = await readSession(f.path, 'utf8'); } catch { continue; }
     for (const line of data.split('\n')) {
       if (!line.includes('"rate_limits"')) continue;
       try {
@@ -122,6 +133,7 @@ export async function readCodexQuota(root = join(process.env.CODEX_HOME || join(
         if (rl && (rl.limit_id == null || rl.limit_id === 'codex') && (rl.primary || rl.secondary) && Number.isFinite(time) && (!best || time > best.time)) best = { time, rl };
       } catch {}
     }
+    if (best) break;
   }
   if (!best) return { ok: false, source: 'codex-sessions' };
   const parsed = {};
@@ -241,6 +253,23 @@ function resetTime(text, measured) {
     day = calendar.getUTCDate(); month = MONTHS[calendar.getUTCMonth()];
   }
   return `${Number(day)} ${month} ${String(hour).padStart(2, '0')}:${minute}${zone}`;
+}
+
+// The HTTP meter can supply a human-readable reset instead of resets_at.
+function quotaResetTime(window, measuredMs) {
+  const explicit = typeof window.resets_at === 'number' ? window.resets_at * 1000 : Date.parse(window.resets_at);
+  if (Number.isFinite(explicit)) return explicit;
+  if (!window.resets) return null;
+  const measured = new Date(measuredMs);
+  const local = `${measured.getFullYear()}-${String(measured.getMonth() + 1).padStart(2, '0')}-${String(measured.getDate()).padStart(2, '0')} ${String(measured.getHours()).padStart(2, '0')}:${String(measured.getMinutes()).padStart(2, '0')}`;
+  const formatted = resetTime(window.resets, local)?.replace(/ \([^)]+\)$/, '');
+  const match = /^(\d{1,2}) ([A-Za-z]{3}) (\d{2}):(\d{2})$/.exec(formatted ?? '');
+  if (!match) return null;
+  const month = MONTHS.indexOf(match[2]);
+  if (month < 0) return null;
+  let date = new Date(measured.getFullYear(), month, Number(match[1]), Number(match[3]), Number(match[4]));
+  if (date.getTime() < measuredMs - 180 * 86400_000) date = new Date(measured.getFullYear() + 1, month, Number(match[1]), Number(match[3]), Number(match[4]));
+  return date.getTime();
 }
 
 // The quota windows as gauges for the screen's header: [{ provider, label, used, resets }], in the
