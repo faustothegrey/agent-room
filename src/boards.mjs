@@ -1,4 +1,5 @@
 // Board lifecycle and checkpoint persistence, bound to the current room code on Reload.
+import * as defaultInstructions from './instructions.mjs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, tmpdir } from 'node:os';
@@ -426,8 +427,8 @@ function briefing(ctx) {
       }
       return `This session continues the research board in ${dir}: create, read and write this board's documents (quest.md, learnings.md, drawings) there. Read its quest.md, learnings.md and transcripts/ folder.${summary}`;
     }
-    return `This is a new research board. Its folder is ${dir}: create, read and write this board's documents (quest.md, learnings.md, drawings) there. `
-      + `The room's root, ${ctx.cwd}, holds the work itself.`;
+    const instr = ctx.instructions ?? defaultInstructions;
+    return instr.fill(instr.RESEARCH_BRIEFING, { dir, root: ctx.cwd });
   }
   if (continued) {
     if (ctx.discussion.fromResearch) {
@@ -441,8 +442,8 @@ function briefing(ctx) {
     return `This session continues the discussion in ${dir}: create, read and write this discussion's documents (notes, drawings) there. Start from its handoff `
       + '(see "Where to start reading" in your rulebook); you can also read its notes and its transcripts/ folder.' + summary;
   }
-  return `This is a new discussion. Its folder is ${dir}: create, read and write this discussion's documents (notes, drawings) there. `
-    + `The room's root, ${ctx.cwd}, holds the work itself.`;
+  const instr = ctx.instructions ?? defaultInstructions;
+  return instr.fill(instr.BRIEFING, { dir, root: ctx.cwd });
 }
 
 // ── Checkpoints ───────────────────────────────────────────────────────
@@ -698,7 +699,8 @@ async function loadCheckpoint(ctx, saved, name, brainstorm = false, directory = 
   if (!existsSync(logPath)) throw new Error(`The transcript of ${name}'s checkpoint is missing (${logPath}). The checkpoint was kept.`);
   // Every agent's next prompt says it was restored (room.mjs): its own session may remember more.
   // A notice still waiting there (a brainstorm turned into a discussion while closed) comes first.
-  const restored = `agent-room restored this ${what} from its checkpoint of ${when(new Date(saved.at))}. If you remember turns after that, they are not in the room's record.`;
+  const instr = ctx.instructions ?? defaultInstructions;
+  const restored = instr.fill(instr.RESTORED, { what, when: when(new Date(saved.at)) });
   const waiting = saved.state.restored?.pending?.length && typeof saved.state.restored.text === 'string' ? saved.state.restored.text : null;
   const state = { ...saved.state, ...(saved.workbench || isWorkbenchDir(dir) ? { workbench: true } : {}), ...(saved.research || isResearchDir(dir) ? { research: true } : {}), seen, restored: { text: waiting ? `${waiting}\n\n${restored}` : restored,
     pending: saved.agentSpecs.split(',').map((spec) => parseSpec(spec).name) } };

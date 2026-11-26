@@ -764,7 +764,8 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       const merge = isCatchUpAction ? '' : instr.workerMerge(mainBehind, rollback, place, label);
       const interrupted = instr.workerInterrupted(told);
       if (told.length) work.interrupted = work.interrupted.filter((r) => !told.includes(r));
-      const retryBrief = t?.retry ? `Your earlier attempt at this instruction failed: ${t.retry.error}\nInspect the current worktree and Git state first, including uncommitted edits and any merge or revert in progress. Commits made since the failure:\n${t.retry.after ? (await git(place.path, 'log', '--format=%H %s', `${t.retry.after}..HEAD`).catch(() => '(could not read commits)') || '(none)') : '(the failure commit could not be determined)'}\n\n` : '';
+      const retryBrief = t?.retry ? instr.fill(instr.WORKER_RETRY, { error: t.retry.error,
+        commits: t.retry.after ? (await git(place.path, 'log', '--format=%H %s', `${t.retry.after}..HEAD`).catch(() => '(could not read commits)') || '(none)') : '(the failure commit could not be determined)' }) + '\n\n' : '';
       const makeUsageLine = () => ctx.usage.agentUsageLine({
         total: worker === ctx.worker ? ctx.totals?.[worker.name] : undefined,
         usageUnavailable: worker !== ctx.worker,

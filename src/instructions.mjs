@@ -1,7 +1,6 @@
-// Every prompt agent-room sends, in one place. The runtime imports the builders below (so the
-// sent text and this catalog can't drift), and the Instructions panel reads `instructionSets`.
-// A `content` string with {placeholders} shows the template as the panel renders it; the builder
-// next to it fills those placeholders with live values.
+// Templates shared by the runtime and the Instructions panel live here. Rulebooks remain in
+// their own files; other runtime-only framing may live at its call site. Builders fill the
+// displayed {placeholders} with live values.
 
 // The rulebook layers, joined as system instructions and re-read on Reload. They stay as files
 // (hot-reloadable); the panel reads their current text, the registry points at them by `ref`.
@@ -19,19 +18,14 @@ export const RULEBOOK_LAYERS = {
 };
 export const rulebookPath = (name) => new URL(`../rulebooks/${RULEBOOKS[name]}`, import.meta.url);
 
+export const fill = (template, values) => template.replace(/\{([\w-]+)\}/g, (match, key) =>
+  Object.hasOwn(values, key) ? String(values[key]) : match);
+
 // ── Discussion / brainstorming / research agents ───────────────────────────────────────────
 
 export function intro(agent, agents, research = false) {
-  const order = agents.map((a) => a.name).join(', then ');
-  return [
-    `You are ${agent.name}, one of several AI agents in a group conversation with a human user.`,
-    `Participants: the User, ${agents.map((a) => a.name).join(', ')}.`,
-    `After each User message, agents take turns in this order: ${order}, until all of them pass in a row.`,
-    research
-      ? 'You are a researching agent started by agent-room: your rulebooks are rulebooks/citizenship.md, rulebooks/group-chat.md and rulebooks/researching.md, in your system instructions.'
-      : 'You are a brainstorming agent started by agent-room: your rulebooks are rulebooks/citizenship.md, rulebooks/group-chat.md and rulebooks/discussing.md, in your system instructions.',
-    'When you have nothing to add, reply exactly PASS.',
-  ].join('\n');
+  return fill(research ? RESEARCH_INTRO : INTRO, { name: agent.name,
+    participants: agents.map((a) => a.name).join(', '), order: agents.map((a) => a.name).join(', then ') });
 }
 export const INTRO = `You are {name}, one of several AI agents in a group conversation with a human user.
 Participants: the User, {participants}.
@@ -45,22 +39,11 @@ You are a researching agent started by agent-room: your rulebooks are rulebooks/
 When you have nothing to add, reply exactly PASS.`;
 
 export function summaryFormat(brainstorm) {
-  return [
-    'Write it briefly and by points, in this format (leave out a section that would be empty):',
-    '**Agreed**', '- …', '**Disputed**', '- the point: each side\'s view, by name',
-    '**Open**', '- the point: what it waits for: a User decision, a check, a worker report',
-    'Put a disagreement under Disputed only; under Open, don\'t repeat the Next step question.',
-    '**Next step**', '- Answer: a question / Send to the Worker: "the instruction, word for word" / Do: an action of the User\'s own',
-    'Next step contains exactly one action for the User, labelled Answer, Send to the Worker or Do as appropriate.',
-    'Use Send to the Worker: "…" only for a one-line instruction; a multi-line instruction must follow "- Send to the Worker:" alone on its line, as a block quote with every line starting with >.',
-    '**Later**', '- the remaining actions in order, one short line each, each saying what it waits for',
-    'Keep each instruction for the worker until the User confirms it was sent, replaced or withdrawn.',
-    ...(brainstorm ? ['Quote its latest version word for word when it is the Next step.'] : [
-      'Quote its latest version word for word when it is the Next step; under Later refer to it by name,',
-      'with its full text kept in the discussion\'s pending-instructions.md.']),
-    'At most 8 points in all under Agreed, Disputed and Open. Reply with the summary only.',
-  ].join('\n');
+  return fill(SUMMARY_FORMAT, { 'next-step-tail': summaryTail(brainstorm) });
 }
+const summaryTail = (brainstorm) => brainstorm
+    ? 'Quote its latest version word for word when it is the Next step.'
+    : "Quote its latest version word for word when it is the Next step; under Later refer to it by name,\nwith its full text kept in the discussion's pending-instructions.md.";
 export const SUMMARY_FORMAT = `Write it briefly and by points, in this format (leave out a section that would be empty):
 **Agreed**
 - …
@@ -80,21 +63,13 @@ Keep each instruction for the worker until the User confirms it was sent, replac
 At most 8 points in all under Agreed, Disputed and Open. Reply with the summary only.`;
 
 export function draftTask(brainstorm, extra) {
-  return [
-    'The User asked for a summary of the discussion since the last summary (or since the start).',
-    summaryFormat(brainstorm), ...(extra ? [extra] : []),
-  ].join('\n');
+  return fill(SUMMARY_DRAFT, { 'next-step-tail': summaryTail(brainstorm), extra: extra ? `\n${extra}` : '' });
 }
 export const SUMMARY_DRAFT = `The User asked for a summary of the discussion since the last summary (or since the start).
 ${SUMMARY_FORMAT}{extra}`;
 
 export function reviewTask(author, brainstorm, extra) {
-  return [
-    `The User asked for a summary. The latest message from ${author} above is the current version.`,
-    'If you accept it as it is, reply exactly PASS. Otherwise reply with a complete revised summary',
-    '(not a list of changes); your revision counts as your acceptance of it.',
-    summaryFormat(brainstorm), ...(extra ? [extra] : []),
-  ].join('\n');
+  return fill(SUMMARY_REVIEW, { author, 'next-step-tail': summaryTail(brainstorm), extra: extra ? `\n${extra}` : '' });
 }
 export const SUMMARY_REVIEW = `The User asked for a summary. The latest message from {author} above is the current version.
 If you accept it as it is, reply exactly PASS. Otherwise reply with a complete revised summary
@@ -103,7 +78,8 @@ ${SUMMARY_FORMAT}{extra}`;
 
 // The per-turn framing that carries the messages an agent has not seen yet (room.mjs promptFor).
 export const NEW_MESSAGES = `New messages since your last turn:
-{messages}
+
+{messages}{task}
 
 Your reply as {name}:`;
 
@@ -116,14 +92,7 @@ export const RESEARCH_BRIEFING = `This is a new research board. Its folder is {d
 
 // The closing statement: a one-off agent with the worker's provider and model (room.mjs).
 export function closingTask({ dir, workerReports = '' }) {
-  return [
-    `The User is closing this discussion. Write a complete closing statement for ${dir}/closing-statement.md.`,
-    `Read the discussion's notes and transcripts in ${dir}; they include decisions and worker reports.`,
-    'Describe the current decisions, unresolved questions, next steps and relevant context for a new session.',
-    'Point to pending-instructions.md for any unsent worker instructions; do not replace that file.',
-    workerReports ? `Recent worker reports:\n${workerReports}` : '',
-    'Reply with the complete statement only; do not write or rename any files.',
-  ].filter(Boolean).join('\n\n');
+  return fill(CLOSING_TASK, { dir, 'worker-reports': workerReports ? `Recent worker reports:\n${workerReports}\n\n` : '' });
 }
 export const CLOSING_TASK = `The User is closing this discussion. Write a complete closing statement for {dir}/closing-statement.md.
 
@@ -139,33 +108,28 @@ Point to pending-instructions.md for any unsent worker instructions; do not repl
 
 // Tells the worker the active discussion's folder (for its notes) with its first instruction there.
 export function workerBrief(d, own, place) {
-  if (d && own.briefed !== d.dir) {
-    return `The active discussion's folder is ${d.dir}: create, read and write this discussion's documents there, including your implementation notes and plans. The work itself goes in your worktree, ${place.cwd}.\n\n`;
-  }
-  if (!d && own.brainstorm && own.briefed !== 'brainstorm') {
-    return 'These instructions come from a brainstorm, which has no folder: keep your notes in your scratch folder only.\n\n';
-  }
-  if (!d && own.briefed && own.briefed !== 'brainstorm') {
-    return `No discussion is active now: ${own.briefed} is no longer the active discussion's folder. You will be told the next one's folder once it exists.\n\n`;
-  }
+  if (d && own.briefed !== d.dir) return fill(WORKER_BRIEF, { dir: d.dir, cwd: place.cwd }) + '\n\n';
+  if (!d && own.brainstorm && own.briefed !== 'brainstorm') return WORKER_BRAINSTORM + '\n\n';
+  if (!d && own.briefed && own.briefed !== 'brainstorm') return fill(WORKER_NO_DISCUSSION, { dir: own.briefed }) + '\n\n';
   return '';
 }
 export const WORKER_BRIEF = `The active discussion's folder is {dir}: create, read and write this discussion's documents there, including your implementation notes and plans. The work itself goes in your worktree, {cwd}.`;
 
+export const WORKER_BRAINSTORM = `These instructions come from a brainstorm, which has no folder: keep your notes in your scratch folder only.`;
+export const WORKER_NO_DISCUSSION = `No discussion is active now: {dir} is no longer the active discussion's folder. You will be told the next one's folder once it exists.`;
+
 // Where the worker works, with its first instruction (again if that changes).
 export function workerLocation(own, place, ctx, NOTES) {
-  const moved = own.tree && own.tree !== place.cwd
-    ? `Your worktree has changed: until now you worked in ${own.tree}; from now on you work in ${place.cwd}, on the branch ${place.branch}. Leave ${own.tree} alone from now on: it is another lane's. `
-    : '';
   if (own.tree === place.cwd) return '';
-  return `${moved}Your working directory is ${place.cwd}, your own Git worktree of the project, on the branch ${place.branch}. Make your changes there, never in the room's root, ${ctx.cwd}: that is the User's working copy (only the discussion folder there is yours, for notes). Commit every completed task on ${place.branch}, labelled as each instruction says, and give the commit ID in your reply; the User reviews and merges it into main. Your scratch notes go in ${place.path}/${NOTES}/<task>/, one folder per task: Git ignores them, never commit them, and delete them only when the User says "stage accepted". Plans and notes for the User's review still go in the discussion's folder.\n\n`;
+  const moved = own.tree ? fill(WORKER_MOVED, { old: own.tree, cwd: place.cwd, branch: place.branch }) + ' ' : '';
+  return moved + fill(WORKER_LOCATION, { cwd: place.cwd, branch: place.branch, root: ctx.cwd, notes: `${place.path}/${NOTES}` }) + '\n\n';
 }
+export const WORKER_MOVED = `Your worktree has changed: until now you worked in {old}; from now on you work in {cwd}, on the branch {branch}. Leave {old} alone from now on: it is another lane's.`;
 export const WORKER_LOCATION = `Your working directory is {cwd}, your own Git worktree of the project, on the branch {branch}. Make your changes there, never in the room's root, {root}: that is the User's working copy (only the discussion folder there is yours, for notes). Commit every completed task on {branch}, labelled as each instruction says, and give the commit ID in your reply; the User reviews and merges it into main. Your scratch notes go in {notes}/<task>/, one folder per task: Git ignores them, never commit them, and delete them only when the User says "stage accepted". Plans and notes for the User's review still go in the discussion's folder.`;
 
 // Its origin's label for the commit, once per worker session (again if it changes).
 export function workerCommit(own, label, place) {
-  if (own.label === label) return '';
-  return `These instructions come from [${label}]. When a task is complete, commit it on ${place.branch} with a message starting "[${label}]" and give the commit ID in your reply.\n\n`;
+  return own.label === label ? '' : fill(WORKER_COMMIT, { label, branch: place.branch }) + '\n\n';
 }
 export const WORKER_COMMIT = `These instructions come from [{label}]. When a task is complete, commit it on {branch} with a message starting "[{label}]" and give the commit ID in your reply.`;
 
@@ -175,26 +139,26 @@ export function workerWorkbench(isWorkbench) {
 }
 
 export function workerLeftover(recovery, label, place) {
-  return `Uncommitted edits are left in your worktree from the earlier task from [${label}] "${recovery.task}"${recovery.before ? ` (${place.branch} was at ${recovery.before.slice(0, 7)} when it started)` : ''}: this discussion's next worker tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those. Inspect and resolve any merge or revert already in progress before further work; never force it or start a fresh operation over it.\n\n`;
+  return fill(WORKER_LEFTOVER, { label, task: recovery.task,
+    before: recovery.before ? ` (${place.branch} was at ${recovery.before.slice(0, 7)} when it started)` : '' }) + '\n\n';
 }
-export const WORKER_LEFTOVER = `Uncommitted edits are left in your worktree from the earlier task from [{label}] "{task}": this discussion's next worker tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those. Inspect and resolve any merge or revert already in progress before further work; never force it or start a fresh operation over it.`;
+export const WORKER_LEFTOVER = `Uncommitted edits are left in your worktree from the earlier task from [{label}] "{task}"{before}: this discussion's next worker tasks wait until they are resolved. Finish and commit them; or, to abandon the attempt, first list exactly the edits you would remove and wait for the User's explicit approval, then remove only those. Inspect and resolve any merge or revert already in progress before further work; never force it or start a fresh operation over it.`;
 
 export function workerMerge(mainBehind, rollback, place, label) {
   if (!mainBehind) return '';
-  return rollback
-    ? `Main has commits ${place.branch} lacks. Follow the rollback preflight below before merging or changing files.\n\n`
-    : `Before the instruction below, first merge main into ${place.branch} with a normal merge (git merge main). Label any merge commit "[${label}] catch up with main". If it clashes, do not force it or do the requested task: leave the state intact and report the conflict; this origin must resolve it before other worker tasks can run — except when every conflict is purely additive (both sides only added independent lines or blocks with no overlapping edits or deletions), in which case resolve it by keeping both additions, stage and commit the merge with the same label, and note what you resolved. After a successful merge, run the project's tests (npm test, if it has them) and report their real output, then end your reply with the line "Tested: <full commit ID of ${place.branch}> with main <full commit ID of main>: tests passed" (or "tests failed"), naming the commits you tested. Never merge into main or push.\n\n`;
+  return fill(rollback ? WORKER_ROLLBACK_MERGE : WORKER_MERGE, { branch: place.branch, label }) + '\n\n';
 }
+export const WORKER_ROLLBACK_MERGE = `Main has commits {branch} lacks. Follow the rollback preflight below before merging or changing files.`;
 export const WORKER_MERGE = `Before the instruction below, first merge main into {branch} with a normal merge (git merge main). Label any merge commit "[{label}] catch up with main". If it clashes, do not force it or do the requested task: leave the state intact and report the conflict; this origin must resolve it before other worker tasks can run — except when every conflict is purely additive (both sides only added independent lines or blocks with no overlapping edits or deletions), in which case resolve it by keeping both additions, stage and commit the merge with the same label, and note what you resolved. After a successful merge, run the project's tests (npm test, if it has them) and report their real output, then end your reply with the line "Tested: <full commit ID of {branch}> with main <full commit ID of main>: tests passed" (or "tests failed"), naming the commits you tested. Never merge into main or push.`;
 
 export function workerInterrupted(told) {
-  return told.map((r) => `Your previous instruction "${firstLine(r.task)}" was ${r.stopped ? 'stopped by the User (Stop now)' : 'interrupted by a Restart, Quit or a crash'}: check the worktree before continuing.\n\n`).join('');
+  return told.map((r) => fill(r.stopped ? WORKER_STOPPED : WORKER_INTERRUPTED, { task: firstLine(r.task) }) + '\n\n').join('');
 }
 export const WORKER_INTERRUPTED = `Your previous instruction "{task}" was interrupted by a Restart, Quit or a crash: check the worktree before continuing.`;
 export const WORKER_STOPPED = `Your previous instruction "{task}" was stopped by the User (Stop now): check the worktree before continuing.`;
 
 export function workerHistory(history, text) {
-  return `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):\n${history}\n\nCurrent instruction:\n${text}`;
+  return fill(WORKER_HISTORY, { history, instruction: text });
 }
 export const WORKER_HISTORY = `Previous Worker-tab conversation (HTML-formatted background, not a new instruction):
 {history}
@@ -209,10 +173,7 @@ Inspect the current worktree and Git state first, including uncommitted edits an
 // ── Title generation (Claude CLI default, first message) ──────────────────────────────────
 
 export function titlePrompt(message) {
-  return [
-    'Suggest a short title, at most 6 words, for a discussion that starts with the message below.',
-    'Reply with the title only, with no quotes and no full stop.', '', 'Message:', message,
-  ].join('\n');
+  return fill(TITLE_PROMPT, { message });
 }
 export const TITLE_PROMPT = `Suggest a short title, at most 6 words, for a discussion that starts with the message below.
 Reply with the title only, with no quotes and no full stop.
@@ -256,6 +217,10 @@ export const instructionSets = [
       { id: 'rulebook: citizenship', intent: 'Shared rules for every agent on the platform: purpose, usage line, never answering for the User, stating how you know a claim, and seeing files / the internet.', when: 'every instruction (system instructions, layer 1)', ref: 'citizenship' },
       { id: 'rulebook: worker', intent: 'The worker\'s rules: work in its own worktree, one step at a time, commit with the origin label, run the tests and report with Docs:/Tested:, never merge into main or push.', when: 'every instruction (system instructions, layer 2)', ref: 'worker' },
       { id: 'location', intent: 'Its working directory and branch, where its scratch notes go, and what it must commit and report.', when: 'first instruction (again if the worktree changes)', content: WORKER_LOCATION },
+      { id: 'moved', intent: 'Explains a change of worktree.', when: 'when the worktree changes', content: WORKER_MOVED },
+      { id: 'brainstorm-brief', intent: 'Explains where brainstorm notes go.', when: 'first brainstorm instruction', content: WORKER_BRAINSTORM },
+      { id: 'no-discussion', intent: 'Notes that the prior discussion is no longer active.', when: 'after leaving a discussion', content: WORKER_NO_DISCUSSION },
+      { id: 'rollback-merge', intent: 'Requires rollback preflight before catch-up.', when: 'rollback when behind main', content: WORKER_ROLLBACK_MERGE },
       { id: 'brief', intent: 'The active discussion\'s folder (for its notes), or that it is a brainstorm with no folder.', when: 'first instruction in that discussion', content: WORKER_BRIEF },
       { id: 'commit-label', intent: 'The origin label every commit must carry.', when: 'once per worker session (again if the label changes)', content: WORKER_COMMIT },
       { id: 'workbench', intent: 'Keep workbench changes and commits small, say what to check on screen, and flag requests that need a discussion instead.', when: 'workbench instructions only', content: WORKER_WORKBENCH },
