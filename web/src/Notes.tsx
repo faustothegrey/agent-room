@@ -31,7 +31,8 @@ export function Notes({ open, show, post, api, kept }: { open: boolean; show: ()
   const loadNotes = async () => {
     const r = await fetch('__notes', { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status + ' ' + await r.text());
-    const value = await r.json() as NoteEntry[]; setList(value);
+    // A server still running the previous version does not include tags until it restarts.
+    const value = (await r.json() as NoteEntry[]).map((n) => ({ ...n, tags: n.tags ?? [] })); setList(value);
     setFilter((tag) => tag && value.some((n) => n.tags.includes(tag)) ? tag : null); return value;
   };
   // Runs act now, or once the User agrees to discard the unsaved changes (cancel: if they don't).
