@@ -137,7 +137,7 @@ worker's, as their panels list them ("<provider> default" for CLI default).
   [The worker's worktrees](#the-workers-worktrees)). A discussion's instructions run one at a time,
   in the order sent, alongside the discussion and alongside other discussions' (at most two
   worker tasks at once in a folder), with a 30-minute timeout per instruction.
-  When the room is agent-room's own checkout, **Capture** lets you point at interface elements while
+  When the room is agent-room's own checkout, **Capture UI live** lets you point at interface elements while
   menus and hover behavior keep working. Press Alt+P to add the highlighted element to the Worker
   composer (or Esc to cancel); captured chips can be expanded to inspect their text, labels, tag,
   classes, position, size and ancestor path, or removed. Input and editable text is excluded. The
