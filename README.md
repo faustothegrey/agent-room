@@ -141,7 +141,8 @@ worker's, as their panels list them ("<provider> default" for CLI default).
   menus and hover behavior keep working. Press Alt+P to add the highlighted element to the Worker
   composer (or Esc to cancel); captured chips can be expanded to inspect their text, labels, tag,
   classes, position, size and ancestor path, or removed. Input and editable text is excluded. The
-  clues are sent before your instruction. Multiple captures can be included in one instruction.
+  clues are sent before your instruction. Multiple captures can be included in one instruction;
+  they clear after a successful send or when you switch boards, and stay if sending fails.
   While the shown discussion's worker runs an instruction, the tab offers two stop buttons (hidden
   while the page peeks at another discussion or views a peer's, back at once on returning); each
   asks you to click it again to confirm, as Close discussion does. They act only on this
