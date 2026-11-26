@@ -453,7 +453,7 @@ function header(ctx) {
   const d = ctx.discussion;
   const specs = (ctx.agentSpecs ?? '').split(',').filter(Boolean).map((s) => parseSpec(s));
   const workerSpec = ctx.workerSpec ? parseSpec(ctx.workerSpec, true) : null;
-  return { folder: ctx.cwd, agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name,
+  return { folder: ctx.cwd, ownCheckout: real(ctx.cwd) === real(dirname(dirname(fileURLToPath(import.meta.url)))), agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name,
     workerModel: workerSpec ? modelLabel(workerSpec.provider, workerSpec.model) : null, // for the Worker tab's title
     cliSessions: sessionView(ctx),
     discussion: d ? d.title : ctx.state.brainstorm ? 'New brainstorm' : ctx.state.workbench ? 'New workbench' : ctx.state.research ? 'New research board' : 'No discussion started',
