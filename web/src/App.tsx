@@ -13,6 +13,20 @@ import { Notes, NOTES_DRAFT_KEY, type NoteDraft, type NotesApi } from './Notes';
 import type { PromptTestRequest, ScheduleRequest, NoteRequest, AgentEnabledRequest, SettingsSaveRequest, Gauge, Monitor, NewRoomRequest, PairRequest, QuotaAt, ReceivedLine, Replica, ViewedLine, ViewReply, ViewRequest, AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
+const SNAP_SIZE = 80;
+function Splitter({ id, label, horizontal = false, dividerRef, onStart, onMove, onEnd, onKeyDown }: {
+  id: string; label: string; horizontal?: boolean; dividerRef?: React.Ref<HTMLDivElement>;
+  onStart: () => void; onMove: (x: number, y: number) => void; onEnd: (x: number, y: number) => void;
+  onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
+}) {
+  const [dragging, setDragging] = useState(false);
+  return <div ref={dividerRef} id={id} className={'next-divider' + (dragging ? ' dragging' : '')} role="separator" tabIndex={0} aria-label={label} aria-orientation={horizontal ? 'horizontal' : 'vertical'} title="Drag to resize"
+    onKeyDown={onKeyDown}
+    onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setDragging(true); onStart(); }}
+    onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) onMove(event.clientX, event.clientY); }}
+    onPointerUp={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; onEnd(event.clientX, event.clientY); event.currentTarget.releasePointerCapture(event.pointerId); setDragging(false); }}
+    onPointerCancel={(event) => { onEnd(event.clientX, event.clientY); setDragging(false); }}><span aria-hidden="true">⋮</span></div>;
+}
 type StatusLine = { text: string; error: boolean };
 type Failure = { agent: string; error: string; time: string; earlier: number };
 type Layout = { stacked: boolean; sideClosed: boolean; left: number | null; top: number | null };
@@ -144,6 +158,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const fileLoad = useRef<Promise<FilesResponse> | null>(null);
   const preservePeekDoc = useRef(false);
   const [fileDetails, setFileDetails] = useState<FileDetailsResponse | null>(null);
+  const [listWidth, setListWidth] = useState(() => { try { return Number(localStorage.getItem('agent-room:list-width')) || 240; } catch { return 240; } });
+  const listPanel = useRef<HTMLElement>(null);
+  const listDragStart = useRef(0);
   const [boardsClosed, setBoardsClosed] = useState(() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } });
   // Services (openService on /__room): a panel beside the board; opening one folds the Boards list
   // (unsaved) and closing it restores the list. While one is open, divider drags aren't saved.
@@ -212,6 +229,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const panel = useRef<HTMLDivElement>(null);
   const conversation = useRef<HTMLDivElement>(null);
   const divider = useRef<HTMLDivElement>(null);
+  const sideDragStart = useRef<Layout | null>(null);
   const applyLayout = (next: Layout, save = true, key?: string) => {
     layoutRef.current = next; setLayout(next);
     const context = layoutContext.current;
@@ -251,6 +269,34 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     const size = Math.round(Math.max(minimum, Math.min(Math.max(minimum, available - minimum), position)));
     const next = { ...layoutRef.current, [stacked ? 'top' : 'left']: size };
     applyLayout(next, save && serviceRef.current === null, stacked ? 'top' : 'left');
+  };
+  const sidePosition = (x: number, y: number) => {
+    const bounds = panel.current?.getBoundingClientRect();
+    return bounds ? (layoutRef.current.stacked ? y - bounds.top : x - bounds.left) - 3 : null;
+  };
+  const finishSideDrag = (x: number, y: number) => {
+    const bounds = panel.current?.getBoundingClientRect(), position = sidePosition(x, y), start = sideDragStart.current;
+    if (!bounds || position === null || !start) return;
+    const stacked = start.stacked;
+    const available = stacked ? bounds.height - (divider.current?.offsetHeight || 7) : bounds.width - (divider.current?.offsetWidth || 7);
+    if (available - position < SNAP_SIZE) applyLayout({ ...start, sideClosed: true }, serviceRef.current === null, 'side-closed');
+    else resize(position, stacked, true);
+    sideDragStart.current = null;
+  };
+  const listPosition = (x: number) => x - (listPanel.current?.getBoundingClientRect().left ?? x) - 3;
+  const resizeList = (x: number, save: boolean) => {
+    const bounds = listPanel.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const max = Math.max(160, window.innerWidth - bounds.left - 280);
+    const width = Math.round(Math.max(160, Math.min(max, listPosition(x))));
+    setListWidth(width);
+    if (save && serviceRef.current === null) try { localStorage.setItem('agent-room:list-width', String(width)); } catch {}
+  };
+  const finishListDrag = (x: number) => {
+    if (listPosition(x) < SNAP_SIZE) {
+      setListWidth(listDragStart.current); setBoardsClosed(true);
+      if (serviceRef.current === null) try { localStorage.setItem('agent-room:list-collapsed', '1'); } catch {}
+    } else resizeList(x, true);
   };
   const offerEpoch = useRef(0);
   const [follow, setFollow] = useState(() => { try { return localStorage.getItem('agent-room.followMentions') === '1'; } catch { return false; } });
@@ -963,7 +1009,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     await loadDetails();
     requestAnimationFrame(() => explorer.current?.querySelector<HTMLElement>('.shown')?.scrollIntoView?.({ block: 'center' }));
   };
-  return <main className={'app' + (boardsClosed ? ' list-collapsed' : '') + (service ? ' service-open' : '')}>
+  return <main className={'app' + (boardsClosed ? ' list-collapsed' : '') + (service ? ' service-open' : '')} style={{ '--list': listWidth + 'px' } as React.CSSProperties}>
     <header id="header">
     <RoomZones openHealth={() => { setHealthOpen(true); openService('providers'); }} folder={room?.folder ?? null} active={room?.active ?? null} replica={replica} replicaOff={replicaOff} viewing={remote?.line ?? null} newRoom={newRoom} readOnly={!!peek || !!viewLayout}
       post={(path, body) => post(path, body)} status={(text, error) => addStatus(text, error)} navigate={(url) => notesGuard(() => navigate(url))}
@@ -1013,7 +1059,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {isLocalPage && <div className="view" id="notes" hidden={service !== 'notes'}><Notes open={service === 'notes'} show={() => openService('notes')} api={notesApi} kept={notesKept} post={(path, body) => post(path, body)} /></div>}
       {isLocalPage && <div className="view" id="terminal" hidden={service !== 'terminal'}><TerminalPane visible={service === 'terminal'} fitKey={layout} running={setShellAlive} /></div>}
     </section>
-    <aside id="list-panel" className="next-boards" aria-label="Boards">
+    <aside ref={listPanel} id="list-panel" className="next-boards" aria-label="Boards">
       <div id="list-head">{!boardsClosed && <span id="list-title">Boards</span>}<button type="button" id="list-toggle" title={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); if (serviceRef.current === null) { try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} } }}>{boardsClosed ? '»' : '«'}</button></div>
       {!boardsClosed && <>
         {!!(room && input && !peek && !viewLayout) && <div id="list-new" className="boards-new">
@@ -1044,7 +1090,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         </div></div>
       </>}
     </aside>
-    {!boardsClosed && <div id="list-split" />}
+    {!boardsClosed && <Splitter id="list-split" label="Resize Boards list" onStart={() => { listDragStart.current = listWidth; }} onMove={(x) => resizeList(x, false)} onEnd={(x) => finishListDrag(x)} onKeyDown={(event) => { if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return; event.preventDefault(); const left = listPanel.current?.getBoundingClientRect().left ?? 0; resizeList(left + listWidth + (event.key === 'ArrowLeft' ? -24 : 24) + 3, true); }} />}
     <div ref={panel} id="main-panel" className={'next-layout' + (layout.stacked ? ' stacked' : '') + (layout.sideClosed ? ' closed side-closed' : '')} style={{ '--left': layout.left ? layout.left + 'px' : '55%', '--top': layout.top ? layout.top + 'px' : '55%' } as React.CSSProperties}>
     <div id="disc-header" aria-label="Current discussion">
     {(canSummary || canAct) && <details ref={actionsMenu} id="actions-menu" className="menu actions-menu" onToggle={(event) => { if (event.currentTarget.open) { setRowMenu(null); refreshWorker(); } }}>
@@ -1136,18 +1182,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     </div>
     </div>
     </div>
-    <div ref={divider} role="separator" tabIndex={0} aria-label="Resize conversation and side pane" aria-orientation={layout.stacked ? 'horizontal' : 'vertical'} id="split" className="next-divider" title="Drag to resize"
+    <Splitter dividerRef={divider} id="split" label="Resize conversation and side pane" horizontal={layout.stacked}
+      onStart={() => { sideDragStart.current = { ...layoutRef.current }; }}
+      onMove={(x, y) => { const position = sidePosition(x, y); if (position !== null) resize(position, layoutRef.current.stacked, false); }}
+      onEnd={finishSideDrag}
       onKeyDown={(event) => {
         const stacked = layoutRef.current.stacked;
         if (!(stacked ? ['ArrowUp', 'ArrowDown'] : ['ArrowLeft', 'ArrowRight']).includes(event.key)) return;
         event.preventDefault(); const rect = conversation.current?.getBoundingClientRect();
         const size = stacked ? rect?.height : rect?.width;
         resize((size || (stacked ? layoutRef.current.top : layoutRef.current.left) || 0) + (event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -24 : 24), stacked, true);
-      }}
-      onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); }}
-      onPointerMove={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = panel.current?.getBoundingClientRect(); if (bounds) resize((layoutRef.current.stacked ? event.clientY - bounds.top : event.clientX - bounds.left) - 3, layoutRef.current.stacked, false); }}
-      onPointerCancel={(event) => { const bounds = panel.current?.getBoundingClientRect(); if (bounds) resize((layoutRef.current.stacked ? event.clientY - bounds.top : event.clientX - bounds.left) - 3, layoutRef.current.stacked, true); }}
-      onPointerUp={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = panel.current?.getBoundingClientRect(); if (bounds) resize((layoutRef.current.stacked ? event.clientY - bounds.top : event.clientX - bounds.left) - 3, layoutRef.current.stacked, true); event.currentTarget.releasePointerCapture(event.pointerId); }} />
+      }} />
     <div id="right" className="next-side" hidden={layout.sideClosed}>
       <div id="subtabs"><button type="button" id="tab-explorer" className={'tab' + (subtab === 'explorer' ? ' on' : '') + (peek || filePeek || receivedPeek ? ' peeking' : '')} aria-label={peek || filePeek || receivedPeek ? 'Explorer tab' : undefined} data-peeking={peek || filePeek || receivedPeek ? 'true' : undefined} aria-pressed={subtab === 'explorer'} onClick={() => void reveal()}>Explorer</button><button type="button" id="tab-document" className={'tab' + (subtab === 'document' ? ' on' : '')} disabled={!doc} title={doc ? undefined : 'Choose a file in Explorer'} aria-pressed={subtab === 'document'} onClick={() => { openDocument(); setSubtab('document'); }}>Document</button>
         <span id="side-controls"><button type="button" className="pane-ctrl" title={layout.stacked ? 'Place conversation and side pane side by side' : 'Stack conversation above side pane'} onClick={() => applyLayout({ ...layoutRef.current, stacked: !layoutRef.current.stacked }, true, 'split-orient')}>{layout.stacked ? '⇆' : '⇅'}</button><button type="button" className="pane-ctrl" title="Close side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: true }, true, 'side-closed')}>✕</button></span></div>
