@@ -14,8 +14,8 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 it('offers capture only in the checkout room and sends the visible clues before the message', () => {
   render(<App version="one" refresh={() => {}} />);
   const reset = (ownCheckout: boolean) => Source.current.send({ type: 'reset', room: { ...room, ownCheckout }, messages: [], worker: [], input: true, workInput: true });
-  reset(false); expect(screen.queryByRole('button', { name: 'Capture' })).toBeNull();
-  reset(true); fireEvent.click(screen.getByRole('button', { name: 'Capture' }));
+  reset(false); expect(screen.queryByRole('button', { name: 'Capture UI live' })).toBeNull();
+  reset(true); fireEvent.click(screen.getByRole('button', { name: 'Capture UI live' }));
   const target = document.createElement('div'); target.className = 'example'; target.setAttribute('aria-label', 'Label'); target.title = 'A title';
   target.innerHTML = 'Visible <input value="secret"><textarea>private</textarea><span contenteditable="true">hidden edit</span>';
   document.body.append(target); document.elementFromPoint = vi.fn(() => target); fireEvent.mouseMove(target); fireEvent.keyDown(document, { altKey: true, code: 'KeyP', key: 'π' }); target.remove();
@@ -36,7 +36,7 @@ function setup() {
 }
 function capture(target: Element) {
   document.elementFromPoint = vi.fn(() => target);
-  fireEvent.click(screen.getByRole('button', { name: 'Capture' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Capture UI live' }));
   fireEvent.mouseMove(target, { clientX: 20, clientY: 30 });
   fireEvent.keyDown(document, { altKey: true, code: 'KeyP', key: 'π' });
 }
@@ -46,7 +46,7 @@ it('refreshes the outline on click and scroll and captures the current element u
   const rect = (x: number) => ({ x, y: 10, left: x, top: 10, width: 50, height: 20, right: x + 50, bottom: 30, toJSON() {} } as DOMRect);
   old.getBoundingClientRect = () => rect(1); current.getBoundingClientRect = () => rect(40);
   let underPointer = old; document.elementFromPoint = vi.fn(() => underPointer);
-  fireEvent.click(screen.getByRole('button', { name: 'Capture' })); fireEvent.mouseMove(old, { clientX: 20, clientY: 30 });
+  fireEvent.click(screen.getByRole('button', { name: 'Capture UI live' })); fireEvent.mouseMove(old, { clientX: 20, clientY: 30 });
   expect((document.querySelector('.capture-outline') as HTMLElement).style.left).toBe('1px');
   underPointer = current; fireEvent.click(old, { clientX: 20, clientY: 30 });
   expect((document.querySelector('.capture-outline') as HTMLElement).style.left).toBe('40px');
