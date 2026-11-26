@@ -300,7 +300,7 @@ own worker session, worktree and queue (below): their worker tasks run at the sa
 two at once. You can switch discussion while one waits for its worker task: the window shows one
 discussion, the one what you type goes to, and the task's report still goes back to its own. One window shows one of them; **Boards** highlights the one on screen and shows each row's state (`ongoing`, `closed`, `not started`, `waiting for input`, `ready for auto dev`, `work ready`, or `idle`). Clicking an open row (or choosing **Continue** in its **`⋯`** menu) shows an open one as
 it is, during a round too: its agents carry on, nothing is restarted. An open discussion that hasn't started (no message
-yet) shows **Go to** in its menu instead, which only shows it. the **+💬** and **+💡** icons (in their section headers in **Boards**) open the new
+yet) shows **Go to** in its menu instead, which only shows it. The **+💬** and **+💡** icons (in their section headers in **Boards**) open the new
 one beside the one in use, which stays open (in place, when the one in use hasn't started). Continue, Resume
 and Start fresh open any other discussion or brainstorm beside the open ones; several brainstorms
 can be open at once. **Close** (in **Actions ▾** and each row's **`⋯`** menu in **Boards**, or `/close`) is labelled **Close with pending work** when the discussion's worker branch has commits not in main or uncommitted edits, and also works on a paused
