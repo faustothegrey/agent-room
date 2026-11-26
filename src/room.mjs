@@ -93,9 +93,8 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
     if (seen.get(agent.name) === 0) parts.push(intro(agent, activeAgents(), !!state.research), ...(state.briefing ? [state.briefing] : []));
     // After a Resume or Restart (ui.mjs): one sentence, in each agent's next prompt only.
     if (state.restored?.pending?.includes(agent.name)) parts.push(state.restored.text);
-    parts.push('New messages since your last turn:', formatMessages(unseenFor(agent)));
-    if (task) parts.push(task);
-    parts.push(`Your reply as ${agent.name}:`);
+    parts.push(instr.fill(instr.NEW_MESSAGES, { messages: formatMessages(unseenFor(agent)),
+      task: task ? `\n\n${task}` : '', name: agent.name }));
     return parts.join('\n\n');
   }
 
