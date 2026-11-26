@@ -32,7 +32,7 @@ async function refreshQuota(ctx, quota) {
   const providers = [...new Set([...ctx.room.agents, ctx.worker].map((a) => a.provider))];
   ctx.screen.quota = quota ? ctx.usage.quotaGauges(quota, providers) : null;
   // When the meter measured these values, and when the room last asked it.
-  ctx.screen.quotaAt = { measured: quota?.last_update ?? null, checked: new Date().toISOString() };
+  ctx.screen.quotaAt = { measured: quota?.last_update ?? null, providers: Object.fromEntries(providers.map((p) => [p, quota?.[p === 'agy' ? 'antigravity' : p]?.updated_at ?? null])), checked: new Date().toISOString() };
   toScreen(ctx, { type: 'quota', gauges: ctx.screen.quota, at: ctx.screen.quotaAt });
   return quota;
 }
@@ -51,6 +51,15 @@ function watchMonitor(ctx) {
   hub.monitor.cli ??= {};
   hub.checkLogins = (all, requested) => checkLogins(hub, all, requested);
   hub.checkLeftovers = () => checkLeftovers(hub);
+  if (ctx.usage.useQuotaCache) {
+    hub.quotaCache ??= { value: null };
+    ctx.usage.useQuotaCache(hub.quotaCache);
+    hub.refreshQuotaCache = () => ctx.usage.refreshQuotaCache(hub.quotaCache);
+    if (!hub.quotaCacheTimer && !ctx.usage.METER_URL) {
+      hub.refreshQuotaCache();
+      hub.quotaCacheTimer = setInterval(() => hub.refreshQuotaCache(), 120_000).unref();
+    }
+  }
   ctx.showMonitor = () => showMonitor(ctx);
   if (!hub.monitorTimers) {
     hub.monitor.nextLogin = new Date(Date.now() + LOGIN_EVERY_MS).toISOString();

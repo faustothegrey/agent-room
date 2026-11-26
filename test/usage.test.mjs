@@ -1,12 +1,15 @@
 import { test } from './helpers/test.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { addUsage, agentUsageLine, checkLogin, checkQuotaFloor, fetchQuota, parseClaudeAuth, parseCodexLogin, formatUsage, quotaGauges, quotaSummary, usageReport } from '../src/usage.mjs';
+import { mkdtemp, mkdir, writeFile, readFile, utimes, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { addUsage, agentUsageLine, checkLogin, checkQuotaFloor, fetchQuota, parseClaudeAuth, parseCodexLogin, formatUsage, quotaGauges, quotaSummary, usageReport, readClaudeQuota, readCodexQuota, parseAgyQuota, refreshQuotaCache, useQuotaCache } from '../src/usage.mjs';
 
 // The shape the quota meter returned on 2026-10-20 (trimmed).
 const QUOTA = {
-  claude: { ok: true, parsed: { current_session: { used_percent: 70, resets: '2:20pm' }, current_week_all_models: { used_percent: 31, resets: 'Oct 21 at 9am' } } },
-  codex: { ok: true, parsed: { five_hour_limit: { used_percent: 20, resets: '13:44' }, weekly_limit: { used_percent: 3, resets: '07:44 on 27 Oct' } } },
+  claude: { ok: true, updated_at: '2026-10-20 13:44:46', parsed: { current_session: { used_percent: 70, resets: '2:20pm' }, current_week_all_models: { used_percent: 31, resets: 'Oct 21 at 9am' } } },
+  codex: { ok: true, updated_at: '2026-10-20 13:44:46', parsed: { five_hour_limit: { used_percent: 20, resets: '13:44' }, weekly_limit: { used_percent: 3, resets: '07:44 on 27 Oct' } } },
   last_update: '2026-10-20 13:44:46',
 };
 
@@ -162,13 +165,13 @@ test('agentUsageLine formats only the agent\'s own totals and provider quota, wi
     total: { turns: 12, input: 1400000, cached: 1200000, output: 18000, cost: 1.5 },
     provider: 'claude', gauges, measured: QUOTA.last_update, now: sameDay,
   });
-  assert.equal(line, '[your reported usage this session: 12 turns, 1400.0k in (1200.0k cached) / 18.0k out · claude quota 70% used 5h / 31% used week, meter at 13:44]');
+  assert.equal(line, '[your reported usage this session: 12 turns, 1400.0k in (1200.0k cached) / 18.0k out · claude quota 70% used 5h / 31% used week, reading 15m old]');
   assert.doesNotMatch(line, /codex|\$/);
 
   // Singular turn, small counts, and previous-day meter time includes the date.
   assert.equal(
     agentUsageLine({ total: { turns: 1, input: 500, cached: 0, output: 120 }, provider: 'codex', gauges, measured: QUOTA.last_update, now: nextDay }),
-    '[your reported usage this session: 1 turn, 500 in (0 cached) / 120 out · codex quota 20% used 5h / 3% used week, meter at 2026-10-20 13:44]',
+    '[your reported usage this session: 1 turn, 500 in (0 cached) / 120 out · codex quota 20% used 5h / 3% used week, reading 1155m old]',
   );
 
   // Missing usage and/or missing quota: never show zeros for missing data.
@@ -188,7 +191,7 @@ test('agentUsageLine formats only the agent\'s own totals and provider quota, wi
   // Unavailable session usage (e.g. a detached worker from another discussion) says "usage unavailable", not "none yet".
   assert.equal(
     agentUsageLine({ total: undefined, usageUnavailable: true, provider: 'claude', gauges, measured: QUOTA.last_update, now: sameDay }),
-    '[your reported usage this session: usage unavailable · claude quota 70% used 5h / 31% used week, meter at 13:44]',
+    '[your reported usage this session: usage unavailable · claude quota 70% used 5h / 31% used week, reading 15m old]',
   );
   assert.equal(
     agentUsageLine({ usageUnavailable: true, provider: 'agy', gauges: null, measured: null }),
@@ -204,16 +207,16 @@ test('agentUsageLine formats only the agent\'s own totals and provider quota, wi
   } } };
   assert.equal(
     agentUsageLine({ total: null, provider: 'agy', gauges: quotaGauges(agyQuota, ['agy']), measured: agyQuota.last_update, now: new Date(2026, 10, 14, 11, 0) }),
-    '[your reported usage this session: none yet · agy quota gemini 3% used 5h / 10% used week, argon 20% used week, meter at 10:30]',
+    '[your reported usage this session: none yet · agy quota gemini 3% used 5h / 10% used week, argon 20% used week, reading 30m old]',
   );
 });
 
 test('checkQuotaFloor: passes above floor, fails below floor on 5h or weekly, and rejects missing or stale meter readings', () => {
   const now = new Date(2026, 9, 20, 13, 50, 0).getTime(); // 5m14s after QUOTA.last_update
   const freshQuota = {
-    claude: { ok: true, parsed: { current_session: { used_percent: 40 }, current_week_all_models: { used_percent: 20 } } },
-    codex: { ok: true, parsed: { five_hour_limit: { used_percent: 50 }, weekly_limit: { used_percent: 10 } } },
-    antigravity: { ok: true, parsed: { groups: {
+    claude: { ok: true, updated_at: '2026-10-20 13:44:46', parsed: { current_session: { used_percent: 40 }, current_week_all_models: { used_percent: 20 } } },
+    codex: { ok: true, updated_at: '2026-10-20 13:44:46', parsed: { five_hour_limit: { used_percent: 50 }, weekly_limit: { used_percent: 10 } } },
+    antigravity: { ok: true, updated_at: '2026-10-20 13:44:46', parsed: { groups: {
       gemini: { windows: { '5h': { used_percent: 10 }, weekly: { used_percent: 30 } } },
       argon: { windows: { weekly: { used_percent: 40 } } },
     } } },
@@ -221,11 +224,11 @@ test('checkQuotaFloor: passes above floor, fails below floor on 5h or weekly, an
   };
   assert.deepEqual(checkQuotaFloor(freshQuota, ['claude', 'codex', 'agy'], 50, { now }), { ok: true });
   // Below 50% remaining on 5h (used 51% -> 49% remaining)
-  const low5h = { ...freshQuota, claude: { ok: true, parsed: { current_session: { used_percent: 51 }, current_week_all_models: { used_percent: 10 } } } };
+  const low5h = { ...freshQuota, claude: { ok: true, updated_at: '2026-10-20 13:44:46', parsed: { current_session: { used_percent: 51 }, current_week_all_models: { used_percent: 10 } } } };
   assert.equal(checkQuotaFloor(low5h, ['claude', 'codex'], 50, { now }).ok, false);
   assert.match(checkQuotaFloor(low5h, ['claude', 'codex'], 50, { now }).reason, /claude 5h has 49% remaining \(below 50% floor\)/);
   // Below 50% remaining on weekly (agy argon used 60% -> 40% remaining)
-  const lowWeek = { ...freshQuota, antigravity: { ok: true, parsed: { groups: {
+  const lowWeek = { ...freshQuota, antigravity: { ok: true, updated_at: '2026-10-20 13:44:46', parsed: { groups: {
     gemini: { windows: { '5h': { used_percent: 10 }, weekly: { used_percent: 10 } } },
     argon: { windows: { weekly: { used_percent: 60 } } },
   } } } };
@@ -233,13 +236,96 @@ test('checkQuotaFloor: passes above floor, fails below floor on 5h or weekly, an
   assert.match(checkQuotaFloor(lowWeek, ['agy'], 50, { now }).reason, /agy \(argon\) week has 40% remaining/);
   // Missing meter or missing timestamp
   assert.match(checkQuotaFloor(null, ['claude'], 50, { now }).reason, /missing/);
-  assert.match(checkQuotaFloor({ ...freshQuota, last_update: '' }, ['claude'], 50, { now }).reason, /timestamp is missing/);
+  assert.match(checkQuotaFloor({ ...freshQuota, claude: { ...freshQuota.claude, updated_at: '' } }, ['claude'], 50, { now }).reason, /timestamp is missing/);
   // Stale reading (> 15m old)
   const staleNow = new Date(2026, 9, 20, 14, 5, 0).getTime();
   assert.equal(checkQuotaFloor(freshQuota, ['claude'], 50, { now: staleNow }).ok, false);
   assert.match(checkQuotaFloor(freshQuota, ['claude'], 50, { now: staleNow }).reason, /stale/);
   // Missing provider window
-  const missingWeek = { ...freshQuota, codex: { ok: true, parsed: { five_hour_limit: { used_percent: 10 } } } };
+  const missingWeek = { ...freshQuota, codex: { ok: true, updated_at: '2026-10-20 13:44:46', parsed: { five_hour_limit: { used_percent: 10 } } } };
   assert.equal(checkQuotaFloor(missingWeek, ['codex'], 50, { now }).ok, false);
   assert.match(checkQuotaFloor(missingWeek, ['codex'], 50, { now }).reason, /codex weekly quota reading is missing/);
+});
+
+
+test('internal readers preserve provider reading times and parse quota windows', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'quota-test-'));
+  try {
+    const claude = join(dir, '.claude.json');
+    await writeFile(claude, JSON.stringify({ oauthAccount: { accountUuid: 'a' }, cachedUsageUtilization: { accountUuid: 'a', fetchedAtMs: 1700000000000, utilization: { five_hour: { utilization: 20, resets_at: '2023-11-14T22:14:00Z' }, seven_day: { utilization: 30 } } } }));
+    const c = await readClaudeQuota(claude);
+    assert.equal(c.updated_at, '2023-11-14T22:13:20.000Z');
+    assert.equal(c.parsed.current_session.used_percent, 20);
+    await mkdir(join(dir, 'sessions'));
+    const event = (timestamp, used) => JSON.stringify({ timestamp, payload: { rate_limits: { primary: { used_percent: used, window_minutes: 300 }, secondary: { used_percent: 10, window_minutes: 10080 } } } });
+    await writeFile(join(dir, 'sessions', 'a.jsonl'), [event('2026-01-01T00:00:00Z', 20), event('2026-01-02T00:00:00Z', 40)].join('\n'));
+    const x = await readCodexQuota(join(dir, 'sessions'));
+    assert.equal(x.updated_at, '2026-01-02T00:00:00.000Z');
+    assert.equal(x.parsed.five_hour_limit.used_percent, 40);
+    const agy = parseAgyQuota({ command: { data: { groups: [{ name: 'Gemini', buckets: [{ id: 'gemini-5h', remaining_fraction: 0.75 }] }] } } }, 1700000000000);
+    assert.equal(agy.parsed.groups.gemini.windows['5h'].used_percent, 25);
+    assert.equal(agy.updated_at, '2023-11-14T22:13:20.000Z');
+    assert.match(checkQuotaFloor({ claude: c, last_update: new Date().toISOString() }, ['claude'], 50, { now: Date.parse('2023-11-14T23:13:20Z') }).reason, /claude.*60m old/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+
+test('background quota cache returns immediately while Agy is pending and retains last success', async () => {
+  const cache = { value: null }; useQuotaCache(cache);
+  let release; const pending = new Promise((resolve) => { release = resolve; });
+  const updating = refreshQuotaCache(cache, [async () => ({ ok: true, updated_at: '2026-01-01' }), async () => ({ ok: false }), () => pending]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await fetchQuota()).claude.updated_at, '2026-01-01');
+  release({ ok: false }); await updating;
+  await refreshQuotaCache(cache, [async () => ({ ok: false }), async () => ({ ok: false }), async () => ({ ok: false })]);
+  assert.equal((await fetchQuota()).claude.updated_at, '2026-01-01');
+  useQuotaCache({ value: null });
+});
+
+
+test('Codex reads at most 30 newest files and stops after the first with a valid event', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'codex-files-'));
+  try {
+    const event = (used) => JSON.stringify({ timestamp: '2026-01-01T00:00:00Z', payload: { rate_limits: { primary: { used_percent: used } } } });
+    for (let i = 0; i < 32; i++) {
+      const path = join(dir, `${i}.jsonl`);
+      await writeFile(path, i === 1 || i === 31 ? event(i) : '{}');
+      await utimes(path, new Date(1700000000000 + i * 1000), new Date(1700000000000 + i * 1000));
+    }
+    const read = [];
+    const result = await readCodexQuota(dir, async (path, encoding) => { read.push(path); return readFile(path, encoding); });
+    assert.equal(result.parsed.five_hour_limit.used_percent, 31);
+    assert.deepEqual(read, [join(dir, '31.jsonl')]);
+    await writeFile(join(dir, '31.jsonl'), '{}');
+    await utimes(join(dir, '31.jsonl'), new Date(1700000031000), new Date(1700000031000));
+    read.length = 0;
+    assert.equal((await readCodexQuota(dir, async (path, encoding) => { read.push(path); return readFile(path, encoding); })).ok, false);
+    assert.equal(read.length, 30);
+    assert.ok(!read.includes(join(dir, '1.jsonl')));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('quota guard rejects a window after its reset until a later reading arrives', async () => {
+  const measured = '2026-11-26T12:00:00Z', reset = '2026-11-26T12:05:00Z';
+  const quota = { claude: { ok: true, updated_at: measured, parsed: {
+    current_session: { used_percent: 20, resets_at: reset }, current_week_all_models: { used_percent: 10 },
+  } } };
+  assert.equal(checkQuotaFloor(quota, ['claude'], 50, { now: Date.parse('2026-11-26T12:04:00Z') }).ok, true);
+  assert.match(checkQuotaFloor(quota, ['claude'], 50, { now: Date.parse('2026-11-26T12:05:00Z') }).reason, /claude 5h.*reset/);
+  quota.claude.updated_at = '2026-11-26T12:06:00Z';
+  assert.equal(checkQuotaFloor(quota, ['claude'], 50, { now: Date.parse('2026-11-26T12:07:00Z') }).ok, true);
+  const http = { codex: { ok: true, updated_at: '2026-11-26 12:00:00', parsed: {
+    five_hour_limit: { used_percent: 20 }, weekly_limit: { used_percent: 10, resets: '12:05' },
+  } } };
+  const server = createServer((req, res) => res.end(JSON.stringify(http)));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const reading = await fetchQuota(`http://127.0.0.1:${server.address().port}`);
+    assert.match(checkQuotaFloor(reading, ['codex'], 50, { now: new Date(2026, 10, 26, 12, 6).getTime() }).reason, /codex week.*reset/);
+  } finally { server.close(); }
+  const agy = { antigravity: { ok: true, updated_at: measured, parsed: { groups: {
+    gemini: { windows: { '5h': { used_percent: 1 }, weekly: { used_percent: 1 } } },
+    argon: { windows: { weekly: { used_percent: 1, resets_at: reset } } },
+  } } } };
+  assert.match(checkQuotaFloor(agy, ['agy'], 50, { now: Date.parse('2026-11-26T12:06:00Z') }).reason, /agy \(argon\) week.*reset/);
 });

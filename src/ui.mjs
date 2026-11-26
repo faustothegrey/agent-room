@@ -345,7 +345,7 @@ export async function load(ctx, v) {
     total: ctx.totals?.[agent.name],
     provider: agent.provider,
     gauges: ctx.screen?.quota,
-    measured: ctx.screen?.quotaAt?.measured,
+    measured: ctx.screen?.quotaAt?.providers ?? ctx.screen?.quotaAt?.measured,
   });
   return { room: createRoom(agents, ctx.state, instr, usageLine), worker, docs, lanes, workshopModule, boardsModule, monitorModule, schedulerModule, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: roomShop,
