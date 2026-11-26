@@ -7051,6 +7051,24 @@ test('Reload loads the lane diagram module again while preserving live room and 
   } finally { rmSync(root, { recursive: true, force: true, maxRetries: 5 }); }
 });
 
+test('a newly started board immediately displays the shared quota gauges', async () => {
+  const ui = await import('../src/ui.mjs');
+  const quota = { claude: { ok: true, parsed: { current_session: { used_percent: 20 } } } };
+  const hub = { rooms: new Map(), quotaCache: { value: quota }, quotaCacheTimer: {}, monitorTimers: [],
+    monitor: { login: { claude: {}, codex: {} }, leftovers: [] } };
+  const ctx = { ...freshCtx(), hub, workerSpec: 'claude:W', noScreen: true };
+  Object.assign(ctx, await ui.load(ctx, '?quota-start'));
+  hub.rooms.set(ctx.cwd, ctx);
+  try {
+    await ui.start(ctx);
+    assert.deepEqual(ctx.screen.quota, ctx.usage.quotaGauges(quota, ['claude', 'codex']));
+    assert.equal(ctx.screen.quota[0].used, 20);
+  } finally {
+    clearInterval(ctx.quotaTimer);
+    clearInterval(ctx.shop?.schedulerTimer);
+  }
+});
+
 test('Reload retains an open board and resumes a paused board from its checkpoint', async () => {
   const { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
@@ -7065,9 +7083,10 @@ test('Reload retains an open board and resumes a paused board from its checkpoin
     const cwd = join(root, 'room'); mkdirSync(cwd);
     const uiFile = join(root, 'src/ui.mjs');
     const ui = await import(pathToFileURL(uiFile).href);
-    const ctx = { ...freshCtx(), cwd, workerSpec: 'claude:W', noScreen: true };
+    const quota = { claude: { ok: true, parsed: { current_session: { used_percent: 20 } } } };
+    const hub = { rooms: new Map(), quotaCache: { value: quota } };
+    const ctx = { ...freshCtx(), cwd, hub, workerSpec: 'claude:W', noScreen: true };
     Object.assign(ctx, await ui.load(ctx, '?v=first'));
-    ctx.usage = { ...ctx.usage, fetchQuota: async () => null };
     const titles = ['Paused board', 'Open board'];
     ctx.suggestTitle = async () => ({ title: titles.shift() });
     for (const agent of ctx.room.agents) agent.turn = async () => 'PASS';
@@ -7100,6 +7119,9 @@ test('Reload retains an open board and resumes a paused board from its checkpoin
     assert.equal(ctx.boardReadVersion, 'new'); assert.equal(ctx.discussion.name, paused);
     assert.equal(ctx.sessions.get('A').id, 'paused-session');
     assert.deepEqual(ctx.state.transcript, pausedSnapshot.state.transcript);
+    await ctx.refreshQuota();
+    assert.deepEqual(ctx.screen.quota, ctx.usage.quotaGauges(quota, ['claude', 'codex']));
+    assert.equal(ctx.screen.quota[0].used, 20);
   } finally {
     if (home === undefined) delete process.env.HOME; else process.env.HOME = home;
     rmSync(root, { recursive: true, force: true, maxRetries: 5 });
