@@ -48,11 +48,11 @@ function ProviderName({ monitor, provider, display = provider, health = true, op
   return <b tabIndex={0} role="button" onClick={openHealth} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openHealth?.(); } }}>{display}{h?.level && <span className={'alert' + (h.level === 'red' ? ' red' : '')}>⚠</span>}
     {h && <Tip>{h.lines.map((line, i) => <span key={i} className={line.cls}>{line.text}{line.code && <code>{line.code}</code>}</span>)}</Tip>}</b>;
 }
-function QuotaUpdated({ at }: { at: QuotaAt | null | undefined }) {
+function QuotaUpdated({ at, compact = false }: { at: QuotaAt | null | undefined; compact?: boolean }) {
   const checked = at?.checked ? new Date(at.checked) : null;
   const measured = at?.measured ? new Date(at.measured.replace(' ', 'T')) : null;
   const age = measured && !Number.isNaN(measured.getTime()) ? Math.max(0, Math.floor((Date.now() - measured.getTime()) / 60000)) : null;
-  const text = age == null ? (checked ? 'checked ' + hhmm(checked) : '') : `${age}m old`;
+  const text = age == null ? (checked ? 'checked ' + hhmm(checked) : '') : `${age}m${compact ? "" : " old"}`;
   const title = (at?.measured ? 'Reading at ' + at.measured + '. ' : '') + (checked ? 'The room last checked at ' + hhmm(checked) + '.' : '');
   return <span className="updated" title={title}>{text}</span>;
 }
@@ -72,8 +72,8 @@ export function Gauges({ gauges, at, monitor, openHealth }: { gauges: Gauge[] | 
       else groups.push({ provider: g.provider, group: g.group ?? null, items: [g] });
     }
     body = <>{groups.map(({ provider, group, items }) => <span className="quota" key={provider + ' ' + group}>
-      <QuotaUpdated at={{ measured: at?.providers?.[provider] ?? null, checked: at?.checked ?? '' }} /><ProviderName monitor={monitor} provider={provider} display={group ?? provider} health={group !== 'argon'} openHealth={openHealth} />
-      {group !== 'argon' && monitor[provider]?.running != null && <span className="running">{monitor[provider].running} running</span>}
+      <ProviderName monitor={monitor} provider={provider} display={group ?? provider} health={group !== 'argon'} openHealth={openHealth} />
+      <span className="quota-meta">{group !== 'argon' && monitor[provider]?.running != null && <span title={`${monitor[provider].running} running now in this room`}>{monitor[provider].running} r</span>}{group !== 'argon' && monitor[provider]?.running != null && (at?.providers?.[provider] || at?.checked) && <span aria-hidden="true"> | </span>}<QuotaUpdated compact at={{ measured: at?.providers?.[provider] ?? null, checked: at?.checked ?? '' }} /></span>
       {items.map((g) => {
         const left = 100 - g.used;
         return <span key={g.label} tabIndex={0} className={'gauge' + (left < 10 ? ' high' : left < 30 ? ' warn' : '')} style={g.label === '5h' ? { gridRow: '1' } : g.label === 'week' ? { gridRow: '2' } : undefined}>

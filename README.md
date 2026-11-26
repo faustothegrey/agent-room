@@ -582,7 +582,7 @@ discussion and New brainstorm do too (on the screen they leave the discussion an
 
 `/usage` reports session token totals for discussion agents and the worker.
 Claude's reported dollar value is an API-price equivalent, not your subscription bill.
-Header gauges show **percent used**, reset times, and each provider's reading age (hover for its timestamp). Yellow means under 30% remains; red means under 10% remains.
+Header gauges show **percent used**, reset times, and each provider's running count and reading age beneath its name (for example, `0 r | 2m`; hover for details). Yellow means under 30% remains; red means under 10% remains.
 
 The server reads Claude's cached usage from `~/.claude.json`, the newest rate-limit event in the newest usable Codex session file under `~/.codex/sessions` (checking at most 30 files), and Agy with `agy -p /usage --output-format json`. One background cache polls every two minutes; requests never wait for Agy. Claude and Codex readings retain the time the provider recorded them, so they can become stale while idle. The quota guard rejects each provider's reading when it is over 15 minutes old or a quota window has reset since the reading; it waits for a reading taken after that reset. Set `AGENT_ROOM_METER` to use that HTTP meter's `/usage` instead. The room still works when readings are unavailable. Agy login is not monitored.
 

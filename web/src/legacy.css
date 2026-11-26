@@ -142,8 +142,8 @@ body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 .gauge.warn { color: #eab308; } .gauge.warn .bar i { background: #eab308; }
 .gauge.high { color: #ef4444; font-weight: 600; } .gauge.high .bar i { background: #ef4444; }
 .quota b { color: CanvasText; font-weight: 600; grid-column: 1; grid-row: 1 / span 2; text-transform: capitalize; font-size: .7rem; }
-.quota b:has(+ .running) { grid-row: 1; }
-.quota .running { grid-column: 1; grid-row: 2; font-size: .6rem; color: var(--dim); white-space: nowrap; }
+.quota b:has(+ .quota-meta) { grid-row: 1; }
+.quota .quota-meta { grid-column: 1; grid-row: 2; font-size: .6rem; color: var(--dim); white-space: nowrap; }
 .quota .gauge { grid-column: 2; }
 /* A provider's name and each gauge: hover or focus shows details; a ⚠ right of the name on a problem. */
 .quota b, .gauge { position: relative; cursor: default; }
