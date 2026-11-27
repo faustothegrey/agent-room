@@ -72,8 +72,37 @@ it('saves the floor, toggles, deletes after two clicks, and adds and edits tasks
   await user.click(within(edit).getByRole('button', { name: 'Save changes' }));
   await waitFor(() => expect(status().textContent).toBe('Task updated.'));
   expect(bodies('__schedule')).toEqual([{ action: 'floor', quotaFloor: 40 }, { action: 'toggle', id: 't2', enabled: true }, { action: 'delete', id: 't1' },
-    { action: 'add', kind: 'research', title: 'New scan', date: '2026-12-24', time: '03:00', prompt: 'Look again' },
-    { action: 'edit', id: 't2', kind: 'recurring', title: '', time: '03:00', prompt: 'Daily check', enabled: true }]);
+    { action: 'add', researchKind: { deep: false, theoretical: false }, kind: 'research', title: 'New scan', date: '2026-12-24', time: '03:00', prompt: 'Look again' },
+    { action: 'edit', id: 't2', researchKind: { deep: false, theoretical: false }, kind: 'recurring', title: '', time: '03:00', prompt: 'Daily check', enabled: true }]);
+});
+
+it('saves the Deep / Theoretical choice with a task, shows it, and locks it once the task has its board', async () => {
+  const kinds = { ...schedule, tasks: [{ ...tasks[0], researchKind: { deep: true, theoretical: false } }, { ...tasks[1], researchKind: { deep: true, theoretical: true } }, tasks[2]] };
+  answer = (url) => url === '__schedule' ? ok(kinds) : ok([]);
+  render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '⏰ Schedule' })); await within(panel()).findByText('Scheduled tasks (3)');
+  expect([...panel().querySelectorAll('.sched-card')].map((c) => c.querySelector('.research-kind-badge')?.textContent ?? null)).toEqual(['Deep', 'Deep · Theoretical', null]);
+  // A new task: both toggles start off, and each combination is sent.
+  const add = within(panel()).getByRole('form', { name: 'Add scheduled task' });
+  const toggle = (form: HTMLElement, name: string) => within(within(form).getByRole('group', { name: 'Research kind' })).getByRole('button', { name });
+  for (const name of ['Deep', 'Theoretical']) expect(toggle(add, name).getAttribute('aria-pressed')).toBe('false');
+  await user.click(toggle(add, 'Theoretical'));
+  await user.type(within(add).getByLabelText('Date (local)'), '2026-12-24');
+  await user.type(within(add).getByLabelText('Saved prompt (posted as Scheduler)'), 'Think');
+  await user.click(within(add).getByRole('button', { name: 'Add task' }));
+  await waitFor(() => expect(bodies('__schedule').at(-1)).toMatchObject({ action: 'add', researchKind: { deep: false, theoretical: true } }));
+  // A task with no board yet: its toggles show its kind and can change it.
+  await user.click(within(panel()).getAllByRole('button', { name: 'Edit' })[1]);
+  let edit = within(panel()).getByRole('form', { name: 'Edit scheduled task' });
+  expect([toggle(edit, 'Deep'), toggle(edit, 'Theoretical')].map((b) => [b.getAttribute('aria-pressed'), (b as HTMLButtonElement).disabled])).toEqual([['true', false], ['true', false]]);
+  await user.click(toggle(edit, 'Deep'));
+  await user.click(within(edit).getByRole('button', { name: 'Save changes' }));
+  await waitFor(() => expect(bodies('__schedule').at(-1)).toMatchObject({ action: 'edit', id: 't2', researchKind: { deep: false, theoretical: true } }));
+  // A task linked to its board: the toggles are disabled, with the reason.
+  await user.click(within(panel()).getAllByRole('button', { name: 'Edit' })[0]);
+  edit = within(panel()).getByRole('form', { name: 'Edit scheduled task' });
+  expect([toggle(edit, 'Deep'), toggle(edit, 'Theoretical')].map((b) => [b.getAttribute('aria-pressed'), (b as HTMLButtonElement).disabled])).toEqual([['true', true], ['false', true]]);
+  expect(within(edit).getByText(/already exists: its kind was saved when it was created/)).toBeTruthy();
 });
 
 it('reports a schedule that cannot load', async () => {

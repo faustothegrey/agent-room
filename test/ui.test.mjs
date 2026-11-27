@@ -6891,6 +6891,93 @@ test('recurring research schedules a board and reuses its live session, skipping
   assert.ok(contexts().some((c) => c.discussion?.name.endsWith('one-shot-prompt-title')));
 });
 
+// A multi-context room whose page shows its own started discussion, with scheduled boards that run one
+// agent until their lap cap. `run` runs a task and counts the turns of its latest Scheduler round.
+async function scheduledKindsRoom() {
+  const { readFileSync } = await import('node:fs');
+  const { getSchedule, runScheduledTask } = await import('../src/ui.mjs');
+  const { hub, first, contexts, gotoOf } = await multiRoom();
+  first.scheduleFile = `${first.cwd}/schedule.json`;
+  first.usage.checkQuotaFloor = () => ({ ok: true });
+  const addRoom = hub.addRoom;
+  hub.addRoom = async (...args) => {
+    const result = await addRoom(...args);
+    result.ctx.usage.checkQuotaFloor = () => ({ ok: true });
+    for (const a of result.ctx.room.agents) a.turn = async () => 'still looking'; // every run hits its lap cap
+    result.ctx.state.disabledAgents = ['B']; // one agent: one turn per lap
+    return result;
+  };
+  await handleLine('Our own topic', first);
+  const shown = first.screen.room.active, eventsBefore = first.events.length;
+  assert.match(shown, /^discussions\/.*our-own-topic$/);
+  const run = async (id) => {
+    assert.equal((await runScheduledTask(first, id)).status, 'ran');
+    const board = contexts().filter((c) => c.state.research).find((c) => c.discussion?.name === getSchedule(first).tasks.find((t) => t.id === id).board)
+      ?? contexts().filter((c) => c.state.research).at(-1); // a one-shot task's new board
+    const t = board.state.transcript, start = t.findLastIndex((m) => m.speaker === 'Scheduler');
+    return { board, turns: t.length - start - 1, marker: readFileSync(`${board.discussion.dir}/.research`, 'utf8') };
+  };
+  // Through every first and later run, the User's page kept showing its own board: never sent elsewhere.
+  const pageKept = () => {
+    const events = first.events.slice(eventsBefore);
+    assert.ok(events.some((e) => e.type === 'room')); // the page was told about the runs
+    assert.equal(events.filter((e) => e.type === 'goto').length, 0);
+    assert.equal(gotoOf(first), undefined);
+    assert.equal(first.events.filter((e) => (e.type === 'reset' || e.type === 'room') && e.room).at(-1).room.active, shown);
+    for (const t of getSchedule(first).tasks) if (t.board) assert.ok(first.screen.room.researches.includes(t.board)); // new boards just appear in Boards
+  };
+  return { first, run, pageKept };
+}
+
+test('scheduled research kinds with the Feasibility effort: saved on the task, applied at the first run (6 laps); an older task is Feasibility; the page keeps its board', async () => {
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const { saveSchedule, getSchedule } = await import('../src/ui.mjs');
+  const { first, run, pageKept } = await scheduledKindsRoom();
+  saveSchedule(first, { action: 'add', kind: 'recurring', title: '', prompt: 'Daily feasibility', time: '23:59', researchKind: { deep: false, theoretical: false } });
+  saveSchedule(first, { action: 'add', kind: 'research', title: '', prompt: 'One-shot theory', date: '2026-11-27', time: '23:58', researchKind: { deep: false, theoretical: true } });
+  const file = JSON.parse(readFileSync(first.scheduleFile, 'utf8'));
+  file.tasks.push({ id: 'old-task', kind: 'recurring', title: 'Old task', prompt: 'Saved before kinds', time: '23:57', enabled: true, lastRun: null, lastTriggerKey: null });
+  writeFileSync(first.scheduleFile, JSON.stringify(file));
+  const tasks = getSchedule(first).tasks;
+  assert.deepEqual(tasks.map((t) => t.researchKind), [{ deep: false, theoretical: false }, { deep: false, theoretical: true }, { deep: false, theoretical: false }]);
+  for (const [task, marker] of [[tasks[0], 'research\n'], [tasks[1], 'research theoretical\n'], [tasks[2], 'research\n']]) {
+    const result = await run(task.id);
+    assert.equal(result.marker, marker, task.prompt);
+    assert.equal(result.turns, 6, task.prompt);
+  }
+  // A later run reuses the daily board.
+  const again = await run('old-task');
+  assert.equal(again.board.discussion.name, getSchedule(first).tasks[2].board);
+  assert.equal(again.turns, 6);
+  // A one-shot task has no board of its own: editing it changes the kind its next board gets.
+  saveSchedule(first, { action: 'edit', id: tasks[1].id, kind: 'research', title: '', prompt: 'One-shot theory', date: '2026-11-28', time: '23:58', researchKind: { deep: true, theoretical: true } });
+  assert.deepEqual(getSchedule(first).tasks[1].researchKind, { deep: true, theoretical: true });
+  pageKept();
+});
+
+test('scheduled research kinds with the Deep effort: applied at the first run (30 laps); editing a linked task keeps its board’s kind; the page keeps its board', async () => {
+  const { saveSchedule, getSchedule } = await import('../src/ui.mjs');
+  const { first, run, pageKept } = await scheduledKindsRoom();
+  saveSchedule(first, { action: 'add', kind: 'recurring', title: '', prompt: 'Daily deep', time: '23:59', researchKind: { deep: true, theoretical: false } });
+  saveSchedule(first, { action: 'add', kind: 'recurring', title: '', prompt: 'Daily deep theory', time: '23:58', researchKind: { deep: true, theoretical: true } });
+  const tasks = getSchedule(first).tasks;
+  assert.deepEqual(tasks.map((t) => t.researchKind), [{ deep: true, theoretical: false }, { deep: true, theoretical: true }]);
+  for (const [task, marker] of [[tasks[0], 'research deep\n'], [tasks[1], 'research deep theoretical\n']]) {
+    const result = await run(task.id);
+    assert.equal(result.marker, marker, task.prompt);
+    assert.equal(result.turns, 30, task.prompt);
+  }
+  // Once the board exists its kind wins: editing the task's kind keeps it, and a later run keeps the board's.
+  const deep = getSchedule(first).tasks[0];
+  saveSchedule(first, { action: 'edit', id: deep.id, kind: 'recurring', title: '', prompt: deep.prompt, time: deep.time, enabled: true, researchKind: { deep: false, theoretical: true } });
+  assert.deepEqual(getSchedule(first).tasks[0].researchKind, { deep: true, theoretical: false });
+  const later = await run(deep.id);
+  assert.equal(later.board.discussion.name, deep.board);
+  assert.equal(later.marker, 'research deep\n');
+  assert.equal(later.turns, 30);
+  pageKept();
+});
+
 test('recurring research restores unloaded sessions and resumes a closed board fresh', async () => {
   const { saveSchedule, getSchedule, checkSchedule, reloaded } = await import('../src/ui.mjs');
   const { readFileSync } = await import('node:fs');

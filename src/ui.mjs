@@ -1534,6 +1534,6 @@ const { laneOf, cleanupMergedOnClose, worktreeFingerprint, recordTested } = lane
 const scheduler = schedulerModule.createScheduler({ siblings, toScreen, showHeader, checkpoints, DATED, isWorkbenchDir,
   SECTIONS, shopOf, discussionRef, day, pad, load, isResearchDir, isDiscussion, readCheckpoint,
   roomDefaults, parseSpec, refreshQuota, openBeside, resumeDiscussion, newResearch, wire,
-  openDiscussion, runRound, saveCheckpoint, fresh, closeContext });
+  openDiscussion, runRound, saveCheckpoint, fresh, closeContext, chooseResearchKind });
 export const { scheduleFile, readSchedule, getSchedule, saveSchedule, runScheduledTask, checkSchedule } = scheduler;
 const { writeSchedule, broadcastSchedule, startScheduler, stopSchedulerIfLast } = scheduler;

@@ -28,7 +28,7 @@ export function SchedulePanel({ open, reload, post }: { open: boolean; reload: n
   const [editingId, setEditingId] = useState<string | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
   const [floor, setFloor] = useState('50');
-  const blank = { kind: 'research' as ScheduleTask['kind'], title: '', date: '', time: '03:00', prompt: '', enabled: true };
+  const blank = { kind: 'research' as ScheduleTask['kind'], title: '', date: '', time: '03:00', prompt: '', enabled: true, deep: false, theoretical: false };
   const [form, setForm] = useState(blank);
   const show = (next: ScheduleData, text = '', isError = false) => { setData(next); setError(''); setNotice({ text, error: isError }); setFloor(String(next.quotaFloor ?? 50)); };
   useEffect(() => {
@@ -38,7 +38,7 @@ export function SchedulePanel({ open, reload, post }: { open: boolean; reload: n
   }, [open, reload]);
   const editing = editingId ? data?.tasks.find((t) => t.id === editingId) ?? null : null;
   useEffect(() => { if (editingId && data && !editing) setEditingId(null); }, [data]);
-  useEffect(() => { setForm(editing ? { kind: editing.kind, title: editing.title || '', date: editing.date || '', time: editing.time, prompt: editing.prompt, enabled: !!editing.enabled } : blank); }, [editingId]);
+  useEffect(() => { setForm(editing ? { kind: editing.kind, title: editing.title || '', date: editing.date || '', time: editing.time, prompt: editing.prompt, enabled: !!editing.enabled, deep: !!editing.researchKind?.deep, theoretical: !!editing.researchKind?.theoretical } : blank); }, [editingId]);
   useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(null), 4000); return () => clearTimeout(t); }, [armed]);
   const mutate = async (payload: ScheduleRequest, ok: string) => {
     try { const res = await post('__schedule', payload); if (!res.ok) throw new Error(await res.text()); show(await res.json() as ScheduleData, ok); }
@@ -47,6 +47,9 @@ export function SchedulePanel({ open, reload, post }: { open: boolean; reload: n
   if (error) return <div className="schedule-pane">{error}</div>;
   if (!data) return <div className="schedule-pane" />;
   const research = form.kind === 'research';
+  // Once a task has created its board, the board's saved kind wins: its toggles can't change it.
+  const kindLocked = !!editing?.board;
+  const kindText = (task: ScheduleTask) => [task.researchKind?.deep && 'Deep', task.researchKind?.theoretical && 'Theoretical'].filter(Boolean).join(' · ');
   return <div className="schedule-pane">
     <section className="sched-section"><h3>Quota guard</h3>
       <div className="sched-floor-row"><label>Minimum quota remaining (% for all providers): <input type="number" min="0" max="100" step="1" value={floor} onChange={(e) => setFloor(e.target.value)} /></label>
@@ -60,6 +63,7 @@ export function SchedulePanel({ open, reload, post }: { open: boolean; reload: n
           <input type="checkbox" hidden={task.kind === 'research'} checked={!!task.enabled} aria-label={'Enable scheduled task for ' + (task.title || 'research')} onChange={(e) => void mutate({ action: 'toggle', id: task.id, enabled: e.target.checked }, e.target.checked ? 'Task enabled.' : 'Task disabled.')} />
           <span className="sched-time">{task.kind === 'research' ? task.date + ' ' + task.time : task.time + ' daily'}</span>
           <span className="sched-disc">{(task.title || 'Untitled research') + (task.board ? ' · ' + task.board : '')}</span>
+          {kindText(task) && <span className="research-kind-badge" title="Research kind its board is created with">{kindText(task)}</span>}
           <span className="sched-actions"><button type="button" onClick={() => setEditingId(task.id)}>Edit</button>
             <button type="button" className="danger" onClick={() => { if (armed === task.id) { setArmed(null); if (editingId === task.id) setEditingId(null); void mutate({ action: 'delete', id: task.id }, 'Task deleted.'); } else setArmed(task.id); }}>{armed === task.id ? 'Confirm delete' : 'Delete'}</button></span>
         </div>
@@ -71,7 +75,8 @@ export function SchedulePanel({ open, reload, post }: { open: boolean; reload: n
       <form className="sched-form" aria-label={editing ? 'Edit scheduled task' : 'Add scheduled task'} onSubmit={(e) => {
         e.preventDefault();
         const fields = research ? { kind: 'research' as const, title: form.title, date: form.date, time: form.time, prompt: form.prompt } : { kind: 'recurring' as const, title: form.title, time: form.time, prompt: form.prompt, enabled: form.enabled };
-        const payload: ScheduleRequest = editing ? { action: 'edit', id: editing.id, ...fields } : { action: 'add', ...fields };
+        const researchKind = { deep: form.deep, theoretical: form.theoretical };
+        const payload: ScheduleRequest = editing ? { action: 'edit', id: editing.id, researchKind, ...fields } : { action: 'add', researchKind, ...fields };
         setEditingId(null); void mutate(payload, editing ? 'Task updated.' : 'Task added.');
       }}>
         <label>Task type<select value={form.kind} disabled={!!editing} onChange={(e) => setForm({ ...form, kind: e.target.value as ScheduleTask['kind'] })}><option value="research">One-shot research</option><option value="recurring">Daily research</option></select></label>
@@ -81,6 +86,8 @@ export function SchedulePanel({ open, reload, post }: { open: boolean; reload: n
           <label>{research ? 'Time (local)' : 'Daily time (local)'}<input type="time" required value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} /></label>
         </div>
         <label>Saved prompt (posted as Scheduler)<textarea rows={4} required placeholder="Write the prompt the Scheduler should post to the research board…" value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })} /></label>
+        <div className="sched-form-row research-kind" role="group" aria-label="Research kind">{(['deep', 'theoretical'] as const).map((key) => <button type="button" key={key} aria-pressed={form[key]} disabled={kindLocked} title={key === 'deep' ? 'Deep: question the premises, search the web, up to 30 laps per run (otherwise 6)' : 'Theoretical: end with what was understood, instead of a feasibility scorecard and verdict'} onClick={() => setForm({ ...form, [key]: !form[key] })}>{key === 'deep' ? 'Deep' : 'Theoretical'}</button>)}
+          <span className="settings-hint">{kindLocked ? 'Its board ' + editing!.board + ' already exists: its kind was saved when it was created and can’t be changed here.' : 'The kind its research board is created with: neither on is Feasibility.'}</span></div>
         <label className="inline" hidden={research}><input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />Enabled</label>
         <div className="sched-form-buttons"><button type="submit">{editing ? 'Save changes' : 'Add task'}</button>{editing && <button type="button" onClick={() => setEditingId(null)}>Cancel</button>}</div>
       </form>

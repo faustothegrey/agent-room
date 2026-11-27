@@ -95,10 +95,11 @@ export interface NoteSaved { id: string; title?: string; savedAt: string }
 // GET/POST __schedule (Schedule service): the quota floor and the scheduled research tasks; a POST
 // { action, … } (floor, toggle, delete, add, edit) answers with the new schedule.
 export interface ScheduleRun { at?: string | null; status: 'ran' | 'skipped' | 'stopped' | 'failed' | string; reason?: string | null }
-export interface ScheduleTask { id: string; kind: 'research' | 'recurring'; title?: string | null; board?: string | null; date?: string; time: string; prompt: string; enabled: boolean; running?: boolean; lastRun?: ScheduleRun | null }
+export interface ScheduleTask { id: string; kind: 'research' | 'recurring'; title?: string | null; board?: string | null; date?: string; time: string; prompt: string; enabled: boolean; researchKind?: ResearchKind; running?: boolean; lastRun?: ScheduleRun | null }
 export interface ScheduleData { quotaFloor?: number; tasks: ScheduleTask[] }
 export type ScheduleRequest = { action: 'floor'; quotaFloor: number } | { action: 'toggle'; id: string; enabled: boolean } | { action: 'delete'; id: string }
-  | ({ action: 'add' } | { action: 'edit'; id: string }) & ({ kind: 'research'; title: string; date: string; time: string; prompt: string } | { kind: 'recurring'; title: string; time: string; prompt: string; enabled: boolean });
+  // researchKind: the kind the task's board is created with (missing: Feasibility); kept as it was once the task has a board.
+  | ({ action: 'add' } | { action: 'edit'; id: string }) & { researchKind?: ResearchKind } & ({ kind: 'research'; title: string; date: string; time: string; prompt: string } | { kind: 'recurring'; title: string; time: string; prompt: string; enabled: boolean });
 // GET __instructions (Instructions service): the prompt catalog, read-only.
 export interface InstructionSet { type: string; pieces: { id: string; intent: string; when: string; content: string }[] }
 // GET __provider-health (POST: check now) and POST __prompt-test { provider, model } (Providers service).

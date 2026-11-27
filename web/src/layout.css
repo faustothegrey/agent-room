@@ -25,7 +25,10 @@ h1#disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
 #attach-row .research-kind { display: inline-flex; gap: .25rem; margin-right: .4rem; }
 #attach-row .research-kind button[aria-pressed="true"] { background: light-dark(#dbeafe, #1e3a8a); border-color: light-dark(#2563eb, #93c5fd); font-weight: 600; }
 #attach-row .research-kind button[aria-pressed="true"]::before { content: "✓ "; }
-#board-list .research-kind-badge { padding: 0 .35rem; border: 1px solid var(--line); border-radius: 8px; font-weight: 600; }
+.sched-form .research-kind { align-items: center; gap: .35rem; }
+.sched-form .research-kind button[aria-pressed="true"] { background: light-dark(#dbeafe, #1e3a8a); border-color: light-dark(#2563eb, #93c5fd); font-weight: 600; }
+.sched-form .research-kind button[aria-pressed="true"]::before { content: "✓ "; }
+.sched-card .research-kind-badge, #board-list .research-kind-badge { padding: 0 .35rem; border: 1px solid var(--line); border-radius: 8px; font-weight: 600; }
 #attach-row .chip button { border: 0; background: none; padding: 0 .25rem; font-size: .8rem; cursor: pointer; }
 #wstop { margin-top: .4rem; }
 .first-hint { margin: .5rem 1rem 0; }
