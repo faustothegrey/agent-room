@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { NoteEntry, NoteRequest, NoteSaved } from '../../src/contract';
 
-// The My notes service (notes.mjs), as on /__room: the User's notes for this room's folder, on
-// this computer only. A note is saved only by Save. Closing or switching services only hides the
+// The My notes service (notes.mjs), as on /__room: the User's notes for this room's folder, stored
+// on the agent-room computer, reachable from the room's own addresses (LAN ones too). A note is saved only by Save. Closing or switching services only hides the
 // panel, keeping unsaved edits; they are never dropped without asking: inside the panel before
 // another note or New, before switching board or room (guard), the browser's leave-page warning
 // otherwise, and a refresh after a code change keeps them (draft).
