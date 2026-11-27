@@ -17,6 +17,16 @@ function ownHost(host) {
     ...Object.values(networkInterfaces()).flat().filter((i) => i.family === 'IPv4').map((i) => i.address)];
   return mine.includes(name);
 }
+// The machine's short name for the header (not the --node name): hostname up to its first dot
+// (Machiste.local → Machiste) unless it is an IPv4 address; else the first LAN IPv4 address.
+function shortHost() {
+  try {
+    const name = hostname().trim();
+    const short = /^\d{1,3}(\.\d{1,3}){3}$/.test(name) ? name : name.split('.')[0];
+    if (short) return short;
+  } catch {}
+  try { return Object.values(networkInterfaces()).flat().find((i) => i?.family === 'IPv4' && !i.internal)?.address ?? null; } catch { return null; }
+}
 function fromOwnPage(req) {
   const host = req.headers.host ?? '';
   if (!ownHost(host)) return false;
@@ -80,7 +90,7 @@ function handleScreen(req, res, url, dir, screen) {
   if (handleNotes(req, res, url, dir)) return true; // the Notes pane (notes.mjs)
   // The heartbeat: the page and the Dock app ask every few seconds; a new pid means a new process.
   if (url.pathname === '/__health') {
-    send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, root: dir,
+    send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, root: dir, host: shortHost(),
       startedAt: screen.startedAt ?? null, discussion: screen.room?.active ?? null, pages: screen.clients.size }));
     return true;
   }

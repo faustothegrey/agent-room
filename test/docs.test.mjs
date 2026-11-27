@@ -480,7 +480,13 @@ test('the heartbeat: /__health says it is agent-room, with its process, root and
   const s = await serve(dir, screen);
   const res = await s.get('/__health');
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { app: 'agent-room', pid: process.pid, root: dir, startedAt: '2026-11-03T10:00:00.000Z', discussion: 'discussions/2026-11-03-x', pages: 0 });
+  const { host, ...rest } = await res.json();
+  assert.deepEqual(rest, { app: 'agent-room', pid: process.pid, root: dir, startedAt: '2026-11-03T10:00:00.000Z', discussion: 'discussions/2026-11-03-x', pages: 0 });
+  // The machine's short name: its hostname cut at the first dot, unless that is an IPv4 address.
+  const { hostname } = await import('node:os');
+  const name = hostname().trim();
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(name)) assert.equal(host, name);
+  else if (name.split('.')[0]) assert.equal(host, name.split('.')[0]);
   s.close();
 });
 
