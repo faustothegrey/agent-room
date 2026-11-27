@@ -282,7 +282,7 @@ export async function load(ctx, v) {
   const researchingInstructions = readRulebooks('researching');
   const instructions = isResearch ? researchingInstructions : discussingInstructions;
   const workerInstructions = readRulebooks('worker');
-  const { createAgent, claudeTitle, run, findLeftovers, parseCodexEvents, parseAgyOutput } = await import(`./agents.mjs${v}`);
+  const { createAgent, claudeTitle, run, findLeftovers, parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM } = await import(`./agents.mjs${v}`);
   const { createRoom, closingStatement, formattedTurn } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
   const lanes = await import(`./lanes.mjs${v}`);
@@ -314,7 +314,7 @@ export async function load(ctx, v) {
     const { provider, name, model } = parseSpec(spec);
     if (!ctx.sessions.has(name)) ctx.sessions.set(name, {});
     const session = ctx.sessions.get(name);
-    return monitorAgentTurns(createAgent(provider, { name, model, cwd: ctx.cwd, instructions, runner, session }), session, turnRecords);
+    return monitorAgentTurns(createAgent(provider, { name, model, cwd: ctx.cwd, instructions, runner, session }), session, turnRecords, ctx);
   });
   // The worker's session is kept under its own key, so it never mixes with a room agent's.
   const { provider: wProvider, name: wName, model: wModel } = parseSpec(ctx.workerSpec, true);
@@ -333,7 +333,7 @@ export async function load(ctx, v) {
     const own = (command, args, options) => (programs.stopped ? Promise.reject(new Error('not started: the User stopped this instruction'))
       : runner(command, args, { ...options, started: (p) => programs.running.add(p) }));
     return Object.assign(monitorAgentTurns(createAgent(wProvider, { name: wName, model: wModel, cwd: () => workerDir.path, instructions: workerInstructions,
-      timeoutMs: WORKER_TIMEOUT_MS, runner: own, session }), session, turnRecords), { programs });
+      timeoutMs: WORKER_TIMEOUT_MS, runner: own, session }), session, turnRecords, ctx), { programs });
   };
   const worker = makeWorker(ctx.sessions.get(`worker:${wName}`));
   // Session token totals per agent name, and the discussion screen's state (see docs.mjs): kept in
@@ -349,7 +349,7 @@ export async function load(ctx, v) {
   });
   return { room: createRoom(agents, ctx.state, instr, usageLine), worker, docs, lanes, workshopModule, boardsModule, monitorModule, schedulerModule, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
     shop: roomShop,
-    testPrompt: (room, provider, model) => runPromptTest(room, provider, model, runner, { parseCodexEvents, parseAgyOutput }),
+    testPrompt: (room, provider, model) => runPromptTest(room, provider, model, runner, { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM }),
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
     makeWorker,
     // Close's closing statement, written by a one-off agent with the worker's provider and model, in

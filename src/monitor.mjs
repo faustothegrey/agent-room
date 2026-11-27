@@ -7,7 +7,8 @@ import { join } from 'node:path';
 export function createMonitor({ hubOf, toScreen, currentSettings, claudeModels, codexModels, agyModels,
   modelAlignment, readDefaults, sessionView, folderOf }) {
 // Turn records live only in memory, keyed by the actual provider session, never in checkpoints.
-function monitorAgentTurns(agent, session, records) {
+// With `ctx` (its room), each turn that ends also updates its provider's quota (turnQuota).
+function monitorAgentTurns(agent, session, records, ctx) {
   const turn = agent.turn.bind(agent), reset = agent.reset?.bind(agent);
   agent.turn = async (...args) => {
     try {
@@ -18,7 +19,7 @@ function monitorAgentTurns(agent, session, records) {
       const ended = new Date().toISOString();
       records.set(session, { ended, outcome: 'error', error: { message: err?.message ?? String(err), at: ended } });
       throw err;
-    }
+    } finally { if (ctx) turnQuota(ctx, agent); }
   };
   if (reset) agent.reset = (...args) => { records.delete(session); return reset(...args); };
   return agent;
@@ -35,6 +36,16 @@ async function refreshQuota(ctx, quota) {
   ctx.screen.quotaAt = { measured: quota?.last_update ?? null, providers: Object.fromEntries(providers.map((p) => [p, quota?.[p === 'agy' ? 'antigravity' : p]?.updated_at ?? null])), checked: new Date().toISOString() };
   toScreen(ctx, { type: 'quota', gauges: ctx.screen.quota, at: ctx.screen.quotaAt });
   return quota;
+}
+
+// After a turn: its provider's entry in the shared quota cache (a Claude turn's own reading, the
+// Codex rollouts, agy's /usage), then every open room's gauges, without waiting for the 120 s poll.
+// Not with an HTTP meter (AGENT_ROOM_METER), which the cache doesn't feed.
+function turnQuota(ctx, agent) {
+  const hub = hubOf(ctx), usage = ctx.usage;
+  if (!hub.quotaCache || !usage?.refreshProviderQuota || usage.METER_URL) return;
+  usage.refreshProviderQuota(agent.provider, agent.lastQuota, hub.quotaCache)
+    .then(() => Promise.all(loadedRooms(hub).map((r) => refreshQuota(r).catch(() => null)))).catch(() => {});
 }
 
 // The monitor panel's warnings (see README, "The header"), checked once per server: each provider's
@@ -124,7 +135,7 @@ async function runPromptTest(ctx, provider, model, runner, parsers) {
     dir = mkdtempSync(join(tmpdir(), 'agent-room-prompt-test-'));
     let args;
     if (provider === 'claude') {
-      args = ['-p', '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config'];
+      args = ['-p', ...parsers.CLAUDE_STREAM, '--no-session-persistence', '--strict-mcp-config'];
       if (model) args.push('--model', model);
       args.push('--tools', '');
     } else if (provider === 'codex') {
@@ -137,7 +148,7 @@ async function runPromptTest(ctx, provider, model, runner, parsers) {
     }
     const output = await runner(provider, args, { input: 'Reply with exactly OK.', cwd: dir, timeoutMs: 30_000, agent: 'prompt test' });
     if (provider === 'claude') {
-      const result = JSON.parse(output);
+      const { result } = parsers.parseClaudeStream(output);
       if (result.is_error) throw new Error(`claude: ${result.result || 'test failed'}`);
       reply = String(result.result ?? '').trim();
     } else if (provider === 'codex') reply = parsers.parseCodexEvents(output).text;

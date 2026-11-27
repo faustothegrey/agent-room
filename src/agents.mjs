@@ -150,12 +150,15 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, r
     name,
     provider: 'claude',
     lastUsage: null,
+    // The turn's quota reading (parseClaudeStream), for the shared quota cache; null if it had none.
+    lastQuota: null,
     // A fresh CLI session from the next turn on (Resume or Start fresh elsewhere); `session` is kept, emptied.
     reset() { session.id = randomUUID(); session.started = false; },
     async turn(prompt) {
       agent.lastUsage = null;
+      agent.lastQuota = null;
       const call = () => {
-        const args = ['-p', '--output-format', 'json'];
+        const args = ['-p', ...CLAUDE_STREAM];
         args.push(session.started ? '--resume' : '--session-id', session.id);
         if (model) args.push('--model', model);
         if (instructions) args.push('--append-system-prompt', instructions);
@@ -171,7 +174,8 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, r
         session.started = true;
         return call();
       });
-      const result = JSON.parse(out);
+      const { result, quota } = parseClaudeStream(out);
+      agent.lastQuota = quota;
       if (result.is_error) throw new Error(`claude: ${result.result || 'turn failed'}`);
       session.started = true;
       agent.lastUsage = claudeUsage(result);
@@ -185,8 +189,8 @@ export function createClaudeAgent({ name, model, cwd, timeoutMs, instructions, r
 // at all (so it can't write anything) and no saved session. Resolves to { title, usage }.
 export async function claudeTitle(message, { runner = run, cwd, timeoutMs = TITLE_TIMEOUT_MS } = {}, instr = defaultInstructions) {
   const prompt = instr.titlePrompt(message);
-  const args = ['-p', '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config', '--tools', ''];
-  const result = JSON.parse(await runner('claude', args, { input: prompt, cwd, timeoutMs, agent: 'title' }));
+  const args = ['-p', ...CLAUDE_STREAM, '--no-session-persistence', '--strict-mcp-config', '--tools', ''];
+  const { result } = parseClaudeStream(await runner('claude', args, { input: prompt, cwd, timeoutMs, agent: 'title' }));
   if (result.is_error) throw new Error(`claude: ${result.result || 'title failed'}`);
   const title = String(result.result ?? '').split('\n')[0].replace(/^["'*\s]+|["'*.\s]+$/g, '').slice(0, 80);
   if (!title) throw new Error('claude gave an empty title');
@@ -194,6 +198,33 @@ export async function claudeTitle(message, { runner = run, cwd, timeoutMs = TITL
 }
 // One measured title took 4.5s (2026-11-02); past this the date-and-time name is used instead.
 const TITLE_TIMEOUT_MS = 30 * 1000;
+
+// Claude runs with stream-json: one event per line. Its `result` event holds what `--output-format
+// json` printed alone (a lone JSON object without a type is read the same way); its
+// `rate_limit_event` holds the subscription's 5-hour and weekly windows, straight from the API's
+// response headers. Returns { result, quota }: quota is { received_at, five_hour?, seven_day? }, each
+// window { used_percent (0-100, from a 0-1 utilization), resets_at (Unix seconds) }, or null.
+export const CLAUDE_STREAM = ['--output-format', 'stream-json', '--verbose'];
+export function parseClaudeStream(stdout, now = Date.now()) {
+  let result = null, quota = null;
+  for (const line of String(stdout).split('\n')) {
+    if (!line.trim()) continue;
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
+    if (event?.type === 'result' || (event && event.type === undefined && 'result' in event)) result = event;
+    const windows = event?.type === 'rate_limit_event' ? event.rate_limit_info?.unifiedWindows : null;
+    if (windows) {
+      const reading = { received_at: now };
+      for (const key of ['five_hour', 'seven_day']) {
+        const w = windows[key], used = Number(w?.utilization);
+        if (w?.utilization != null && Number.isFinite(used)) reading[key] = { used_percent: used * 100, ...(Number.isFinite(Number(w.resetsAt)) && { resets_at: Number(w.resetsAt) }) };
+      }
+      if (reading.five_hour || reading.seven_day) quota = reading;
+    }
+  }
+  if (!result) throw new Error('claude: no result in its output');
+  return { result, quota };
+}
 
 // Every adapter reports a turn's usage as { input, cached, output, cost? }: input counts all prompt
 // tokens (cached ones included), cost is claude's API-price equivalent in USD, not a subscription bill.
