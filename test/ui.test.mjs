@@ -4267,9 +4267,32 @@ test('last-turn records stay in memory by session and retain the latest error af
   assert.equal(records.get(session), undefined);
 });
 
+test('each ended turn updates its provider quota entry and every open room gauge', async () => {
+  const { monitorAgentTurns } = await import('../src/ui.mjs');
+  const calls = [];
+  const usage = { refreshProviderQuota: async (provider, reading, cache) => { calls.push({ provider, reading, cache }); },
+    fetchQuota: async () => ({ claude: { ok: true } }), quotaGauges: () => [{ provider: 'claude', label: '5h', used: 5 }] };
+  const ctx = { cwd: '/tmp/q', usage, room: { agents: [{ provider: 'claude' }] }, worker: { provider: 'claude' }, screen: {},
+    docs: { broadcast: () => {} } };
+  ctx.hub = { rooms: new Map([['q', ctx]]), quotaCache: { value: null } };
+  let failure = null;
+  const agent = monitorAgentTurns({ provider: 'claude', lastQuota: { received_at: 1 }, turn: async () => { if (failure) throw failure; return 'ok'; } }, {}, new WeakMap(), ctx);
+  await agent.turn();
+  failure = new Error('failed');
+  await assert.rejects(agent.turn(), /failed/);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(calls.map((c) => [c.provider, c.reading]), [['claude', { received_at: 1 }], ['claude', { received_at: 1 }]]);
+  assert.equal(calls[0].cache, ctx.hub.quotaCache);
+  assert.deepEqual(ctx.screen.quota, [{ provider: 'claude', label: '5h', used: 5 }]);
+  // With an HTTP meter the cache is not fed.
+  calls.length = 0; usage.METER_URL = 'http://meter';
+  await agent.turn().catch(() => {});
+  assert.equal(calls.length, 0);
+});
+
 test('prompt diagnostics use isolated calls, retain results and leave agent sessions alone', async () => {
   const { runPromptTest } = await import('../src/ui.mjs');
-  const { parseCodexEvents, parseAgyOutput } = await import('../src/agents.mjs');
+  const { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM } = await import('../src/agents.mjs');
   const { existsSync, readdirSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const agentSession = { threadId: 'existing-thread' }, workerSession = { conversationId: 'existing-worker' };
@@ -4277,7 +4300,7 @@ test('prompt diagnostics use isolated calls, retain results and leave agent sess
     room: { agents: [{ provider: 'codex' }, { provider: 'claude' }] }, worker: { provider: 'agy' }, usage: {},
     sessions: new Map([['A', agentSession], ['worker:W', workerSession]]) };
   ctx.hub = { rooms: new Map([['room', ctx]]) };
-  const parsers = { parseCodexEvents, parseAgyOutput }, calls = [], dirs = [];
+  const parsers = { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM }, calls = [], dirs = [];
   const runner = async (provider, args, options) => {
     calls.push({ provider, args, options }); dirs.push(options.cwd);
     assert.ok(options.cwd.startsWith(tmpdir()));

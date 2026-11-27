@@ -175,17 +175,41 @@ export async function readAgyQuota(exec = execFile) {
   } catch { return { ok: false, source: 'agy-json' }; }
   finally { if (dir) await rm(dir, { recursive: true, force: true }); }
 }
+// A Claude turn's reading (parseClaudeStream in agents.mjs) as the cache's claude entry, in the
+// shape readClaudeQuota gives; updated_at is when the turn received it.
+export function claudeStreamQuota(reading) {
+  const parsed = {};
+  for (const [key, source] of [['current_session', 'five_hour'], ['current_week_all_models', 'seven_day']]) {
+    const w = reading?.[source], value = w && quotaWindow(w.used_percent, w.resets_at);
+    if (value) parsed[key] = value;
+  }
+  const at = Number(reading?.received_at);
+  return { ok: !!Object.keys(parsed).length && Number.isFinite(at), source: 'claude-stream', updated_at: Number.isFinite(at) ? stamp(at) : null, parsed };
+}
+// Puts a provider's new reading in the cache: a successful one replaces the entry unless that holds
+// a newer successful reading (so an older ~/.claude.json can't overwrite a turn's); a failed one
+// only fills an empty entry.
+function storeQuota(cache, key, result) {
+  const value = { ...cache.value, last_update: stamp(Date.now()) }, old = value[key];
+  const newer = () => !old?.ok || !((parseMeterTime(result.updated_at) ?? -Infinity) < (parseMeterTime(old.updated_at) ?? -Infinity));
+  if (result.ok ? newer() : !old) value[key] = result;
+  cache.value = value;
+}
 export async function refreshQuotaCache(cache = quotaCache, readers = [readClaudeQuota, readCodexQuota, readAgyQuota]) {
   if (cache.running) return;
   cache.running = true;
   try {
     await Promise.all(['claude', 'codex', 'antigravity'].map((key, i) => [key, readers[i]]).map(async ([key, read]) => {
-      const result = await read();
-      const value = { ...cache.value, last_update: stamp(Date.now()) };
-      if (result.ok || !value[key]) value[key] = result;
-      cache.value = value;
+      storeQuota(cache, key, await read());
     }));
   } finally { cache.running = false; }
+}
+// After one turn of `provider`: its entry alone, from the turn's own reading for Claude (or
+// ~/.claude.json without one), the rollouts for Codex, `agy -p /usage` for agy.
+export async function refreshProviderQuota(provider, reading, cache = quotaCache, readers = { claude: readClaudeQuota, codex: readCodexQuota, agy: readAgyQuota }) {
+  const key = provider === 'agy' ? 'antigravity' : provider;
+  if (!readers[provider]) return;
+  storeQuota(cache, key, provider === 'claude' && reading ? claudeStreamQuota(reading) : await readers[provider]());
 }
 // The override keeps the old HTTP behavior; internal reads return the background snapshot immediately.
 export async function fetchQuota(url = METER_URL, timeoutMs = 1500) {

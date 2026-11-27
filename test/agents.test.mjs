@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { claudeTitle, createAgyAgent, createClaudeAgent, createCodexAgent, parseAgyOutput, findLeftovers, parseCodexEvents, probeProcess, recordProgram, run } from '../src/agents.mjs';
+import { claudeTitle, createAgyAgent, createClaudeAgent, createCodexAgent, parseAgyOutput, parseClaudeStream, findLeftovers, parseCodexEvents, probeProcess, recordProgram, run } from '../src/agents.mjs';
 
 // A fake runner that records each call and returns scripted stdout.
 function fakeRunner(outputs) {
@@ -155,6 +155,41 @@ test('each turn reports its usage: claude from its JSON result, codex from turn.
   assert.deepEqual(codex.lastUsage, { input: 15973, cached: 7168, output: 5 });
   await codex.turn('p2'); // no turn.completed this time: no stale usage from the previous turn
   assert.equal(codex.lastUsage, null);
+});
+
+// Lines as claude -p --output-format stream-json --verbose printed them (2.1.318, 2026-11-27), trimmed.
+const STREAM = [
+  '{"type":"system","subtype":"init","session_id":"s"}',
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"OK"}]}}',
+  '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1795780200,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":0.05,"resetsAt":1795780200,"status":"allowed"},"seven_day":{"utilization":0.31,"resetsAt":1796194800,"status":"allowed"}}}}',
+  '{"type":"result","subtype":"success","is_error":false,"result":"OK","total_cost_usd":0.01,"usage":{"input_tokens":2,"output_tokens":4}}',
+].join('\n');
+
+test('parseClaudeStream: the result event, and the rate-limit windows scaled from 0-1 to percent', () => {
+  const { result, quota } = parseClaudeStream(STREAM, 1795770000000);
+  assert.equal(result.result, 'OK');
+  assert.deepEqual(quota, { received_at: 1795770000000, five_hour: { used_percent: 5, resets_at: 1795780200 }, seven_day: { used_percent: 31, resets_at: 1796194800 } });
+  // A lone JSON object (the json format) is read as the result; no event, no reading.
+  assert.deepEqual(parseClaudeStream(JSON.stringify({ result: 'hi', is_error: false })), { result: { result: 'hi', is_error: false }, quota: null });
+  // A window without a utilization is left out; one with neither gives no reading.
+  const partial = STREAM.replace('"utilization":0.31,', '');
+  assert.deepEqual(Object.keys(parseClaudeStream(partial).quota), ['received_at', 'five_hour']);
+  assert.equal(parseClaudeStream(partial.replace('"utilization":0.05,', '')).quota, null);
+  assert.throws(() => parseClaudeStream('{"type":"system"}\nnot json'), /no result/);
+});
+
+test('claude turns run with stream-json and carry the turn quota reading out', async () => {
+  const { calls, runner } = fakeRunner([STREAM, JSON.stringify({ result: 'no events', is_error: false })]);
+  const agent = createClaudeAgent({ name: 'A', runner });
+  assert.equal(await agent.turn('p'), 'OK');
+  assert.deepEqual(calls[0].args.slice(0, 4), ['-p', '--output-format', 'stream-json', '--verbose']);
+  assert.equal(agent.lastQuota.five_hour.used_percent, 5);
+  assert.deepEqual(agent.lastUsage, { input: 2, cached: 0, output: 4, cost: 0.01 });
+  await agent.turn('p2');
+  assert.equal(agent.lastQuota, null); // no stale reading from the previous turn
+  const title = fakeRunner([STREAM]);
+  await claudeTitle('x', { runner: title.runner });
+  assert.ok(title.calls[0].args.includes('stream-json'));
 });
 
 test('claude worker: Bash is available and pre-approved', async () => {
