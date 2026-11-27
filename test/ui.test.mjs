@@ -7564,7 +7564,7 @@ test('Check now diagnostics: CLI processes by owner, launch environment by varia
   assert.equal(again.error.message, 'ps: denied'); assert.ok(again.error.at >= before);
 });
 
-test('Check now auth mode never leaks tokens from Claude JSON fields, Codex status text, or failing/unreadable status output', async () => {
+test('Check now and header monitor never leak tokens from Claude JSON fields, Codex status text, or failing/unreadable status output', async () => {
   const { createMonitor } = await import('../src/monitor.mjs');
   const { checkLogin } = await import('../src/usage.mjs');
   const token = 'sk-fake-tok98765';
@@ -7575,57 +7575,79 @@ test('Check now auth mode never leaks tokens from Claude JSON fields, Codex stat
   const runDiag = async (command, args) => (command === 'ps' ? '' : args[1] === 'claude' ? '/a/claude\n' : '');
   const runCase = async (execs) => {
     const hub = { rooms: new Map(), monitor: { login: {}, leftovers: [], cli: {}, errors: { login: {}, cli: {}, leftovers: null } } };
-    const ctx = { cwd: '/a', hub, usage: { checkLogin: (p, _, opts) => checkLogin(p, execs[p], opts) }, room: { agents: [] }, worker: { provider: 'claude' },
+    const ctx = { cwd: '/a', hub, usage: { checkLogin: (p, _, opts) => checkLogin(p, execs[p], opts) },
+      room: { agents: [{ name: 'A', provider: 'claude' }, { name: 'B', provider: 'codex' }] }, worker: { name: 'W', provider: 'claude' },
       screen: { clients: new Set(), transcript: [] }, programs: { running: new Set() }, recordedPids: () => [], state: {}, sessions: new Map() };
     hub.rooms.set('a', ctx);
     await m.checkLogins(hub, true, ['claude', 'codex', 'agy'], { authMode: true });
     await m.checkDiagnostics(hub, { run: runDiag, env: {}, home: '/h', exists: () => false });
-    return m.healthView(ctx);
+    return { view: m.healthView(ctx), monitor: m.monitorView(ctx) };
   };
   const exec = (result) => (command, args, options, done) => done(...result);
 
-  // 1. Fake token in Claude JSON fields (short plain token) and Codex status text: neither leaks anywhere in healthView.
-  const okView = await runCase({
+  // 1. Fake token in Claude JSON fields (short plain token) and Codex status text.
+  const ok = await runCase({
     claude: exec([null, JSON.stringify({ loggedIn: true, authMethod: token, apiProvider: token }), '']),
     codex: exec([null, '', `Logged in using an API key - ${token}\n`]),
   });
-  assert.equal(okView.diagnostics.launch.claude.authMode.result, 'unknown');
-  assert.equal(okView.diagnostics.launch.codex.authMode.result, 'API key');
-  assert.ok(!JSON.stringify(okView).includes(token));
+  assert.equal(ok.view.diagnostics.launch.claude.authMode.result, 'unknown');
+  assert.equal(ok.view.diagnostics.launch.codex.authMode.result, 'API key');
+  assert.ok(!JSON.stringify(ok.view).includes(token));
+  assert.ok(!JSON.stringify(ok.monitor).includes(token));
 
-  // 2. Fake token in Claude apiProvider with known authMethod: authMode stays known label, token absent.
-  const apiProvView = await runCase({
+  // 2. Fake token in Claude apiProvider with known authMethod.
+  const apiProv = await runCase({
     claude: exec([null, JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: token }), '']),
     codex: exec([null, '', 'Logged in using ChatGPT\n']),
   });
-  assert.equal(apiProvView.diagnostics.launch.claude.authMode.result, 'claude.ai');
-  assert.ok(!JSON.stringify(apiProvView).includes(token));
+  assert.equal(apiProv.view.diagnostics.launch.claude.authMode.result, 'claude.ai');
+  assert.ok(!JSON.stringify(apiProv.view).includes(token));
+  assert.ok(!JSON.stringify(apiProv.monitor).includes(token));
 
-  // 3. Unreadable or failing status output carrying a fake token: authMode reports fixed error without the token.
-  const exit1 = Object.assign(new Error('exit 1'), { code: 1 });
-  const failView = await runCase({
-    claude: exec([exit1, `bad output ${token}`, `stderr ${token}`]),
+  // 3. Non-zero exit and ENOENT spawn error carrying a fake token.
+  const exit2 = Object.assign(new Error(`exit 2 ${token}`), { code: 2 });
+  const fail = await runCase({
+    claude: exec([exit2, `bad output ${token}`, `stderr ${token}`]),
     codex: exec([Object.assign(new Error(`spawn failed ${token}`), { code: 'ENOENT' })]),
   });
-  assert.equal(failView.diagnostics.launch.claude.authMode.error.message, 'login status not read');
-  assert.equal(failView.diagnostics.launch.codex.authMode.error.message, 'login status not read');
-  assert.ok(!JSON.stringify(failView.diagnostics).includes(token));
-  // Legacy login error fields remain unchanged and still carry the raw error text.
-  assert.ok(failView.errors.login.claude.message.includes(token));
-  assert.ok(failView.loginCurrent.claude.error.includes(token));
-  assert.ok(failView.errors.login.codex.message.includes(token));
-  assert.ok(failView.loginCurrent.codex.error.includes(token));
+  assert.equal(fail.view.diagnostics.launch.claude.authMode.error.message, 'login status not read');
+  assert.equal(fail.view.diagnostics.launch.codex.authMode.error.message, 'login status not read');
+  assert.equal(fail.view.errors.login.claude.message, 'claude auth status --json: exit 2');
+  assert.equal(fail.view.loginCurrent.claude.error, 'claude auth status --json: exit 2');
+  assert.equal(fail.monitor.claude.login.error, 'claude auth status --json: exit 2');
+  assert.equal(fail.view.errors.login.codex.message, 'codex login status: not found');
+  assert.equal(fail.view.loginCurrent.codex.error, 'codex login status: not found');
+  assert.equal(fail.monitor.codex.login.error, 'codex login status: not found');
+  assert.ok(!JSON.stringify(fail.view).includes(token));
+  assert.ok(!JSON.stringify(fail.monitor).includes(token));
 
   // 4. Unreadable Claude loginExpiresAt and unreadable Codex status text carrying a fake token.
-  const unreadableView = await runCase({
+  const unreadable = await runCase({
     claude: exec([null, JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', loginExpiresAt: token }), '']),
     codex: exec([null, '', `unexpected output ${token}\n`]),
   });
-  assert.equal(unreadableView.diagnostics.launch.claude.authMode.error.message, 'login status not read');
-  assert.equal(unreadableView.diagnostics.launch.codex.authMode.error.message, 'login status not read');
-  assert.ok(!JSON.stringify(unreadableView.diagnostics).includes(token));
-  assert.ok(unreadableView.errors.login.claude.message.includes(token));
-  assert.ok(unreadableView.loginCurrent.claude.error.includes(token));
-  assert.ok(unreadableView.errors.login.codex.message.includes(token));
-  assert.ok(unreadableView.loginCurrent.codex.error.includes(token));
+  assert.equal(unreadable.view.diagnostics.launch.claude.authMode.error.message, 'login status not read');
+  assert.equal(unreadable.view.diagnostics.launch.codex.authMode.error.message, 'login status not read');
+  assert.equal(unreadable.view.errors.login.claude.message, 'claude auth status --json: login expiry unreadable');
+  assert.equal(unreadable.view.errors.login.codex.message, 'codex login status: output not recognised');
+  assert.ok(!JSON.stringify(unreadable.view).includes(token));
+  assert.ok(!JSON.stringify(unreadable.monitor).includes(token));
+
+  // 5. Timeout and generic spawn failure carrying a fake token, plus non-JSON Claude stdout.
+  const timedOut = await runCase({
+    claude: exec([Object.assign(new Error(`timeout ${token}`), { code: null, killed: true })]),
+    codex: exec([Object.assign(new Error(`EACCES ${token}`), { code: 'EACCES' })]),
+  });
+  assert.equal(timedOut.view.errors.login.claude.message, 'claude auth status --json: timed out');
+  assert.equal(timedOut.view.errors.login.codex.message, 'codex login status: failed to run');
+  assert.ok(!JSON.stringify(timedOut.view).includes(token));
+  assert.ok(!JSON.stringify(timedOut.monitor).includes(token));
+
+  const nonJson = await runCase({
+    claude: exec([null, `not json ${token}`, '']),
+    codex: exec([null, '', 'Not logged in\n']),
+  });
+  assert.equal(nonJson.view.errors.login.claude.message, 'claude auth status --json: output not JSON');
+  assert.ok(!JSON.stringify(nonJson.view).includes(token));
+  assert.ok(!JSON.stringify(nonJson.monitor).includes(token));
 });

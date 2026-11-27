@@ -94,26 +94,29 @@ test('claude login: from loginExpiresAt in claude auth status; ending in 2 days 
   assert.deepEqual(parseClaudeAuth(status({}), now), { state: 'ok', expiresAt: null });
   assert.deepEqual(parseClaudeAuth(JSON.stringify({ loggedIn: false }), now), { state: 'out' });
   assert.equal(parseClaudeAuth('Logged in', now).state, 'unknown');
+  assert.equal(parseClaudeAuth('Logged in', now).error, 'claude auth status --json: output not JSON');
   assert.equal(parseClaudeAuth('{}', now).state, 'unknown');
-  assert.match(parseClaudeAuth(status({ loginExpiresAt: 'soon' }), now).error, /unreadable loginExpiresAt: soon/);
+  assert.equal(parseClaudeAuth(status({ loginExpiresAt: 'soon' }), now).error, 'claude auth status --json: login expiry unreadable');
 });
 
 test('codex login: logged in with no expiry, logged out, or unknown', () => {
   assert.deepEqual(parseCodexLogin('Logged in using ChatGPT\n'), { state: 'ok', expiresAt: null });
   assert.deepEqual(parseCodexLogin('\nNot logged in\n'), { state: 'out' });
-  assert.match(parseCodexLogin('something else').error, /unreadable output: something else/);
+  assert.equal(parseCodexLogin('something else').error, 'codex login status: output not recognised');
 });
 
-test('checkLogin: a command that fails or times out is unknown, with its error; a logged-out exit code still reads', async () => {
+test('checkLogin: a command that fails or times out is unknown, with fixed error; a logged-out exit code still reads', async () => {
   const exec = (result) => (command, args, options, done) => done(...result);
   const missing = Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' });
-  assert.deepEqual(await checkLogin('codex', exec([missing])), { state: 'unknown', error: 'codex login status: spawn codex ENOENT' });
+  assert.deepEqual(await checkLogin('codex', exec([missing])), { state: 'unknown', error: 'codex login status: not found' });
   const killed = Object.assign(new Error('timed out'), { code: null, killed: true });
-  assert.equal((await checkLogin('claude', exec([killed]))).state, 'unknown');
+  assert.deepEqual(await checkLogin('claude', exec([killed])), { state: 'unknown', error: 'claude auth status --json: timed out' });
+  const denied = Object.assign(new Error('spawn claude EACCES'), { code: 'EACCES' });
+  assert.deepEqual(await checkLogin('claude', exec([denied])), { state: 'unknown', error: 'claude auth status --json: failed to run' });
   const out = Object.assign(new Error('exit 1'), { code: 1 });
   assert.deepEqual(await checkLogin('claude', exec([out, '{"loggedIn": false}', ''])), { state: 'out' });
   assert.deepEqual(await checkLogin('codex', exec([null, '', 'Logged in using ChatGPT\n'])), { state: 'ok', expiresAt: null });
-  assert.match((await checkLogin('codex', exec([out, '', 'boom']))).error, /exit 1: boom/);
+  assert.deepEqual(await checkLogin('codex', exec([out, '', 'boom'])), { state: 'unknown', error: 'codex login status: exit 1' });
 });
 
 

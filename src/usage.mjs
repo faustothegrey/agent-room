@@ -370,12 +370,12 @@ export function usageReport({ totals, agents, quota, url = METER_URL }) {
 const ENDING_MS = 2 * 24 * 3600 * 1000;
 export function parseClaudeAuth(stdout, now = Date.now()) {
   let s;
-  try { s = JSON.parse(stdout); } catch { return { state: 'unknown', error: `claude auth status: unreadable output: ${String(stdout).trim().slice(0, 200) || '(none)'}` }; }
+  try { s = JSON.parse(stdout); } catch { return { state: 'unknown', error: 'claude auth status --json: output not JSON' }; }
   if (s?.loggedIn === false) return { state: 'out' };
-  if (s?.loggedIn !== true) return { state: 'unknown', error: 'claude auth status: no loggedIn field' };
+  if (s?.loggedIn !== true) return { state: 'unknown', error: 'claude auth status --json: no loggedIn field' };
   if (s.loginExpiresAt == null) return { state: 'ok', expiresAt: null };
   const at = Date.parse(s.loginExpiresAt);
-  if (Number.isNaN(at)) return { state: 'unknown', error: `claude auth status: unreadable loginExpiresAt: ${s.loginExpiresAt}` };
+  if (Number.isNaN(at)) return { state: 'unknown', error: 'claude auth status --json: login expiry unreadable' };
   const expiresAt = new Date(at).toISOString();
   return { state: at <= now ? 'expired' : at - now <= ENDING_MS ? 'ending' : 'ok', expiresAt };
 }
@@ -384,7 +384,7 @@ export function parseCodexLogin(text) {
   const t = String(text).trim();
   if (/^not logged in\b/im.test(t)) return { state: 'out' };
   if (/^logged in\b/im.test(t)) return { state: 'ok', expiresAt: null };
-  return { state: 'unknown', error: `codex login status: unreadable output: ${t.slice(0, 200) || '(none)'}` };
+  return { state: 'unknown', error: 'codex login status: output not recognised' };
 }
 const LOGIN_COMMANDS = { claude: ['claude', ['auth', 'status', '--json'], (out) => parseClaudeAuth(out)],
   codex: ['codex', ['login', 'status'], (out, err) => parseCodexLogin(`${out}\n${err}`)] };
@@ -421,11 +421,14 @@ export function checkLogin(provider, exec = execFile, { authMode = false } = {})
   if (provider === 'agy') return Promise.resolve({ state: 'unmonitored' });
   const known = LOGIN_COMMANDS[provider];
   if (!known) return Promise.resolve({ state: 'unknown', error: `no login check for ${provider}` });
-  const [command, args, parse] = known;
+  const [command, args, parse] = known, label = `${command} ${args.join(' ')}`;
   return new Promise((done) => exec(command, args, { timeout: 20_000 }, (err, stdout = '', stderr = '') => {
-    if (err && (typeof err.code !== 'number' || err.killed)) return done({ state: 'unknown', error: `${command} ${args.join(' ')}: ${err.message}` });
+    if (err && (typeof err.code !== 'number' || err.killed)) {
+      const reason = err.killed ? 'timed out' : err.code === 'ENOENT' ? 'not found' : 'failed to run';
+      return done({ state: 'unknown', error: `${label}: ${reason}` });
+    }
     const login = parse(String(stdout), String(stderr));
-    if (err && login.state === 'unknown') login.error += ` (exit ${err.code}: ${String(stderr).trim().slice(-200)})`;
+    if (err && login.state === 'unknown') login.error = `${label}: exit ${err.code}`;
     if (authMode) login.authMode = authModeOf(provider, String(stdout), String(stderr));
     done(login);
   }));

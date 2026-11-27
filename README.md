@@ -59,7 +59,7 @@ fails; the error is shown as before. It is not shown for agents thinking or the 
 The monitor panel watches agent-room's own Claude, Codex and Agy programs and Claude and Codex login, for the room
 being viewed. A ⚠ right of a provider's name means a problem: **amber** when its login ends in 2
 days or less, its login status is unknown (the status command failed or its output couldn't be
-read; the error is shown), or one of its programs is left over; **red** when logged out or the login
+read; the error names the command and a fixed reason, never raw CLI output), or one of its programs is left over; **red** when logged out or the login
 has expired. No ⚠ when all is fine. Hover or focus the name for the problems, then the state: the
 login (for Claude, "Claude reports login ends …", from `loginExpiresAt` in `claude auth status`; for
 Codex "logged in, no expiry given", from `codex login status`) and how many of this room's
