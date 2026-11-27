@@ -451,4 +451,8 @@ test('permission check: launch modes against each CLI\'s config, problems only w
   // Agy: deny rules still apply with --dangerously-skip-permissions; allow and ask rules don't block.
   assert.deepEqual(verdict('agy', JSON.stringify({ permissions: { allow: ['command(tail)'], ask: ['command(rm)'] } })), ['ok', []]);
   assert.deepEqual(verdict('agy', JSON.stringify({ permissions: { deny: ['command(git push)'] } })), ['problem', ['deny rule command(git push)']]);
+  // Agy modes: default, accept-edits and auto are normal, plan is a problem, anything else unknown.
+  for (const mode of ['default', 'accept-edits', 'auto']) assert.deepEqual(verdict('agy', JSON.stringify({ permissions: { defaultMode: mode } })), ['ok', []]);
+  assert.deepEqual(verdict('agy', JSON.stringify({ permissions: { defaultMode: 'plan' } })), ['problem', ['permission mode plan: plans wait for review']]);
+  assert.deepEqual(verdict('agy', JSON.stringify({ permissions: { defaultMode: 'strange' } })), ['unknown', ['permission mode strange not recognised']]);
 });

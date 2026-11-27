@@ -265,6 +265,7 @@ export function readPermissionConfig(provider, file = permissionFiles()[provider
   } catch (err) { return { file, error: `could not parse it: ${err?.message ?? err}` }; }
 }
 const CLAUDE_MODES = ['default', 'acceptEdits', 'bypassPermissions', 'dontAsk', 'auto'];
+const AGY_MODES = ['default', 'accept-edits', 'auto']; // agy --mode's values (and plan, a problem)
 // One provider's verdict from its config reading and (Claude) live mode { mode, at }:
 // { launch, state: 'ok' | 'problem' | 'unknown', mode, problems }.
 export function permissionReport(provider, config, live = null) {
@@ -289,6 +290,7 @@ export function permissionReport(provider, config, live = null) {
     report.mode = config.mode ?? 'default';
     // Deny rules still apply with --dangerously-skip-permissions (agy's changelog), and plans wait for review.
     if (report.mode === 'plan') problem('permission mode plan: plans wait for review');
+    else if (!AGY_MODES.includes(report.mode)) { report.state = 'unknown'; report.problems.push(`permission mode ${report.mode} not recognised`); }
     for (const rule of config.deny ?? []) problem(`deny rule ${rule}`);
   }
   return report;
