@@ -6513,7 +6513,75 @@ test('layered rulebooks: joined system instructions, Instructions panel, and Rel
   }
 });
 
-test('research board: .research marker, briefing, researching instructions on creation/Resume/Start fresh/Schedule, 20 laps, no auto-summary, no worker, Close and Delete', async () => {
+// Creates a research board for each [kind, marker, laps, label, effort, output] in one room, as the page
+// does (the toggles' choice with the first message), then reads each kind back on Resume and Start fresh.
+async function researchKindsCheck(combos) {
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { RESEARCH_MARKER, reloaded } = await import('../src/ui.mjs');
+  const researching = readFileSync(new URL('../rulebooks/researching.md', import.meta.url), 'utf8');
+  for (const heading of ['### Feasibility (the default)', '### Deep', '### Theoretical']) assert.ok(researching.includes(heading), heading);
+
+  const cwd = await tmp('research-kind-');
+  const ctx = { ...freshCtx(), cwd, agentSpecs: 'claude:A', workerSpec: 'claude:W' };
+  Object.assign(ctx, await load(ctx, `?research-kinds-${combos[0][1].replace(/ /g, '-')}`));
+  ctx.say = () => {}; // the page's line queue: handleLine below delivers each line
+  await reloaded(ctx); // wires ctx.screen.say
+  ctx.noScreen = true;
+  const reply = (text, prompts = []) => { ctx.room.agents[0].turn = async (p) => { Object.assign(ctx.sessions.get('A'), { started: true }); prompts.push(p); return text; }; return prompts; };
+  const boards = [];
+  for (const [kind, marker, laps, label, effort, output] of combos) {
+    ctx.suggestTitle = async () => ({ title: `Quest ${label}` });
+    await handleLine('/research', ctx);
+    const prompts = reply('still looking');
+    ctx.screen.say('What should we look at?', false, kind); // as /__say does with the toggles' choice
+    await handleLine('What should we look at?', ctx);
+    const { dir, name } = ctx.discussion;
+    assert.equal(readFileSync(join(dir, RESEARCH_MARKER), 'utf8'), `${marker}\n`, label);
+    assert.equal(prompts.length, laps, `${label}: lap cap`);
+    assert.match(prompts[0], new RegExp(`This research board's kind is ${label}, chosen when it was created: in rulebooks/researching\\.md, follow the ${effort} section for the effort and the ${output} section for the output\\.`));
+    // Boards' row data carries the kind (only the parts that are on; nothing for Feasibility).
+    const { laps: _, lastRun, priorUnknown, nextRun, ...rowKind } = ctx.screen.room.researchStats[name];
+    assert.deepEqual(rowKind, { ...(kind.deep && { deep: true }), ...(kind.theoretical && { theoretical: true }) });
+    // The kind can't change afterwards: a choice sent with a later message is ignored.
+    reply('PASS');
+    ctx.screen.say('And then?', false, { deep: !kind.deep, theoretical: !kind.theoretical });
+    await handleLine('And then?', ctx);
+    assert.equal(readFileSync(join(dir, RESEARCH_MARKER), 'utf8'), `${marker}\n`);
+    assert.deepEqual(ctx.state.researchKind, kind); // what the lap cap reads (room.test.mjs)
+    boards.push({ kind, label, dir, name });
+  }
+  // Read back from the marker on Resume (the same sessions: no new intro).
+  for (const { kind, label, name } of boards) {
+    await handleLine(`/resume ${name}`, ctx);
+    const resumed = reply('PASS');
+    await handleLine('Once more', ctx);
+    assert.deepEqual(ctx.state.researchKind, kind, `${label}: after Resume`);
+    assert.doesNotMatch(resumed[0], /kind is/);
+  }
+  // Start fresh: new sessions get the intro with the saved kind.
+  const last = boards.at(-1);
+  await handleLine(`/fresh ${last.name}`, ctx);
+  const fresh = reply('PASS');
+  await handleLine('Again', ctx);
+  assert.deepEqual(ctx.state.researchKind, last.kind);
+  assert.match(fresh[0], new RegExp(`kind is ${last.label}, chosen`));
+  // A marker with no kind (every board made before kinds) is Feasibility.
+  writeFileSync(join(last.dir, RESEARCH_MARKER), 'research\n');
+  reply('PASS');
+  await handleLine('Old board', ctx);
+  assert.deepEqual(ctx.state.researchKind, { deep: false, theoretical: false });
+}
+test('research board kinds with the Feasibility effort (Feasibility, Theoretical): saved in .research, 6 laps, intro, read back; no kind = Feasibility', async () => {
+  await researchKindsCheck([[{ deep: false, theoretical: false }, 'research', 6, 'Feasibility', 'Feasibility', 'Feasibility'],
+    [{ deep: false, theoretical: true }, 'research theoretical', 6, 'Theoretical', 'Feasibility', 'Theoretical']]);
+});
+test('research board kinds with the Deep effort (Deep, Deep · Theoretical): saved in .research, 30 laps, intro, read back; no kind = Feasibility', async () => {
+  await researchKindsCheck([[{ deep: true, theoretical: false }, 'research deep', 30, 'Deep', 'Deep', 'Feasibility'],
+    [{ deep: true, theoretical: true }, 'research deep theoretical', 30, 'Deep · Theoretical', 'Deep', 'Theoretical']]);
+});
+
+test('research board: .research marker, briefing, researching instructions on creation/Resume/Start fresh/Schedule, 6 laps, no auto-summary, no worker, Close and Delete', async () => {
   const { existsSync, readFileSync } = await import('node:fs');
   const { join } = await import('node:path');
   const { RESEARCH_MARKER, isResearchDir, getSchedule, saveSchedule, runScheduledTask, queueWork, checkSummary, reloaded } = await import('../src/ui.mjs');
@@ -6580,12 +6648,12 @@ test('research board: .research marker, briefing, researching instructions on cr
   await handleLine('/autodev', ctx);
   assert.equal(ctx.autoDev ?? null, null);
 
-  // Rounds run up to 20 laps on a research board (as in a brainstorm).
+  // Rounds run up to 6 laps on a research board with no kind saved (Feasibility).
   let turns = 0;
   const lapRoom = createRoom([{ name: 'A', turn: async () => { turns++; return 'still investigating'; } }], { transcript: [], seen: new Map(), research: true });
   let capNotice = null;
   await lapRoom.round('go', { onNotice: (n) => { capNotice = n; } });
-  assert.equal(turns, 20);
+  assert.equal(turns, 6);
   assert.equal(capNotice, '(lap cap reached)');
 
   // 2. Resume from paused checkpoint keeps researching rules.

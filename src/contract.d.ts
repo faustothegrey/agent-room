@@ -45,7 +45,9 @@ export interface WorkerInfo { lines: string[]; disabled?: boolean; error?: boole
 export interface OpenBoard { url: string; current: boolean; title: string; active: string | null; brainstorm: boolean; workbench: boolean; research: boolean; started: boolean; working: boolean; workerBusy: boolean; ongoing: boolean; waitingForInput?: boolean; waitingReason?: string | null; readyForAutoDev?: boolean; workReady?: boolean }
 export interface BoardCheckpoint { name: string; title?: string; at?: string; kind?: string; summary?: boolean }
 export interface BoardRollback { name: string; status: string; report?: string | null; commit?: string | null }
-export interface ResearchStats { laps: number; priorUnknown?: boolean; lastRun?: string | null; nextRun?: string | null }
+// A research board's kind (both false: Feasibility), chosen once when it is created.
+export interface ResearchKind { deep: boolean; theoretical: boolean }
+export interface ResearchStats { laps: number; priorUnknown?: boolean; lastRun?: string | null; nextRun?: string | null; deep?: boolean; theoretical?: boolean }
 export interface AutoDev { status: 'running' | 'paused' | 'finished' | null; cycle: number; max: number; reason: string | null; waiting: boolean; offer: { text?: string; error?: string } | null }
 export interface WorkerStop { after: boolean; now: boolean }
 export interface StopWorkerRequest { mode: 'after' | 'now' }
@@ -195,7 +197,8 @@ export interface AgentEnabledRequest { name: string; enabled: boolean; member?: 
 export interface SettingsReply { settings: RoomSettings; defaults?: RoomSettings; launchDefaults?: RoomSettings; started: boolean; models: Record<AgentSettings['provider'], { id: string; label: string }[]> }
 export interface RetryRequest { id: string; settings?: RoomSettings & { scope: 'work' } }
 export interface WorkRequest { text: string }
-export interface SayRequest { text: string; files?: SayAttachment[]; confirmed?: boolean }
+// `researchKind`: sent with a new research board's first message; ignored once the board exists.
+export interface SayRequest { text: string; files?: SayAttachment[]; confirmed?: boolean; researchKind?: ResearchKind }
 export type SayReplyStatus = 204 | 400 | 403 | 409 | 413;
 
 // File mentions and the read-only board view use these room-relative routes.

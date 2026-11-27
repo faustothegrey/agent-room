@@ -346,6 +346,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [text, setText] = useState(() => { try { const saved = sessionStorage.getItem('next-composer-draft') ?? ''; sessionStorage.removeItem('next-composer-draft'); return saved; } catch { return ''; } });
   const draft = useRef(text); draft.current = text;
   const [files, setFiles] = useState<File[]>([]);
+  // A new research board's kind, chosen with the Deep / Theoretical toggles before its first message.
+  const [researchKind, setResearchKind] = useState({ deep: false, theoretical: false });
   const [sending, setSending] = useState(false);
   const inFlight = useRef(new Set<string>());
   const fileInput = useRef<HTMLInputElement>(null);
@@ -409,8 +411,10 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   }, [capturing]);
   const shownBoard = JSON.stringify([room?.folder, room?.active, room?.workbench, room?.brainstorm, room?.research, peek?.path, viewLayout?.name, viewLayout?.discussion]);
   const previousBoard = useRef(shownBoard);
+  // The Deep / Theoretical toggles: only on a research board not created yet (before its first message).
+  const choosingKind = !!(room?.research && !room.active && !peek && !viewLayout && !remote);
   useLayoutEffect(() => {
-    if (previousBoard.current !== shownBoard) { setCaptures([]); setCapturing(false); previousBoard.current = shownBoard; }
+    if (previousBoard.current !== shownBoard) { setCaptures([]); setCapturing(false); setResearchKind({ deep: false, theoretical: false }); previousBoard.current = shownBoard; }
   }, [shownBoard]);
   useEffect(() => { if (focusWorker.current) { document.getElementById('wbox')?.focus(); focusWorker.current = false; } });
   const sendWork = async (value: string) => {
@@ -618,6 +622,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     if (plain) inFlight.current.add(value); else setSending(true);
     try {
       const body: SayRequest = { text: value };
+      if (choosingKind && !value.startsWith('/')) body.researchKind = researchKind;
       if (files.length) body.files = await Promise.all(files.map(async (file) => ({ name: file.name, data: await base64(file) })));
       let response = await post('__say', body);
       if (response.status === 409 && !files.length && (value === '/restart' || value === '/shutdown')) {
@@ -997,6 +1002,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       else if (!archived && input && !viewing.current) void boardCommand('/resume ' + ref);
       else { setFilePeek({ path, name, title: label, readonly: archived }); setExplorerMode('discussion'); setSubtab('explorer'); }
     };
+    const kindBadge = isResearch ? [stats?.deep && 'Deep', stats?.theoretical && 'Theoretical'].filter(Boolean).join(' · ') : '';
     const content = <>{kind === 'workbench' ? '🔧 ' : kind === 'research' ? '🔬 ' : ''}{label}</>;
     const archivedState = archived ? (path.includes('/archive/') ? 'archived' : 'deferred') + (brainstorm ? ' brainstorm' : isResearch ? ' research' : '') + (!brainstorm && closed ? ' · closed' : '') + closingText + (isDiscussion && workerInfo?.merged?.includes(name) ? ' · merged' : '') : null;
     const index = ordering?.names.indexOf(name) ?? -1;
@@ -1008,7 +1014,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       <div className="local-label" title={tooltip || undefined}>{archivedState ?? (state + suffix + (isDiscussion && entry?.working ? ' · worker working' : '') + closingText + changed)}</div>
       {isDiscussion && !archived && work && <div className="worker-pending">⚠ Worker: {pendingText}</div>}
       {!!conflictText && !workerBusy && <div className="worker-conflict">⚠ {conflictText}</div>}
-      {isResearch && <div className="local-label"><span className={count > 30 ? 'research-laps-high' : undefined}>Laps: {stats?.priorUnknown ? '≥' : ''}{count}</span> · Last: {date(stats?.lastRun)} · Next: {date(stats?.nextRun)}</div>}
+      {isResearch && <div className="local-label">{kindBadge && <><span className="research-kind-badge" title="Research kind, chosen when the board was created">{kindBadge}</span> </>}<span className={count > 30 ? 'research-laps-high' : undefined}>Laps: {stats?.priorUnknown ? '≥' : ''}{count}</span> · Last: {date(stats?.lastRun)} · Next: {date(stats?.nextRun)}</div>}
       {!!(room && input && !viewing.current && isDiscussion && closing === 'waiting') && <button type="button" onClick={() => void cancelClose(name)}>Cancel close</button>}
       {!!(room && input && !viewing.current && rollback?.report) && <details><summary>Rollback report · {rollback.status}</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{rollback.report}</pre></details>}
       </div>
@@ -1253,7 +1259,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {!remote && <textarea className="box" id="box" aria-label="Message to the agents" value={text} disabled={ended} onChange={(event) => setText(event.target.value)}
         placeholder={peek ? 'Peeking read-only — click Back to return to the active discussion.' : autoDev?.status === 'running' ? 'Auto dev is running — sending a message pauses it. (Enter sends, Shift+Enter for a new line)' : 'Message to the agents… (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown'}
         onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />}
-      <div id="attach-row" hidden={!!remote}><button type="button" id="attach" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)" disabled={sending || ended || !!peek || !room?.active} onClick={() => fileInput.current?.click()}>📎 Attach</button>
+      <div id="attach-row" hidden={!!remote}>{choosingKind && <div className="research-kind" role="group" aria-label="Research kind" title="Chosen once, with the first message: neither on is a Feasibility check">{(['deep', 'theoretical'] as const).map((key) => <button type="button" key={key} aria-pressed={researchKind[key]} disabled={ended} title={key === 'deep' ? 'Deep: question the premises, search the web, up to 30 laps per message (otherwise 6)' : 'Theoretical: end with what was understood, instead of a feasibility scorecard and verdict'} onClick={() => setResearchKind((kind) => ({ ...kind, [key]: !kind[key] }))}>{key === 'deep' ? 'Deep' : 'Theoretical'}</button>)}</div>}<button type="button" id="attach" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)" disabled={sending || ended || !!peek || !room?.active} onClick={() => fileInput.current?.click()}>📎 Attach</button>
         <input ref={fileInput} type="file" aria-label="Attach files" multiple hidden onChange={(event) => { const chosen = Array.from(event.target.files ?? []); setFiles((previous) => [...previous, ...chosen]); event.target.value = ''; }} />
         {files.map((file, index) => <span className="chip" key={index}>{file.name} · {sizeText(file.size)} <button type="button" title="Remove this attachment" aria-label={`Remove ${file.name}`} disabled={sending} onClick={() => setFiles((previous) => previous.filter((_, i) => i !== index))}>✕</button></span>)}
         {pointed.map((point, index) => <span className="chip" title={point.text} key={index}>{point.label} <button type="button" title="Stop pointing at this" aria-label={`Stop pointing at ${point.label}`} onClick={() => setPointed((previous) => previous.filter((_, i) => i !== index))}>✕</button></span>)}
