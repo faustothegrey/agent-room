@@ -9,6 +9,12 @@ import * as defaultInstructions from './instructions.mjs';
 
 export const MAX_LAPS = 10;
 export const BRAINSTORM_MAX_LAPS = 20;
+// Research boards: per User or Scheduler message, by the board's kind (state.researchKind, from its
+// .research marker): Deep gets 30 laps, any other kind (Feasibility, Theoretical alone) 6.
+export const RESEARCH_MAX_LAPS = 6;
+export const DEEP_RESEARCH_MAX_LAPS = 30;
+export const maxLaps = (state) => state.research ? (state.researchKind?.deep ? DEEP_RESEARCH_MAX_LAPS : RESEARCH_MAX_LAPS)
+  : state.brainstorm ? BRAINSTORM_MAX_LAPS : MAX_LAPS;
 export const SUMMARY_TURNS_EACH = 3;
 
 export function isPass(text) {
@@ -90,7 +96,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
     const usage = usageLine?.(agent);
     if (usage) parts.push(usage);
     // state.briefing (set by ui.mjs once the discussion folder exists): where to write, and so on.
-    if (seen.get(agent.name) === 0) parts.push(intro(agent, activeAgents(), !!state.research), ...(state.briefing ? [state.briefing] : []));
+    if (seen.get(agent.name) === 0) parts.push(intro(agent, activeAgents(), state.research ? state.researchKind ?? {} : false), ...(state.briefing ? [state.briefing] : []));
     // After a Resume or Restart (ui.mjs): one sentence, in each agent's next prompt only.
     if (state.restored?.pending?.includes(agent.name)) parts.push(state.restored.text);
     parts.push(instr.fill(instr.NEW_MESSAGES, { messages: formatMessages(unseenFor(agent)),
@@ -138,7 +144,7 @@ export function createRoom(agents, state = { transcript: [], seen: new Map() }, 
       const user = { speaker, text: userText };
       transcript.push(user);
       onMessage?.(user);
-      const maxTurns = (state.brainstorm || state.research ? BRAINSTORM_MAX_LAPS : MAX_LAPS) * selected.length;
+      const maxTurns = maxLaps(state) * selected.length;
       let passes = 0;
       for (let turn = 0; turn < maxTurns; turn++) {
         if (turn > 0 && turn % selected.length === 0 && beforeLap) {

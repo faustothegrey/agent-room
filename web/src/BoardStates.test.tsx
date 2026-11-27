@@ -59,3 +59,12 @@ it('shows research lap details and refreshes worker state on expansion and throt
   vi.useFakeTimers(); vi.setSystemTime(Date.now() + 5001); fireEvent.focus(window);
   expect(fetchMock.mock.calls.filter(([url]) => url === '__workerinfo')).toHaveLength(3);
 });
+
+it('shows a research row’s kind as a badge, with none for Feasibility', async () => {
+  for (const [kind, badge] of [[{}, null], [{ deep: true }, 'Deep'], [{ theoretical: true }, 'Theoretical'], [{ deep: true, theoretical: true }, 'Deep · Theoretical']] as const) {
+    cleanup(); setup({ researchStats: { '2026-11-02-research': { laps: 2, ...kind } } });
+    const research = (await screen.findByRole('button', { name: '🔬 research' })).parentElement!;
+    expect(within(research).getByText('Laps: 2')).toBeTruthy();
+    expect(research.querySelector('.research-kind-badge')?.textContent ?? null).toBe(badge);
+  }
+});

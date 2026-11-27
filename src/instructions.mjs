@@ -23,10 +23,15 @@ export const fill = (template, values) => template.replace(/\{([\w-]+)\}/g, (mat
 
 // ── Discussion / brainstorming / research agents ───────────────────────────────────────────
 
+// `research`: false, or the research board's kind ({ deep, theoretical }; true or {} is Feasibility).
 export function intro(agent, agents, research = false) {
+  const kind = research === true ? {} : research || {};
   return fill(research ? RESEARCH_INTRO : INTRO, { name: agent.name,
-    participants: agents.map((a) => a.name).join(', '), order: agents.map((a) => a.name).join(', then ') });
+    participants: agents.map((a) => a.name).join(', '), order: agents.map((a) => a.name).join(', then '),
+    kind: researchKindLabel(kind), effort: kind.deep ? 'Deep' : 'Feasibility', output: kind.theoretical ? 'Theoretical' : 'Feasibility' });
 }
+// "Feasibility", "Deep", "Theoretical" or "Deep · Theoretical".
+export const researchKindLabel = (kind) => [kind?.deep && 'Deep', kind?.theoretical && 'Theoretical'].filter(Boolean).join(' · ') || 'Feasibility';
 export const INTRO = `You are {name}, one of several AI agents in a group conversation with a human user.
 Participants: the User, {participants}.
 After each User message, agents take turns in this order: {order}, until all of them pass in a row.
@@ -36,6 +41,7 @@ export const RESEARCH_INTRO = `You are {name}, one of several AI agents in a gro
 Participants: the User, {participants}.
 After each User message, agents take turns in this order: {order}, until all of them pass in a row.
 You are a researching agent started by agent-room: your rulebooks are rulebooks/citizenship.md, rulebooks/group-chat.md and rulebooks/researching.md, in your system instructions.
+This research board's kind is {kind}, chosen when it was created: in rulebooks/researching.md, follow the {effort} section for the effort and the {output} section for the output.
 When you have nothing to add, reply exactly PASS.`;
 
 export function summaryFormat(brainstorm) {
@@ -206,8 +212,8 @@ export const instructionSets = [
     pieces: [
       { id: 'rulebook: citizenship', intent: 'Shared rules for every agent on the platform: purpose, usage line, never answering for the User, stating how you know a claim, and seeing files / the internet.', when: 'every turn (system instructions, layer 1)', ref: 'citizenship' },
       { id: 'rulebook: group-chat', intent: 'Rules for agents in a room conversation: turns, PASS, @name, open disagreement, and pointable tables, diagrams and charts.', when: 'every turn (system instructions, layer 2)', ref: 'group-chat' },
-      { id: 'rulebook: researching', intent: 'Research board rules: quests, how wide to look, Frame → Investigate → Verdict, writing quest.md and learnings.md, and no worker.', when: 'every turn (system instructions, layer 3)', ref: 'researching' },
-      { id: 'intro', intent: 'Names the agent and the participants, gives the turn order, points at the research rulebooks, and states the PASS rule.', when: 'first turn only', content: RESEARCH_INTRO },
+      { id: 'rulebook: researching', intent: 'Research board rules: quests, Frame → Investigate → End, writing quest.md and learnings.md, no worker, and a section per kind (Feasibility, Deep, Theoretical).', when: 'every turn (system instructions, layer 3)', ref: 'researching' },
+      { id: 'intro', intent: 'Names the agent and the participants, gives the turn order, points at the research rulebooks, names the board\'s kind and which rulebook sections apply, and states the PASS rule.', when: 'first turn only', content: RESEARCH_INTRO },
       { id: 'briefing', intent: 'Whether it is a new or continued research board, its folder, and where to write; a continued session also gets the closing statement and any latest summary.', when: 'once, with the first prompt (after the folder exists)', content: RESEARCH_BRIEFING },
     ],
   },

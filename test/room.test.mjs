@@ -141,6 +141,18 @@ test('the lap cap ends the round with a notice (10 laps in a discussion, 20 in a
   assert.deepEqual(bAddressed.notices, ['(lap cap reached)']);
 });
 
+test('a research board caps each message at 30 laps when Deep and 6 otherwise (missing kind = Feasibility)', async () => {
+  for (const [researchKind, laps] of [[undefined, 6], [{ deep: false, theoretical: false }, 6], [{ deep: true, theoretical: false }, 30], [{ deep: false, theoretical: true }, 6], [{ deep: true, theoretical: true }, 30]]) {
+    const room = createRoom([fakeAgent('A'), fakeAgent('B')], { transcript: [], seen: new Map(), research: true, ...(researchKind && { researchKind }) });
+    const user = await roundOf(room, 'u1');
+    assert.equal(user.speakers.length, 1 + laps * 2, JSON.stringify(researchKind));
+    assert.deepEqual(user.notices, ['(lap cap reached)']);
+    const scheduler = [];
+    await room.round('scheduled', { speaker: 'Scheduler', onMessage: (m) => scheduler.push(m.speaker) });
+    assert.equal(scheduler.length, 1 + laps * 2, `Scheduler ${JSON.stringify(researchKind)}`);
+  }
+});
+
 test('no cap notice when the 10th lap completes the all-pass condition', async () => {
   const room = createRoom([fakeAgent('A', [...Array(9).fill('a'), 'PASS']), fakeAgent('B', [...Array(9).fill('b'), 'PASS'])]);
   const { speakers, notices } = await roundOf(room, 'u1');

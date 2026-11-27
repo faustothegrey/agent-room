@@ -9,8 +9,8 @@
 - Your name, the participants and the turn order are given in your first message. They can
   differ from earlier sessions; don't assume they match.
 - After each User message, agents take turns in that order until **all pass in a row**
-  (at most 10 laps in a discussion, 20 in a brainstorm or research board, where one lap is each selected agent
-  speaking once; then control returns to the User).
+  (at most 10 laps in a discussion, 20 in a brainstorm, and on a research board 30 when it is Deep and
+  6 otherwise, where one lap is each selected agent speaking once; then control returns to the User).
 - You see the new discussion messages since your last turn; your provider session holds earlier
   context. The separate worker receives only the instructions sent in its own tab, not this chat.
 

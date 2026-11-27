@@ -417,8 +417,9 @@ function wire(ctx) {
     if (ctx.state.workbench) return sendWorkbenchInstruction(ctx, text).catch((err) => note(ctx, `✗ ${err.message}`, true));
     return queueWork(ctx, text);
   };
-  ctx.screen.say = (line, confirmed) => {
-    if (!line.trim().startsWith('/')) autoDevInput(ctx, 'you sent a message');
+  // `researchKind`: the Deep / Theoretical choice sent with a new research board's first message.
+  ctx.screen.say = (line, confirmed, researchKind) => {
+    if (!line.trim().startsWith('/')) { autoDevInput(ctx, 'you sent a message'); chooseResearchKind(ctx, researchKind); }
     // Quit room closes every discussion open in this folder.
     if (line.trim() === '/quit') for (const c of siblings(ctx)) if (c !== ctx) c.say?.('/quit');
     return ctx.say(line, confirmed);
@@ -817,7 +818,7 @@ export function ended(ctx, restarting = false) {
 
 // How long Quit room (and Shutdown, Restart) waits for the room's round in progress, or other
 // queued lines, before stopping its agents mid-turn. Without it a round could hold Quit for up to
-// 10 laps (20 in a brainstorm) of 5-minute turns, plus its summary's turns, plus every line queued before Quit.
+// 10 laps (20 in a brainstorm, 30 on a Deep research board) of 5-minute turns, plus its summary's turns, plus every line queued before Quit.
 export const QUIT_GRACE_MS = 30_000;
 
 // Stops every agent and worker program the room runs (SIGTERM, then SIGKILL after 5s); from then on
@@ -1012,6 +1013,7 @@ function setScreenThinking(ctx, name) {
 // turn, and its tokens count like any other turn. `auto`: started by auto-summarize after a round.
 async function runSummary(ctx, auto = false, extra) {
   const t0 = Date.now();
+  syncResearchKind(ctx);
   // A paused auto dev run: this summary (asked for, or after a User round) may finish it.
   const paused = !extra && ctx.autoDev?.status === 'paused' ? ctx.autoDev : null;
   if (paused) extra = pausedTask(paused);
@@ -1081,6 +1083,7 @@ async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = n
   let roundUsage;
   let spoke = 0; // agent replies that weren't passes or failures
   try {
+    syncResearchKind(ctx);
     ctx.workReady = false;
     ctx.busy = true;
     showHeader(ctx);
@@ -1497,7 +1500,7 @@ const boards = boardsModule.createBoards({
   mainRef, modelLabel, currentSettings, saveClosed,
 });
 export const { WORKBENCH_MARKER, isWorkbenchDir, RESEARCH_MARKER, isResearchDir, createDiscussionFolder, createSessionFile, cancelClose } = boards;
-const { SECTIONS, DATED, BRAINSTORMS, isWorkbenchName, workbenchNames, researchNames, recordResearchLap, researchStats, isDiscussion, folderOf, discussionRef, moveDiscussion, requestRollback, confirmRollbackArchive, rollbackReport, openDiscussion, briefing, closedEntries, closedDiscussions, checkpoints, writeCheckpoint, readCheckpoint, captureRound, saveCheckpoint, workOf, persistWork, clock, firstLine, leftBehind, detachWorker, saveLeftWorker, peekDiscussion, resumeDiscussion, refOf, startFresh, convertBrainstormToResearch, convertResearchToDiscussion, convertBrainstorm, deleteBrainstorm, deleteResearch, newDiscussion, newBrainstorm, newWorkbench, newResearch, goto, openBeside, closeContext, newDiscussionBeside, newBrainstormBeside, newWorkbenchBeside, newResearchBeside, closeDiscussion, cancelCreation, closeNamedDiscussion } = boards;
+const { SECTIONS, DATED, BRAINSTORMS, isWorkbenchName, workbenchNames, syncResearchKind, chooseResearchKind, researchNames, recordResearchLap, researchStats, isDiscussion, folderOf, discussionRef, moveDiscussion, requestRollback, confirmRollbackArchive, rollbackReport, openDiscussion, briefing, closedEntries, closedDiscussions, checkpoints, writeCheckpoint, readCheckpoint, captureRound, saveCheckpoint, workOf, persistWork, clock, firstLine, leftBehind, detachWorker, saveLeftWorker, peekDiscussion, resumeDiscussion, refOf, startFresh, convertBrainstormToResearch, convertResearchToDiscussion, convertBrainstorm, deleteBrainstorm, deleteResearch, newDiscussion, newBrainstorm, newWorkbench, newResearch, goto, openBeside, closeContext, newDiscussionBeside, newBrainstormBeside, newWorkbenchBeside, newResearchBeside, closeDiscussion, cancelCreation, closeNamedDiscussion } = boards;
 
 // Workshop callbacks refer to the current room code; lane operations are resolved when called.
 const workshop = workshopModule.createWorkshop({
@@ -1531,6 +1534,6 @@ const { laneOf, cleanupMergedOnClose, worktreeFingerprint, recordTested } = lane
 const scheduler = schedulerModule.createScheduler({ siblings, toScreen, showHeader, checkpoints, DATED, isWorkbenchDir,
   SECTIONS, shopOf, discussionRef, day, pad, load, isResearchDir, isDiscussion, readCheckpoint,
   roomDefaults, parseSpec, refreshQuota, openBeside, resumeDiscussion, newResearch, wire,
-  openDiscussion, runRound, saveCheckpoint, fresh, closeContext });
+  openDiscussion, runRound, saveCheckpoint, fresh, closeContext, chooseResearchKind });
 export const { scheduleFile, readSchedule, getSchedule, saveSchedule, runScheduledTask, checkSchedule } = scheduler;
 const { writeSchedule, broadcastSchedule, startScheduler, stopSchedulerIfLast } = scheduler;

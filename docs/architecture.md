@@ -206,8 +206,10 @@ A discussion's folder, `discussions/<date>-<title>/`, is created at its first me
 transcripts in `transcripts/`. A checkpoint on this computer after every round lets Resume and
 Restart continue the same sessions; Start fresh begins new sessions from the handoff, notes and
 latest summary. Discussions can be moved to `archive/` or `deferred/`. A **research board**
-(`/research`) also lives in `discussions/<date>-<title>/` with a `.research` marker file: its
-agents receive the researching rulebook, rounds run up to 20 laps with no automatic summary
+(`/research`) also lives in `discussions/<date>-<title>/` with a `.research` marker file that
+saves its kind (Feasibility, Deep, Theoretical, or Deep · Theoretical; chosen with its first
+message): its agents receive the researching rulebook and an intro naming the kind, rounds run up
+to 30 laps on a Deep board and 6 otherwise, with no automatic summary
 (manual `/summary` works), there is no Worker tab or auto dev, Close writes `closing-statement.md`,
 and it can be scheduled in **Schedule** or deleted once closed. A **workbench** (`/workbench`)
 lives in `discussions/<date>-<title>/` with a `.workbench` marker file and runs the worker only.
