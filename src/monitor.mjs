@@ -153,6 +153,8 @@ async function runPromptTest(ctx, provider, model, runner, parsers) {
     if (provider === 'claude') {
       const parsed = parsers.parseClaudeStream(output), { result } = parsed;
       quota = parsed.quota ?? null;
+      // Its init event's permission mode: Claude's live report for the permission check.
+      if (parsed.permissionMode) (hub.permissionLive ??= {}).claude = { mode: parsed.permissionMode, at };
       if (result.is_error) throw new Error(`claude: ${result.result || 'test failed'}`);
       reply = String(result.result ?? '').trim();
     } else if (provider === 'codex') reply = parsers.parseCodexEvents(output).text;
@@ -173,6 +175,18 @@ async function runPromptTest(ctx, provider, model, runner, parsers) {
   updateStartupSummary(hub);
   return result;
 }
+// Each provider's permission configuration, read afresh (Check now and the startup checks).
+async function checkPermissions(hub) {
+  const rooms = loadedRooms(hub), perms = rooms[0]?.permissions;
+  if (!perms) return;
+  hub.monitor.permissions ??= {};
+  for (const p of PROVIDERS) hub.monitor.permissions[p] = { config: perms.read(p), checked: new Date().toISOString() };
+}
+function permissionReports(hub) {
+  const perms = loadedRooms(hub)[0]?.permissions;
+  if (!perms || !hub.monitor?.permissions) return null;
+  return Object.fromEntries(PROVIDERS.map((p) => [p, { ...perms.report(p, hub.monitor.permissions[p]?.config, hub.permissionLive?.[p] ?? null), checked: hub.monitor.permissions[p]?.checked ?? null }]));
+}
 function healthView(ctx) {
   const hub = hubOf(ctx), m = hub.monitor;
   const rooms = loadedRooms(hub);
@@ -189,7 +203,7 @@ function healthView(ctx) {
   return { promptResults: [...(hub.promptResults?.values() ?? [])].flatMap((results) => [...results.values()]),
     promptRunning: [...(hub.promptRunning ?? [])], sessions, scheduledProviders: [...new Set(rooms.flatMap(providersOf))], catalogs,
     configured: rooms.map((r) => ({ room: r.cwd, discussion: folderOf(r), agents: configured(currentSettings(r)).map((a) => ({ ...a, enabled: a.role === 'worker' || !(r.state.disabledAgents ?? []).includes(a.name) })) })),
-    defaults: defaults ? configured(defaults) : null, login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
+    defaults: defaults ? configured(defaults) : null, permissions: permissionReports(hub), login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
     leftovers: m.leftovers, leftoversChecked: m.leftoversChecked, nextLogin: m.nextLogin, nextLeftovers: m.nextLeftovers,
     running: loadedRooms(hub).flatMap((r) => [...(r.programs?.running ?? [])].map((p) => ({ pid: p.pid, provider: p.provider, ...p.monitorInfo }))),
     quota: loadedRooms(hub).map((r) => ({ room: r.cwd, reachable: r.screen.quota === undefined ? null : r.screen.quota !== null, ...r.screen.quotaAt })) };
@@ -197,7 +211,7 @@ function healthView(ctx) {
 async function checkProviderHealth(ctx) {
   const hub = hubOf(ctx);
   codexModels();
-  await Promise.all([agyModels.refresh(), checkLogins(hub, true, ['claude', 'codex', 'agy']), checkLeftovers(hub),
+  await Promise.all([agyModels.refresh(), checkLogins(hub, true, ['claude', 'codex', 'agy']), checkLeftovers(hub), checkPermissions(hub),
     ...['claude', 'codex', 'agy'].map((p) => checkCli(hub, p)), ...loadedRooms(hub).map((r) => refreshQuota(r).catch(() => null))]);
   updateStartupSummary(hub);
   return healthView(ctx);
@@ -232,6 +246,8 @@ function startupProblems(hub) {
     else if (settings.some((s) => [...s.agents, s.worker].some((a) => a.provider === p && modelAlignment(a.model, catalogs[p]) === 'not in list'))) problems.push(`${p} model not in list`);
   }
   if (current(errors.leftovers, m.leftoversChecked)) problems.push('leftovers check');
+  const reports = permissionReports(hub);
+  for (const p of PROVIDERS) if (reports && reports[p].state !== 'ok') problems.push(`${p} permission mode`);
   for (const p of PROVIDERS) {
     const latest = [...(hub.promptResults?.get(p)?.values() ?? [])].sort((a, b) => (a.at < b.at ? 1 : -1))[0];
     if (latest?.outcome === 'failed') problems.push(`${p} test prompt`);
@@ -279,5 +295,5 @@ function showMonitor(ctx) {
 
 
 return { monitorAgentTurns, refreshQuota, watchMonitor, checkLogins, checkLeftovers, checkCli,
-  runPromptTest, healthView, checkProviderHealth, monitorView, showMonitor, startupChecks, startupProblems };
+  runPromptTest, healthView, checkProviderHealth, monitorView, showMonitor, startupChecks, startupProblems, checkPermissions };
 }

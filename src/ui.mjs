@@ -282,7 +282,7 @@ export async function load(ctx, v) {
   const researchingInstructions = readRulebooks('researching');
   const instructions = isResearch ? researchingInstructions : discussingInstructions;
   const workerInstructions = readRulebooks('worker');
-  const { createAgent, claudeTitle, run, findLeftovers, parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM } = await import(`./agents.mjs${v}`);
+  const { createAgent, claudeTitle, run, findLeftovers, parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM, readPermissionConfig, permissionReport } = await import(`./agents.mjs${v}`);
   const { createRoom, closingStatement, formattedTurn } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
   const lanes = await import(`./lanes.mjs${v}`);
@@ -348,6 +348,7 @@ export async function load(ctx, v) {
     measured: ctx.screen?.quotaAt?.providers ?? ctx.screen?.quotaAt?.measured,
   });
   return { room: createRoom(agents, ctx.state, instr, usageLine), worker, docs, lanes, workshopModule, boardsModule, monitorModule, schedulerModule, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
+    permissions: { read: readPermissionConfig, report: permissionReport },
     shop: roomShop,
     testPrompt: (room, provider, model) => runPromptTest(room, provider, model, runner, { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM }),
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.

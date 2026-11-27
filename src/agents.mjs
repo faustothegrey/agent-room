@@ -202,16 +202,18 @@ const TITLE_TIMEOUT_MS = 30 * 1000;
 // Claude runs with stream-json: one event per line. Its `result` event holds what `--output-format
 // json` printed alone (a lone JSON object without a type is read the same way); its
 // `rate_limit_event` holds the subscription's 5-hour and weekly windows, straight from the API's
-// response headers. Returns { result, quota }: quota is { received_at, five_hour?, seven_day? }, each
+// response headers. Returns { result, quota } (and permissionMode, from the `init` event, when it
+// reports one): quota is { received_at, five_hour?, seven_day? }, each
 // window { used_percent (0-100, from a 0-1 utilization), resets_at (Unix seconds) }, or null.
 export const CLAUDE_STREAM = ['--output-format', 'stream-json', '--verbose'];
 export function parseClaudeStream(stdout, now = Date.now()) {
-  let result = null, quota = null;
+  let result = null, quota = null, permissionMode = null;
   for (const line of String(stdout).split('\n')) {
     if (!line.trim()) continue;
     let event;
     try { event = JSON.parse(line); } catch { continue; }
     if (event?.type === 'result' || (event && event.type === undefined && 'result' in event)) result = event;
+    if (event?.type === 'system' && event.subtype === 'init' && typeof event.permissionMode === 'string') permissionMode = event.permissionMode;
     const windows = event?.type === 'rate_limit_event' ? event.rate_limit_info?.unifiedWindows : null;
     if (windows) {
       const reading = { received_at: now };
@@ -223,7 +225,73 @@ export function parseClaudeStream(stdout, now = Date.now()) {
     }
   }
   if (!result) throw new Error('claude: no result in its output');
-  return { result, quota };
+  return permissionMode ? { result, quota, permissionMode } : { result, quota };
+}
+
+// Permission modes (README, "Providers"): how agent-room launches each CLI, and what the CLI's own
+// configuration says (for Claude also the live `init` event's permissionMode, from a Test prompt).
+// A missing file is no local override; an unreadable one makes the mode "unknown". Only what could
+// block unattended work, compared with the launch mode, is a problem: normal yolo is not.
+export const LAUNCH_MODES = {
+  claude: `--allowedTools ${CLAUDE_ALLOWED.filter((t) => !t.startsWith('mcp__')).join(', ')} and ${CHROME_TOOLS.length} Claude in Chrome tools; no permission-mode flag`,
+  codex: 'sandbox_mode="danger-full-access" (-c, over config.toml); exec never stops for approvals',
+  agy: '--dangerously-skip-permissions',
+};
+export const permissionFiles = (home = homedir(), env = process.env) => ({
+  claude: join(env.CLAUDE_CONFIG_DIR || join(home, '.claude'), 'settings.json'),
+  codex: join(env.CODEX_HOME || join(home, '.codex'), 'config.toml'),
+  agy: join(home, '.gemini', 'antigravity-cli', 'settings.json'),
+});
+// The keys that matter from one provider's file: { file, found, mode?, deny?, ask?, sandbox?,
+// approval?, profile? }, or { file, error } when it can't be read or parsed.
+export function readPermissionConfig(provider, file = permissionFiles()[provider], read = readFileSync) {
+  let text;
+  try { text = read(file, 'utf8'); }
+  catch (err) { return err?.code === 'ENOENT' ? { file, found: false } : { file, error: err?.message ?? String(err) }; }
+  try {
+    if (provider === 'codex') {
+      // Only top-level keys (before the first [table]) can change the launch mode; values are strings.
+      const top = {};
+      for (const line of text.split('\n')) {
+        if (/^\s*\[/.test(line)) break;
+        const m = line.match(/^\s*([A-Za-z_]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/);
+        if (m) top[m[1]] = m[2] ?? m[3] ?? m[4];
+      }
+      return { file, found: true, sandbox: top.sandbox_mode ?? null, approval: top.approval_policy ?? null, profile: top.profile ?? null };
+    }
+    const p = JSON.parse(text)?.permissions ?? {};
+    const list = (v) => (Array.isArray(v) ? v.map(String) : []);
+    return { file, found: true, mode: typeof p.defaultMode === 'string' ? p.defaultMode : null, deny: list(p.deny), ask: list(p.ask) };
+  } catch (err) { return { file, error: `could not parse it: ${err?.message ?? err}` }; }
+}
+const CLAUDE_MODES = ['default', 'acceptEdits', 'bypassPermissions', 'dontAsk', 'auto'];
+// One provider's verdict from its config reading and (Claude) live mode { mode, at }:
+// { launch, state: 'ok' | 'problem' | 'unknown', mode, problems }.
+export function permissionReport(provider, config, live = null) {
+  const report = { launch: LAUNCH_MODES[provider], config: config ?? null, live, state: 'ok', mode: null, problems: [] };
+  const problem = (text) => { report.problems.push(text); if (report.state === 'ok') report.state = 'problem'; };
+  if (!config) { report.state = 'unknown'; report.problems.push('not checked yet'); return report; }
+  if (config.error) { report.state = 'unknown'; report.problems.push(`${config.file} unreadable: ${config.error}`); }
+  if (provider === 'claude') {
+    report.mode = live?.mode ?? (config.error ? null : config.mode ?? 'default');
+    if (report.mode === 'plan') problem('permission mode plan: tools never run');
+    else if (report.mode && !CLAUDE_MODES.includes(report.mode)) { report.state = 'unknown'; report.problems.push(`permission mode ${report.mode} not recognised`); }
+    // A deny or ask rule on a pre-approved tool refuses it (headless claude can't ask).
+    const tool = (rule) => rule.replace(/\(.*$/s, '').trim();
+    const hits = (rule) => CLAUDE_ALLOWED.some((t) => t === tool(rule) || t.startsWith(tool(rule) + '__'));
+    for (const kind of ['deny', 'ask']) for (const rule of config[kind] ?? []) if (hits(rule)) problem(`${kind} rule ${rule}`);
+  } else if (provider === 'codex' && !config.error) {
+    report.mode = `approval_policy ${config.approval ?? 'not set'} · sandbox_mode ${config.sandbox ?? 'not set'} (overridden)`;
+    if (config.profile) problem(`legacy profile = "${config.profile}": codex refuses to start`);
+    if (config.approval === 'untrusted') problem('approval_policy "untrusted": codex refuses to start');
+    else if (config.approval && !['never', 'on-request'].includes(config.approval)) { report.state = 'unknown'; report.problems.push(`approval_policy "${config.approval}" not recognised`); }
+  } else if (provider === 'agy' && !config.error) {
+    report.mode = config.mode ?? 'default';
+    // Deny rules still apply with --dangerously-skip-permissions (agy's changelog), and plans wait for review.
+    if (report.mode === 'plan') problem('permission mode plan: plans wait for review');
+    for (const rule of config.deny ?? []) problem(`deny rule ${rule}`);
+  }
+  return report;
 }
 
 // Every adapter reports a turn's usage as { input, cached, output, cost? }: input counts all prompt

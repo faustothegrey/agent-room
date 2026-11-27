@@ -7295,3 +7295,34 @@ test('startup checks: nothing in System messages when every check passes, and la
   assert.deepEqual(m.startupProblems(hub), ['claude test prompt']);
   assert.deepEqual(sent.filter((e) => e.type === 'note'), []);
 });
+
+test('startup checks: permission modes join the summary, read by Check now and from a Claude Test prompt\'s init event', async () => {
+  const { createMonitor } = await import('../src/monitor.mjs');
+  const { modelAlignment } = await import('../src/ui.mjs');
+  const { parseClaudeStream, readPermissionConfig, permissionReport } = await import('../src/agents.mjs');
+  const sent = [];
+  const catalog = { status: () => ({ loaded: true, checked: 'x', models: [], error: null }), refresh: async () => {} };
+  const m = createMonitor({ hubOf: (c) => c.hub, toScreen: (c, e) => sent.push(e), currentSettings: () => ({ agents: [], worker: { provider: 'claude', model: '' } }),
+    claudeModels: [], codexModels: Object.assign(() => [], catalog), agyModels: catalog, modelAlignment, readDefaults: () => null,
+    sessionView: () => ({ agents: [], worker: {} }), folderOf: () => null });
+  const files = { claude: '{"permissions":{"defaultMode":"plan"}}', codex: Object.assign(new Error('gone'), { code: 'ENOENT' }), agy: Object.assign(new Error('denied'), { code: 'EACCES' }) };
+  const permissions = { read: (p) => readPermissionConfig(p, `/${p}`, () => { if (files[p] instanceof Error) throw files[p]; return files[p]; }), report: permissionReport };
+  const hub = { rooms: new Map() }, now = new Date().toISOString();
+  const ctx = { cwd: '/a', hub, usage: {}, permissions, room: { agents: [] }, worker: { provider: 'claude' }, screen: { clients: new Set(), transcript: [] } };
+  ctx.testPrompt = async () => null;
+  hub.rooms.set('a', ctx);
+  hub.monitor = { login: {}, loginCurrent: { claude: { state: 'ok' }, codex: { state: 'ok' } }, cli: {}, errors: { login: {}, cli: {}, leftovers: null }, leftoversChecked: now };
+  await m.startupChecks(hub, async () => { await m.checkPermissions(hub); });
+  assert.deepEqual(m.startupProblems(hub), ['claude permission mode', 'agy permission mode']);
+  assert.equal(hub.startupSummary, 'Startup checks: 2 problems (claude permission mode, agy permission mode) · see Providers');
+  const view = m.healthView(ctx).permissions;
+  assert.equal(view.codex.state, 'ok'); assert.equal(view.codex.config.found, false);
+  assert.equal(view.agy.state, 'unknown');
+  assert.deepEqual(view.claude.problems, ['permission mode plan: tools never run']);
+  // A Claude Test prompt's init event reports the live mode, which wins over the file.
+  const init = '{"type":"system","subtype":"init","permissionMode":"default"}\n{"type":"result","result":"OK","is_error":false}\n';
+  await m.runPromptTest(ctx, 'claude', '', async () => init, { parseClaudeStream, CLAUDE_STREAM: [] });
+  assert.equal(hub.permissionLive.claude.mode, 'default');
+  assert.equal(hub.startupSummary, 'Startup checks: 1 problem (agy permission mode) · see Providers');
+  assert.equal(sent.filter((e) => e.type === 'note').at(-1).text, hub.startupSummary);
+});

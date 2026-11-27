@@ -106,10 +106,17 @@ export interface ProviderHealthReply {
   errors: { cli: Record<string, (HealthError & { path?: string }) | { path?: string } | null | undefined>; login: Record<string, HealthError>; leftovers?: HealthError };
   scheduledProviders: string[]; nextLogin: string | null; catalogs: Record<string, { loaded: boolean; checked: string | null; models: unknown[]; error?: HealthError }>;
   configured: { room: string; discussion: string | null; agents: HealthAgent[] }[]; defaults: HealthAgent[] | null;
+  permissions?: Record<string, PermissionReport> | null;
   promptRunning: string[]; promptResults: { provider: string; model: string; at: string; durationMs: number; outcome: string; reply?: string | null; error?: string | null }[];
   sessions: { room: string; discussion: string | null; agents: { role: string; name: string; provider: string; id: string | null; lastTurn?: { ended: string; outcome: string; error?: { at: string; message: string } | null } | null }[] }[];
   leftoversChecked: string | null; nextLeftovers: string | null; running: HealthProgram[]; leftovers: HealthProgram[];
   quota: { room: string; reachable: boolean | null; measured: string | null; providers?: Record<string, string | null>; checked: string | null }[];
+}
+// One provider's permission check (agents.mjs, permissionReport): its launch mode, its config file's
+// reading and (Claude) the live mode from a Test prompt's init event.
+export interface PermissionReport {
+  launch: string; state: 'ok' | 'problem' | 'unknown'; mode: string | null; problems: string[]; checked: string | null;
+  config: { file: string; found?: boolean; error?: string } | null; live: { mode: string; at: string } | null;
 }
 export interface HealthProgram { pid: number; provider: string; agent: string; room: string; started?: string | null; unverified?: boolean }
 export interface PromptTestRequest { provider: string; model: string }

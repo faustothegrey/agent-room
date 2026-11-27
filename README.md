@@ -91,12 +91,30 @@ Codex uses a read-only sandbox, no web search and an ephemeral session; Agy uses
 not bypass permissions. Claude's reply carries its quota reading, which updates the quota gauges of
 every open room at once.
 
+**Permission mode.** Check now and the startup checks also compare, per provider, agent-room's
+launch mode with what the CLI's own configuration says. Agent-room launches Claude with an
+`--allowedTools` list (no permission-mode flag), Codex with `-c sandbox_mode="danger-full-access"`
+(which wins over `config.toml`; `codex exec` never stops for approvals) and Agy with
+`--dangerously-skip-permissions`. The files read are `~/.claude/settings.json` (or
+`$CLAUDE_CONFIG_DIR/settings.json`), `~/.codex/config.toml` (or `$CODEX_HOME`) and
+`~/.gemini/antigravity-cli/settings.json`. For Claude, the live mode comes from the `init` event of
+the latest Claude Test prompt; it wins over the file's `permissions.defaultMode`. A missing file means no local override.
+Only a mode that could block unattended work counts as a problem: Claude in `plan` mode, or a
+`deny` or `ask` rule on a tool agent-room pre-approves; for Codex, a legacy top-level `profile` or
+`approval_policy = "untrusted"`, both of which make Codex 0.167 refuse to start; for Agy, `plan` mode
+or any `deny` rule (they still apply with `--dangerously-skip-permissions`). An unreadable file, or
+a mode or approval policy agent-room doesn't recognise, makes the mode **unknown**, which counts as
+a problem too. Normal yolo is not a problem. Not read: project settings in a room's folder (the Test prompt runs
+in an empty temporary folder, so Claude's live mode doesn't see them either), and managed or
+organization policies.
+
 **Startup checks.** When the server starts or Restarts (not on Reload), once every restored room has
 loaded, it runs in the background everything Check now does, plus one Test prompt per provider with
 its CLI default model. So Claude's gauge appears right away, without waiting for a Claude turn. The
 problems counted are: a login that is not ok for Claude or Codex, a CLI check error, an unavailable
 model list, a Codex or Agy configured or default model not in its list (Claude's list is agent-room's
-own), a leftovers check error and a failed Test prompt. If there are any, every open room's System
+own), a leftovers check error, a failed Test prompt and a permission mode that is a problem or
+unknown (above). If there are any, every open room's System
 messages get one line, such as "Startup checks: 2 problems (codex login, agy test prompt) · see
 Providers"; nothing when all pass. The server keeps that line and sends it to pages that connect
 later. A later Check now or Test prompt updates it, or clears it with "the problems are resolved".

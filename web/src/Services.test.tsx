@@ -109,6 +109,20 @@ const health = { cli: { claude: { path: '/bin/claude', version: '2.0', checked: 
   sessions: [{ room: '/room', discussion: 'live', agents: [{ role: 'member', name: 'Claude', provider: 'claude', id: 's1', lastTurn: null }] }],
   leftoversChecked: null, nextLeftovers: null, running: [], leftovers: [], quota: [{ room: '/room', reachable: true, measured: '2026-11-25 08:00', checked: null }] };
 
+it('shows each provider\'s permission mode, or that it was not checked yet', async () => {
+  const permissions = { claude: { launch: '--allowedTools Bash', state: 'problem', mode: 'plan', problems: ['permission mode plan: tools never run'], checked: '2026-11-25T08:00:00Z',
+    config: { file: '/h/.claude/settings.json', found: true }, live: { mode: 'plan', at: '2026-11-25T08:01:00Z' } },
+  codex: { launch: 'sandbox_mode="danger-full-access"', state: 'ok', mode: null, problems: [], checked: '2026-11-25T08:00:00Z', config: { file: '/h/.codex/config.toml', found: false }, live: null } };
+  answer = (url) => url === '__provider-health' ? ok({ ...health, permissions }) : url === '__settings' ? ok({ settings: { agents, worker }, started: false, models }) : ok([]);
+  render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '⚙ Providers' }));
+  await user.click(within(panel()).getByText(/^Provider health · all rooms on this server/));
+  const report = await within(panel()).findByRole('status', { name: 'Provider health' });
+  await waitFor(() => expect(report.textContent).toContain('Permission mode: problem (permission mode plan: tools never run) · launch: --allowedTools Bash · /h/.claude/settings.json: read · mode plan · live: plan (Test prompt, '));
+  expect(report.textContent).toContain('Permission mode: ok · launch: sandbox_mode="danger-full-access" · /h/.codex/config.toml: not found, no local override');
+  expect(report.textContent).toContain('Permission mode: not checked yet (Check now)');
+});
+
 it('saves the default providers through the shared queue, with the legacy texts', async () => {
   answer = (url, body) => url === '__settings' ? (body ? ok({ applied: false }) : ok({ settings: { agents, worker }, defaults: { agents, worker }, started: true, models })) : ok([]);
   render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();

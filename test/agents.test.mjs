@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { claudeTitle, createAgyAgent, createClaudeAgent, createCodexAgent, parseAgyOutput, parseClaudeStream, findLeftovers, parseCodexEvents, probeProcess, recordProgram, run } from '../src/agents.mjs';
+import { claudeTitle, permissionReport, readPermissionConfig, createAgyAgent, createClaudeAgent, createCodexAgent, parseAgyOutput, parseClaudeStream, findLeftovers, parseCodexEvents, probeProcess, recordProgram, run } from '../src/agents.mjs';
 
 // A fake runner that records each call and returns scripted stdout.
 function fakeRunner(outputs) {
@@ -414,4 +414,41 @@ test('run gives `started` the process as soon as it is spawned (the worker\'s St
   const turn = run('sh', ['-c', 'echo ok'], { started: (p) => { started = p; } });
   assert.equal(typeof started?.stopGroup, 'function'); // already, before the program ends
   assert.equal(await turn, 'ok\n');
+});
+
+test('parseClaudeStream: the init event\'s permission mode, when it reports one', () => {
+  assert.equal(parseClaudeStream(STREAM.replace('"session_id":"s"', '"session_id":"s","permissionMode":"plan"')).permissionMode, 'plan');
+  assert.equal('permissionMode' in parseClaudeStream(STREAM), false);
+});
+
+test('permission check: launch modes against each CLI\'s config, problems only where unattended work could block', () => {
+  const reader = (text) => () => { if (text instanceof Error) throw text; return text; };
+  const missing = Object.assign(new Error('gone'), { code: 'ENOENT' });
+  const read = (provider, text) => readPermissionConfig(provider, '/f', reader(text));
+  const verdict = (provider, text, live) => { const r = permissionReport(provider, read(provider, text), live); return [r.state, r.problems]; };
+  // A missing file is no local override; an unreadable or unparseable one is unknown.
+  for (const p of ['claude', 'codex', 'agy']) {
+    assert.deepEqual(read(p, missing), { file: '/f', found: false });
+    assert.deepEqual(verdict(p, missing), ['ok', []]);
+    assert.equal(verdict(p, Object.assign(new Error('denied'), { code: 'EACCES' }))[0], 'unknown');
+  }
+  assert.equal(verdict('claude', '{ not json')[0], 'unknown');
+  assert.equal(permissionReport('claude', null).state, 'unknown');
+  // Claude: deny or ask rules on pre-approved tools, a plan mode (live wins over the file), unknown modes.
+  const claude = (permissions, live) => verdict('claude', JSON.stringify({ permissions }), live);
+  assert.deepEqual(claude({ defaultMode: 'bypassPermissions', allow: ['Bash'] }), ['ok', []]);
+  assert.deepEqual(claude({ deny: ['Bash(rm:*)', 'NotebookEdit'], ask: ['mcp__claude-in-chrome'] }), ['problem', ['deny rule Bash(rm:*)', 'ask rule mcp__claude-in-chrome']]);
+  assert.deepEqual(claude({ defaultMode: 'plan' }), ['problem', ['permission mode plan: tools never run']]);
+  assert.deepEqual(claude({ defaultMode: 'plan' }, { mode: 'default', at: 't' }), ['ok', []]);
+  assert.deepEqual(claude({}, { mode: 'plan', at: 't' })[0], 'problem');
+  assert.deepEqual(claude({}, { mode: 'strange', at: 't' }), ['unknown', ['permission mode strange not recognised']]);
+  // Codex: -c overrides sandbox_mode; a legacy profile or "untrusted" makes codex refuse to start (0.167).
+  assert.deepEqual(verdict('codex', 'approval_policy = "never"\nsandbox_mode = "read-only"\n[profiles.x]\nprofile = "x"\n'), ['ok', []]);
+  assert.equal(permissionReport('codex', read('codex', 'approval_policy = "on-request"')).mode, 'approval_policy on-request · sandbox_mode not set (overridden)');
+  assert.deepEqual(verdict('codex', 'profile = "work"\n'), ['problem', ['legacy profile = "work": codex refuses to start']]);
+  assert.deepEqual(verdict('codex', "approval_policy = 'untrusted'"), ['problem', ['approval_policy "untrusted": codex refuses to start']]);
+  assert.equal(verdict('codex', 'approval_policy = "granular"')[0], 'unknown');
+  // Agy: deny rules still apply with --dangerously-skip-permissions; allow and ask rules don't block.
+  assert.deepEqual(verdict('agy', JSON.stringify({ permissions: { allow: ['command(tail)'], ask: ['command(rm)'] } })), ['ok', []]);
+  assert.deepEqual(verdict('agy', JSON.stringify({ permissions: { deny: ['command(git push)'] } })), ['problem', ['deny rule command(git push)']]);
 });
