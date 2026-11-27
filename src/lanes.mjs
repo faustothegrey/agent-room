@@ -4,10 +4,19 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 export const git = (dir, ...args) => new Promise((done, fail) => execFile('git', ['-C', dir, ...args], { maxBuffer: 1 << 22 },
   (err, out, errOut) => (err ? fail(new Error(`git ${args[0]}: ${(errOut || err.message).trim()}`)) : done(out.trim()))));
 export const gitOk = (dir, ...args) => git(dir, ...args).then(() => true, () => false);
 export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// Modules Reload can't replace: cli.mjs runs the process; host-shell.mjs (open shells) and
+// notes.mjs are imported without the Reload version, so a running server keeps its first copy.
+export const RESTART_ONLY = ['cli.mjs', 'host-shell.mjs', 'notes.mjs'];
+const SERVER_SOURCE = dirname(fileURLToPath(import.meta.url));
+// Which of this server's restart-only modules `files` (paths relative to `top`) are.
+export const restartOnlyChanges = (top, files, serverSource = SERVER_SOURCE) =>
+  files.map((f) => join(top, f)).filter((p) => dirname(p) === serverSource && RESTART_ONLY.includes(basename(p))).map((p) => basename(p));
 
 // ── Branch diagram for the Worker tab ──
 // Builds a Mermaid gitGraph of `place.branch` against the room's current branch, from their
@@ -1090,6 +1099,7 @@ async function closeAndMerge(ctx, name, snapshot, { _beforeMerge = null } = {}) 
 
     const mergeCommit = await git(place.top, 'rev-parse', '--short=7', 'HEAD');
     done.push(`merged ${place.branch} into ${targetBranch} as ${mergeCommit}`);
+    const restart = restartOnlyChanges(place.top, (await git(place.top, 'diff', '--name-only', 'HEAD^1', 'HEAD').catch(() => '')).split('\n').filter(Boolean));
 
     // 2. Remove worktree.
     if (state.worktreeExists) {
@@ -1128,7 +1138,8 @@ async function closeAndMerge(ctx, name, snapshot, { _beforeMerge = null } = {}) 
     } catch (err) {
       failAfterMerge('close discussion', err, ['discussion not closed']);
     }
-    return { ok: true, mergeCommit, targetBranch };
+    if (restart.length) note(ctx, `This merge changes ${restart.join(', ')}: Restart to apply it (Reload can't).`, true);
+    return { ok: true, mergeCommit, targetBranch, restart };
   } finally {
     if (shop.merging === lock) shop.merging = null;
   }
