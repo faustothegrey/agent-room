@@ -7356,3 +7356,55 @@ test('startup checks: permission modes join the summary, read by Check now and f
   assert.equal(hub.startupSummary, 'Startup checks: 1 problem (agy permission mode) · see Providers');
   assert.equal(sent.filter((e) => e.type === 'note').at(-1).text, hub.startupSummary);
 });
+
+test('Check now diagnostics: CLI processes by owner, launch environment by variable name only, failed reruns keep the previous result', async () => {
+  const { createMonitor, parseProcesses } = await import('../src/monitor.mjs');
+  const ps = [
+    '  100   100    01:02 ??       claude', // recorded
+    '  101   100    00:30 ??       /Users/x/.local/bin/claude', // its child, same group
+    '  200   200 01-02:03:04 ttys003  codex', // a terminal
+    '  300   300    05:00 ??       /opt/agy', // nothing known
+    '  400   400    05:00 ??       /Applications/Claude.app/Contents/MacOS/Claude',
+    '  500   500    05:00 ??       /x/codex-code-mode-host', 'garbage'].join('\n');
+  assert.deepEqual(parseProcesses(ps, new Set([100])).map((p) => [p.pid, p.provider, p.elapsed, p.owner]),
+    [[100, 'claude', '01:02', 'agent-room'], [101, 'claude', '00:30', 'agent-room'], [200, 'codex', '01-02:03:04', 'external'], [300, 'agy', '05:00', 'unknown']]);
+  const catalog = { status: () => ({ loaded: true, checked: 'x', models: [], error: null }), refresh: async () => {} };
+  const m = createMonitor({ hubOf: (c) => c.hub, toScreen: () => {}, currentSettings: () => ({ agents: [], worker: { provider: 'claude', model: '' } }),
+    claudeModels: [], codexModels: Object.assign(() => [], catalog), agyModels: catalog, modelAlignment: () => 'as saved', readDefaults: () => null,
+    sessionView: () => ({ agents: [], worker: {} }), folderOf: () => null });
+  const hub = { rooms: new Map() };
+  const ctx = { cwd: '/a', hub, usage: {}, room: { agents: [] }, worker: { provider: 'claude' }, screen: { clients: new Set(), transcript: [] },
+    programs: { running: new Set([{ pid: 100 }]) }, recordedPids: () => [], state: {}, sessions: new Map() };
+  hub.rooms.set('a', ctx);
+  hub.monitor = { login: {}, leftovers: [], cli: {}, errors: { login: {}, cli: {}, leftovers: null },
+    loginCurrent: { claude: { state: 'ok', authMode: 'claude.ai (firstParty)' }, codex: { state: 'unknown', error: 'codex login status: spawn codex ENOENT' } } };
+  assert.equal(m.healthView(ctx).diagnostics, null); // never checked
+  const secret = 'sk-ant-SECRET-VALUE';
+  const env = { ANTHROPIC_API_KEY: secret, CODEX_HOME: '/h/codexhome', OPENAI_API_KEY: '', PATH: '/bin' };
+  let psFails = false;
+  const run = async (command, args) => {
+    if (command === 'ps') { if (psFails) throw new Error('ps: denied'); return ps; }
+    return { claude: '/a/claude\n/b/claude\n/a/claude\n', codex: '/c/codex\n', agy: '' }[args[1]];
+  };
+  await m.checkDiagnostics(hub, { run, env, home: '/h', exists: (p) => p === '/h/.claude' });
+  const d = m.healthView(ctx).diagnostics;
+  assert.deepEqual(d.processes.result.map((p) => p.owner), ['agent-room', 'agent-room', 'external', 'unknown']);
+  assert.deepEqual(d.launch.claude.executables.result, ['/a/claude', '/b/claude']);
+  assert.deepEqual(d.launch.agy.executables.result, []);
+  assert.deepEqual(d.launch.claude.configFolder.result, { path: '/h/.claude', exists: true });
+  assert.deepEqual(d.launch.codex.configFolder.result, { path: '/h/codexhome', exists: false });
+  assert.deepEqual(d.launch.claude.env.result, ['ANTHROPIC_API_KEY']);
+  assert.deepEqual(d.launch.codex.env.result, ['CODEX_HOME']); // an empty variable is not set
+  assert.equal(d.launch.claude.authMode.result, 'claude.ai (firstParty)');
+  assert.equal(d.launch.codex.authMode.checked, undefined); assert.match(d.launch.codex.authMode.error.message, /ENOENT/);
+  assert.deepEqual(d.launch.agy.authMode, {});
+  assert.ok(!JSON.stringify(m.healthView(ctx)).includes(secret));
+  // A failed rerun records its error and keeps the previous result with its own time.
+  const before = d.processes.checked;
+  psFails = true;
+  await new Promise((r) => setTimeout(r, 5));
+  await m.checkDiagnostics(hub, { run, env, home: '/h', exists: () => false });
+  const again = m.healthView(ctx).diagnostics.processes;
+  assert.equal(again.checked, before); assert.equal(again.result.length, 4);
+  assert.equal(again.error.message, 'ps: denied'); assert.ok(again.error.at >= before);
+});

@@ -66,7 +66,10 @@ Codex "logged in, no expiry given", from `codex login status`) and how many of t
 programs are running now. Login is checked once per server, at startup and every 10 minutes.
 
 Click a provider name or its ⚠ to open **Providers** and expand its health section, which covers every room on
-this server. The folded health section shows ⚠ when this room’s header reports a provider problem. It lists running and leftover programs, each room's quota meter status and its measured
+this server. The folded health section shows ⚠ when this room’s header reports a provider problem. Its lines
+are grouped under short headings (Providers, Launch environment, Model lists, Configured models,
+Prompt tests, Operations, Sessions, Programs agent-room started, CLI processes visible to this
+server, Quota meter). It lists running and leftover programs, each room's quota meter status and its measured
 and checked times, and login results with the next scheduled check. **Check now** checks all three
 CLI paths and versions, logins, leftovers and quota meters together; CLI checks run only on request.
 For CLI, login and leftover checks, the latest error and its time remain visible separately from the
@@ -108,8 +111,27 @@ a problem too. Normal yolo is not a problem. Not read: project settings in a roo
 in an empty temporary folder, so Claude's live mode doesn't see them either), and managed or
 organization policies.
 
+**Diagnostics (Check now only).** Two sections are filled only by an explicit **Check now**: not by
+opening Providers, the startup checks, the scheduled checks or Test prompt. **Launch environment**
+shows, per provider and as the server's own environment sees it: the executables on `PATH`
+(`which -a`; the first is the one agent-room runs); the config folder (`$CLAUDE_CONFIG_DIR` or
+`~/.claude`, `$CODEX_HOME` or `~/.codex`, `~/.gemini/antigravity-cli`) and whether it exists; which
+auth and config environment variables are set (names only, never values, such as
+`ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `CLAUDE_CONFIG_DIR`, `OPENAI_API_KEY`, `CODEX_HOME`,
+`GEMINI_API_KEY`), each a possible override, not proof it was used; and the auth mode, only as
+`claude auth status --json` (`authMethod`) or `codex login status` (ChatGPT or API key) state it,
+otherwise `unknown`; Agy's stays not monitored. **CLI processes visible to this server** lists every
+running `claude`, `codex` and `agy` process `ps` shows (by executable name), with PID, elapsed time and
+owner: `agent-room` when it, or its process group, is a program agent-room recorded (this server's
+running programs, leftovers, or another agent-room server's records); `external` when it has a
+terminal (agent-room starts CLIs detached, without one); otherwise `unknown` (such as a desktop
+app's daemon). Working folders and command lines are not shown. Each of these checks shows never
+checked, found, nothing found, or couldn't check with its error, and when it last ran; a failed
+rerun shows the failure and keeps the previous result with its own time. Results are kept in memory
+only.
+
 **Startup checks.** When the server starts or Restarts (not on Reload), once every restored room has
-loaded, it runs in the background everything Check now does, plus one Test prompt per provider with
+loaded, it runs in the background everything Check now does except the diagnostics above, plus one Test prompt per provider with
 its CLI default model. So Claude's gauge appears right away, without waiting for a Claude turn. The
 problems counted are: a login that is not ok for Claude or Codex, a CLI check error, an unavailable
 model list, a Codex or Agy configured or default model not in its list (Claude's list is agent-room's

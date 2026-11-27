@@ -108,10 +108,19 @@ export interface ProviderHealthReply {
   scheduledProviders: string[]; nextLogin: string | null; catalogs: Record<string, { loaded: boolean; checked: string | null; models: unknown[]; error?: HealthError }>;
   configured: { room: string; discussion: string | null; agents: HealthAgent[] }[]; defaults: HealthAgent[] | null;
   permissions?: Record<string, PermissionReport> | null;
+  diagnostics?: HealthDiagnostics | null;
   promptRunning: string[]; promptResults: { provider: string; model: string; at: string; durationMs: number; outcome: string; reply?: string | null; error?: string | null }[];
   sessions: { room: string; discussion: string | null; agents: { role: string; name: string; provider: string; id: string | null; lastTurn?: { ended: string; outcome: string; error?: { at: string; message: string } | null } | null }[] }[];
   leftoversChecked: string | null; nextLeftovers: string | null; running: HealthProgram[]; leftovers: HealthProgram[];
   quota: { room: string; reachable: boolean | null; measured: string | null; providers?: Record<string, string | null>; checked: string | null }[];
+}
+// Check now's diagnostics (monitor.mjs, checkDiagnostics): each keeps its last result and time, and
+// its latest error (newer than `checked` while the latest attempt failed).
+export interface DiagnosticCheck<T> { result?: T | null; checked?: string | null; error?: HealthError | null }
+export interface CliProcess { pid: number; provider: string; elapsed: string; owner: 'agent-room' | 'external' | 'unknown'; evidence: string }
+export interface HealthDiagnostics {
+  processes: DiagnosticCheck<CliProcess[]>;
+  launch: Record<string, { executables: DiagnosticCheck<string[]>; configFolder: DiagnosticCheck<{ path: string; exists: boolean }>; env: DiagnosticCheck<string[]>; authMode: DiagnosticCheck<string> }>;
 }
 // One provider's permission check (agents.mjs, permissionReport): its launch mode, its config file's
 // reading and (Claude) the live mode from a Test prompt's init event.

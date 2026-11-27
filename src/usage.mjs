@@ -388,9 +388,22 @@ export function parseCodexLogin(text) {
 }
 const LOGIN_COMMANDS = { claude: ['claude', ['auth', 'status', '--json'], (out) => parseClaudeAuth(out)],
   codex: ['codex', ['login', 'status'], (out, err) => parseCodexLogin(`${out}\n${err}`)] };
+// The auth mode the status command states, for Check now's Launch environment, or 'unknown'. Only
+// fixed words or a short plain label: never anything that could carry a key.
+const PLAIN = /^[\w. -]{1,40}$/;
+export function authModeOf(provider, stdout, stderr = '') {
+  if (provider === 'claude') {
+    let s; try { s = JSON.parse(stdout); } catch { return 'unknown'; }
+    if (typeof s?.authMethod !== 'string' || !PLAIN.test(s.authMethod)) return 'unknown';
+    return s.authMethod + (typeof s.apiProvider === 'string' && PLAIN.test(s.apiProvider) ? ` (${s.apiProvider})` : '');
+  }
+  const t = `${stdout}\n${stderr}`;
+  return /^logged in using chatgpt\b/im.test(t) ? 'ChatGPT' : /^logged in using an api key\b/im.test(t) ? 'API key' : 'unknown';
+}
 // Runs the provider's status command. Its exit code isn't trusted alone (logged out may exit
-// non-zero with a readable answer); a failure to run, or unreadable output, is 'unknown'.
-export function checkLogin(provider, exec = execFile) {
+// non-zero with a readable answer); a failure to run, or unreadable output, is 'unknown'. With
+// `authMode` (Check now only), the result also carries authModeOf's answer.
+export function checkLogin(provider, exec = execFile, { authMode = false } = {}) {
   if (provider === 'agy') return Promise.resolve({ state: 'unmonitored' });
   const known = LOGIN_COMMANDS[provider];
   if (!known) return Promise.resolve({ state: 'unknown', error: `no login check for ${provider}` });
@@ -399,6 +412,7 @@ export function checkLogin(provider, exec = execFile) {
     if (err && (typeof err.code !== 'number' || err.killed)) return done({ state: 'unknown', error: `${command} ${args.join(' ')}: ${err.message}` });
     const login = parse(String(stdout), String(stderr));
     if (err && login.state === 'unknown') login.error += ` (exit ${err.code}: ${String(stderr).trim().slice(-200)})`;
+    if (authMode) login.authMode = authModeOf(provider, String(stdout), String(stderr));
     done(login);
   }));
 }

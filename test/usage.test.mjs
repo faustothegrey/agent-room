@@ -354,3 +354,17 @@ test('quota guard rejects a window after its reset until a later reading arrives
   } } } };
   assert.match(checkQuotaFloor(agy, ['agy'], 50, { now: Date.parse('2026-11-26T12:06:00Z') }).reason, /agy \(argon\) week.*reset/);
 });
+
+test('auth mode: only what the status commands state, as a plain label or fixed words, never key text; only when asked', async () => {
+  const { authModeOf } = await import('../src/usage.mjs');
+  assert.equal(authModeOf('claude', '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}'), 'claude.ai (firstParty)');
+  assert.equal(authModeOf('claude', '{"loggedIn":true}'), 'unknown');
+  assert.equal(authModeOf('claude', '{"authMethod":"sk-ant-api03-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'), 'unknown');
+  assert.equal(authModeOf('claude', 'not json'), 'unknown');
+  assert.equal(authModeOf('codex', '', 'Logged in using ChatGPT\n'), 'ChatGPT');
+  assert.equal(authModeOf('codex', '', 'Logged in using an API key - sk-proj-***abcd\n'), 'API key');
+  assert.equal(authModeOf('codex', '', 'Not logged in\n'), 'unknown');
+  const exec = (result) => (command, args, options, done) => done(...result);
+  assert.deepEqual(await checkLogin('codex', exec([null, '', 'Logged in using ChatGPT\n'])), { state: 'ok', expiresAt: null });
+  assert.deepEqual(await checkLogin('codex', exec([null, '', 'Logged in using ChatGPT\n']), { authMode: true }), { state: 'ok', expiresAt: null, authMode: 'ChatGPT' });
+});

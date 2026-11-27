@@ -282,7 +282,7 @@ export async function load(ctx, v) {
   const researchingInstructions = readRulebooks('researching');
   const instructions = isResearch ? researchingInstructions : discussingInstructions;
   const workerInstructions = readRulebooks('worker');
-  const { createAgent, claudeTitle, run, findLeftovers, parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM, readPermissionConfig, permissionReport } = await import(`./agents.mjs${v}`);
+  const { createAgent, claudeTitle, run, findLeftovers, recordedPids, parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM, readPermissionConfig, permissionReport } = await import(`./agents.mjs${v}`);
   const { createRoom, closingStatement, formattedTurn } = await import(`./room.mjs${v}`);
   const docs = await import(`./docs.mjs${v}`);
   const lanes = await import(`./lanes.mjs${v}`);
@@ -349,7 +349,7 @@ export async function load(ctx, v) {
     gauges: ctx.screen?.quota,
     measured: ctx.screen?.quotaAt?.providers ?? ctx.screen?.quotaAt?.measured,
   });
-  return { room: createRoom(agents, ctx.state, instr, usageLine), worker, docs, lanes, workshopModule, boardsModule, monitorModule, schedulerModule, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers,
+  return { room: createRoom(agents, ctx.state, instr, usageLine), worker, docs, lanes, workshopModule, boardsModule, monitorModule, schedulerModule, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers, recordedPids,
     permissions: { read: readPermissionConfig, report: permissionReport },
     shop: roomShop,
     testPrompt: (room, provider, model) => runPromptTest(room, provider, model, runner, { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM }),
@@ -435,7 +435,7 @@ function wire(ctx) {
   };
   ctx.screen.providerHealth = () => healthView(ctx);
   ctx.screen.testPrompt = (body) => ctx.testPrompt(ctx, body?.provider, body?.model);
-  ctx.screen.checkProviderHealth = () => checkProviderHealth(ctx);
+  ctx.screen.checkProviderHealth = () => checkProviderHealth(ctx, { diagnostics: true }); // Check now
   ctx.screen.saveSettings = (value) => (value?.scope === 'defaults' ? saveDefaultSettings(ctx, value) : saveSettings(ctx, value));
   ctx.screen.retryWork = (id, settings) => retryWork(ctx, id, settings);
   ctx.screen.stopWorker = (mode) => stopWorker(ctx, mode);

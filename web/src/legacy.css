@@ -376,6 +376,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #health-warning { color: light-dark(#b45309, #d6a84c); }
 #provider-health table { border-collapse: collapse; margin: .5rem 0; }
 #provider-health th, #provider-health td { border: 1px solid var(--line); padding: .3rem .5rem; text-align: left; vertical-align: top; }
+#provider-health .health-heading { margin: 1rem 0 .3rem; padding-bottom: .15rem; border-bottom: 1px solid var(--line); font-size: .85rem; }
 /* The Instructions tab: prompt sets, each piece expandable, its content in a monospace block. */
 #instructions { overflow-y: auto; padding: .8rem 1rem; }
 .ins-set { margin-bottom: 1.3rem; }

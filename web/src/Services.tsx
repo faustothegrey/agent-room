@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
-import type { InstructionSet, PromptTestRequest, ProviderHealthReply, ScheduleData, ScheduleRequest, ScheduleTask, SettingsReply, SettingsSaveRequest, SettingsSaveReply } from '../../src/contract';
+import type { DiagnosticCheck, InstructionSet, PromptTestRequest, ProviderHealthReply, ScheduleData, ScheduleRequest, ScheduleTask, SettingsReply, SettingsSaveRequest, SettingsSaveReply } from '../../src/contract';
 import { AgentRow, choice, incomplete, memberPlan, selectedSettings, toRow, type Row } from './Settings';
 
 // The Schedule, Instructions and Providers services, as on /__room (renderSchedule,
@@ -118,8 +118,18 @@ function Health({ open, post }: { open: boolean; post: ProvidersPost }) {
   const err = (e: { at?: string; message?: string } | null | undefined) => e && e.message ? ' · latest error ' + when(e.at) + ': ' + e.message : '';
   const lines: ReactNode[] = [];
   const line = (text: string) => lines.push(<p key={lines.length}>{text}</p>);
+  const heading = (text: string) => lines.push(<h4 className="health-heading" key={lines.length}>{text}</h4>);
+  // A Check now diagnostic: never checked, found / nothing found with its time, or couldn't check
+  // (with the error, and the previous result with its own time).
+  const diag = <T,>(label: string, c: DiagnosticCheck<T> | undefined, show: (r: T) => [boolean, string]) => {
+    let base: string | null = null;
+    if (c?.checked) { const [found, text] = show(c.result as T); base = (found ? 'found' : 'nothing found') + (text ? ': ' + text : '') + ' · checked ' + when(c.checked); }
+    const failed = c?.error && (!c.checked || c.error.at >= c.checked);
+    line(label + ': ' + (failed ? "couldn't check: " + c!.error!.message + ' (' + when(c!.error!.at) + ')' + (base ? ' · previous result: ' + base : '') : base ?? 'never checked'));
+  };
   const table = (headings: string[], rows: string[][]) => lines.push(<table key={lines.length}><thead><tr>{headings.map((h) => <th scope="col" key={h}>{h}</th>)}</tr></thead><tbody>{rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j}>{c}</td>)}</tr>)}</tbody></table>);
   if (data) {
+    heading('Providers');
     for (const provider of ['claude', 'codex', 'agy']) {
       const cli = data.cli[provider], login = data.login[provider], cliError = data.errors.cli[provider] as { path?: string; at?: string; message?: string } | null | undefined;
       line(provider.toUpperCase() + ' · CLI: ' + (cli ? cli.path + ' · ' + cli.version + ' · last success ' + when(cli.checked) : cliError?.path ? 'found at ' + cliError.path + ', version unavailable' : 'not checked successfully') + err(cliError));
@@ -131,15 +141,29 @@ function Health({ open, post }: { open: boolean; post: ProvidersPost }) {
       else line('Permission mode: not checked yet (Check now)');
       line('Login: ' + (provider === 'agy' ? 'not monitored' : login ? login.state + (login.expiresAt ? ' · ends ' + when(login.expiresAt) : '') + ' · last success ' + when(login.checked) : 'not checked successfully') + err(data.errors.login[provider]) + (provider === 'agy' ? '' : data.scheduledProviders.includes(provider) ? ' · next scheduled check ' + when(data.nextLogin) : ' · not on the 10-minute schedule (Check now only)'));
     }
+    heading('Launch environment');
+    line("As this server's own environment shows it, from Check now. Variable names only, never their values; a set variable is a possible override, not proof it was used.");
+    const launch = data.diagnostics?.launch;
+    for (const provider of ['claude', 'codex', 'agy']) {
+      const l = launch?.[provider], P = provider.toUpperCase();
+      diag(P + ' · executables on PATH', l?.executables, (r) => [r.length > 0, r.map((x, i) => i ? x : x + ' (agent-room runs this one)').join(', ')]);
+      diag(P + ' · config folder', l?.configFolder, (r) => [r.exists, r.path + (r.exists ? '' : ' (not present)')]);
+      diag(P + ' · auth and config variables set', l?.env, (r) => [r.length > 0, r.join(', ')]);
+      if (provider === 'agy') line(P + ' · auth mode: not monitored');
+      else diag(P + ' · auth mode (' + (provider === 'claude' ? 'claude auth status --json' : 'codex login status') + ')', l?.authMode, (r) => [r !== 'unknown', r]);
+    }
+    heading('Model lists');
     const sources: Record<string, string> = { claude: "agent-room's fixed list in modelChoices", codex: 'models_cache.json', agy: 'agy models' };
     for (const provider of ['claude', 'codex', 'agy']) {
       const c = data.catalogs[provider];
       line(provider.toUpperCase() + ' model list · ' + sources[provider] + ' · ' + (c.loaded ? 'loaded' : c.checked ? 'unavailable' : 'not read yet') + ' · ' + c.models.length + ' models' + (c.checked ? ' · last attempt ' + when(c.checked) : '') + err(c.error));
     }
     line("Claude's list is agent-room's own; being in that list proves little about availability.");
+    heading('Configured models');
     for (const group of data.configured) { line('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started')); for (const a of group.agents) line(a.role + ' ' + a.name + ' · ' + a.provider + ' · ' + (a.model || 'CLI default') + ' · ' + a.alignment); }
     if (data.defaults) { line('Saved defaults'); for (const a of data.defaults) line(a.role + ' ' + a.name + ' · ' + a.provider + ' · ' + (a.model || 'CLI default') + ' · ' + a.alignment); }
     else line('Saved defaults: none available');
+    heading('Prompt tests');
     line('Prompt tests use quota and prove only that the model answered at that moment.');
     for (const provider of ['claude', 'codex', 'agy']) {
       const choices = [...new Set(data.configured.flatMap((g) => g.agents.filter((a) => a.provider === provider && a.model).map((a) => a.model)))];
@@ -151,6 +175,7 @@ function Health({ open, post }: { open: boolean; post: ProvidersPost }) {
         }}>Test prompt (uses quota)</button><span>{tests[provider]}</span></p>);
       for (const r of data.promptResults.filter((item) => item.provider === provider)) line(provider.toUpperCase() + ' · ' + (r.model || 'CLI default') + ' · ' + when(r.at) + ' · ' + (r.durationMs / 1000).toFixed(1) + ' s · ' + r.outcome + ' · reply: ' + (r.reply || '(none)') + (r.error ? ' · error: ' + r.error : ''));
     }
+    heading('Operations');
     line('Operations · provider and model used now');
     for (const group of data.configured) {
       line('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started'));
@@ -162,18 +187,26 @@ function Health({ open, post }: { open: boolean; post: ProvidersPost }) {
         ['Login check · claude auth status', 'Claude', 'not applicable'], ['Login check · codex login status', 'Codex', 'not applicable'], ['Login check', 'Agy', 'not monitored'], ['Quota meter', 'quota meter', 'not applicable']);
       table(['Operation', 'Provider', 'Model'], rows);
     }
+    heading('Sessions');
     line('Sessions are memory between turns, not running programs. This list covers only sessions known to agent-room.');
     for (const group of data.sessions) {
       line('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started'));
       table(['Agent', 'Provider', 'Session ID', 'Last turn', 'Latest error'], group.agents.map((a) => [a.role + ' ' + a.name, a.provider, a.id || 'none yet',
         a.lastTurn ? when(a.lastTurn.ended) + ' · ' + a.lastTurn.outcome : 'none yet', a.lastTurn?.error ? when(a.lastTurn.error.at) + ' · ' + a.lastTurn.error.message : 'none']));
     }
+    heading('Programs agent-room started');
     line('Leftovers: last success ' + when(data.leftoversChecked) + err(data.errors.leftovers) + ' · next scheduled check ' + when(data.nextLeftovers));
     const age = (started?: string | null) => started ? Math.max(0, Math.floor((Date.now() - new Date(started).getTime()) / 60000)) + ' min' : 'unknown';
     for (const [label, programs] of [['Running', data.running], ['Leftover', data.leftovers]] as const) {
       if (!programs.length) line(label + ': none in last available results');
       for (const p of programs) line(label + ': PID ' + p.pid + ' · ' + p.provider + ' · ' + p.agent + ' · room ' + p.room + ' · age ' + age(p.started) + (p.unverified ? ' · unverified' : ''));
     }
+    heading('CLI processes visible to this server');
+    line('Every running claude, codex and agy process ps shows, from Check now. Owner: agent-room for a recorded program or its process group; external for one with a terminal (agent-room starts CLIs without one); unknown otherwise. Working folders and command lines are not shown.');
+    const procs = data.diagnostics?.processes;
+    diag('CLI processes', procs, (r) => [r.length > 0, r.length ? r.length + (r.length === 1 ? ' process' : ' processes') : '']);
+    if (procs?.result?.length) table(['PID', 'Provider', 'Elapsed', 'Owner', 'Evidence'], procs.result.map((x) => [String(x.pid), x.provider, x.elapsed, x.owner, x.evidence]));
+    heading('Quota meter');
     for (const q of data.quota) line('Quota meter · room ' + q.room + ': ' + (q.reachable === null ? 'not checked' : q.reachable ? 'reachable' : 'not reachable') + ' · readings ' + (q.providers ? Object.entries(q.providers).map(([p, t]) => p + ': ' + (t || 'unknown')).join(', ') : (q.measured || 'unknown')) + ' · checked ' + when(q.checked));
   }
   return <><button type="button" id="health-check" disabled={busy} onClick={() => void load(true)}>Check now</button><div id="provider-health" role="status" aria-label="Provider health">{error || lines}</div></>;

@@ -180,3 +180,32 @@ it('describes ⚙ Providers with this board\'s CLI sessions, following room upda
   Source.current.send({ type: 'room', room: { ...room, cliSessions: null } });
   expect(document.getElementById('providers-tip')).toBeNull(); expect(button().getAttribute('title')).toContain('Default providers');
 });
+
+it('groups provider health under headings and shows Check now diagnostics: never checked, found, nothing found, and a failed rerun with the previous result', async () => {
+  const at = '2026-11-27T10:00:00Z', later = '2026-11-27T11:00:00Z';
+  const never = { executables: {}, configFolder: {}, env: {}, authMode: {} };
+  const diagnostics = { processes: { result: [{ pid: 101, provider: 'claude', elapsed: '01:02', owner: 'agent-room', evidence: 'recorded program' }, { pid: 202, provider: 'codex', elapsed: '00:05', owner: 'external', evidence: 'has a terminal; agent-room starts CLIs without one' }], checked: at, error: { message: 'ps: denied', at: later } },
+    launch: { claude: { executables: { result: ['/a/claude', '/b/claude'], checked: at }, configFolder: { result: { path: '/h/.claude', exists: true }, checked: at }, env: { result: ['ANTHROPIC_API_KEY'], checked: at }, authMode: { result: 'claude.ai (firstParty)', checked: at } },
+      codex: { executables: { result: [], checked: at }, configFolder: { result: { path: '/h/.codex', exists: false }, checked: at }, env: { result: [], checked: at }, authMode: { error: { message: 'login status not read', at } } }, agy: never } };
+  answer = (url, body) => url === '__provider-health' ? ok({ ...health, diagnostics: body ? diagnostics : null }) : url === '__settings' ? ok({ settings: { agents, worker }, started: false, models }) : ok([]);
+  render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '⚙ Providers' }));
+  await user.click(within(panel()).getByText(/^Provider health · all rooms on this server/));
+  const report = await within(panel()).findByRole('status', { name: 'Provider health' });
+  await waitFor(() => expect(report.textContent).toContain('CLAUDE · executables on PATH: never checked'));
+  expect([...report.querySelectorAll('h4')].map((h) => h.textContent)).toEqual(['Providers', 'Launch environment', 'Model lists', 'Configured models', 'Prompt tests', 'Operations', 'Sessions', 'Programs agent-room started', 'CLI processes visible to this server', 'Quota meter']);
+  expect(report.textContent).toContain('CLI processes: never checked'); expect(report.textContent).toContain('AGY · auth mode: not monitored');
+  await user.click(within(panel()).getByRole('button', { name: 'Check now' }));
+  await waitFor(() => expect(report.textContent).toContain('CLAUDE · executables on PATH: found: /a/claude (agent-room runs this one), /b/claude · checked '));
+  const text = report.textContent!;
+  expect(text).toContain('CLAUDE · config folder: found: /h/.claude · checked ');
+  expect(text).toContain('CLAUDE · auth and config variables set: found: ANTHROPIC_API_KEY · checked ');
+  expect(text).toContain('CLAUDE · auth mode (claude auth status --json): found: claude.ai (firstParty) · checked ');
+  expect(text).toContain('CODEX · executables on PATH: nothing found · checked ');
+  expect(text).toContain('CODEX · config folder: nothing found: /h/.codex (not present) · checked ');
+  expect(text).toContain("CODEX · auth mode (codex login status): couldn't check: login status not read (");
+  expect(text).toContain('AGY · config folder: never checked');
+  expect(text).toMatch(/CLI processes: couldn't check: ps: denied \(.*\) · previous result: found: 2 processes · checked /);
+  const rows = [...report.querySelectorAll('table')].at(-1)!.querySelectorAll('tr');
+  expect([...rows].map((r) => [...r.children].map((c) => c.textContent))).toEqual([['PID', 'Provider', 'Elapsed', 'Owner', 'Evidence'], ['101', 'claude', '01:02', 'agent-room', 'recorded program'], ['202', 'codex', '00:05', 'external', 'has a terminal; agent-room starts CLIs without one']]);
+});
