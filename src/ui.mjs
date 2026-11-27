@@ -1473,7 +1473,7 @@ async function pairWith(ctx, peer, confirm) {
 // Monitoring binds the current coordinator; hub and room state retain timer ownership.
 const monitor = monitorModule.createMonitor({ hubOf, toScreen, currentSettings, claudeModels, codexModels, agyModels,
   modelAlignment, readDefaults, sessionView, folderOf: (...args) => folderOf(...args) });
-export const { monitorAgentTurns, checkLogins, checkLeftovers, checkCli, runPromptTest, monitorView } = monitor;
+export const { monitorAgentTurns, checkLogins, checkLeftovers, checkCli, runPromptTest, monitorView, startupChecks, startupProblems } = monitor;
 const { refreshQuota, watchMonitor, healthView, checkProviderHealth, showMonitor } = monitor;
 
 // Board callbacks are rebound with each UI version; running operations keep their original set.

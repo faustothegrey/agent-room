@@ -787,6 +787,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         setWorkInput(!!event.workInput); setWorking(event.working ?? null); setRetryBusy(null);
         setWorkerMessages((event.worker ?? []).filter((m) => !('note' in m))); setWorkerHint(!event.worker?.length); setChatReset((n) => n + 1);
         for (const m of event.worker ?? []) if ('note' in m) addStatus(m.note, !!m.error, 'Worker');
+        // The startup checks' summary, kept by the server for pages that connect after it was sent.
+        const startup = event.startup;
+        if (startup) setStatus((lines) => lines.some((l) => l.text === startup) ? lines : [...lines, { text: startup, error: true }].slice(-2));
         if (event.peek ? event.peek.kind === 'workbench' : event.room?.workbench) { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); }
         else if ((event.peek ? event.peek.kind === 'research' : event.room?.research || roomRef.current?.workbench) && tabRef.current === 'worker') { tabRef.current = 'discussion'; setTab('discussion'); }
         viewing.current = remoteRef.current ?? event.viewing;

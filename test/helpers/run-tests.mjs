@@ -42,7 +42,7 @@ async function main() {
   const timings = existsSync(timingsPath) ? JSON.parse(readFileSync(timingsPath, 'utf8')) : {};
   const files = (await import('node:fs')).readdirSync(testDir).filter((name) => name.endsWith('.test.mjs')).map((name) => join(testDir, name));
   const result = spawnSync(process.execPath, ['--test', '--test-reporter=spec', `--test-reporter-destination=stdout`, `--test-reporter=${fileURLToPath(new URL('reporter.mjs', import.meta.url))}`, `--test-reporter-destination=${report}`, ...files], {
-    stdio: 'inherit', env: { ...process.env, HOME: directory, AGENT_ROOM_TEST_SUITE: suite },
+    stdio: 'inherit', env: { ...process.env, HOME: directory, AGENT_ROOM_TEST_SUITE: suite, AGENT_ROOM_NO_STARTUP_CHECKS: '1' },
   });
   try {
     const events = readFileSync(report, 'utf8').split('\n').filter(Boolean).map(JSON.parse);

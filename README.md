@@ -84,10 +84,24 @@ session. The session tables list the provider session IDs known to agent-room an
 worker's last turn, with its outcome and latest error. A session is memory between turns, not a
 running program. Turn outcomes and latest errors are kept only in memory, not in a history or log. For each provider,
 **Test prompt (uses quota)** sends a tiny prompt with the chosen configured model or CLI default in a
-new session and temporary empty folder. It runs only on click, separately from Check now, and its
-latest result per provider and model is kept in memory. The result proves only that the model answered
-at that moment. Claude runs without tools or session persistence; Codex uses a read-only sandbox,
-no web search and an ephemeral session; Agy uses its sandbox and does not bypass permissions.
+new session and temporary empty folder. It runs on click, separately from Check now, and once per
+provider at startup (below); its latest result per provider and model is kept in memory. The result
+proves only that the model answered at that moment. Claude runs without tools or session persistence;
+Codex uses a read-only sandbox, no web search and an ephemeral session; Agy uses its sandbox and does
+not bypass permissions. Claude's reply carries its quota reading, which updates the quota gauges of
+every open room at once.
+
+**Startup checks.** When the server starts or Restarts (not on Reload), once every restored room has
+loaded, it runs in the background everything Check now does, plus one Test prompt per provider with
+its CLI default model. So Claude's gauge appears right away, without waiting for a Claude turn. The
+problems counted are: a login that is not ok for Claude or Codex, a CLI check error, an unavailable
+model list, a Codex or Agy configured or default model not in its list (Claude's list is agent-room's
+own), a leftovers check error and a failed Test prompt. If there are any, every open room's System
+messages get one line, such as "Startup checks: 2 problems (codex login, agy test prompt) · see
+Providers"; nothing when all pass. The server keeps that line and sends it to pages that connect
+later. A later Check now or Test prompt updates it, or clears it with "the problems are resolved".
+The details are in Providers. Terminal mode (`--no-screen`) skips the startup checks, as do tests
+(`AGENT_ROOM_NO_STARTUP_CHECKS`, set by the test runner).
 
 A **leftover** is a program agent-room started that is still alive after a crash or a Restart.
 Each program is written, when it starts, to `~/.local/state/agent-room/programs/<pid>.json` (PID,

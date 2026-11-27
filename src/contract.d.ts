@@ -126,6 +126,7 @@ export interface ResetEvent {
   working: string | null; workInput: boolean; workerInfo: WorkerInfo | null;
   quota?: Gauge[] | null; quotaAt: QuotaAt | null; monitor: Monitor | null; newRoom: boolean;
   page: string; webVersion: string | null; replica: Replica | null; replicaOff: string | null; viewing: unknown; peek: Peek | null;
+  startup?: string | null; // the latest startup checks' summary of problems (monitor.mjs), or null
 }
 export type ScreenEvent = ResetEvent
   | { type: 'message'; message: MessageView }
@@ -154,7 +155,7 @@ export interface Screen {
   nextDist?: string; busy?: unknown; say?: unknown; room?: Room | null; workerForPage?: () => WorkerMessage[];
   worker?: WorkerMessage[]; working?: string | null; work?: unknown; workerInfo?: WorkerInfo | null;
   quota?: Gauge[] | null; quotaAt?: QuotaAt | null; monitor?: Monitor | null; newRoom?: unknown;
-  replica?: Replica | null; replicaOff?: string | null; viewing?: unknown; peek?: Peek | null;
+  replica?: Replica | null; replicaOff?: string | null; viewing?: unknown; peek?: Peek | null; startup?: string | null;
 }
 
 // First routes used by the React page. Event-stream bodies consist of ScreenEvent JSON frames.

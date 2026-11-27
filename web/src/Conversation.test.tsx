@@ -69,6 +69,15 @@ it('tracks thinking, your turn, user speech, auto dev and the last two status li
   expect(screen.queryByLabelText('Turn status')).toBeNull();
 });
 
+it('shows the startup checks summary from a reset once, as an error line', () => {
+  render(<App version="one" refresh={() => {}} />);
+  const startup = 'Startup checks: 1 problem (codex login) · see Providers';
+  Source.current.send({ type: 'reset', room, messages: [], startup });
+  Source.current.send({ type: 'reset', room, messages: [], startup });
+  expect(screen.getAllByText(startup)).toHaveLength(1);
+  expect(screen.getByText(startup).className).toContain('error');
+});
+
 it('shows a delayed busy indicator from reset and events and briefly marks errors', () => {
   vi.useFakeTimers();
   render(<App version="one" refresh={() => {}} />);

@@ -7201,3 +7201,97 @@ test('Reload preserves per-context quota, per-workshop schedule and server monit
     rmSync(root, { recursive: true, force: true, maxRetries: 5 });
   }
 });
+
+test('startup checks: one summary of problems in every room, replayed to later pages and resolved by later checks', async () => {
+  const { createMonitor } = await import('../src/monitor.mjs');
+  const { modelAlignment } = await import('../src/ui.mjs');
+  const { createScreenEvents } = await import('../src/screen-events.mjs');
+  const { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM } = await import('../src/agents.mjs');
+  const sent = [], logged = [];
+  const catalog = (models) => ({ status: () => ({ loaded: true, checked: 'x', models, error: null }), refresh: async () => {} });
+  const codexModels = Object.assign(() => [], catalog([{ id: 'gpt' }])), agyModels = catalog([{ id: 'gem' }]);
+  // Claude's model is outside agent-room's fixed list: not a problem; Codex's "old" is.
+  const settings = { agents: [{ provider: 'codex', model: 'old' }, { provider: 'claude', model: 'custom' }], worker: { provider: 'agy', model: '' } };
+  const m = createMonitor({ hubOf: (c) => c.hub, toScreen: (c, e) => sent.push([c.cwd, e]), currentSettings: () => settings, claudeModels: [],
+    codexModels, agyModels, modelAlignment, readDefaults: () => null, sessionView: () => ({ agents: [], worker: {} }), folderOf: () => null });
+  const quotaCalls = [];
+  const usage = { refreshProviderQuota: async (provider, reading) => { quotaCalls.push([provider, reading.five_hour.used_percent]); },
+    fetchQuota: async () => ({}), quotaGauges: () => [{ provider: 'claude', label: '5h', used: 5 }] };
+  let agyFails = true;
+  const runner = async (provider) => {
+    if (provider === 'agy' && agyFails) throw new Error('agy failed');
+    if (provider === 'codex') return '{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n';
+    if (provider === 'agy') return JSON.stringify({ status: 'SUCCESS', response: 'OK' });
+    return '{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.05,"resetsAt":1795780200}}}}\n{"type":"result","result":"OK","is_error":false}\n';
+  };
+  const parsers = { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM }, models = [];
+  const hub = { rooms: new Map(), quotaCache: { value: null } };
+  const room = (cwd) => ({ cwd, hub, usage, room: { agents: [{ provider: 'codex' }] }, worker: { provider: 'agy' }, screen: { clients: new Set(), transcript: [] },
+    testPrompt: (ctx, provider, model) => { models.push([provider, model]); return m.runPromptTest(ctx, provider, model, runner, parsers); } });
+  const a = room('/a'), b = room('/b');
+  hub.rooms.set('a', a); hub.rooms.set('b', b);
+  const now = new Date().toISOString();
+  const health = async () => {
+    hub.monitor = { login: {}, loginCurrent: { claude: { state: 'ok' }, codex: { state: 'out' }, agy: { state: 'unknown' } },
+      cli: { claude: { checked: now } }, errors: { login: {}, cli: {}, leftovers: null }, leftoversChecked: now };
+  };
+  const log = console.log; console.log = (line) => logged.push(line);
+  try {
+    await m.startupChecks(hub, health);
+    // Once per server: a second call (a Reload's code, say) runs nothing.
+    await m.startupChecks(hub, health);
+  } finally { console.log = log; }
+  assert.deepEqual(models.sort(), [['agy', ''], ['claude', ''], ['codex', '']]);
+  // Claude's Test prompt reading fed the quota cache, and every open room's gauges.
+  assert.deepEqual(quotaCalls, [['claude', 5]]);
+  assert.deepEqual(a.screen.quota, [{ provider: 'claude', label: '5h', used: 5 }]);
+  assert.deepEqual(b.screen.quota, [{ provider: 'claude', label: '5h', used: 5 }]);
+  const text = 'Startup checks: 3 problems (codex login, codex model not in list, agy test prompt) · see Providers';
+  const notes = () => sent.filter(([, e]) => e.type === 'note');
+  assert.deepEqual(notes(), [['/a', { type: 'note', text, error: true }], ['/b', { type: 'note', text, error: true }]]);
+  assert.deepEqual(logged, [text]);
+  assert.equal(hub.startupSummary, text);
+  // A page that connects later gets it in its reset event.
+  const events = createScreenEvents({ parse: (t) => t }, () => 'page', () => null);
+  assert.equal(events.resetEvent(a.screen).startup, text);
+  // A later Test prompt updates the line; once the rest is fixed, the next check clears it.
+  sent.length = 0; agyFails = false;
+  console.log = (line) => logged.push(line);
+  try {
+    await m.runPromptTest(a, 'agy', '', runner, parsers);
+    hub.monitor.loginCurrent.codex = { state: 'ok' }; settings.agents[0].model = 'gpt';
+    await m.runPromptTest(a, 'codex', '', runner, parsers);
+    await m.runPromptTest(a, 'codex', '', runner, parsers);
+  } finally { console.log = log; }
+  const updated = 'Startup checks: 2 problems (codex login, codex model not in list) · see Providers', resolved = 'Startup checks: the problems are resolved';
+  assert.deepEqual(notes().map(([cwd, e]) => [cwd, e.text, e.error]), [['/a', updated, true], ['/b', updated, true], ['/a', resolved, false], ['/b', resolved, false]]);
+  assert.equal(hub.startupSummary, null);
+  assert.equal(events.resetEvent(b.screen).startup, null);
+});
+
+test('startup checks: nothing in System messages when every check passes, and later failures do not post', async () => {
+  const { createMonitor } = await import('../src/monitor.mjs');
+  const { modelAlignment } = await import('../src/ui.mjs');
+  const sent = [];
+  const catalog = { status: () => ({ loaded: true, checked: 'x', models: [], error: null }), refresh: async () => {} };
+  const m = createMonitor({ hubOf: (c) => c.hub, toScreen: (c, e) => sent.push(e), currentSettings: () => ({ agents: [], worker: { provider: 'claude', model: '' } }),
+    claudeModels: [], codexModels: Object.assign(() => [], catalog), agyModels: catalog, modelAlignment, readDefaults: () => null,
+    sessionView: () => ({ agents: [], worker: {} }), folderOf: () => null });
+  const hub = { rooms: new Map() };
+  const now = new Date().toISOString();
+  let fail = false;
+  const ctx = { cwd: '/a', hub, usage: {}, room: { agents: [] }, worker: { provider: 'claude' }, screen: { clients: new Set(), transcript: [] },
+    testPrompt: async (c, provider) => { (hub.promptResults ??= new Map()).set(provider, new Map([['', { provider, model: '', at: new Date().toISOString(), outcome: fail ? 'failed' : 'ok' }]])); } };
+  hub.rooms.set('a', ctx);
+  // A CLI error older than its last success, and a leftovers error older than its last check, are past.
+  const health = async () => { hub.monitor = { login: {}, loginCurrent: { claude: { state: 'ok' }, codex: { state: 'ok' } }, cli: { codex: { checked: now } },
+    errors: { login: {}, cli: { codex: { message: 'old', at: '2026-01-01T00:00:00.000Z' } }, leftovers: { message: 'old', at: '2026-01-01T00:00:00.000Z' } }, leftoversChecked: now }; };
+  await m.startupChecks(hub, health);
+  assert.deepEqual(m.startupProblems(hub), []);
+  assert.deepEqual(sent.filter((e) => e.type === 'note'), []);
+  assert.equal(hub.startupSummary, null);
+  fail = true;
+  await m.runPromptTest(ctx, 'claude', '', async () => { throw new Error('down'); }, {});
+  assert.deepEqual(m.startupProblems(hub), ['claude test prompt']);
+  assert.deepEqual(sent.filter((e) => e.type === 'note'), []);
+});
