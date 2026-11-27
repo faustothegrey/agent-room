@@ -93,6 +93,10 @@ export function recordProgram(entry, dir = programsDirectory()) {
     renameSync(temp, join(dir, `${entry.pid}.json`));
   } catch { try { unlinkSync(temp); } catch {} }
 }
+// The PIDs of every recorded program, of any agent-room server (Check now's process list).
+export function recordedPids(dir = programsDirectory()) {
+  try { return readdirSync(dir).filter((n) => /^\d+\.json$/.test(n)).map((n) => Number(n.slice(0, -5))); } catch { return []; }
+}
 export function forgetProgram(pid, dir = programsDirectory()) {
   try { unlinkSync(join(dir, `${pid}.json`)); } catch {}
 }

@@ -1,8 +1,35 @@
 // Per-room quota and server-wide provider monitoring, bound to the current room coordinator.
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+// Check now's diagnostics (README, "Provider health"): what the server's own environment shows of each
+// provider's launch, and the CLI processes it can see. Names of variables only, never their values.
+export const AUTH_ENV = {
+  claude: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CONFIG_DIR'],
+  codex: ['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'CODEX_API_KEY', 'CODEX_HOME'],
+  agy: ['GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_CLOUD_PROJECT', 'GOOGLE_GENAI_USE_VERTEXAI'],
+};
+export const configFolder = (provider, env = process.env, home = homedir()) => provider === 'claude' ? env.CLAUDE_CONFIG_DIR || join(home, '.claude')
+  : provider === 'codex' ? env.CODEX_HOME || join(home, '.codex') : join(home, '.gemini', 'antigravity-cli');
+// `ps -axo pid=,pgid=,etime=,tty=,comm=` → the claude, codex and agy processes, by executable name
+// only (never arguments or folders). Owner: 'agent-room' when the process or its group leader is a
+// recorded program (agent-room starts each CLI as its own group); 'external' when it has a terminal
+// (agent-room starts CLIs detached, without one); otherwise 'unknown'.
+export function parseProcesses(text, recorded) {
+  return String(text).split('\n').flatMap((line) => {
+    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.+?)\s*$/);
+    const provider = m?.[5].split('/').pop();
+    if (!m || !['claude', 'codex', 'agy'].includes(provider)) return [];
+    const pid = Number(m[1]), pgid = Number(m[2]), tty = m[4];
+    const [owner, evidence] = recorded.has(pid) ? ['agent-room', 'recorded program'] : recorded.has(pgid) ? ['agent-room', "in a recorded program's process group"]
+      : !['?', '??', '-'].includes(tty) ? ['external', 'has a terminal; agent-room starts CLIs without one'] : ['unknown', 'no record and no terminal'];
+    return [{ pid, provider, elapsed: m[3], owner, evidence }];
+  });
+}
+const execText = (command, args, { ok = [] } = {}) => new Promise((resolve, reject) => execFile(command, args, { timeout: 20_000, env: { ...process.env, LC_ALL: 'C' } },
+  (err, out) => err && !ok.includes(err.code) ? reject(err) : resolve(String(out ?? ''))));
 
 export function createMonitor({ hubOf, toScreen, currentSettings, claudeModels, codexModels, agyModels,
   modelAlignment, readDefaults, sessionView, folderOf }) {
@@ -86,13 +113,13 @@ function watchMonitor(ctx) {
 }
 const errorAt = (err) => ({ message: err?.message ?? String(err), at: new Date().toISOString() });
 // Preserve the last success separately from the latest failure, including unreadable login output.
-async function checkLogins(hub, all, requested) {
+async function checkLogins(hub, all, requested, options) {
   const rooms = loadedRooms(hub);
   if (!rooms.length) return;
   const providers = (requested ?? [...new Set(rooms.flatMap(providersOf))]).filter((p) => all || !(p in hub.monitor.login));
   await Promise.all(providers.map(async (p) => {
     try {
-      const result = await rooms[0].usage.checkLogin(p), checked = new Date().toISOString();
+      const result = await rooms[0].usage.checkLogin(p, undefined, options), checked = new Date().toISOString();
       if (result.state === 'unknown') hub.monitor.errors.login[p] = { message: result.error, at: checked };
       else hub.monitor.login[p] = { ...result, checked };
       hub.monitor.loginCurrent ??= {};
@@ -203,18 +230,45 @@ function healthView(ctx) {
   return { promptResults: [...(hub.promptResults?.values() ?? [])].flatMap((results) => [...results.values()]),
     promptRunning: [...(hub.promptRunning ?? [])], sessions, scheduledProviders: [...new Set(rooms.flatMap(providersOf))], catalogs,
     configured: rooms.map((r) => ({ room: r.cwd, discussion: folderOf(r), agents: configured(currentSettings(r)).map((a) => ({ ...a, enabled: a.role === 'worker' || !(r.state.disabledAgents ?? []).includes(a.name) })) })),
-    defaults: defaults ? configured(defaults) : null, permissions: permissionReports(hub), login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
+    defaults: defaults ? configured(defaults) : null, diagnostics: m.diagnostics ?? null, permissions: permissionReports(hub), login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
     leftovers: m.leftovers, leftoversChecked: m.leftoversChecked, nextLogin: m.nextLogin, nextLeftovers: m.nextLeftovers,
     running: loadedRooms(hub).flatMap((r) => [...(r.programs?.running ?? [])].map((p) => ({ pid: p.pid, provider: p.provider, ...p.monitorInfo }))),
     quota: loadedRooms(hub).map((r) => ({ room: r.cwd, reachable: r.screen.quota === undefined ? null : r.screen.quota !== null, ...r.screen.quotaAt })) };
 }
-async function checkProviderHealth(ctx) {
+// `diagnostics`: Check now only (not the startup checks), which also runs checkDiagnostics.
+async function checkProviderHealth(ctx, { diagnostics = false } = {}) {
   const hub = hubOf(ctx);
   codexModels();
-  await Promise.all([agyModels.refresh(), checkLogins(hub, true, ['claude', 'codex', 'agy']), checkLeftovers(hub), checkPermissions(hub),
+  await Promise.all([agyModels.refresh(), checkLogins(hub, true, ['claude', 'codex', 'agy'], { authMode: diagnostics }), checkLeftovers(hub), checkPermissions(hub),
     ...['claude', 'codex', 'agy'].map((p) => checkCli(hub, p)), ...loadedRooms(hub).map((r) => refreshQuota(r).catch(() => null))]);
+  if (diagnostics) await checkDiagnostics(hub);
   updateStartupSummary(hub);
   return healthView(ctx);
+}
+// Each diagnostic keeps { result, checked, error }: a failed rerun records its error and keeps the
+// previous result with its own time. Runs after the login and leftovers checks it reads.
+async function checkDiagnostics(hub, { run = execText, env = process.env, home = homedir(), exists = existsSync } = {}) {
+  const rooms = loadedRooms(hub);
+  const d = hub.monitor.diagnostics ??= { processes: {}, launch: Object.fromEntries(PROVIDERS.map((p) => [p, { executables: {}, configFolder: {}, env: {}, authMode: {} }])) };
+  const attempt = async (slot, fn) => {
+    try { Object.assign(slot, { result: await fn(), checked: new Date().toISOString(), error: null }); }
+    catch (err) { slot.error = errorAt(err); }
+  };
+  const recorded = () => new Set([...rooms.flatMap((r) => [...(r.programs?.running ?? [])].map((p) => p.pid)),
+    ...(hub.monitor.leftovers ?? []).map((l) => l.pid), ...(rooms[0]?.recordedPids?.() ?? [])]);
+  await Promise.all([
+    attempt(d.processes, async () => parseProcesses(await run('ps', ['-axo', 'pid=,pgid=,etime=,tty=,comm=']), recorded())),
+    ...PROVIDERS.flatMap((p) => { const l = d.launch[p]; return [
+      // `which` exits 1 when nothing matches; the first path is the one agent-room's spawn finds.
+      attempt(l.executables, async () => [...new Set((await run('which', ['-a', p], { ok: [1] })).split('\n').map((x) => x.trim()).filter(Boolean))]),
+      attempt(l.configFolder, async () => { const path = configFolder(p, env, home); return { path, exists: exists(path) }; }),
+      attempt(l.env, async () => AUTH_ENV[p].filter((name) => !!env[name])),
+      // Only what checkLogin's status command said; agy's login is not monitored.
+      p !== 'agy' && attempt(l.authMode, async () => {
+        const login = hub.monitor.loginCurrent?.[p];
+        if (!login || login.state === 'unknown') throw new Error('login status not read');
+        return login.authMode ?? 'unknown';
+      })]; })]);
 }
 
 // Startup diagnostics (README, "Providers"): once per server start or Restart, after the restored
@@ -295,5 +349,5 @@ function showMonitor(ctx) {
 
 
 return { monitorAgentTurns, refreshQuota, watchMonitor, checkLogins, checkLeftovers, checkCli,
-  runPromptTest, healthView, checkProviderHealth, monitorView, showMonitor, startupChecks, startupProblems, checkPermissions };
+  runPromptTest, healthView, checkProviderHealth, checkDiagnostics, monitorView, showMonitor, startupChecks, startupProblems, checkPermissions };
 }

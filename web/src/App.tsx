@@ -10,7 +10,7 @@ import { TerminalPane } from './Terminal';
 import { InstructionsPanel, ProvidersPanel, SchedulePanel } from './Services';
 import { providerHealth } from './RoomZones';
 import { Notes, NOTES_DRAFT_KEY, type NoteDraft, type NotesApi } from './Notes';
-import type { PromptTestRequest, ScheduleRequest, NoteRequest, AgentEnabledRequest, SettingsSaveRequest, Gauge, Monitor, NewRoomRequest, PairRequest, QuotaAt, ReceivedLine, Replica, ViewedLine, ViewReply, ViewRequest, AgentSettings, BoardActionRequest, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
+import type { PromptTestRequest, ScheduleRequest, NoteRequest, AgentEnabledRequest, SettingsSaveRequest, Gauge, Monitor, NewRoomRequest, PairRequest, QuotaAt, ReceivedLine, Replica, ViewedLine, ViewReply, ViewRequest, AgentSettings, BoardActionRequest, CliSession, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
 const SNAP_SIZE = 80;
@@ -934,6 +934,10 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const rootMode = explorerMode === 'root' || !base;
   const treeFiles = rootMode ? (fileDetails?.files ?? []).filter((file) => !inBoard(file)) : (fileDetails?.files ?? []).filter((file) => file.startsWith(base + '/')).map((file) => file.slice(base!.length + 1));
   const namesUnder = (prefix: string) => [...new Set((fileDetails?.files ?? []).filter((f) => f.startsWith(prefix + '/')).map((f) => f.slice(prefix.length + 1).split('/')).filter((parts) => parts.length > 1 && /^\d{4}-\d{2}-\d{2}-/.test(parts[0])).map((parts) => parts[0]))].sort((a, b) => b.localeCompare(a));
+  // The ⚙ Providers tooltip: this board's CLI sessions at a glance (full IDs are in the settings panels).
+  const sessionLabel = (s: CliSession) => `${s.name} · ${s.provider} · ${s.id ? s.id.slice(0, 8) + '…' : 'No session yet'}`;
+  const sessionList = room?.cliSessions ? [...room.cliSessions.agents.map(sessionLabel), ...(room.cliSessions.worker?.id ? [sessionLabel(room.cliSessions.worker)] : [])] : [];
+  const sessionLines = sessionList.length ? sessionList : null;
   const boardTitle = (name: string, path: string, brainstorm: boolean) => displayTitle(name, room?.open?.find((entry) => entry.active === path)?.title ?? (room?.active === path ? room.discussion : undefined) ?? room?.checkpoints?.find((entry) => entry.name === (brainstorm ? 'brainstorms/' + name : name))?.title);
   // Document's path line (docLabel): the discussion (current, peeked or received) or "Room checkout",
   // plus the file's path inside it; the browser tab is named after it, or after the board.
@@ -1136,7 +1140,10 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     <nav id="control-bar" aria-label="Services">
       <div id="server-head" ref={setServerSlot} />
       <button type="button" className="ctrl-btn" id="ctrl-boards" aria-pressed={service === null} title="Boards and conversation" onClick={() => { if (service) openService(null); else if (boardsClosed) { setBoardsClosed(false); refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', '0'); } catch {} } }}><span className="ctrl-ico">💬</span> <span className="ctrl-lbl">Boards</span></button>
-      <button type="button" className="ctrl-btn" aria-pressed={service === 'providers'} title="Default providers and models for new discussions, and provider health" onClick={() => openService(service === 'providers' ? null : 'providers')}><span className="ctrl-ico">⚙</span> <span className="ctrl-lbl">Providers</span></button>
+      <div className="ctrl-tip-wrap">
+        <button type="button" className="ctrl-btn" aria-pressed={service === 'providers'} title={sessionLines ? undefined : 'Default providers and models for new discussions, and provider health'} aria-describedby={sessionLines ? 'providers-tip' : undefined} onClick={() => openService(service === 'providers' ? null : 'providers')}><span className="ctrl-ico">⚙</span> <span className="ctrl-lbl">Providers</span></button>
+        {sessionLines && <div id="providers-tip" className="ctrl-tip" role="tooltip"><strong>This room's sessions</strong>{sessionLines.map((line, i) => <div key={i}>{line}</div>)}</div>}
+      </div>
       <button type="button" className="ctrl-btn" aria-pressed={service === 'instructions'} title="The prompts and rulebooks sent to each agent, and when" onClick={() => openService(service === 'instructions' ? null : 'instructions')}><span className="ctrl-ico">📜</span> <span className="ctrl-lbl">Instructions</span></button>
       <button type="button" className="ctrl-btn" aria-pressed={service === 'schedule'} title="Scheduled tasks and quota guard" onClick={() => openService(service === 'schedule' ? null : 'schedule')}><span className="ctrl-ico">⏰</span> <span className="ctrl-lbl">Schedule</span></button>
       <button type="button" className="ctrl-btn" aria-pressed={service === 'notes'} title="Your own notes for this room's folder, stored on the agent-room computer (not in the folder, not sent to peers); usable from the room's own addresses, the LAN ones too. The agents are not told about them; the files are outside the room's folder." onClick={() => openService(service === 'notes' ? null : 'notes')}><span className="ctrl-ico">📝</span> <span className="ctrl-lbl">My notes</span></button>

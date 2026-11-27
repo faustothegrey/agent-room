@@ -94,26 +94,29 @@ test('claude login: from loginExpiresAt in claude auth status; ending in 2 days 
   assert.deepEqual(parseClaudeAuth(status({}), now), { state: 'ok', expiresAt: null });
   assert.deepEqual(parseClaudeAuth(JSON.stringify({ loggedIn: false }), now), { state: 'out' });
   assert.equal(parseClaudeAuth('Logged in', now).state, 'unknown');
+  assert.equal(parseClaudeAuth('Logged in', now).error, 'claude auth status --json: output not JSON');
   assert.equal(parseClaudeAuth('{}', now).state, 'unknown');
-  assert.match(parseClaudeAuth(status({ loginExpiresAt: 'soon' }), now).error, /unreadable loginExpiresAt: soon/);
+  assert.equal(parseClaudeAuth(status({ loginExpiresAt: 'soon' }), now).error, 'claude auth status --json: login expiry unreadable');
 });
 
 test('codex login: logged in with no expiry, logged out, or unknown', () => {
   assert.deepEqual(parseCodexLogin('Logged in using ChatGPT\n'), { state: 'ok', expiresAt: null });
   assert.deepEqual(parseCodexLogin('\nNot logged in\n'), { state: 'out' });
-  assert.match(parseCodexLogin('something else').error, /unreadable output: something else/);
+  assert.equal(parseCodexLogin('something else').error, 'codex login status: output not recognised');
 });
 
-test('checkLogin: a command that fails or times out is unknown, with its error; a logged-out exit code still reads', async () => {
+test('checkLogin: a command that fails or times out is unknown, with fixed error; a logged-out exit code still reads', async () => {
   const exec = (result) => (command, args, options, done) => done(...result);
   const missing = Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' });
-  assert.deepEqual(await checkLogin('codex', exec([missing])), { state: 'unknown', error: 'codex login status: spawn codex ENOENT' });
+  assert.deepEqual(await checkLogin('codex', exec([missing])), { state: 'unknown', error: 'codex login status: not found' });
   const killed = Object.assign(new Error('timed out'), { code: null, killed: true });
-  assert.equal((await checkLogin('claude', exec([killed]))).state, 'unknown');
+  assert.deepEqual(await checkLogin('claude', exec([killed])), { state: 'unknown', error: 'claude auth status --json: timed out' });
+  const denied = Object.assign(new Error('spawn claude EACCES'), { code: 'EACCES' });
+  assert.deepEqual(await checkLogin('claude', exec([denied])), { state: 'unknown', error: 'claude auth status --json: failed to run' });
   const out = Object.assign(new Error('exit 1'), { code: 1 });
   assert.deepEqual(await checkLogin('claude', exec([out, '{"loggedIn": false}', ''])), { state: 'out' });
   assert.deepEqual(await checkLogin('codex', exec([null, '', 'Logged in using ChatGPT\n'])), { state: 'ok', expiresAt: null });
-  assert.match((await checkLogin('codex', exec([out, '', 'boom']))).error, /exit 1: boom/);
+  assert.deepEqual(await checkLogin('codex', exec([out, '', 'boom'])), { state: 'unknown', error: 'codex login status: exit 1' });
 });
 
 
@@ -353,4 +356,24 @@ test('quota guard rejects a window after its reset until a later reading arrives
     argon: { windows: { weekly: { used_percent: 1, resets_at: reset } } },
   } } } };
   assert.match(checkQuotaFloor(agy, ['agy'], 50, { now: Date.parse('2026-11-26T12:06:00Z') }).reason, /agy \(argon\) week.*reset/);
+});
+
+test('auth mode: only known labels, never key text (even short plain tokens); only when asked', async () => {
+  const { authModeOf } = await import('../src/usage.mjs');
+  const shortTok = 'sk-ant-tok12345';
+  assert.equal(authModeOf('claude', '{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}'), 'claude.ai (firstParty)');
+  assert.equal(authModeOf('claude', '{"loggedIn":true,"authMethod":"api_key","apiProvider":"bedrock"}'), 'API key (Bedrock)');
+  assert.equal(authModeOf('claude', '{"loggedIn":true,"authMethod":"claude.ai"}'), 'claude.ai');
+  assert.equal(authModeOf('claude', '{"loggedIn":true}'), 'unknown');
+  assert.equal(authModeOf('claude', JSON.stringify({ loggedIn: true, authMethod: shortTok, apiProvider: 'firstParty' })), 'unknown');
+  assert.equal(authModeOf('claude', JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: shortTok })), 'claude.ai');
+  assert.equal(authModeOf('claude', '{"authMethod":"sk-ant-api03-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'), 'unknown');
+  assert.equal(authModeOf('claude', `not json ${shortTok}`), 'unknown');
+  assert.equal(authModeOf('codex', '', 'Logged in using ChatGPT\n'), 'ChatGPT');
+  assert.equal(authModeOf('codex', '', `Logged in using an API key - ${shortTok}\n`), 'API key');
+  assert.equal(authModeOf('codex', '', `Unexpected status ${shortTok}\n`), 'unknown');
+  assert.equal(authModeOf('codex', '', 'Not logged in\n'), 'unknown');
+  const exec = (result) => (command, args, options, done) => done(...result);
+  assert.deepEqual(await checkLogin('codex', exec([null, '', 'Logged in using ChatGPT\n'])), { state: 'ok', expiresAt: null });
+  assert.deepEqual(await checkLogin('codex', exec([null, '', 'Logged in using ChatGPT\n']), { authMode: true }), { state: 'ok', expiresAt: null, authMode: 'ChatGPT' });
 });

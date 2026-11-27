@@ -370,12 +370,12 @@ export function usageReport({ totals, agents, quota, url = METER_URL }) {
 const ENDING_MS = 2 * 24 * 3600 * 1000;
 export function parseClaudeAuth(stdout, now = Date.now()) {
   let s;
-  try { s = JSON.parse(stdout); } catch { return { state: 'unknown', error: `claude auth status: unreadable output: ${String(stdout).trim().slice(0, 200) || '(none)'}` }; }
+  try { s = JSON.parse(stdout); } catch { return { state: 'unknown', error: 'claude auth status --json: output not JSON' }; }
   if (s?.loggedIn === false) return { state: 'out' };
-  if (s?.loggedIn !== true) return { state: 'unknown', error: 'claude auth status: no loggedIn field' };
+  if (s?.loggedIn !== true) return { state: 'unknown', error: 'claude auth status --json: no loggedIn field' };
   if (s.loginExpiresAt == null) return { state: 'ok', expiresAt: null };
   const at = Date.parse(s.loginExpiresAt);
-  if (Number.isNaN(at)) return { state: 'unknown', error: `claude auth status: unreadable loginExpiresAt: ${s.loginExpiresAt}` };
+  if (Number.isNaN(at)) return { state: 'unknown', error: 'claude auth status --json: login expiry unreadable' };
   const expiresAt = new Date(at).toISOString();
   return { state: at <= now ? 'expired' : at - now <= ENDING_MS ? 'ending' : 'ok', expiresAt };
 }
@@ -384,21 +384,52 @@ export function parseCodexLogin(text) {
   const t = String(text).trim();
   if (/^not logged in\b/im.test(t)) return { state: 'out' };
   if (/^logged in\b/im.test(t)) return { state: 'ok', expiresAt: null };
-  return { state: 'unknown', error: `codex login status: unreadable output: ${t.slice(0, 200) || '(none)'}` };
+  return { state: 'unknown', error: 'codex login status: output not recognised' };
 }
 const LOGIN_COMMANDS = { claude: ['claude', ['auth', 'status', '--json'], (out) => parseClaudeAuth(out)],
   codex: ['codex', ['login', 'status'], (out, err) => parseCodexLogin(`${out}\n${err}`)] };
+// The auth mode the status command states, for Check now's Launch environment, or 'unknown'. Only
+// known values mapped to fixed display labels: never anything from CLI output verbatim.
+const CLAUDE_AUTH_METHODS = new Map([
+  ['claude.ai', 'claude.ai'],
+  ['oauth_token', 'OAuth token'],
+  ['api_key', 'API key'],
+  ['console', 'Console'],
+  ['third_party', 'third-party'],
+]);
+const CLAUDE_API_PROVIDERS = new Map([
+  ['firstParty', 'firstParty'],
+  ['bedrock', 'Bedrock'],
+  ['vertex', 'Vertex'],
+  ['foundry', 'Foundry'],
+]);
+export function authModeOf(provider, stdout, stderr = '') {
+  if (provider === 'claude') {
+    let s; try { s = JSON.parse(stdout); } catch { return 'unknown'; }
+    const method = typeof s?.authMethod === 'string' ? CLAUDE_AUTH_METHODS.get(s.authMethod) : null;
+    if (!method) return 'unknown';
+    const apiProvider = typeof s?.apiProvider === 'string' ? CLAUDE_API_PROVIDERS.get(s.apiProvider) : null;
+    return apiProvider ? `${method} (${apiProvider})` : method;
+  }
+  const t = `${stdout}\n${stderr}`;
+  return /^logged in using chatgpt\b/im.test(t) ? 'ChatGPT' : /^logged in using an api key\b/im.test(t) ? 'API key' : 'unknown';
+}
 // Runs the provider's status command. Its exit code isn't trusted alone (logged out may exit
-// non-zero with a readable answer); a failure to run, or unreadable output, is 'unknown'.
-export function checkLogin(provider, exec = execFile) {
+// non-zero with a readable answer); a failure to run, or unreadable output, is 'unknown'. With
+// `authMode` (Check now only), the result also carries authModeOf's answer.
+export function checkLogin(provider, exec = execFile, { authMode = false } = {}) {
   if (provider === 'agy') return Promise.resolve({ state: 'unmonitored' });
   const known = LOGIN_COMMANDS[provider];
   if (!known) return Promise.resolve({ state: 'unknown', error: `no login check for ${provider}` });
-  const [command, args, parse] = known;
+  const [command, args, parse] = known, label = `${command} ${args.join(' ')}`;
   return new Promise((done) => exec(command, args, { timeout: 20_000 }, (err, stdout = '', stderr = '') => {
-    if (err && (typeof err.code !== 'number' || err.killed)) return done({ state: 'unknown', error: `${command} ${args.join(' ')}: ${err.message}` });
+    if (err && (typeof err.code !== 'number' || err.killed)) {
+      const reason = err.killed ? 'timed out' : err.code === 'ENOENT' ? 'not found' : 'failed to run';
+      return done({ state: 'unknown', error: `${label}: ${reason}` });
+    }
     const login = parse(String(stdout), String(stderr));
-    if (err && login.state === 'unknown') login.error += ` (exit ${err.code}: ${String(stderr).trim().slice(-200)})`;
+    if (err && login.state === 'unknown') login.error = `${label}: exit ${err.code}`;
+    if (authMode) login.authMode = authModeOf(provider, String(stdout), String(stderr));
     done(login);
   }));
 }

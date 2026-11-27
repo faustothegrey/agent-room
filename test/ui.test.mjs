@@ -7511,3 +7511,143 @@ test('startup checks: permission modes join the summary, read by Check now and f
   assert.equal(hub.startupSummary, 'Startup checks: 1 problem (agy permission mode) · see Providers');
   assert.equal(sent.filter((e) => e.type === 'note').at(-1).text, hub.startupSummary);
 });
+
+test('Check now diagnostics: CLI processes by owner, launch environment by variable name only, failed reruns keep the previous result', async () => {
+  const { createMonitor, parseProcesses } = await import('../src/monitor.mjs');
+  const ps = [
+    '  100   100    01:02 ??       claude', // recorded
+    '  101   100    00:30 ??       /Users/x/.local/bin/claude', // its child, same group
+    '  200   200 01-02:03:04 ttys003  codex', // a terminal
+    '  300   300    05:00 ??       /opt/agy', // nothing known
+    '  400   400    05:00 ??       /Applications/Claude.app/Contents/MacOS/Claude',
+    '  500   500    05:00 ??       /x/codex-code-mode-host', 'garbage'].join('\n');
+  assert.deepEqual(parseProcesses(ps, new Set([100])).map((p) => [p.pid, p.provider, p.elapsed, p.owner]),
+    [[100, 'claude', '01:02', 'agent-room'], [101, 'claude', '00:30', 'agent-room'], [200, 'codex', '01-02:03:04', 'external'], [300, 'agy', '05:00', 'unknown']]);
+  const catalog = { status: () => ({ loaded: true, checked: 'x', models: [], error: null }), refresh: async () => {} };
+  const m = createMonitor({ hubOf: (c) => c.hub, toScreen: () => {}, currentSettings: () => ({ agents: [], worker: { provider: 'claude', model: '' } }),
+    claudeModels: [], codexModels: Object.assign(() => [], catalog), agyModels: catalog, modelAlignment: () => 'as saved', readDefaults: () => null,
+    sessionView: () => ({ agents: [], worker: {} }), folderOf: () => null });
+  const hub = { rooms: new Map() };
+  const ctx = { cwd: '/a', hub, usage: {}, room: { agents: [] }, worker: { provider: 'claude' }, screen: { clients: new Set(), transcript: [] },
+    programs: { running: new Set([{ pid: 100 }]) }, recordedPids: () => [], state: {}, sessions: new Map() };
+  hub.rooms.set('a', ctx);
+  hub.monitor = { login: {}, leftovers: [], cli: {}, errors: { login: {}, cli: {}, leftovers: null },
+    loginCurrent: { claude: { state: 'ok', authMode: 'claude.ai (firstParty)' }, codex: { state: 'unknown', error: 'codex login status: spawn codex ENOENT' } } };
+  assert.equal(m.healthView(ctx).diagnostics, null); // never checked
+  const secret = 'sk-ant-SECRET-VALUE';
+  const env = { ANTHROPIC_API_KEY: secret, CODEX_HOME: '/h/codexhome', OPENAI_API_KEY: '', PATH: '/bin' };
+  let psFails = false;
+  const run = async (command, args) => {
+    if (command === 'ps') { if (psFails) throw new Error('ps: denied'); return ps; }
+    return { claude: '/a/claude\n/b/claude\n/a/claude\n', codex: '/c/codex\n', agy: '' }[args[1]];
+  };
+  await m.checkDiagnostics(hub, { run, env, home: '/h', exists: (p) => p === '/h/.claude' });
+  const d = m.healthView(ctx).diagnostics;
+  assert.deepEqual(d.processes.result.map((p) => p.owner), ['agent-room', 'agent-room', 'external', 'unknown']);
+  assert.deepEqual(d.launch.claude.executables.result, ['/a/claude', '/b/claude']);
+  assert.deepEqual(d.launch.agy.executables.result, []);
+  assert.deepEqual(d.launch.claude.configFolder.result, { path: '/h/.claude', exists: true });
+  assert.deepEqual(d.launch.codex.configFolder.result, { path: '/h/codexhome', exists: false });
+  assert.deepEqual(d.launch.claude.env.result, ['ANTHROPIC_API_KEY']);
+  assert.deepEqual(d.launch.codex.env.result, ['CODEX_HOME']); // an empty variable is not set
+  assert.equal(d.launch.claude.authMode.result, 'claude.ai (firstParty)');
+  assert.equal(d.launch.codex.authMode.checked, undefined); assert.equal(d.launch.codex.authMode.error.message, 'login status not read');
+  assert.deepEqual(d.launch.agy.authMode, {});
+  assert.ok(!JSON.stringify(m.healthView(ctx)).includes(secret));
+  // A failed rerun records its error and keeps the previous result with its own time.
+  const before = d.processes.checked;
+  psFails = true;
+  await new Promise((r) => setTimeout(r, 5));
+  await m.checkDiagnostics(hub, { run, env, home: '/h', exists: () => false });
+  const again = m.healthView(ctx).diagnostics.processes;
+  assert.equal(again.checked, before); assert.equal(again.result.length, 4);
+  assert.equal(again.error.message, 'ps: denied'); assert.ok(again.error.at >= before);
+});
+
+test('Check now and header monitor never leak tokens from Claude JSON fields, Codex status text, or failing/unreadable status output', async () => {
+  const { createMonitor } = await import('../src/monitor.mjs');
+  const { checkLogin } = await import('../src/usage.mjs');
+  const token = 'sk-fake-tok98765';
+  const catalog = { status: () => ({ loaded: true, checked: 'x', models: [], error: null }), refresh: async () => {} };
+  const m = createMonitor({ hubOf: (c) => c.hub, toScreen: () => {}, currentSettings: () => ({ agents: [], worker: { provider: 'claude', model: '' } }),
+    claudeModels: [], codexModels: Object.assign(() => [], catalog), agyModels: catalog, modelAlignment: () => 'as saved', readDefaults: () => null,
+    sessionView: () => ({ agents: [], worker: {} }), folderOf: () => null });
+  const runDiag = async (command, args) => (command === 'ps' ? '' : args[1] === 'claude' ? '/a/claude\n' : '');
+  const runCase = async (execs) => {
+    const hub = { rooms: new Map(), monitor: { login: {}, leftovers: [], cli: {}, errors: { login: {}, cli: {}, leftovers: null } } };
+    const ctx = { cwd: '/a', hub, usage: { checkLogin: (p, _, opts) => checkLogin(p, execs[p], opts) },
+      room: { agents: [{ name: 'A', provider: 'claude' }, { name: 'B', provider: 'codex' }] }, worker: { name: 'W', provider: 'claude' },
+      screen: { clients: new Set(), transcript: [] }, programs: { running: new Set() }, recordedPids: () => [], state: {}, sessions: new Map() };
+    hub.rooms.set('a', ctx);
+    await m.checkLogins(hub, true, ['claude', 'codex', 'agy'], { authMode: true });
+    await m.checkDiagnostics(hub, { run: runDiag, env: {}, home: '/h', exists: () => false });
+    return { view: m.healthView(ctx), monitor: m.monitorView(ctx) };
+  };
+  const exec = (result) => (command, args, options, done) => done(...result);
+
+  // 1. Fake token in Claude JSON fields (short plain token) and Codex status text.
+  const ok = await runCase({
+    claude: exec([null, JSON.stringify({ loggedIn: true, authMethod: token, apiProvider: token }), '']),
+    codex: exec([null, '', `Logged in using an API key - ${token}\n`]),
+  });
+  assert.equal(ok.view.diagnostics.launch.claude.authMode.result, 'unknown');
+  assert.equal(ok.view.diagnostics.launch.codex.authMode.result, 'API key');
+  assert.ok(!JSON.stringify(ok.view).includes(token));
+  assert.ok(!JSON.stringify(ok.monitor).includes(token));
+
+  // 2. Fake token in Claude apiProvider with known authMethod.
+  const apiProv = await runCase({
+    claude: exec([null, JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: token }), '']),
+    codex: exec([null, '', 'Logged in using ChatGPT\n']),
+  });
+  assert.equal(apiProv.view.diagnostics.launch.claude.authMode.result, 'claude.ai');
+  assert.ok(!JSON.stringify(apiProv.view).includes(token));
+  assert.ok(!JSON.stringify(apiProv.monitor).includes(token));
+
+  // 3. Non-zero exit and ENOENT spawn error carrying a fake token.
+  const exit2 = Object.assign(new Error(`exit 2 ${token}`), { code: 2 });
+  const fail = await runCase({
+    claude: exec([exit2, `bad output ${token}`, `stderr ${token}`]),
+    codex: exec([Object.assign(new Error(`spawn failed ${token}`), { code: 'ENOENT' })]),
+  });
+  assert.equal(fail.view.diagnostics.launch.claude.authMode.error.message, 'login status not read');
+  assert.equal(fail.view.diagnostics.launch.codex.authMode.error.message, 'login status not read');
+  assert.equal(fail.view.errors.login.claude.message, 'claude auth status --json: exit 2');
+  assert.equal(fail.view.loginCurrent.claude.error, 'claude auth status --json: exit 2');
+  assert.equal(fail.monitor.claude.login.error, 'claude auth status --json: exit 2');
+  assert.equal(fail.view.errors.login.codex.message, 'codex login status: not found');
+  assert.equal(fail.view.loginCurrent.codex.error, 'codex login status: not found');
+  assert.equal(fail.monitor.codex.login.error, 'codex login status: not found');
+  assert.ok(!JSON.stringify(fail.view).includes(token));
+  assert.ok(!JSON.stringify(fail.monitor).includes(token));
+
+  // 4. Unreadable Claude loginExpiresAt and unreadable Codex status text carrying a fake token.
+  const unreadable = await runCase({
+    claude: exec([null, JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', loginExpiresAt: token }), '']),
+    codex: exec([null, '', `unexpected output ${token}\n`]),
+  });
+  assert.equal(unreadable.view.diagnostics.launch.claude.authMode.error.message, 'login status not read');
+  assert.equal(unreadable.view.diagnostics.launch.codex.authMode.error.message, 'login status not read');
+  assert.equal(unreadable.view.errors.login.claude.message, 'claude auth status --json: login expiry unreadable');
+  assert.equal(unreadable.view.errors.login.codex.message, 'codex login status: output not recognised');
+  assert.ok(!JSON.stringify(unreadable.view).includes(token));
+  assert.ok(!JSON.stringify(unreadable.monitor).includes(token));
+
+  // 5. Timeout and generic spawn failure carrying a fake token, plus non-JSON Claude stdout.
+  const timedOut = await runCase({
+    claude: exec([Object.assign(new Error(`timeout ${token}`), { code: null, killed: true })]),
+    codex: exec([Object.assign(new Error(`EACCES ${token}`), { code: 'EACCES' })]),
+  });
+  assert.equal(timedOut.view.errors.login.claude.message, 'claude auth status --json: timed out');
+  assert.equal(timedOut.view.errors.login.codex.message, 'codex login status: failed to run');
+  assert.ok(!JSON.stringify(timedOut.view).includes(token));
+  assert.ok(!JSON.stringify(timedOut.monitor).includes(token));
+
+  const nonJson = await runCase({
+    claude: exec([null, `not json ${token}`, '']),
+    codex: exec([null, '', 'Not logged in\n']),
+  });
+  assert.equal(nonJson.view.errors.login.claude.message, 'claude auth status --json: output not JSON');
+  assert.ok(!JSON.stringify(nonJson.view).includes(token));
+  assert.ok(!JSON.stringify(nonJson.monitor).includes(token));
+});
