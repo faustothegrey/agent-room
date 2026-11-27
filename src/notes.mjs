@@ -1,13 +1,14 @@
-// The Notes pane's server side: the User's free-text notes, one set per room folder, kept on this
-// computer only (never in the room's folder, never replicated) and served only to pages opened on
-// this computer, with the terminal pane's checks (refusal() in host-shell.mjs). The agents are not
-// told about them. One Markdown file per note, its first line the title; the file name is a
+// The Notes pane's server side: the User's free-text notes, one set per room folder, stored on the
+// agent-room computer (never in the room's folder, never replicated) and served to the room's own
+// pages, on any of its own addresses (ownHost in host-shell.mjs: localhost and its LAN names and
+// addresses, not Tailscale MagicDNS names), like the rest of the room. The agents are not told
+// about them. One Markdown file per note, its first line the title; the file name is a
 // timestamp and random letters, never the title, so no note overwrites another.
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { refusal } from './host-shell.mjs';
+import { ownHost } from './host-shell.mjs';
 
 export const NOTES_LIMIT = 1_000_000; // characters of one request's JSON
 // Separated by room folder as the checkpoints are (ui.mjs, checkpointDirectory).
@@ -98,8 +99,11 @@ export function handleNotes(req, res, url, dir) {
     return true;
   };
   const text = (status, body) => send(status, body, 'text/plain; charset=utf-8');
-  const why = refusal(req, { originRequired: false });
-  if (why) { console.log(`[notes] refused ${url.pathname}: ${why[1]} (from ${req.socket.remoteAddress}, Host ${req.headers.host ?? 'none'})`); return text(why[0], why[1]); }
+  // Every request: one of the room's own Hosts (no DNS rebinding) and, when an Origin is sent, the
+  // same page's (no other site's page). POSTs also need JSON, below (no form posts from elsewhere).
+  const host = req.headers.host ?? '';
+  const why = !ownHost(host) ? 'Host not allowed' : req.headers.origin !== undefined && req.headers.origin !== `http://${host}` ? 'Origin does not match Host' : null;
+  if (why) { console.log(`[notes] refused ${url.pathname}: ${why} (from ${req.socket.remoteAddress}, Host ${host || 'none'}, Origin ${req.headers.origin ?? 'none'})`); return text(403, 'Forbidden: ' + why); }
   const action = url.pathname.slice('/__notes/'.length);
   try {
     if (req.method === 'GET') {

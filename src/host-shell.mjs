@@ -5,6 +5,7 @@
 // the demo's 127.0.0.1, so every request here must also come from a loopback address.
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { hostname, networkInterfaces } from 'node:os';
 import { isIP } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +15,16 @@ import { WebSocketServer } from 'ws';
 const TOKEN = randomBytes(32).toString('base64url');
 const ALLOWED_HOSTS = ['localhost', '127.0.0.1', '::1'];
 const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+// The room's own host names, for its pages and My notes (not the terminal, which allows only
+// ALLOWED_HOSTS): the room listens on the LAN too, so this machine's own addresses and names count
+// as its own host. Names it doesn't know (such as Tailscale MagicDNS names) are not among them.
+export function ownHost(host) {
+  const name = host.replace(/:\d+$/, '').toLowerCase();
+  const mine = ['127.0.0.1', 'localhost', '[::1]', hostname().toLowerCase(), `${hostname().toLowerCase().replace(/\.local$/, '')}.local`,
+    ...Object.values(networkInterfaces()).flat().filter((i) => i.family === 'IPv4').map((i) => i.address)];
+  return mine.includes(name);
+}
 
 // Host header → { hostname, port }, or null when malformed (the demo's parseHostHeader, shortened).
 function parseHost(value) {
