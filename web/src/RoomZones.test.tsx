@@ -11,7 +11,7 @@ class Source {
 }
 const room = { folder: '/Users/me/projects/my-room/', discussion: 'Live', active: 'discussions/2026-11-25-live', started: true, brainstorm: false, research: false, workbench: false, open: [] as object[], code: null as object | null };
 const reply = (status: number, text = '') => ({ ok: status >= 200 && status < 300, status, text: async () => text, json: async () => ({}) });
-const health = (pid: number) => ({ ok: true, status: 200, json: async () => ({ app: 'agent-room', pid, root: '/r', startedAt: new Date(Date.now() - 65 * 60000).toISOString(), discussion: null, pages: 1 }) });
+const health = (pid: number) => ({ ok: true, status: 200, json: async () => ({ app: 'agent-room', pid, root: '/r', host: 'machiste', startedAt: new Date(Date.now() - 65 * 60000).toISOString(), discussion: null, pages: 1 }) });
 let answer: (url: string, init?: RequestInit) => unknown;
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => answer(url, init));
 const posts = (path: string) => fetchMock.mock.calls.filter(([url]) => url === path).map(([, init]) => JSON.parse(String(init?.body)));
@@ -21,19 +21,19 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstub
 
 it('names the room menu after its folder, and quits, reloads and restarts with the legacy clicks', async () => {
   render(<App version="one" refresh={() => {}} />); reset();
-  const zone = screen.getByLabelText('Room'), user = userEvent.setup();
+  const zone = screen.getByLabelText('Room'), bar = screen.getByRole('navigation', { name: 'Services' }), user = userEvent.setup();
   expect(within(zone).getByText('my-room')).toBeTruthy();
   await user.click(within(zone).getByRole('button', { name: 'Quit room' })); expect(posts('__say')).toEqual([]);
   await user.click(within(zone).getByRole('button', { name: 'Click again to quit this room' }));
   expect(posts('__say')).toEqual([{ text: '/quit' }]);
-  await user.click(within(zone).getByRole('button', { name: 'Reload' })); expect(posts('__say').at(-1)).toEqual({ text: '/reload' });
+  await user.click(within(bar).getByRole('button', { name: 'Reload' })); expect(posts('__say').at(-1)).toEqual({ text: '/reload' });
   answer = (url, init) => url === '__health' ? new Promise(() => {}) : JSON.parse(String(init?.body)).confirmed ? reply(204) : reply(409, 'Rooms still running: alpha (round), beta (worker instruction). Restart anyway?');
   const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
-  await user.click(within(zone).getByRole('button', { name: 'Restart' }));
-  await user.click(within(zone).getByRole('button', { name: 'Click again: the chat clears' }));
+  await user.click(within(bar).getByRole('button', { name: 'Restart' }));
+  await user.click(within(bar).getByRole('button', { name: 'Click again: the chat clears' }));
   await waitFor(() => expect(confirm).toHaveBeenCalledWith('Rooms still running: alpha (round), beta (worker instruction). Restart anyway?'));
   expect(posts('__say').at(-1)).toEqual({ text: '/restart' }); // cancelled: not sent again
-  await user.click(within(zone).getByRole('button', { name: 'Restart' })); await user.click(within(zone).getByRole('button', { name: 'Click again: the chat clears' }));
+  await user.click(within(bar).getByRole('button', { name: 'Restart' })); await user.click(within(bar).getByRole('button', { name: 'Click again: the chat clears' }));
   await waitFor(() => expect(posts('__say').at(-1)).toEqual({ text: '/restart', confirmed: true }));
 });
 
@@ -59,18 +59,23 @@ it('shuts the server down at its own address, asking again when rooms are still 
   expect(await within(screen.getByRole('log', { name: 'System messages' })).findByText('Shutdown failed')).toBeTruthy();
 });
 
-it('shows the heartbeat every three seconds, refreshes for a new server, and says why the server is down', async () => {
+it('shows the heartbeat every three seconds at the top of the left bar, refreshes for a new server, and says why the server is down', async () => {
   vi.useFakeTimers(); let next: unknown = health(10); answer = (url) => url === '__health' ? (next === 'offline' ? Promise.reject(new Error('down')) : next) : reply(204);
   const refresh = vi.fn(); render(<App version="one" refresh={refresh} />);
   reset({ room: { ...room, code: { path: '/src/agent-room', branch: 'main', commit: 'abc1234', dirty: true, startedAt: '2026-11-25T08:00:00Z' } } });
-  const detail = screen.getByLabelText('Server state');
+  const detail = screen.getByLabelText('Server state'), bar = screen.getByRole('navigation', { name: 'Services' });
+  expect(bar.firstElementChild?.contains(detail)).toBe(true);
+  expect(within(bar).getByText('Server').closest('summary')?.className).toBe('ctrl-btn server');
+  expect(document.querySelector('#host')).toBeNull(); // no name before the first answer
   await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  expect(within(screen.getByLabelText('Room')).getByText('machiste').id).toBe('host');
   expect(detail.textContent).toMatch(/^Server up 1h 5m · port \d*abc1234\+ · started /);
   expect(document.querySelector('.server')?.getAttribute('data-state')).toBe('up');
   expect(fetchMock).toHaveBeenCalledWith('__health', expect.objectContaining({ cache: 'no-store' }));
   next = reply(404); await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
   expect(detail.textContent).toContain('This room is not open on the server');
   expect(document.querySelector('.server')?.getAttribute('data-state')).toBe('down');
+  expect(document.querySelector('#host')?.textContent).toBe('machiste'); // the last name received stays
   next = 'offline'; await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
   expect(detail.textContent).toContain('Server not responding');
   Source.current.send({ type: 'restarting' }); await act(async () => { await vi.advanceTimersByTimeAsync(3000); });

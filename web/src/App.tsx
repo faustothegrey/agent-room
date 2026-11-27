@@ -200,6 +200,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const listBeforeService = useRef<boolean | null>(notesKept ? (() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } })() : null);
   const notesApi = useRef<NotesApi | null>(null);
   const [shellAlive, setShellAlive] = useState(false);
+  const [serverSlot, setServerSlot] = useState<HTMLElement | null>(null); // RoomZones puts the Server menu here
   const [healthOpen, setHealthOpen] = useState(false);
   const [scheduleReload, setScheduleReload] = useState(0);
   const openService = (name: Service | null) => {
@@ -1080,7 +1081,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     <RoomZones openHealth={() => { setHealthOpen(true); openService('providers'); }} folder={room?.folder ?? null} active={room?.active ?? null} replica={replica} replicaOff={replicaOff} viewing={remote?.line ?? null} newRoom={newRoom} readOnly={!!peek || !!viewLayout}
       post={(path, body) => post(path, body)} status={(text, error) => addStatus(text, error)} navigate={(url) => notesGuard(() => navigate(url))}
       roomName={room?.folder?.replace(/[/]+$/, '').split('/').pop() || room?.folder || 'agent-room'} code={room?.code} gauges={quota.gauges} at={quota.at} monitor={monitor}
-      ended={ended} restarting={restarting} command={(text) => void boardCommand(text)} shutdown={() => void shutdownServer()} serverChanged={serverChanged}>
+      ended={ended} restarting={restarting} command={(text) => void boardCommand(text)} shutdown={() => void shutdownServer()} serverChanged={serverChanged} serverSlot={serverSlot}>
     <div id="disc-zone" className="zone disc-zone" aria-label="Activity">
       <section id="system-messages" aria-label="System messages" role="log" aria-live="polite" aria-relevant="additions">
         {failure && <div id="pinned-error" className="pinned-error"><span title={failure.error}>✗ {failure.agent} failed {failure.time}: {failure.error.split(/\r?\n/)[0]}{failure.earlier ? ` (+${failure.earlier} earlier)` : ''}</span> <button type="button" title="Dismiss" aria-label="Dismiss pinned error" onClick={() => setFailure(null)}>✕</button></div>}
@@ -1110,6 +1111,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       <button type="button" disabled={dialogBusy} onClick={() => setBoardDialog(null)}>Cancel</button> <button type="button" disabled={dialogBusy} onClick={() => void confirmBoardAction()}>{boardDialog.kind === 'merge' ? 'Confirm ' + boardDialog.preview.title : boardDialog.kind === 'discard' ? 'Confirm Close and Discard' : 'Catch up with ' + boardDialog.target}</button>
     </dialog>}
     <nav id="control-bar" aria-label="Services">
+      <div id="server-head" ref={setServerSlot} />
       <button type="button" className="ctrl-btn" id="ctrl-boards" aria-pressed={service === null} title="Boards and conversation" onClick={() => { if (service) openService(null); else if (boardsClosed) { setBoardsClosed(false); refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', '0'); } catch {} } }}><span className="ctrl-ico">💬</span> <span className="ctrl-lbl">Boards</span></button>
       <button type="button" className="ctrl-btn" aria-pressed={service === 'providers'} title="Default providers and models for new discussions, and provider health" onClick={() => openService(service === 'providers' ? null : 'providers')}><span className="ctrl-ico">⚙</span> <span className="ctrl-lbl">Providers</span></button>
       <button type="button" className="ctrl-btn" aria-pressed={service === 'instructions'} title="The prompts and rulebooks sent to each agent, and when" onClick={() => openService(service === 'instructions' ? null : 'instructions')}><span className="ctrl-ico">📜</span> <span className="ctrl-lbl">Instructions</span></button>
