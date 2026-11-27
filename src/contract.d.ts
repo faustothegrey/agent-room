@@ -84,7 +84,7 @@ export interface ViewReply { viewing: ViewedLine | true | null }
 // POST __pair: { peer } checks (both rooms' folders), { peer, confirm: true } pairs.
 export interface PairRequest { peer: string; confirm?: boolean }
 export interface PairCheck { local: { node: string; root: string; roomId: string | null }; peer: { node: string; root: string } }
-// My notes (notes.mjs, this computer only): GET __notes lists them, GET __notes/read?id= reads one
+// My notes (notes.mjs, the room's own Hosts, LAN ones too; stored on the agent-room computer): GET __notes lists them, GET __notes/read?id= reads one
 // ({ …entry, text }); POST __notes/new { text }, __notes/save { id, text } (404: removed meanwhile), __notes/remove { id }.
 export interface NoteEntry { id: string; title: string; tags: string[]; savedAt: string }
 export type NoteRequest = { text: string } | { id: string; text: string } | { id: string };

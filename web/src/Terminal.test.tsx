@@ -95,9 +95,9 @@ it('cancels a shell ended while it is still loading', async () => {
   expect(terms).toHaveLength(0); expect(Socket.all).toHaveLength(0); expect(fetchMock).not.toHaveBeenCalledWith('__shell/token', expect.anything());
 });
 
-it('offers the Terminal only on a page opened on this computer', () => {
+it('offers the Terminal only on a page opened on this computer, and My notes on the LAN too', () => {
   vi.stubGlobal('location', new URL('http://192.168.1.5:8080/r/a/__next'));
   render(<App version="one" refresh={() => {}} />); Source.current.send({ type: 'reset', room, messages: [], worker: [], input: true });
-  expect(screen.queryByRole('button', { name: '⌨ Terminal' })).toBeNull(); expect(screen.queryByRole('button', { name: '📝 My notes' })).toBeNull();
+  expect(screen.queryByRole('button', { name: '⌨ Terminal' })).toBeNull(); expect(screen.getByRole('button', { name: '📝 My notes' })).toBeTruthy();
   expect(ghostty.load).not.toHaveBeenCalled();
 });
