@@ -460,7 +460,7 @@ function header(ctx) {
   return { folder: ctx.cwd, ownCheckout: real(ctx.cwd) === real(dirname(dirname(fileURLToPath(import.meta.url)))), agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name,
     workerModel: workerSpec ? modelLabel(workerSpec.provider, workerSpec.model) : null, // for the Worker tab's title
     cliSessions: sessionView(ctx),
-    discussion: d ? d.title : ctx.state.brainstorm ? 'New brainstorm' : ctx.state.workbench ? 'New workbench' : ctx.state.research ? 'New research board' : 'No discussion started',
+    discussion: d ? d.title : ctx.state.brainstorm ? 'New brainstorm' : ctx.state.workbench ? 'New workbench' : ctx.state.research ? 'New research board' : 'No sprint started',
     active: folderOf(ctx), started: !!ctx.logPath || !!ctx.state.brainstorm || !!ctx.state.workbench || !!ctx.state.research,
     fresh: !settingsStarted(ctx) && !ctx.state.workbench, // its members can still be chosen: the page opens their panel
     brainstorm: !!ctx.state.brainstorm, // a brainstorm, in brainstorms/<name>/ once started (see newBrainstorm)
@@ -517,7 +517,7 @@ export function setAgentEnabled(ctx, name, enabled, { member = false } = {}) {
   const agent = ctx.room.agents.find((a) => a.name === name);
   if (!agent || typeof enabled !== 'boolean') throw new Error('Unknown discussion agent.');
   if (ctx.stopped || (ctx.busy && !member)) throw new Error('Wait for the current discussion turn to end.');
-  if (member && !settingsStarted(ctx)) throw new Error('Before the discussion starts, choose its members in the panel.');
+  if (member && !settingsStarted(ctx)) throw new Error('Before the board starts, choose its members in the panel.');
   const disabled = new Set(ctx.state.disabledAgents ?? []);
   if (!enabled) {
     if (!member && !ctx.state.transcript.some((m) => m.speaker === name && m.error)) throw new Error('Only a failed agent can be disabled here.');
@@ -610,7 +610,7 @@ function waitingState(ctx) {
 }
 function openList(ctx) {
   return siblings(ctx).filter((c) => c.state && c.id && !c.stopped).map((c) => ({ url: pageOf(c), current: c === ctx,
-    title: c.discussion?.title ?? (c.state.brainstorm ? 'New brainstorm (not started)' : c.state.workbench ? 'New workbench (not started)' : c.state.research ? 'New research board (not started)' : 'New discussion (not started)'),
+    title: c.discussion?.title ?? (c.state.brainstorm ? 'New brainstorm (not started)' : c.state.workbench ? 'New workbench (not started)' : c.state.research ? 'New research board (not started)' : 'New sprint (not started)'),
     active: folderOf(c), brainstorm: !!c.state.brainstorm, workbench: !!c.state.workbench, research: !!c.state.research, started: !!c.logPath, working: !!c.screen.working,
     workerBusy: hasWorkerTask(c),
     ongoing: isOngoing(c), ...waitingState(c) }));
@@ -741,7 +741,7 @@ export async function start(ctx) {
   ctx.screen.startedAt = ctx.openedAt.toISOString(); // the page's and the Dock app's heartbeat show it
   try { recordRoom(ctx.cwd); } catch {}
   out(ctx, `Room: ${describe(ctx.room)} · worker ${ctx.worker.name} (${ctx.worker.provider}) · root ${ctx.cwd}`);
-  out(ctx, `Transcript: in ${join(ctx.cwd, 'discussions')}/, once the first message starts a discussion`);
+  out(ctx, `Transcript: in ${join(ctx.cwd, 'discussions')}/, once the first message starts a sprint`);
   // Another open discussion of the launch room replicates as the launch room does.
   const owner = !ctx.node && ctx.context && siblings(ctx).find((c) => c.replicaOwner);
   if (owner) Object.assign(ctx, { node: owner.node, peers: owner.peers, replicate: owner.replicate });
@@ -760,7 +760,7 @@ export async function start(ctx) {
   refreshWorker(ctx).catch(() => {}); // the Worker tab's line; creates nothing
   await recoverWorkerOwner(ctx);
   if (ctx.noScreen) {
-    return out(ctx, 'Type a message, /docs to browse the discussions, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
+    return out(ctx, 'Type a message, /docs to browse the boards, /summary to sum up, /usage for tokens and quotas, /reload after editing the code, or /quit.\n');
   }
   const base = await viewerUrl(ctx);
   const screenUrl = `${base.slice(0, -1)}${roomPath(ctx)}__room`;
@@ -914,9 +914,9 @@ export async function restart(hub, rooms, values) {
 
 function removedHint(command, name) {
   const n = name || '<name>';
-  if (command === 'pause') return 'Pause is gone: every discussion saves itself after each round, and Continue (or /resume) continues it where it stopped.';
-  if (command === 'autosummary') return 'Auto-summarize is always on now (in discussions, not brainstorms): a summary follows every round in which an agent spoke.';
-  return `/${command} is now /resume ${n} (it continues where the discussion stopped, or starts from its handoff if it was never saved), or /fresh ${n} to start new sessions from its handoff.`;
+  if (command === 'pause') return 'Pause is gone: every sprint saves itself after each round, and Continue (or /resume) continues it where it stopped.';
+  if (command === 'autosummary') return 'Auto-summarize is always on now (in sprints, not brainstorms): a summary follows every round in which an agent spoke.';
+  return `/${command} is now /resume ${n} (it continues where the sprint stopped, or starts from its handoff if it was never saved), or /fresh ${n} to start new sessions from its handoff.`;
 }
 
 export async function handleLine(line, ctx) {

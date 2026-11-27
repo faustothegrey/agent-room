@@ -73,7 +73,7 @@ it('shows the worker info line: lines, disabled in red, brainstorm override and 
   Source.current.send({ type: 'workerinfo', info: { lines: ['The worker is disabled.'], disabled: true } });
   expect(within(info()).getByText('The worker is disabled.').className).toBe('error');
   Source.current.send({ type: 'room', room: { ...room, brainstorm: true } });
-  expect(within(info()).getByText('Turn this brainstorm into a discussion to send work.').className).toBe('error');
+  expect(within(info()).getByText('Turn this brainstorm into a sprint to send work.').className).toBe('error');
   Source.current.send({ type: 'reset', room: { ...room, brainstorm: true }, messages: [], worker: [], input: true, workInput: true, workerInfo: { lines: ['Peeked worktree'] }, peek: { name: 'old', kind: 'discussion', path: 'discussions/old', title: 'Old' } });
   expect(within(info()).getByText('Peeked worktree')).toBeTruthy();
 });

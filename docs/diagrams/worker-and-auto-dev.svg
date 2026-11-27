@@ -23,7 +23,7 @@
   <!-- queue -->
   <rect x="238" y="88" width="240" height="124" rx="6" fill="#f3f7fb" stroke="#1168bd"/>
   <text x="250" y="108" font-weight="bold" fill="#1168bd">2. The lane's queue</text>
-  <text x="250" y="126">One lane per discussion; one task at a</text>
+  <text x="250" y="126">One lane per sprint; one task at a</text>
   <text x="250" y="142">time per lane, in the order sent.</text>
   <text x="250" y="158">At most 2 tasks in the folder at once</text>
   <text x="250" y="172">(PARALLEL_WORKERS); never two of</text>
@@ -48,7 +48,7 @@
   <text x="816" y="142">30 min timeout, its own session,</text>
   <text x="816" y="158">rulebooks/worker.md.</text>
   <text x="816" y="174">Commits on its branch, message</text>
-  <text x="816" y="190">labelled [&lt;discussion&gt;].</text>
+  <text x="816" y="190">labelled [&lt;sprint&gt;].</text>
   <line x1="922" y1="212" x2="922" y2="236" stroke="#444" marker-end="url(#a)"/>
 
   <!-- report -->
@@ -77,7 +77,7 @@
 
   <rect x="20" y="384" width="240" height="132" rx="6" fill="#f3f7fb" stroke="#1168bd"/>
   <text x="32" y="404" font-weight="bold" fill="#1168bd">Start auto dev (/autodev)</text>
-  <text x="32" y="420" font-size="11">Refused unless: a saved discussion (not a</text>
+  <text x="32" y="420" font-size="11">Refused unless: a saved sprint (not a</text>
   <text x="32" y="434" font-size="11">brainstorm), from the browser screen, not</text>
   <text x="32" y="448" font-size="11">already running, worker enabled, and the</text>
   <text x="32" y="462" font-size="11">latest agreed summary has a readable,</text>
@@ -135,7 +135,7 @@
   <text x="312" y="719" font-size="11.5">(a worker already running finishes; its report is still discussed);</text>
   <text x="312" y="735" font-size="11.5">a turn of a round fails.</text>
   <text x="312" y="757" font-size="11.5">While paused, summaries may only say FINISH or WAIT FOR USER</text>
-  <text x="312" y="771" font-size="11.5">(pausedTask). Resume, Start fresh or New discussion end the run.</text>
+  <text x="312" y="771" font-size="11.5">(pausedTask). Resume, Start fresh or New sprint end the run.</text>
 
   <!-- Legend -->
   <rect x="20" y="610" width="260" height="96" fill="#fafafa" stroke="#ccc"/>

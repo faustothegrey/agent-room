@@ -14,7 +14,7 @@ well-founded answer, not to implement anything.
 - Your working directory is the room's **root**, which holds the work itself; read anything in it.
 - The board is a folder, `discussions/<name>/`, given with your first message. Refer to its files by
   relative path (`quest.md`), and to other files by their path from the root.
-- Other discussions and research boards sit beside it; finished ones are in `discussions/archive/`.
+- Other sprints and research boards sit beside it; finished ones are in `discussions/archive/`.
   Treat them as history, not current decisions, unless the User says otherwise.
 
 ## Where to start reading
@@ -49,7 +49,7 @@ is capped: 30 on a Deep board, 6 on any other.
   - **Reach**: how much of the platform it changes.
   - **Benefit**: how much the User would notice it.
 
-  Then a verdict recommending one of: **drop it**, **open a discussion**, or **start a Deep
+  Then a verdict recommending one of: **drop it**, **open a sprint**, or **start a Deep
   research**, and how certain it is.
 
 ### Deep
@@ -76,7 +76,7 @@ tried) or **assumed / from memory** in `quest.md` where they help a later reader
 
 ## No worker
 A research board sends no work. When a verdict calls for a change, propose that the User open a
-discussion for it, and say what that discussion would decide.
+sprint for it, and say what that sprint would decide.
 
 ## Learning
 After the User reacts to how a quest ended, add to the board's `learnings.md` what was learnt: what the User

@@ -59,7 +59,7 @@ async function scriptedCtx(replies) {
   const { createRoom, closingStatement } = await import('../src/room.mjs');
   const docs = await import('../src/docs.mjs');
   const usage = await import('../src/usage.mjs');
-  const fake = (name) => ({ name, provider: 'claude', turn: async (prompt) => prompt.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : replies.shift() ?? 'PASS' });
+  const fake = (name) => ({ name, provider: 'claude', turn: async (prompt) => prompt.includes('The User is closing this sprint.') ? 'Statement: pending-instructions.md' : replies.shift() ?? 'PASS' });
   const state = { transcript: [], seen: new Map() };
   return {
     state, room: createRoom([fake('A'), fake('B')], state), worker: fake('W'), docs, totals: {},
@@ -159,7 +159,7 @@ test('the first message creates the discussion (titled by Claude) and its transc
   const [name] = readdirSync(`${ctx.cwd}/discussions`);
   assert.match(name, /^\d{4}-\d{2}-\d{2}-about-pendulums$/);
   assert.equal(ctx.discussion.title, 'About pendulums');
-  assert.match(prompts[0], new RegExp(`Its folder is ${ctx.cwd}/discussions/${name}: create, read and write this discussion's documents`));
+  assert.match(prompts[0], new RegExp(`Its folder is ${ctx.cwd}/discussions/${name}: create, read and write this sprint's documents`));
   const text = readFileSync(ctx.logPath, 'utf8');
   assert.match(text, /^# About pendulums — session of/);
   assert.match(text, /title by Claude[\s\S]*\*\*User\*\*\n\npendulums/); // said before the folder existed: kept for the transcript
@@ -188,7 +188,7 @@ test('/resume without a checkpoint, before the first message: no title asked, th
   await handleLine('where were we?', ctx);
   assert.deepEqual(readdirSync(`${ctx.cwd}/discussions`), ['2026-11-01-old']);
   assert.equal(readdirSync(`${ctx.cwd}/discussions/2026-11-01-old/transcripts`).length, 1);
-  assert.match(prompts[0], /continues the discussion in .*2026-11-01-old.*Start from its handoff/);
+  assert.match(prompts[0], /continues the sprint in .*2026-11-01-old.*Start from its handoff/);
 });
 
 test('/resume, after the session started, of a discussion without a checkpoint: a fresh session there, from its handoff', async () => {
@@ -213,13 +213,13 @@ test('/resume, after the session started, of a discussion without a checkpoint: 
   assert.equal(ctx.logPath, null);
   assert.deepEqual(ctx.state.transcript, []); // the chat starts over (the same array, emptied)
   assert.equal(ctx.screen.transcript, ctx.state.transcript);
-  assert.match(readFileSync(first, 'utf8'), /session ended: resuming the discussion 2026-11-01-old/);
+  assert.match(readFileSync(first, 'utf8'), /session ended: resuming the sprint 2026-11-01-old/);
 
   await handleLine('back to it', ctx);
   assert.match(ctx.logPath, /discussions\/2026-11-01-old\/transcripts\/session-/);
   assert.equal(prompts.length, 2);
   assert.match(prompts[1], /You are A, one of several AI agents/); // introduced again, as in a new session
-  assert.match(prompts[1], /continues the discussion in .*2026-11-01-old.*Start from its handoff/);
+  assert.match(prompts[1], /continues the sprint in .*2026-11-01-old.*Start from its handoff/);
   assert.equal(readdirSync(`${ctx.cwd}/discussions/${name}/transcripts`).length, 1); // the first discussion keeps its transcript
 
   await handleLine('/resume ../x', ctx);
@@ -238,7 +238,7 @@ test('the worker is told the active discussion\'s folder with its first instruct
   queueWork(ctx, 'fix the bug'); // as the Worker tab sends it
   queueWork(ctx, 'and the test');
   await ctx.workQueue;
-  assert.match(got[0], new RegExp(`^\\[your reported usage this session: [^\\]]+\\]\\n\\nThe active discussion's folder is ${ctx.discussion.dir}: create, read and write this discussion's documents`));
+  assert.match(got[0], new RegExp(`^\\[your reported usage this session: [^\\]]+\\]\\n\\nThe active sprint's folder is ${ctx.discussion.dir}: create, read and write this sprint's documents`));
   assert.match(got[0], /fix the bug$/);
   assert.match(got[1], /^\[your reported usage this session: [^\]]+\]\n\nand the test$/);
 });
@@ -507,7 +507,7 @@ test('/brainstorm: its first message names it in brainstorms/<date>-<title>/ wit
   assert.match(readFileSync(ctx.logPath, 'utf8'), /\*\*User\*\*\n\nhello[\s\S]*\*\*A\*\*/);
   assert.deepEqual(ctx.state.transcript.map((m) => m.speaker), ['User', 'A', 'B', 'A']);
   assert.equal(prompts.length, 2);
-  assert.match(prompts[0], /This is a brainstorm, not a discussion\. Its folder is .*brainstorms\/[^ ]*: write nothing except drawings, in .*\/drawings\//);
+  assert.match(prompts[0], /This is a brainstorm, not a sprint\. Its folder is .*brainstorms\/[^ ]*: write nothing except drawings, in .*\/drawings\//);
   assert.doesNotMatch(prompts[0], /discussions\//);
   await handleLine('/summary', ctx); // manual /summary still works in a brainstorm
   assert.deepEqual(ctx.state.transcript.filter((m) => !m.summary).map((m) => m.speaker), ['User', 'A', 'B', 'A', 'Summary']);
@@ -571,7 +571,7 @@ test('terminal: New discussion or Resume ends the brainstorm session (its folder
   await handleLine('/brainstorm', ctx);
   await handleLine('just talking', ctx);
   await handleLine('/new', ctx);
-  assert.deepEqual([ctx.state.brainstorm, ctx.state.transcript.length, ctx.screen.room.discussion], [false, 0, 'No discussion started']);
+  assert.deepEqual([ctx.state.brainstorm, ctx.state.transcript.length, ctx.screen.room.discussion], [false, 0, 'No sprint started']);
   await handleLine('now for real', ctx);
   assert.equal(ctx.discussion.title, 'Real topic');
   assert.match(ctx.logPath, /discussions\/[^/]*-real-topic-2\/transcripts\/session-/); // -1 is the brainstorm's
@@ -633,9 +633,9 @@ test('/new after a round: the session ends as with Resume; the next message star
   assert.equal(ctx.discussion, null);
   assert.equal(ctx.logPath, null);
   assert.deepEqual(ctx.state.transcript, []);
-  assert.equal(ctx.screen.room.discussion, 'No discussion started');
+  assert.equal(ctx.screen.room.discussion, 'No sprint started');
   assert.deepEqual(ctx.screen.room.back, { name, title: 'First topic' });
-  assert.match(readFileSync(first, 'utf8'), /session ended: starting a new discussion/);
+  assert.match(readFileSync(first, 'utf8'), /session ended: starting a new sprint/);
   assert.deepEqual(readdirSync(`${ctx.cwd}/discussions`), [name]); // nothing created yet
 
   // A failed folder creation sends nothing and keeps the way back.
@@ -649,7 +649,7 @@ test('/new after a round: the session ends as with Resume; the next message star
   assert.equal(ctx.screen.room.back, null); // the link lasts until the new discussion starts
   assert.match(ctx.logPath, /second-topic\/transcripts\/session-/);
   assert.match(prompts[1], /You are A, one of several AI agents/); // introduced again
-  assert.match(prompts[1], /This is a new discussion/);
+  assert.match(prompts[1], /This is a new sprint/);
   assert.equal(readdirSync(`${ctx.cwd}/discussions/${name}/transcripts`).length, 1);
 
   // Going back: Resume the first one (it remembers this one in turn).
@@ -1652,7 +1652,7 @@ test('Close asks one agent with the worker\'s settings for the statement, never 
   assert.ok(notes.includes(`Closing ${name}: Claude (Claude default) is writing the closing statement…`));
   assert.equal(notes.at(-1), `Closed ${name}. Closing statement written by Claude (Claude default).`);
   assert.equal(prompts.length, 1);
-  assert.match(prompts[0], /The User is closing this discussion\./);
+  assert.match(prompts[0], /The User is closing this sprint\./);
   assert.ok(ctx.screen.room.closedDiscussions.includes(name));
   assert.equal(readFileSync(`${dir}/closing-statement.md`, 'utf8'), 'Statement: pending-instructions.md\n');
 });
@@ -2006,7 +2006,7 @@ test('Start fresh briefs with the latest summary, marked if not agreed, or none;
   mkdirSync(`${cwd}/discussions/2026-11-01-none`);
   await handleLine('/fresh 2026-11-01-none', after);
   await handleLine('hi', after);
-  assert.match(prompts.at(-1), /continues the discussion in .*2026-11-01-none.*Start from its handoff/);
+  assert.match(prompts.at(-1), /continues the sprint in .*2026-11-01-none.*Start from its handoff/);
   assert.doesNotMatch(prompts.at(-1), /latest summary/);
 });
 
@@ -2019,7 +2019,7 @@ test('removed commands answer with a hint and reach no agent', async () => {
   for (const line of ['/pause', '/reopen 2026-11-01-x', '/continue', '/autosummary off']) await handleLine(line, ctx);
   assert.equal(turns, 0);
   assert.deepEqual(ctx.state.transcript, []);
-  assert.match(notes[0], /^Pause is gone: every discussion saves itself after each round/);
+  assert.match(notes[0], /^Pause is gone: every sprint saves itself after each round/);
   assert.match(notes[1], /^\/reopen is now \/resume 2026-11-01-x .* or \/fresh 2026-11-01-x/);
   assert.match(notes[2], /^\/continue is now \/resume <name>/);
   assert.match(notes[3], /^Auto-summarize is always on now/);
@@ -3275,7 +3275,7 @@ test('an interrupted round: Resume says the transcript grew after the checkpoint
   const prompts = [];
   for (const a of after.room.agents) a.turn = async (p) => { prompts.push([a.name, p]); return 'PASS'; };
   await handleLine('again', after);
-  const restored = /^agent-room restored this discussion from its checkpoint of .*\. If you remember turns after that, they are not in the room's record\.$/m;
+  const restored = /^agent-room restored this sprint from its checkpoint of .*\. If you remember turns after that, they are not in the room's record\.$/m;
   assert.deepEqual(prompts.filter(([, p]) => restored.test(p)).map(([n]) => n), ['A', 'B']); // each agent's next prompt
   prompts.length = 0;
   await handleLine('later', after);
@@ -3913,7 +3913,7 @@ test('Turn into a discussion, closed: the folder and checkpoint move, never over
   ctx.notes = [];
   ctx.docs = { ...ctx.docs, broadcast: (screen, ev) => { if (ev.type === 'note') ctx.notes.push(ev.text); } };
   await handleLine(`/convert ${ref}`, ctx);
-  assert.match(ctx.notes.at(-1), /can't become a discussion: discussions\/.* already exists\. Nothing was moved/);
+  assert.match(ctx.notes.at(-1), /can't become a sprint: discussions\/.* already exists\. Nothing was moved/);
   assert.ok(existsSync(`${cwd}/brainstorms/${name}/transcripts`));
   assert.ok(existsSync(await checkpointPath(cwd, ref)));
   rmdirSync(`${cwd}/discussions/${name}`);
@@ -3932,7 +3932,7 @@ test('Turn into a discussion, closed: the folder and checkpoint move, never over
   assert.notEqual(ctx.sessions.get('worker:W').started, true); // the worker starts fresh
   await handleLine('carry on', ctx);
   await handleLine('and again', ctx);
-  const told = (agent) => ctx.prompts.filter(([a, p]) => a === agent && p.includes('turned this brainstorm into a discussion')).length;
+  const told = (agent) => ctx.prompts.filter(([a, p]) => a === agent && p.includes('turned this brainstorm into a sprint')).length;
   for (const agent of ['A', 'B', 'C']) {
     assert.equal(told(agent), 1);
     assert.ok(ctx.prompts.find(([a]) => a === agent)[1].includes(`Its folder is now ${ctx.discussion.dir}`));
@@ -3956,8 +3956,8 @@ test('Turn into a discussion, open: its session goes on in discussions/<name>/ w
   ctx.prompts.length = 0;
   await handleLine('next', ctx);
   await handleLine('more', ctx);
-  for (const agent of ['A', 'B', 'C']) assert.equal(ctx.prompts.filter(([a, p]) => a === agent && p.includes(`turned this brainstorm into a discussion. Its folder is now ${ctx.discussion.dir}`)).length, 1);
-  assert.match(readFileSync(ctx.logPath, 'utf8'), /an idea[\s\S]*turned into a discussion[\s\S]*more/);
+  for (const agent of ['A', 'B', 'C']) assert.equal(ctx.prompts.filter(([a, p]) => a === agent && p.includes(`turned this brainstorm into a sprint. Its folder is now ${ctx.discussion.dir}`)).length, 1);
+  assert.match(readFileSync(ctx.logPath, 'utf8'), /an idea[\s\S]*turned into a sprint[\s\S]*more/);
   assert.equal(JSON.parse(readFileSync(await checkpointPath(cwd, name), 'utf8')).state.brainstorm, false);
 });
 
@@ -3983,7 +3983,7 @@ test('Delete: refused while the brainstorm is open (here or beside), otherwise i
 test('the members panel leaves any agent of a started discussion out, from its next round, and brings it back', async () => {
   const { setAgentEnabled } = await import('../src/ui.mjs');
   const ctx = await savedRoom(await tmp('member-off-'), 'member-off');
-  assert.throws(() => setAgentEnabled(ctx, 'B', false, { member: true }), /Before the discussion starts/);
+  assert.throws(() => setAgentEnabled(ctx, 'B', false, { member: true }), /Before the board starts/);
   let a = 0, b = 0;
   ctx.room.agents[0].turn = async () => { a++; return 'PASS'; };
   ctx.room.agents[1].turn = async () => { b++; return 'PASS'; };
@@ -6430,7 +6430,7 @@ test('layered rulebooks: joined system instructions, Instructions panel, and Rel
     '## Purpose', '## Shared rules', '## Seeing files',
     '## Turns and messages', '## Rules of the conversation',
     '## Where you are', '## Rules of the discussion', '## Sending work to the worker in steps',
-    '## How to write discussion documents', '## Project constraint', '## Where to start reading',
+    '## How to write sprint documents', '## Project constraint', '## Where to start reading',
   ];
   let prev = -1;
   for (const heading of dSections) {
@@ -6466,7 +6466,7 @@ test('layered rulebooks: joined system instructions, Instructions panel, and Rel
 
   // 2. The Instructions panel shows each layer file for each agent kind.
   const sets = ctx.screen.instructions();
-  const discussingSet = sets.find((s) => s.type === 'Discussion & brainstorming agents');
+  const discussingSet = sets.find((s) => s.type === 'Sprint & brainstorming agents');
   const workerSet = sets.find((s) => s.type === 'Worker');
   assert.deepEqual(
     discussingSet.pieces.slice(0, 3).map((p) => p.id),

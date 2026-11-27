@@ -271,7 +271,7 @@ export function RoomZones({ children, roomName, folder, active, replica, replica
           <summary id="server" className="ctrl-btn server" data-state={server.state ?? undefined} title={server.title}><span className="ctrl-ico"><i id="beat" key={server.beat} className={server.state === 'up' ? 'on' : undefined} aria-hidden="true" /></span><span className="ctrl-lbl">Server</span></summary>
           <div className="menu-items">
             {!readOnly && <button type="button" onClick={() => { closeMenus(); command('/reload'); }}>Reload</button>}
-            <button type="button" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear." onClick={() => twice('restart', () => command('/restart'))}>{armed.restart ? 'Click again: the chat clears' : 'Restart'}</button>
+            <button type="button" title="Start a new server on this address, with every room, each in its board in use, from its handoff. The chats clear." onClick={() => twice('restart', () => command('/restart'))}>{armed.restart ? 'Click again: the chat clears' : 'Restart'}</button>
             <hr aria-hidden="true" />
             <button type="button" className="danger" title="End every room on this server, then the server." onClick={() => twice('shutdown', shutdown)}>{armed.shutdown ? 'Click again: every room ends' : 'Shutdown server'}</button>
           </div>
@@ -283,7 +283,7 @@ export function RoomZones({ children, roomName, folder, active, replica, replica
         {([['tab', 'Switch this tab to'], ['window', 'Open in new window']] as const).map(([mode, heading]) => <optgroup key={mode} label={heading}>{rooms.map((r) => {
           const open = !r.current && (r.pages ?? 0) > 0;
           const pages = r.pages == null ? '' : ' · ' + r.pages + (r.pages === 1 ? ' page' : ' pages') + ' open';
-          return <option key={r.id} value={mode + ':' + r.path} disabled={r.current || open}>{r.root + ' · ' + (r.discussion || 'No discussion started') + pages + (r.current ? ' (current)' : open ? ' (open in another window)' : '')}</option>;
+          return <option key={r.id} value={mode + ':' + r.path} disabled={r.current || open}>{r.root + ' · ' + (r.discussion || 'No sprint started') + pages + (r.current ? ' (current)' : open ? ' (open in another window)' : '')}</option>;
         })}</optgroup>)}
       </select>}
       {question && <dialog ref={askDialog} id="ask" aria-label={question.text} onCancel={(e) => { e.preventDefault(); answer(); }}>

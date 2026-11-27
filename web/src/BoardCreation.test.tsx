@@ -20,7 +20,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 it('creates each supported board beside the current one and follows the goto to its React page', async () => {
   setup(); const user = userEvent.setup(), boards = screen.getByLabelText('Boards');
-  for (const [label, command] of [['New discussion', '/new'], ['New brainstorm', '/brainstorm'], ['New workbench', '/workbench'], ['New research', '/research']]) {
+  for (const [label, command] of [['New sprint', '/new'], ['New brainstorm', '/brainstorm'], ['New workbench', '/workbench'], ['New research', '/research']]) {
     await user.click(within(boards).getByRole('button', { name: label }));
     await waitFor(() => expect(says()).toContain(command));
   }
@@ -30,7 +30,7 @@ it('creates each supported board beside the current one and follows the goto to 
 it('places creation buttons in their matching collapsible sections', async () => {
   setup(); const user = userEvent.setup();
   for (const [section, labels] of [
-    ['Discussions (0)', ['New discussion', 'New workbench']],
+    ['Sprints (0)', ['New sprint', 'New workbench']],
     ['Research (0)', ['New research']],
     ['Brainstorms (0)', ['New brainstorm']],
   ] as const) {
@@ -68,7 +68,7 @@ it('sends the first message to name an unnamed discussion, brainstorm or researc
   setup({ active: null, multi: true });
   const user = userEvent.setup();
   for (const [extra, hint, message] of [
-    [{ started: false }, 'No active discussions: your first message starts one.', 'A discussion'],
+    [{ started: false }, 'No active sprints: your first message starts one.', 'A discussion'],
     [{ brainstorm: true }, 'Your first message names this brainstorm and saves it here.', 'An idea'],
     [{ research: true }, 'Your first message names this research board and saves it here.', 'A question'],
   ] as const) {

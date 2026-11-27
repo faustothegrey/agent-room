@@ -10,6 +10,8 @@ This page describes the current design. Operating instructions are in the
 [README](../README.md); open decisions and design history are in
 [`discussions/`](../discussions/README.md).
 
+In code, APIs and on disk, "discussion" is the legacy general name for a board, and `kind: 'discussion'` is the board type shown as Sprint.
+
 ## Two harnesses
 
 Here "harness" means a deterministic engine wrapped around the agents' semantic work. agent-room
@@ -37,7 +39,7 @@ One Node process serves several rooms, one per folder. Its source modules:
 | `src/cli.mjs` | Arguments, the server's rooms, each room's input queue, Reload, Restart, Quit room, Shutdown. Never reloaded. |
 | `src/room.mjs` | The main loop: turns, unseen messages, passes, the summary procedure. |
 | `src/ui.mjs` | Room setup, command routing and screen coordination. |
-| `src/boards.mjs` | Discussion, brainstorm, research and workbench lifecycle, closing and checkpoints; reloaded with the room. |
+| `src/boards.mjs` | Sprint, brainstorm, research and workbench lifecycle, closing and checkpoints; reloaded with the room. |
 | `src/scheduler.mjs` | Research schedule storage, quota guard, execution and workshop timer. |
 | `src/monitor.mjs` | Quota, provider and process monitoring, health and prompt tests. |
 | `src/workshop.mjs` | Worker queues, recovery and task execution, workbench instructions, auto dev and summary checks; reloaded with the room. |
@@ -47,10 +49,10 @@ One Node process serves several rooms, one per folder. Its source modules:
 | `src/docs-routes.mjs`, `src/docs-http.mjs`, `src/docs-files.mjs`, `src/docs-next.mjs` | Room endpoints, document viewer and file serving, and built page assets. |
 | `web/` | React and TypeScript room page, styles and component tests; Vite builds it into `web/dist/`. |
 | `src/host-shell.mjs` | The Terminal pane's shell (this computer only). |
-| `src/replicate.mjs` | Optional replication of discussions to peer servers (`--node`, `--peer`). |
+| `src/replicate.mjs` | Optional replication of sprints to peer servers (`--node`, `--peer`). |
 | `src/usage.mjs` | Token totals and the optional quota meter. |
 | `src/instructions.mjs` | Prompt builders and the instruction catalog displayed in the Instructions panel. |
-| `src/mcp.mjs` | Read-only MCP stdio service for listing rooms and discussions. |
+| `src/mcp.mjs` | Read-only MCP stdio service for listing rooms and boards. |
 | `src/notes.mjs` | The Notes pane: the User's own notes, kept on this computer only, never replicated nor shown to agents. |
 
 The server coordinator loads each area with the current Reload tag and binds explicit callbacks for room state and cross-area operations. Board, workshop, lane, scheduler and monitor modules do not import the coordinator; shared room, workshop and server state—including timer handles—stays with the running contexts and hub. An operation already in flight can finish with the callbacks it started with.
@@ -100,7 +102,7 @@ enough to use the `PASS` protocol. Usage data is optional.
 1. If no turn failed, and an agent spoke or auto dev is deciding, the room runs an **automatic
    summary** (`summary()` in `src/room.mjs`; see [Summary contract](#summary-contract)).
 2. The round is committed to the replication store, when replication is on.
-3. The discussion's checkpoint is saved (discussions only, not brainstorms), so Resume and
+3. The sprint's checkpoint is saved (sprints only, not brainstorms), so Resume and
    Restart can continue it.
 4. If auto dev is running, the agreed summary's `Outcome:` line decides whether to send the next
    instruction to the worker, finish, or pause for the User.
@@ -145,7 +147,7 @@ example through `--mcp-config` or a provider's equivalent). agent-room adds none
 
 - **Role instructions** are agent-room's own protocols, layered from `.md` files:
   `rulebooks/citizenship.md` + `rulebooks/group-chat.md` + `rulebooks/discussing.md` for
-  the discussion and brainstorm agents, `rulebooks/citizenship.md` + `rulebooks/group-chat.md` +
+  the sprint and brainstorm agents, `rulebooks/citizenship.md` + `rulebooks/group-chat.md` +
   `rulebooks/researching.md` for research board agents, and `rulebooks/citizenship.md` +
   `rulebooks/worker.md` for the worker, plus the per-turn prompts above. They are always loaded, on
   every turn.
@@ -177,17 +179,17 @@ These are implementation facts today; changing any of them is a separate decisio
   `Bash`, file tools, web search and fetch, sub-agents, skills and the look-and-click Chrome tools.
   Codex runs with no sandbox and agy with `--dangerously-skip-permissions`.
 - **Full filesystem access.** Agents can read and write any path. Keeping discussion agents'
-  writing inside the active discussion's folder is an **instruction**, not a sandbox.
+  writing inside the active board's folder is an **instruction**, not a sandbox.
 - **The worker needs Git** for every task, not only coding ones: it always works in a Git
   worktree of the room's repository. Without a Git repository with at least one commit, the
-  worker is disabled; discussions work as usual. A worktree separates working copies; it is not
+  worker is disabled; sprints work as usual. A worktree separates working copies; it is not
   a sandbox.
 
 ## The worker and auto dev
 
-Each discussion has its own worker **lane**: a worker session, a queue and a worktree
+Each sprint has its own worker **lane**: a worker session, a queue and a worktree
 `<repo>.workers/<name>/` on the branch `worker/<name>`, created at its first instruction. A
-brainstorm, and a task sent before a discussion's first message, use `<repo>.worker/` on
+brainstorm, and a task sent before a sprint's first message, use `<repo>.worker/` on
 `worker/main`. A lane runs one task at a time, in the order sent; at most two tasks run at once in
 a folder (`PARALLEL_WORKERS`). Uncommitted edits left by a task hold its lane until their origin
 resolves them. agent-room's own code only adds worktrees and fast-forwards a lane with nothing of
@@ -200,34 +202,35 @@ cycles per start (`AUTO_DEV_CYCLES`). Anything unexpected, or the User typing, p
 
 ![The worker and auto dev: one instruction from queue to merge, and auto dev's cycle with its pause reasons](diagrams/worker-and-auto-dev.svg)
 
-## Discussions: lifecycle and storage
+## Sprints: lifecycle and storage
 
-A discussion's folder, `discussions/<date>-<title>/`, is created at its first message, with its
+A sprint's folder, `discussions/<date>-<title>/`, is created at its first message, with its
 transcripts in `transcripts/`. A checkpoint on this computer after every round lets Resume and
 Restart continue the same sessions; Start fresh begins new sessions from the handoff, notes and
-latest summary. Discussions can be moved to `archive/` or `deferred/`. A **research board**
+latest summary. Sprints can be moved to `archive/` or `deferred/`. A **research board**
 (`/research`) also lives in `discussions/<date>-<title>/` with a `.research` marker file that
 saves its kind (Feasibility, Deep, Theoretical, or Deep · Theoretical; chosen with its first
 message): its agents receive the researching rulebook and an intro naming the kind, rounds run up
 to 30 laps on a Deep board and 6 otherwise, with no automatic summary
 (manual `/summary` works), there is no Worker tab or auto dev, Close writes `closing-statement.md`,
 and it can be scheduled in **Schedule** or deleted once closed. A **workbench** (`/workbench`)
-lives in `discussions/<date>-<title>/` with a `.workbench` marker file and runs the worker only.
+is a special kind of sprint (worker only, no agents): it lives in `discussions/<date>-<title>/`
+with a `.workbench` marker file.
 A brainstorm has its own folder, `brainstorms/<date>-<title>/` (transcripts, drawings), and
-checkpoint, sends no worker tasks, and can be turned into a discussion (keeping agent sessions) or
+checkpoint, sends no worker tasks, and can be turned into a sprint (keeping agent sessions) or
 into a research board (`/convert … research`, adding `.research` and starting fresh sessions with
 the researching rulebook), which moves its folder to `discussions/`.
 
-![Discussion lifecycle: unstarted, open, brainstorm, Resume, Start fresh, and moving to archive or deferred](diagrams/discussion-lifecycle.svg)
+![Sprint lifecycle: unstarted, open, brainstorm, Resume, Start fresh, and moving to archive or deferred](diagrams/discussion-lifecycle.svg)
 
 ![Storage map: every file and folder agent-room or its agents read or write, and who](diagrams/storage-map.svg)
 
 ## Replication (optional)
 
-With `--node` and `--peer`, each round of the launch room's discussions is saved as a Git commit
+With `--node` and `--peer`, each round of the launch room's sprints is saved as a Git commit
 in `<root>/.agent-room/store.git` (not the project's repository) and sent to paired peer servers,
 which check it and show it as a read-only snapshot. Peer files are never merged into a working
-discussion.
+sprint.
 
 ![Replication: capture, transfer, validation, publication and acknowledgement between paired nodes](diagrams/replication.svg)
 
@@ -264,7 +267,7 @@ Put a disagreement under Disputed only; under Open, don't repeat the Next step q
 Empty sections are left out; at most eight points under Agreed, Disputed and Open; Next step holds
 exactly one action for the User. An instruction for the worker is kept until the User confirms
 it was sent, replaced or withdrawn, quoted word for word when it is the Next step (in a
-discussion, its full text is also kept in the discussion's `pending-instructions.md`).
+sprint, its full text is also kept in the sprint's `pending-instructions.md`).
 
 While auto dev runs, `autoDevTask` in `src/ui.mjs` adds a last line: `Outcome: SEND`,
 `Outcome: FINISH` or `Outcome: WAIT FOR USER`. While it is paused, `pausedTask` allows only

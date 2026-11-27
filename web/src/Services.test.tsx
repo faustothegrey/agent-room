@@ -157,9 +157,9 @@ it('saves the default providers through the shared queue, with the legacy texts'
   render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: '⚙ Providers' }));
   const form = await within(panel()).findByRole('form', { name: 'Default providers' });
-  expect(await within(form).findByText(/^Defaults for new discussions, in this room and every other\. This discussion has started/)).toBeTruthy();
+  expect(await within(form).findByText(/^Defaults for new boards, in this room and every other\. This board has started/)).toBeTruthy();
   await user.selectOptions(within(form).getByLabelText('Worker model'), 'opus');
-  await waitFor(() => expect(within(form).getByRole('status').textContent).toBe('Saved as the defaults for new discussions.'));
+  await waitFor(() => expect(within(form).getByRole('status').textContent).toBe('Saved as the defaults for new boards.'));
   expect(bodies('__settings')).toEqual([{ agents, worker: { ...worker, model: 'opus' }, scope: 'defaults' }]);
   await user.selectOptions(within(form).getByLabelText('Agent 1 model'), 'Custom…');
   expect(within(form).getByRole('status').textContent).toBe('Enter a custom model ID to save this choice.');
@@ -195,7 +195,7 @@ it('shows provider health, checks now, runs a prompt test, and opens from a prov
 it('describes ⚙ Providers with this board\'s CLI sessions, following room updates, or its usual text without them', async () => {
   render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
   const button = () => screen.getByRole('button', { name: '⚙ Providers' });
-  expect(button().getAttribute('title')).toBe('Default providers and models for new discussions, and provider health');
+  expect(button().getAttribute('title')).toBe('Default providers and models for new boards, and provider health');
   expect(document.getElementById('providers-tip')).toBeNull();
   const cliSessions = { agents: [{ name: 'Claude', provider: 'claude', id: null }, { name: 'Codex', provider: 'codex', id: null }], worker: { name: 'Worker', provider: 'claude', id: null } };
   Source.current.send({ type: 'room', room: { ...room, cliSessions } });

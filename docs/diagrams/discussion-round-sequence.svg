@@ -51,7 +51,7 @@
   <!-- after round -->
   <text x="320" y="494" fill="#1168bd">if an agent spoke (or auto dev is deciding) and none failed: automatic summary</text>
   <text x="320" y="508" fill="#1168bd">(drafter rotates; others PASS to agree; ≤3 turns each)</text>
-  <text x="320" y="522" fill="#1168bd">then: replication commit (if on) → checkpoint saved (discussions) → auto dev decides (if running)</text>
+  <text x="320" y="522" fill="#1168bd">then: replication commit (if on) → checkpoint saved (sprints) → auto dev decides (if running)</text>
   <text x="320" y="536" fill="#1168bd" font-size="10">no summary (only passes, or a failed turn): replication commit and checkpoint still saved;</text>
   <text x="320" y="549" fill="#1168bd" font-size="10">a failed turn pauses auto dev</text>
   <line x1="310" y1="566" x2="92" y2="566" stroke="#444" stroke-dasharray="5 3" marker-end="url(#a)"/>

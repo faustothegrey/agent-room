@@ -38,7 +38,7 @@
 
   <rect x="430" y="190" width="170" height="60" fill="#1168bd"/>
   <text x="515" y="215" fill="#fff" text-anchor="middle" font-weight="bold">ui.mjs</text>
-  <text x="515" y="232" fill="#fff" text-anchor="middle" font-size="11">discussions, workers, auto dev</text>
+  <text x="515" y="232" fill="#fff" text-anchor="middle" font-size="11">sprints, workers, auto dev</text>
 
   <rect x="240" y="270" width="170" height="60" fill="#1168bd"/>
   <text x="325" y="295" fill="#fff" text-anchor="middle" font-weight="bold">agents.mjs</text>
@@ -104,7 +104,7 @@
   <text x="127" y="647" text-anchor="middle" font-size="11">notes, drawings, transcripts</text>
   <rect x="250" y="592" width="215" height="84" fill="#e8e8e8" stroke="#888"/>
   <text x="357" y="615" text-anchor="middle" font-weight="bold">Worker worktrees</text>
-  <text x="357" y="632" text-anchor="middle" font-size="11">&lt;repo&gt;.workers/&lt;name&gt;/ per discussion</text>
+  <text x="357" y="632" text-anchor="middle" font-size="11">&lt;repo&gt;.workers/&lt;name&gt;/ per sprint</text>
   <text x="357" y="647" text-anchor="middle" font-size="11">&lt;repo&gt;.worker/ (brainstorms)</text>
   <text x="357" y="662" text-anchor="middle" font-size="11">need Git · not a sandbox</text>
   <rect x="480" y="592" width="215" height="84" fill="#e8e8e8" stroke="#888"/>

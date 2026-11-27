@@ -160,7 +160,7 @@ async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) 
   if (ref?.startsWith(`${BRAINSTORMS}/`)) return moveBrainstorm(ctx, ref, to);
   const parent = join(ctx.cwd, 'discussions');
   const d = discussionRef(parent, ref ?? '');
-  if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent}.`, true), null;
+  if (!d) return note(ctx, `✗ No sprint "${ref}" in ${parent}.`, true), null;
   if (shopOf(ctx).closing?.has(d.name)) return note(ctx, `✗ ${d.name} is closing.`, true), null;
   const target = to === 'active' ? null : to;
   if (to !== 'active' && !SECTIONS.includes(to)) return note(ctx, '✗ Move it to active, archive or deferred.', true), null;
@@ -168,10 +168,10 @@ async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) 
   if (target && !closedDiscussions(ctx).includes(d.name)) return note(ctx, `✗ ${d.name} must be closed before it can be moved to ${target}/.`, true), null;
   await recoverWorkerOwner(ctx);
   const from = join(parent, d.section ?? '', d.name);
-  if (ctx.discussion?.dir === from) return note(ctx, `✗ ${d.name} is the discussion in use in this room: it can't move now.`, true), null;
+  if (ctx.discussion?.dir === from) return note(ctx, `✗ ${d.name} is the board in use in this room: it can't move now.`, true), null;
   const shop = shopOf(ctx);
   if (target === 'archive' && shop.rollbacks?.has(d.name) && !rollbackConfirmed)
-    return note(ctx, '✗ Review the rollback report and use its explicit archive confirmation; the discussion has not been archived.', true), null;
+    return note(ctx, '✗ Review the rollback report and use its explicit archive confirmation; the sprint has not been archived.', true), null;
   if (target === 'deferred') {
     // Its own branch: any commit not in main. worker/main (shared before lanes): its labelled ones.
     const place = await lanePlace(ctx, null);
@@ -196,14 +196,14 @@ async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) 
   if (!open && lanesOf(shop).some((l) => l.blockedBy?.label === d.name)) return note(ctx, `✗ ${d.name} can't move: its worker edits are unresolved.`, true), null;
   if (open?.busy) return note(ctx, `✗ ${d.name} is in the middle of a round; try again when it ends.`, true), null;
   const dest = join(parent, target ?? '', d.name);
-  if (existsSync(dest)) return note(ctx, `✗ There is already a discussion ${d.name} in ${target ?? 'discussions'}/.`, true), null;
+  if (existsSync(dest)) return note(ctx, `✗ There is already a sprint ${d.name} in ${target ?? 'discussions'}/.`, true), null;
   mkdirSync(dirname(dest), { recursive: true });
   renameSync(from, dest);
   if (open) {
     // Its session follows: its folder and transcript paths, and its agents are told.
     open.discussion.dir = dest;
     if (open.logPath?.startsWith(from + sep)) open.logPath = dest + open.logPath.slice(from.length);
-    const moved = { speaker: 'agent-room', text: `This discussion's folder moved to ${dest}: use that path from now on.` };
+    const moved = { speaker: 'agent-room', text: `This sprint's folder moved to ${dest}: use that path from now on.` };
     open.state.transcript.push(moved);
     log(open, `**${moved.speaker}**\n\n${moved.text}\n\n`);
     toScreen(open, { type: 'message', message: open.docs.messageView(moved) });
@@ -216,8 +216,8 @@ async function moveDiscussion(ctx, ref, to, { rollbackConfirmed = false } = {}) 
     toScreen(ctx, { type: 'doc', file: ctx.screen.doc });
   }
   toScreen(ctx, { type: 'moved', from: rel(d.section), to: rel(target) });
-  log(ctx, `_(moved the discussion ${d.name} to ${target ?? 'active'})_\n\n`);
-  note(ctx, `Moved the discussion ${d.name} to ${target ? `${target}/` : 'the active discussions'}.`);
+  log(ctx, `_(moved the sprint ${d.name} to ${target ?? 'active'})_\n\n`);
+  note(ctx, `Moved the sprint ${d.name} to ${target ? `${target}/` : 'the active sprints'}.`);
   return { name: d.name };
 }
 
@@ -265,26 +265,26 @@ function moveBrainstorm(ctx, ref, to) {
 // Rollback is an ordinary, origin-labelled worker task. Git reasoning and changes stay with
 // the worker; only the User's later, explicit command may move the discussion into archive/.
 function rollbackTask(name) {
-  return `Archive with rollback for [${name}]. Work only on worker/${name}, this discussion's own branch; never merge into main or push, reset, rebase or clean the worktree.
+  return `Archive with rollback for [${name}]. Work only on worker/${name}, this sprint's own branch; never merge into main or push, reset, rebase or clean the worktree.
 Before changing any file (including a preliminary merge), inspect the complete history of worker/${name}, main and worker/main (the branch every discussion shared before each had its own: older [${name}] commits may be there), commit messages, parents and diffs. Find this discussion's [${name}]-labelled implementation commits, INCLUDING those already merged into main (do not restrict the search to main..worker/${name}).
 Distinguish implementation commits from catch-up merges and earlier rollback/revert commits. Inspect Agent-Room-Rollback-Origin and Agent-Room-Reverted trailers, standard "This reverts commit" records, and any later reverts of those reverts. Exclude catch-up merges, earlier rollback commits, and implementation changes already undone: never revert a rollback and restore changes already removed. Do not infer the set from labels alone. If the intended set or an earlier rollback's coverage is unclear, stop and report the ambiguity BEFORE changing any file. Do not guess a merge mainline.
 Identify later work by other origins that may depend on the changes, in main and in other discussions' unmerged branches (git branch --list 'worker/*'), using history, overlapping files and affected symbols/callers; report the origins, commit IDs and dependency evidence. A clean revert or passing tests do not prove there are no semantic dependencies. If dependencies make a safe rollback unclear, stop and report before changing files.
 Once the set is clear, if main has commits worker/${name} lacks and the worktree has no unresolved edits or Git operation, first merge main into worker/${name} with a normal merge. Label any merge commit [${name}] catch up with main. If it clashes, do not force it or continue the rollback: leave the state intact and report the conflict for recovery by this origin. Recheck the intended set after the merge; report any new ambiguity before reverting.
 Revert the intended implementation commits newest first. If a revert conflicts, stop and report it; do not force or silently abandon changes. Run npm test and read its real output. Commit the rollback on worker/${name} with a message starting "[${name}] rollback" and the trailer "Agent-Room-Rollback-Origin: ${name}", plus one "Agent-Room-Reverted: <full implementation commit ID>" trailer per commit undone. If everything was already undone, do not restore it: explain that and make a labelled empty rollback commit with the origin trailer and no reverted IDs.
-Report the commit ID, the exact set undone or already undone, npm test's real output, dependencies found on other origins' work and what you could not check. Only if rollback and tests succeeded and the worktree is clean with no Git operation in progress, end the report with "Rollback ready: <full rollback commit ID>". Otherwise omit that line. Do not archive the discussion: the User must review this report and explicitly confirm archiving; the User retains the final merge into main.`;
+Report the commit ID, the exact set undone or already undone, npm test's real output, dependencies found on other origins' work and what you could not check. Only if rollback and tests succeeded and the worktree is clean with no Git operation in progress, end the report with "Rollback ready: <full rollback commit ID>". Otherwise omit that line. Do not archive the sprint: the User must review this report and explicitly confirm archiving; the User retains the final merge into main.`;
 }
 async function requestRollback(ctx, ref) {
   const d = discussionRef(join(ctx.cwd, 'discussions'), ref);
-  if (!d || d.section === 'archive') return note(ctx, '✗ Choose a local discussion outside archive/ for rollback.', true);
+  if (!d || d.section === 'archive') return note(ctx, '✗ Choose a local sprint outside archive/ for rollback.', true);
   let origin = siblings(ctx).find((c) => c.discussion?.name === d.name);
   if (!origin) {
-    if (!multi(ctx)) return note(ctx, '✗ Resume that discussion before requesting rollback in terminal mode.', true);
+    if (!multi(ctx)) return note(ctx, '✗ Resume that sprint before requesting rollback in terminal mode.', true);
     origin = await openBeside(ctx);
     try { await resumeDiscussion(origin, ref); } catch (err) { closeContext(origin); throw err; }
     if (fresh(origin)) return closeContext(origin); // it couldn't open there (its note says why)
   }
   if (origin.stopped || origin.screen.workerInfo?.disabled)
-    return note(ctx, '✗ This discussion\'s worker must be enabled before requesting rollback.', true);
+    return note(ctx, '✗ This sprint\'s worker must be enabled before requesting rollback.', true);
   const shop = shopOf(origin), rollbacks = shop.rollbacks ??= new Map();
   if (['queued', 'running'].includes(rollbacks.get(d.name)?.status)) return note(ctx, 'Rollback is already queued or running.');
   autoDevInput(origin, 'you requested archive with rollback');
@@ -302,7 +302,7 @@ async function confirmRollbackArchive(ctx, ref) {
   if (!rollback || rollback.status !== 'ready') return note(ctx, '✗ No successful rollback report awaiting archive confirmation.', true);
   const lane = laneState(shop, d.name); // its own lane, where its rollback ran
   if (lane.running || lane.tasks.length || lane.pumping || shop.confirming)
-    return note(ctx, '✗ Wait for this discussion\'s worker queue to be idle before confirming archive.', true);
+    return note(ctx, '✗ Wait for this sprint\'s worker queue to be idle before confirming archive.', true);
   shop.confirming = true;
   try {
     const place = await lanePlace(ctx, d.name); // the discussion's own lane, where its rollback ran
@@ -375,7 +375,7 @@ function createSessionFile(dir, text, now = new Date()) {
 async function openDiscussion(ctx, line) {
   const now = new Date();
   const brainstorm = !!ctx.state.brainstorm, workbench = !!ctx.state.workbench, research = !!ctx.state.research;
-  const kind = brainstorm ? 'brainstorm' : workbench ? 'workbench' : research ? 'research board' : 'discussion';
+  const kind = brainstorm ? 'brainstorm' : workbench ? 'workbench' : research ? 'research board' : 'sprint';
   const kindCap = kind[0].toUpperCase() + kind.slice(1);
   try {
     if (!ctx.discussion) {
@@ -426,7 +426,7 @@ function briefing(ctx) {
   const s = continued ? ctx.freshSummary : null;
   const summary = !s ? '' : `\n\nThe latest summary from the previous session (${s.outcome === 'agreed' ? `agreed, by ${s.by}` : `**not agreed**: the last version, by ${s.by}; treat its points as proposals`}):\n\n${s.text}`;
   if (ctx.state.brainstorm) {
-    const rules = `This is a brainstorm, not a discussion. Its folder is ${dir}: write nothing except drawings, in ${join(dir, 'drawings')}/. `
+    const rules = `This is a brainstorm, not a sprint. Its folder is ${dir}: write nothing except drawings, in ${join(dir, 'drawings')}/. `
       + `You may read the project in the room's root, ${ctx.cwd}.`;
     if (!continued) return rules;
     // A fresh start with no summary: its saved transcripts are the record to read first.
@@ -455,14 +455,14 @@ function briefing(ctx) {
   }
   if (continued) {
     if (ctx.discussion.fromResearch) {
-      return `This discussion was turned from a research board. Its folder is ${dir}: create, read and write this discussion's documents there. `
+      return `This sprint was turned from a research board. Its folder is ${dir}: create, read and write this sprint's documents there. `
         + `Before replying, read its research notes and earlier transcripts in ${join(dir, 'transcripts')}/${s ? ` (the transcripts are the source; this summary may omit details):${summary}` : '.'}`;
     }
     if (existsSync(join(dir, 'closing-statement.md'))) {
       const text = readFileSync(join(dir, 'closing-statement.md'), 'utf8');
-      return `This session continues the discussion in ${dir}: create, read and write this discussion's documents (notes, drawings) there. Start from its closing statement:\n\n${text}${summary}`;
+      return `This session continues the sprint in ${dir}: create, read and write this sprint's documents (notes, drawings) there. Start from its closing statement:\n\n${text}${summary}`;
     }
-    return `This session continues the discussion in ${dir}: create, read and write this discussion's documents (notes, drawings) there. Start from its handoff `
+    return `This session continues the sprint in ${dir}: create, read and write this sprint's documents (notes, drawings) there. Start from its handoff `
       + '(see "Where to start reading" in your rulebook); you can also read its notes and its transcripts/ folder.' + summary;
   }
   const instr = ctx.instructions ?? defaultInstructions;
@@ -584,7 +584,7 @@ function saveCheckpoint(ctx) {
     });
     ctx.checkpointError = null;
   } catch (err) {
-    if (ctx.checkpointError !== err.message) note(ctx, `✗ Couldn't save this ${ctx.state.brainstorm ? 'brainstorm' : 'discussion'}'s checkpoint: ${err.message}. ${ctx.state.brainstorm ? 'Resume' : 'Continue'} would continue from an earlier one.`, true);
+    if (ctx.checkpointError !== err.message) note(ctx, `✗ Couldn't save this ${ctx.state.brainstorm ? 'brainstorm' : 'sprint'}'s checkpoint: ${err.message}. ${ctx.state.brainstorm ? 'Resume' : 'Continue'} would continue from an earlier one.`, true);
     ctx.checkpointError = err.message;
   }
 }
@@ -654,13 +654,13 @@ async function leftBehind(ctx, name, r, { stopped = false, preparing = false, pl
     if (!s?.exists || (!s.treeDirty && !commits)) return `Result unknown: ${what} was stopped by the User. Check the worktree (${found}).`;
     if (s.treeDirty) return `Stopped by the User: ${what} left uncommitted edits in the worktree. Ask the worker to finish and commit them, or to abandon them.`;
     if (commits.length) return `Stopped by the User after committing: ${what}: ${commits.map((c) => `${c.id.slice(0, 7)} (${c.files.join(', ') || 'no files changed'})`).join(' · ')}. Its reply was lost. Ask the worker to check whether the task is complete.`;
-    return `Stopped by the User: ${what} left no commits or edits in the worktree. It may still have written notes elsewhere, such as the discussion's folder. Send it again if still wanted.`;
+    return `Stopped by the User: ${what} left no commits or edits in the worktree. It may still have written notes elsewhere, such as the sprint's folder. Send it again if still wanted.`;
   }
   if (!r.before) return `Result unknown: ${what} was interrupted before its starting point was recorded. Check the worktree (${found}).`;
   if (!s?.exists || (!s.treeDirty && !commits)) return `Result unknown: ${what} was interrupted by Restart, Quit or a crash. Check the worktree (${found}).`;
   if (s.treeDirty) return `Interrupted by Restart, Quit or a crash: ${what} left uncommitted edits in the worktree. Ask the worker to finish and commit them, or to abandon them.`;
   if (commits.length) return `Interrupted after committing: ${what}: ${commits.map((c) => `${c.id.slice(0, 7)} (${c.files.join(', ') || 'no files changed'})`).join(' · ')}. Its reply was lost. Ask the worker to check whether the task is complete.`;
-  return `Interrupted: ${what} left no commits or edits in the worktree. It may still have written notes elsewhere, such as the discussion's folder. Send it again if still wanted.`;
+  return `Interrupted: ${what} left no commits or edits in the worktree. It may still have written notes elsewhere, such as the sprint's folder. Send it again if still wanted.`;
 }
 // Each interrupted task, with what the worktree shows now; each task that never started. Shown in
 // the Worker tab, and as one agent-room message in the discussion's chat (so its agents learn it).
@@ -694,8 +694,8 @@ function checkpointSummary(saved) {
 // puts it in ctx. A checkpoint that can't be used is kept, and the room stays as it is. A
 // brainstorm's (brainstorm: true) has no worker part: its context keeps its own worker settings.
 async function loadCheckpoint(ctx, saved, name, brainstorm = false, directory = null, loadRoom = load) {
-  const what = brainstorm ? 'brainstorm' : 'discussion';
-  const fallback = brainstorm ? 'Start fresh starts the brainstorm from its latest summary or transcripts instead' : 'Start fresh starts the discussion from its handoff instead';
+  const what = brainstorm ? 'brainstorm' : 'sprint';
+  const fallback = brainstorm ? 'Start fresh starts the brainstorm from its latest summary or transcripts instead' : 'Start fresh starts the sprint from its handoff instead';
   const invalid = () => new Error(`The checkpoint of ${name} is invalid. It was kept; ${fallback}.`);
   const workerSpec = brainstorm ? ctx.workerSpec ?? roomDefaults(ctx).worker : saved.workerSpec;
   if (saved.invalid || saved.version !== 1 || saved.root !== realpathSync(ctx.cwd) || saved.discussion?.name !== name || !!saved.brainstorm !== brainstorm
@@ -835,7 +835,7 @@ function peekDiscussion(ctx, ref) {
   if (!ref) {
     ctx.screen.peek = null;
     toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
-    return note(ctx, 'Back to the discussion in use.');
+    return note(ctx, 'Back to the board in use.');
   }
   if (ref.startsWith(`${BRAINSTORMS}/`)) {
     const b = brainstormDirRef(join(ctx.cwd, BRAINSTORMS), ref);
@@ -853,16 +853,16 @@ function peekDiscussion(ctx, ref) {
     const notes = existsSync(join(dir, 'notes.md')) ? relative(ctx.cwd, join(dir, 'notes.md')).split(sep).join('/') : null;
     ctx.screen.peek = { name, ref: path, path, kind: 'brainstorm', title: saved?.discussion?.title ?? name, messages: transcript.map(ctx.docs.messageView), doc: notes };
     toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
-    return note(ctx, `Peeking at ${name} — read-only. Back (or /peek) returns to the discussion in use.`);
+    return note(ctx, `Peeking at ${name} — read-only. Back (or /peek) returns to the board in use.`);
   }
   const d = discussionRef(parent, ref);
-  if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent}.`, true);
+  if (!d) return note(ctx, `✗ No sprint "${ref}" in ${parent}.`, true);
   if (shopOf(ctx).closing?.has(d.name)) return note(ctx, `✗ ${d.name} is closing.`, true);
-  if (!closedDiscussions(ctx).includes(d.name)) return note(ctx, `✗ ${d.name} is not closed. Peek is for closed discussions: the open ones are already on screen.`, true);
+  if (!closedDiscussions(ctx).includes(d.name)) return note(ctx, `✗ ${d.name} is not closed. Peek is for closed sprints: the open ones are already on screen.`, true);
   const saved = readCheckpoint(ctx, d.name);
   const transcript = Array.isArray(saved?.state?.transcript) ? saved.state.transcript : [];
   if (ctx.noScreen) {
-    const body = transcript.length ? transcript.map((m) => `**${m.speaker}**\n\n${m.text ?? ''}`).join('\n\n') : 'This discussion has no saved conversation.';
+    const body = transcript.length ? transcript.map((m) => `**${m.speaker}**\n\n${m.text ?? ''}`).join('\n\n') : 'This sprint has no saved conversation.';
     return note(ctx, `${d.name}\n\n${body}\n`);
   }
   const dir = join(parent, d.section ?? '', d.name);
@@ -875,7 +875,7 @@ function peekDiscussion(ctx, ref) {
   ctx.screen.peek = { name: d.name, ref: refKey, path, kind: isWb ? 'workbench' : isRes ? 'research' : 'discussion', title: saved?.discussion?.title ?? d.name,
     messages: transcript.map(ctx.docs.messageView), ...(isWb && { worker: Array.isArray(saved?.worker) ? saved.worker : [] }), doc: notes };
   toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
-  return note(ctx, `Peeking at ${d.name} — read-only. Back (or /peek) returns to the discussion in use.`);
+  return note(ctx, `Peeking at ${d.name} — read-only. Back (or /peek) returns to the board in use.`);
 }
 
 // /resume <name> (Resume): a discussion that isn't on screen. Open in another context of this folder,
@@ -886,21 +886,21 @@ function peekDiscussion(ctx, ref) {
 // ends first. It runs between rounds (commands are queued).
 async function resumeDiscussion(ctx, ref, { loadRoom = load } = {}) {
   const parent = join(ctx.cwd, 'discussions');
-  if (!ref) return note(ctx, '✗ Name the discussion to resume: /resume <name> (its folder\'s name).', true);
+  if (!ref) return note(ctx, '✗ Name the sprint to resume: /resume <name> (its folder\'s name).', true);
   if (ref.startsWith(`${BRAINSTORMS}/`)) return resumeBrainstorm(ctx, ref);
   // A discussion is a folder named <date>-<title>; other folders there are the room's own material.
   const d = discussionRef(parent, ref);
-  if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent} (discussions are folders named <date>-<title>).`, true);
+  if (!d) return note(ctx, `✗ No sprint "${ref}" in ${parent} (sprints are folders named <date>-<title>).`, true);
   if (shopOf(ctx).closing?.has(d.name)) return note(ctx, `✗ ${d.name} is closing.`, true);
   const open = siblings(ctx).find((c) => c !== ctx && isDiscussion(c, d.name));
   if (open) return goto(ctx, open);
-  if (isDiscussion(ctx, d.name)) return note(ctx, `${d.name} is the discussion in use here.`);
+  if (isDiscussion(ctx, d.name)) return note(ctx, `${d.name} is the board in use here.`);
   if (multi(ctx) && !fresh(ctx)) return besideWith(ctx, (next) => resumeDiscussion(next, ref, { loadRoom }));
   if (d.section && !await moveDiscussion(ctx, ref, 'active')) return;
   const name = d.name, dir = join(parent, name), saved = readCheckpoint(ctx, name);
   const isWb = isWorkbenchDir(dir) || !!saved?.workbench;
   const isRes = isResearchDir(dir) || !!saved?.research;
-  const kindLabel = isWb ? 'workbench' : isRes ? 'research board' : 'discussion';
+  const kindLabel = isWb ? 'workbench' : isRes ? 'research board' : 'sprint';
   const wasClosed = closedDiscussions(ctx).includes(name);
   if (wasClosed || saved?.fromClosed) {
     const release = await suspendTransfers(ctx, name);
@@ -974,7 +974,7 @@ async function continueFrom(ctx, saved, name, brainstorm, loadRoom = load) {
   const apply = await loadCheckpoint(ctx, saved, name, brainstorm, null, loadRoom); // built before anything changes
   const was = ctx.discussion && { name: refOf(ctx), title: ctx.discussion.title };
   const ref = brainstorm ? `${BRAINSTORMS}/${name}` : name;
-  await leaveSession(ctx, `resuming the ${brainstorm ? 'brainstorm' : 'discussion'} ${name}`);
+  await leaveSession(ctx, `resuming the ${brainstorm ? 'brainstorm' : 'sprint'} ${name}`);
   apply();
   if (was && was.name !== ref) ctx.previous = was;
   if (ctx.previous?.name === ref) ctx.previous = null;
@@ -982,7 +982,7 @@ async function continueFrom(ctx, saved, name, brainstorm, loadRoom = load) {
   showHeader(ctx);
   toScreen(ctx, ctx.docs.resetEvent(ctx.screen));
   note(ctx, brainstorm ? `Resumed the brainstorm ${name}: the same agent sessions continue, with its chat.`
-    : `Resumed the discussion ${name}: the same agent and worker sessions continue, with its chat.`);
+    : `Resumed the sprint ${name}: the same agent and worker sessions continue, with its chat.`);
   if (ctx.grown) { note(ctx, `✗ ${ctx.grown}`, true); ctx.grown = null; }
 }
 // What /resume names the conversation in use by: its folder's name, or brainstorms/<name>.
@@ -1023,10 +1023,10 @@ function enterBrainstorm(ctx, name, saved) {
 // Resume before the first message still briefs with it.
 async function startFresh(ctx, ref) {
   const parent = join(ctx.cwd, 'discussions');
-  if (!ref) return note(ctx, '✗ Name the discussion to start afresh: /fresh <name> (its folder\'s name).', true);
+  if (!ref) return note(ctx, '✗ Name the sprint to start afresh: /fresh <name> (its folder\'s name).', true);
   if (ref.startsWith(`${BRAINSTORMS}/`)) return freshBrainstorm(ctx, ref);
   const d = discussionRef(parent, ref);
-  if (!d) return note(ctx, `✗ No discussion "${ref}" in ${parent} (discussions are folders named <date>-<title>).`, true);
+  if (!d) return note(ctx, `✗ No sprint "${ref}" in ${parent} (sprints are folders named <date>-<title>).`, true);
   if (shopOf(ctx).closing?.has(d.name)) return note(ctx, `✗ ${d.name} is closing.`, true);
   const open = siblings(ctx).find((c) => c !== ctx && isDiscussion(c, d.name));
   if (open) { open.say?.(`/fresh ${d.name}`); return goto(ctx, open); } // it starts afresh there
@@ -1038,7 +1038,7 @@ async function startFresh(ctx, ref) {
   const release = await suspendTransfers(ctx, name);
   try {
   const wasResearch = !!ctx.state.research;
-  await leaveSession(ctx, `starting the ${isRes ? 'research board' : 'discussion'} ${name} afresh`); // saves its checkpoint first
+  await leaveSession(ctx, `starting the ${isRes ? 'research board' : 'sprint'} ${name} afresh`); // saves its checkpoint first
   const summary = checkpointSummary(readCheckpoint(ctx, name));
   writeCheckpoint(ctx, name, { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
     discussion: { name, title: name }, ...(isRes && { research: true }), fresh: true, summary, work: workOf(shopOf(ctx), name) });
@@ -1225,10 +1225,10 @@ async function convertResearchToDiscussion(ctx, ref) {
   const normalized = ref.startsWith('discussions/') ? ref.slice('discussions/'.length) : ref;
   const d = discussionRef(parent, normalized);
   if (!d || !isResearchDir(join(parent, d.section ?? '', d.name))) return note(ctx, `✗ No research board "${ref}". Nothing was changed.`, true);
-  if (d.section) return note(ctx, `✗ ${d.name} is in ${d.section}/: make it active before turning it into a discussion.`, true);
+  if (d.section) return note(ctx, `✗ ${d.name} is in ${d.section}/: make it active before turning it into a sprint.`, true);
   const name = d.name, dir = join(parent, name), marker = join(dir, RESEARCH_MARKER);
   const open = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, name));
-  if (open?.busy) return note(ctx, `✗ ${name} can't become a discussion while a round or summary is running. Nothing was changed.`, true);
+  if (open?.busy) return note(ctx, `✗ ${name} can't become a sprint while a round or summary is running. Nothing was changed.`, true);
   if (open && open !== ctx) { open.say?.(`/convert discussions/${name}`); return goto(ctx, open); }
   const saved = readCheckpoint(ctx, name);
   if (saved?.invalid) return note(ctx, `✗ The checkpoint of ${name} is invalid. Nothing was changed.`, true);
@@ -1241,8 +1241,8 @@ async function convertResearchToDiscussion(ctx, ref) {
   if (open) {
     state = { transcript: [], seen: new Map() }; sessions = new Map();
     try { loaded = await load({ ...open, discussion: null, agentSpecs, workerSpec, sessions, state }, `?convert-discussion=${Date.now()}`); }
-    catch (err) { return note(ctx, `✗ Couldn't start fresh discussion sessions for ${name}: ${err.message}. Nothing was changed.`, true); }
-    if (open.busy) return note(ctx, `✗ ${name} can't become a discussion while a round or summary is running. Nothing was changed.`, true);
+    catch (err) { return note(ctx, `✗ Couldn't start fresh sprint sessions for ${name}: ${err.message}. Nothing was changed.`, true); }
+    if (open.busy) return note(ctx, `✗ ${name} can't become a sprint while a round or summary is running. Nothing was changed.`, true);
   }
   const freshSaved = { version: 1, root: realpathSync(ctx.cwd), at: new Date().toISOString(),
     discussion: { name, title }, fresh: true, fromResearch: true, summary, agentSpecs, workerSpec };
@@ -1263,7 +1263,7 @@ async function convertResearchToDiscussion(ctx, ref) {
     return note(ctx, `✗ Couldn't convert ${name}: ${err.message}. The research board was restored.`, true);
   }
   if (open) {
-    if (open.logPath) { try { appendFileSync(open.logPath, '_(turned into a discussion)_\n\n'); } catch {} }
+    if (open.logPath) { try { appendFileSync(open.logPath, '_(turned into a sprint)_\n\n'); } catch {} }
     for (const agent of open.room.agents) agent.reset?.();
     detachWorker(open);
     Object.assign(open, loaded, { state, sessions, agentSpecs, workerSpec, logPath: null, pendingLog: '', lastRound: null,
@@ -1278,7 +1278,7 @@ async function convertResearchToDiscussion(ctx, ref) {
   listedCheckpoints.clear();
   if (linked.length) broadcastSchedule(ctx);
   showHeader(ctx);
-  note(ctx, `Turned research board ${name} into a discussion: the same agents start fresh with discussion rules, reading the research notes, transcripts and latest summary.${linked.length ? ` Turned off ${linked.length} recurring scheduled task${linked.length === 1 ? '' : 's'} linked to this board.` : ''}`);
+  note(ctx, `Turned research board ${name} into a sprint: the same agents start fresh with sprint rules, reading the research notes, transcripts and latest summary.${linked.length ? ` Turned off ${linked.length} recurring scheduled task${linked.length === 1 ? '' : 's'} linked to this board.` : ''}`);
 }
 
 // /convert brainstorms/<name> (Turn into a discussion): its folder moves to discussions/<name>/
@@ -1289,18 +1289,18 @@ async function convertResearchToDiscussion(ctx, ref) {
 async function convertBrainstorm(ctx, ref) {
   const b = brainstormDirRef(join(ctx.cwd, BRAINSTORMS), ref);
   if (!b) return note(ctx, `✗ No brainstorm "${ref}" in ${join(ctx.cwd, BRAINSTORMS)}.`, true);
-  if (b.section) return note(ctx, `✗ ${b.name} is in ${b.section}/: make it active before turning it into a discussion.`, true);
+  if (b.section) return note(ctx, `✗ ${b.name} is in ${b.section}/: make it active before turning it into a sprint.`, true);
   const name = b.name, from = join(ctx.cwd, BRAINSTORMS, name);
   const open = siblings(ctx).find((c) => isBrainstorm(c, name));
   if (open && open !== ctx) { open.say?.(`/convert ${ref}`); return goto(ctx, open); }
   const parent = join(ctx.cwd, 'discussions'), dest = join(parent, name);
   const clash = [dest, ...SECTIONS.map((s) => join(parent, s, name)), ...SECTIONS.map((s) => join(ctx.cwd, BRAINSTORMS, s, name))].find((p) => existsSync(p));
-  if (clash) return note(ctx, `✗ ${name} can't become a discussion: ${relative(ctx.cwd, clash)} already exists. Nothing was moved.`, true);
+  if (clash) return note(ctx, `✗ ${name} can't become a sprint: ${relative(ctx.cwd, clash)} already exists. Nothing was moved.`, true);
   mkdirSync(parent, { recursive: true });
   // mkdir claims the name (it fails if the folder exists by now); the rename then replaces that empty folder.
-  try { mkdirSync(dest); } catch (err) { return note(ctx, `✗ ${name} can't become a discussion: ${err.code === 'EEXIST' ? `discussions/${name} already exists` : err.message}. Nothing was moved.`, true); }
+  try { mkdirSync(dest); } catch (err) { return note(ctx, `✗ ${name} can't become a sprint: ${err.code === 'EEXIST' ? `discussions/${name} already exists` : err.message}. Nothing was moved.`, true); }
   try { renameSync(from, dest); } catch (err) { try { rmdirSync(dest); } catch {} return note(ctx, `✗ Couldn't move ${name} to discussions/: ${err.message}`, true); }
-  const notice = `agent-room turned this brainstorm into a discussion. Its folder is now ${dest}: from now on the discussion rules of your rulebook apply (create, read and write this discussion's documents there), and the User can send work to the worker.`;
+  const notice = `agent-room turned this brainstorm into a sprint. Its folder is now ${dest}: from now on the sprint rules of your rulebook apply (create, read and write this sprint's documents there), and the User can send work to the worker.`;
   const moveFile = (p) => (typeof p === 'string' && p.startsWith(from + sep) ? dest + p.slice(from.length) : p);
   const saved = readCheckpoint(ctx, ref);
   if (open) {
@@ -1311,7 +1311,7 @@ async function convertBrainstorm(ctx, ref) {
     delete open.state.brainstormId;
     open.state.restored = { text: notice, pending: open.room.agents.map((a) => a.name) };
     if (open.lastRound) open.lastRound.state = { ...open.lastRound.state, brainstorm: false, restored: open.state.restored };
-    log(open, `_(turned into a discussion: ${dest})_\n\n`);
+    log(open, `_(turned into a sprint: ${dest})_\n\n`);
     saveCheckpoint(open);
     if (!open.lastRound && saved && !saved.invalid) writeCheckpoint(ctx, name, { ...saved, brainstorm: undefined, discussion: { ...saved.discussion, dir: dest } });
   } else if (saved && !saved.invalid) {
@@ -1337,7 +1337,7 @@ async function convertBrainstorm(ctx, ref) {
   }
   showHeader(ctx);
   if (open) refreshWorker(open).catch(() => {});
-  note(ctx, `Turned the brainstorm ${name} into the discussion ${name}, in discussions/: ${open ? 'its agents carry on' : 'Continue it to carry on'} with the same sessions, told of the new folder; the worker starts fresh with its first task.`);
+  note(ctx, `Turned the brainstorm ${name} into the sprint ${name}, in discussions/: ${open ? 'its agents carry on' : 'Continue it to carry on'} with the same sessions, told of the new folder; the worker starts fresh with its first task.`);
 }
 
 // /delete brainstorms/<name> (Delete): its folder (transcripts, drawings) and checkpoint are removed
@@ -1468,16 +1468,16 @@ async function defaultsForNew(ctx, { reloadAgents = false } = {}) {
 }
 async function newDiscussion(ctx) {
   const was = ctx.discussion, ref = refOf(ctx), brain = !!ctx.state.brainstorm, wasRes = !!ctx.state.research;
-  if (!was && !ctx.logPath && !ctx.state.brainstorm && !ctx.state.workbench && !ctx.state.research) return note(ctx, 'No discussion started yet: your next message starts a new one.');
-  if (ctx.logPath || ctx.state.brainstorm || ctx.state.workbench || ctx.state.research) endSession(ctx, 'starting a new discussion');
+  if (!was && !ctx.logPath && !ctx.state.brainstorm && !ctx.state.workbench && !ctx.state.research) return note(ctx, 'No sprint started yet: your next message starts a new one.');
+  if (ctx.logPath || ctx.state.brainstorm || ctx.state.workbench || ctx.state.research) endSession(ctx, 'starting a new sprint');
   await defaultsForNew(ctx, { reloadAgents: wasRes });
   if (was && !brain && ctx.screen.worker.length) {
-    const view = { owner: ownerOf(ctx), note: `New discussion: ${was.name} keeps its worker session; its tasks still running or queued finish there and report to it. The new discussion's worker starts a fresh session.` };
+    const view = { owner: ownerOf(ctx), note: `New sprint: ${was.name} keeps its worker session; its tasks still running or queued finish there and report to it. The new sprint's worker starts a fresh session.` };
     ctx.screen.worker.push(view);
     toScreen(ctx, { type: 'work', message: view });
   }
   switchTo(ctx, null);
-  note(ctx, `New discussion: your next message names it and starts it.${ref ? ` To go back, /resume ${ref}.` : ''}`);
+  note(ctx, `New sprint: your next message names it and starts it.${ref ? ` To go back, /resume ${ref}.` : ''}`);
 }
 
 // /brainstorm (New brainstorm): a conversation like a discussion's, with the same agents, turns and
@@ -1545,15 +1545,15 @@ function closeContext(c, to) {
 async function newDiscussionBeside(ctx) {
   if ((ctx.state.brainstorm || ctx.state.workbench || ctx.state.research) && fresh(ctx)) {
     const wasRes = !!ctx.state.research;
-    endSession(ctx, 'starting a new discussion');
+    endSession(ctx, 'starting a new sprint');
     await defaultsForNew(ctx, { reloadAgents: wasRes });
     switchTo(ctx, null);
-    return note(ctx, 'New discussion: your next message names it and starts it.');
+    return note(ctx, 'New sprint: your next message names it and starts it.');
   }
-  if (fresh(ctx)) return note(ctx, 'No discussion started yet: your next message starts a new one.');
+  if (fresh(ctx)) return note(ctx, 'No sprint started yet: your next message starts a new one.');
   const next = await openBeside(ctx);
   goto(ctx, next);
-  note(ctx, `New discussion: ${ctx.discussion?.name ?? 'this one'} stays open (${ctx.state.brainstorm ? 'Brainstorms: Go to' : 'Discussions: Continue'} shows it again).`);
+  note(ctx, `New sprint: ${ctx.discussion?.name ?? 'this one'} stays open (${ctx.state.brainstorm ? 'Brainstorms: Go to' : 'Sprints: Continue'} shows it again).`);
 }
 // /brainstorm on the screen: beside the open discussions and brainstorms (in this context if it is empty).
 async function newBrainstormBeside(ctx) {
@@ -1584,11 +1584,11 @@ function closeDiscussion(ctx) {
   if (hold) return note(ctx, `✗ This can't be closed yet: ${hold}.`, true);
   const others = siblings(ctx).filter((c) => c !== ctx);
   if ((!others.length || !multi(ctx)) && fresh(ctx) && !ctx.state.brainstorm && !ctx.state.workbench && !ctx.state.research)
-    return note(ctx, 'Nothing to close: no discussion is open here.');
-  if (others.length && multi(ctx) && ctx.replicaOwner) return note(ctx, '✗ This discussion holds the room\'s replication (its peers and storage): it stays open while others are. Close them first, or Quit room.', true);
+    return note(ctx, 'Nothing to close: no sprint is open here.');
+  if (others.length && multi(ctx) && ctx.replicaOwner) return note(ctx, '✗ This board holds the room\'s replication (its peers and storage): it stays open while others are. Close them first, or Quit room.', true);
   if (!others.length || !multi(ctx)) {
     const was = ctx.discussion, brain = !!ctx.state.brainstorm, wb = !!ctx.state.workbench, res = !!ctx.state.research;
-    if (ctx.logPath || ctx.state.brainstorm || ctx.state.workbench || ctx.state.research) endSession(ctx, brain ? 'closing the brainstorm' : wb ? 'closing the workbench' : res ? 'closing the research board' : 'closing the discussion');
+    if (ctx.logPath || ctx.state.brainstorm || ctx.state.workbench || ctx.state.research) endSession(ctx, brain ? 'closing the brainstorm' : wb ? 'closing the workbench' : res ? 'closing the research board' : 'closing the sprint');
     switchTo(ctx, null);
     return note(ctx, was ? `Closed ${was.name}; its checkpoint is kept. To go back, Resume it in ${brain ? 'Brainstorms' : 'Explorer'}.` : wb ? 'Closed the workbench.' : res ? 'Closed the research board.' : 'Closed the brainstorm.');
   }
@@ -1598,7 +1598,7 @@ function closeDiscussion(ctx) {
 function cancelCreation(ctx) {
   if (!fresh(ctx)) return;
   const others = siblings(ctx).filter((c) => c !== ctx && !c.stopped);
-  if (others.length && ctx.replicaOwner) return note(ctx, '✗ This discussion holds the room\'s replication (its peers and storage): it stays open while others are. Close them first, or Quit room.', true);
+  if (others.length && ctx.replicaOwner) return note(ctx, '✗ This board holds the room\'s replication (its peers and storage): it stays open while others are. Close them first, or Quit room.', true);
   if (others.length) return closeContext(ctx, others.includes(ctx.creationOrigin) ? ctx.creationOrigin : others[0]);
   if (ctx.state.brainstorm || ctx.state.workbench || ctx.state.research) return closeDiscussion(ctx);
 }
@@ -1644,7 +1644,7 @@ async function pendingWorkLine(ctx, name) {
 
 async function closeNamedDiscussion(ctx, name, { extraLine = null, rethrow = false } = {}) {
   const d = discussionRef(join(ctx.cwd, 'discussions'), name);
-  if (!d) { const msg = `No discussion "${name}".`; note(ctx, `✗ ${msg}`, true); if (rethrow) throw new Error(msg); return false; }
+  if (!d) { const msg = `No sprint "${name}".`; note(ctx, `✗ ${msg}`, true); if (rethrow) throw new Error(msg); return false; }
   const shop = shopOf(ctx), closing = shop.closing ??= new Map();
   if (closing.has(d.name)) { const msg = `${d.name} is already closing.`; note(ctx, `✗ ${msg}`, true); if (rethrow) throw new Error(msg); return false; }
   if (closedDiscussions(ctx).includes(d.name)) { const msg = `${d.name} is already closed.`; note(ctx, `✗ ${msg}`, true); if (rethrow) throw new Error(msg); return false; }
@@ -1712,7 +1712,7 @@ async function closeNamedDiscussion(ctx, name, { extraLine = null, rethrow = fal
       // CLI calls run one process per turn; the worker and closing turns have returned. Drop their
       // provider IDs without stopping another discussion's detached worker in this context.
       for (const [session] of sessions) for (const key of Object.keys(session)) delete session[key];
-      if (checkpoint?.invalid) throw new Error('The discussion checkpoint is invalid.');
+      if (checkpoint?.invalid) throw new Error('The sprint checkpoint is invalid.');
       if (checkpoint) {
         const wbWorker = workbench ? shop.log.filter((m) => m.origin === d.name) : null;
         writeCheckpoint(ctx, d.name, {
@@ -1757,7 +1757,7 @@ async function closeNamedDiscussion(ctx, name, { extraLine = null, rethrow = fal
       if (others.length && multi(target) && !target.replicaOwner && !foreignWork) closeContext(target, others[0]);
       else {
         if (others.length && multi(target)) goto(target, others[0]);
-        endSession(target, workbench ? 'closing the workbench' : 'closing the discussion', (agent) => note(ctx, `${agent.name}'s ended session was reset for a new discussion.`));
+        endSession(target, workbench ? 'closing the workbench' : 'closing the sprint', (agent) => note(ctx, `${agent.name}'s ended session was reset for a new sprint.`));
         switchTo(target, null);
       }
     }

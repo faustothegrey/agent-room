@@ -67,7 +67,7 @@ it('serializes saves from both panels, and Retry with… waits for them', async 
   reset({ ...room, started: true, retryId: 'r1' }, { worker: [{ speaker: 'Worker report', html: '<p>failed</p>', error: true, retryId: 'r1' }] }); const user = userEvent.setup();
   await user.click(screen.getByRole('tab', { name: /Worker/ }));
   const form = await openPanel(user, /^Worker ·/);
-  expect(await within(form).findByText(/^Changes apply to this discussion only, starting with the next instruction\./)).toBeTruthy();
+  expect(await within(form).findByText(/^Changes apply to this sprint only, starting with the next instruction\./)).toBeTruthy();
   await user.selectOptions(within(form).getByLabelText('Worker model'), 'opus');
   await waitFor(() => expect(bodies('__settings')).toHaveLength(1));
   await user.selectOptions(within(form).getByLabelText('Worker provider'), 'codex');
@@ -88,7 +88,7 @@ it('shows a started discussion its members, read-only, with On boxes that leave 
   render(<App version="one" refresh={() => {}} />); reset({ ...room, started: true, members }); const user = userEvent.setup();
   expect(screen.getByText('Discussion members ·').textContent).toBe('Discussion members · Opus, Codex default');
   const form = await openPanel(user, /^Discussion members/);
-  expect(await within(form).findByText(/^This discussion’s members\./)).toBeTruthy();
+  expect(await within(form).findByText(/^This board’s members\./)).toBeTruthy();
   expect((within(form).getByLabelText('Agent 1 provider') as HTMLSelectElement).disabled).toBe(true);
   expect((within(form).getByLabelText('Agent 1 name') as HTMLInputElement).disabled).toBe(true);
   await user.click(within(form).getByLabelText('Agent 2 On'));

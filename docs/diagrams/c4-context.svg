@@ -24,8 +24,8 @@
 
   <rect x="40" y="280" width="190" height="70" fill="#e8e8e8" stroke="#888"/>
   <text x="135" y="310" text-anchor="middle" font-weight="bold">The room's folder</text>
-  <text x="135" y="328" text-anchor="middle" font-size="11">any project + its discussions</text>
-  <text x="135" y="342" text-anchor="middle" font-size="10">(+ worker worktrees, one per discussion)</text>
+  <text x="135" y="328" text-anchor="middle" font-size="11">any project + its sprints</text>
+  <text x="135" y="342" text-anchor="middle" font-size="10">(+ worker worktrees, one per sprint)</text>
 
   <line x1="190" y1="140" x2="300" y2="185" stroke="#444" marker-end="url(#a)"/>
   <text x="200" y="185" font-size="11" fill="#444">browser</text>

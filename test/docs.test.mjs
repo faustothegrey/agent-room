@@ -657,7 +657,7 @@ test('a brainstorm message with attachments saves into brainstorms/<name>/files/
     screen.room = { active: null, brainstorm: true };
     const refused = await postFrom(s, '/__say', { text: 'early', files: [{ name: 'a.txt', data: b64('A') }] });
     assert.equal(refused.status, 409);
-    assert.match(await refused.text(), /started discussion or brainstorm.*Nothing was sent/);
+    assert.match(await refused.text(), /started sprint or brainstorm.*Nothing was sent/);
   } finally {
     s.close();
   }

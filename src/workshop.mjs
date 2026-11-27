@@ -168,7 +168,7 @@ function hold(ctx, blockedBy) {
   lane.holdContext = ctx;
   const where = blockedBy.label ? `[${blockedBy.label}]` : 'an unknown origin';
   workNote(ctx, `✗ The worker's folder ${blockedBy.place.path} (${blockedBy.place.branch}) has uncommitted edits from ${where}${blockedBy.task ? ` ("${blockedBy.task}")` : ''}: its queue holds${blockedBy.label ? ` until [${blockedBy.label}] resolves them (its own instructions still go through)` : ' until the folder is clean (commit or remove those edits yourself)'}; other lanes go on.`, true, null, blockedBy.owner ?? (blockedBy.place.lane || ownerOf(ctx)));
-  if (blockedBy.origin) note(blockedBy.origin, `✗ The worker left uncommitted edits from "${blockedBy.task}": the worker lane of [${blockedBy.label}] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).`, true);
+  if (blockedBy.origin) note(blockedBy.origin, `✗ The worker left uncommitted edits from "${blockedBy.task}": the worker lane of [${blockedBy.label}] holds them until they are resolved (other sprints' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).`, true);
   showHeader(ctx);
   if (!lane.pumping) watchLane(shop, lane);
 }
@@ -176,7 +176,7 @@ function release(ctx, lane) {
   const was = lane.blockedBy;
   lane.blockedBy = null;
   workNote(ctx, `The worker's folder ${was.place.path} is clean again: its queue resumes.`, false, null, was.owner ?? (was.place.lane || ownerOf(ctx)));
-  if (was?.origin) note(was.origin, 'The worker\'s folder is clean again: this discussion\'s worker tasks resume.');
+  if (was?.origin) note(was.origin, 'The worker\'s folder is clean again: this sprint\'s worker tasks resume.');
   showHeader(ctx);
 }
 // Starts every lane that has work and may run. A lane that can't start for lack of a free place
@@ -285,7 +285,7 @@ function stopWorker(ctx, mode) {
   const label = t?.label ?? originLabel(ctx);
   workNote(ctx, !t ? `No instruction from [${label}] was running.${cancelled.length ? '' : ' Nothing was stopped.'}`
     : mode === 'now' ? `Stop now: [${label}] "${firstLine(t.text)}" is being stopped; what it left follows.`
-      : `Stop after this task: [${label}] "${firstLine(t.text)}" finishes and is reported as usual; nothing more from this discussion runs after it.`, false, label, owner);
+      : `Stop after this task: [${label}] "${firstLine(t.text)}" finishes and is reported as usual; nothing more from this sprint runs after it.`, false, label, owner);
   for (const x of cancelled) {
     const view = { ...ctx.docs.messageView({ speaker: 'agent-room', text: `Not started, cancelled by the stop: [${x.label}] instruction sent ${x.record ? clock(x.record.at) : 'earlier'}. Its full text, to send again if still wanted:\n\n${x.retry?.text ?? x.text}` }), origin: x.label, owner };
     shop.log.push(view);
@@ -490,10 +490,10 @@ function autoDevView(ctx) {
 // /autodev: Start or Restart from the latest agreed summary.
 function startAutoDev(ctx) {
   const s = latestAgreed(ctx);
-  const why = ctx.state.brainstorm ? 'auto dev is for discussions; a brainstorm keeps no saved record'
+  const why = ctx.state.brainstorm ? 'auto dev is for sprints; a brainstorm keeps no saved record'
     : ctx.state.workbench ? 'auto dev is not used on a workbench'
     : ctx.state.research ? 'auto dev is not used on a research board'
-    : !ctx.logPath ? 'it needs a started discussion'
+    : !ctx.logPath ? 'it needs a started sprint'
     : !ctx.say ? 'it works from the browser screen'
     : ctx.autoDev?.status === 'running' ? 'it is already running'
     : ctx.screen.workerInfo?.disabled ? ctx.screen.workerInfo.lines[0]
@@ -630,7 +630,7 @@ async function retryWork(ctx, id, settings = null) {
   }
 }
 
-const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a discussion to send work.';
+const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a sprint to send work.';
 async function sendWorkbenchInstruction(ctx, text) {
   if (ctx.stopped) return note(ctx, 'This room is ending: the instruction was not sent.', true);
   if (ctx.discussion && shopOf(ctx).closing?.has(ctx.discussion.name)) return note(ctx, '✗ This workbench is closing; the instruction was not sent.', true);
@@ -646,8 +646,8 @@ async function sendWorkbenchInstruction(ctx, text) {
 }
 function queueWork(ctx, text, run = null, rollback = null, retry = null, { catchUp = false } = {}) {
   if (ctx.state.brainstorm) return note(ctx, `✗ ${BRAINSTORM_NO_WORK} The instruction was not sent.`, true);
-  if (ctx.state.research) return note(ctx, '✗ A research board has no worker. Open a discussion to send work. The instruction was not sent.', true);
-  if (ctx.discussion && shopOf(ctx).closing?.has(ctx.discussion.name)) return note(ctx, '✗ This discussion is closing; the instruction was not sent.', true);
+  if (ctx.state.research) return note(ctx, '✗ A research board has no worker. Open a sprint to send work. The instruction was not sent.', true);
+  if (ctx.discussion && shopOf(ctx).closing?.has(ctx.discussion.name)) return note(ctx, '✗ This sprint is closing; the instruction was not sent.', true);
   if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
   if (ctx.stopped) return note(ctx, 'This room is ending: the instruction was not sent.', true);
   ctx.agentsStarted = true;

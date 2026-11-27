@@ -23,7 +23,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 it('only enables Archive and Defer for closed non-current boards', async () => {
   setup(); const user = userEvent.setup(); await user.click(await screen.findByLabelText('Board actions for Live'));
   expect((within(menu('Live')).getByRole('button', { name: 'Archive' }) as HTMLButtonElement).disabled).toBe(true);
-  expect(within(menu('Live')).getByRole('button', { name: 'Defer' }).title).toBe('Close the discussion before moving it into deferred/.');
+  expect(within(menu('Live')).getByRole('button', { name: 'Defer' }).title).toBe('Close the sprint before moving it into deferred/.');
   await user.click(screen.getByLabelText('Board actions for closed'));
   expect((within(menu('closed')).getByRole('button', { name: 'Archive' }) as HTMLButtonElement).disabled).toBe(false);
   await user.click(within(menu('closed')).getByRole('button', { name: 'Defer' }));

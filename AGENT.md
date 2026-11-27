@@ -11,7 +11,7 @@ The owner (and User in agent-room) is Fausto; agents may address Fausto by name.
 Current setup, behavior and the source map are in `README.md`. Remaining decisions and
 historical material are in `discussions/` (start at `discussions/README.md`).
 
-**Discussion and brainstorm agents** (the agents agent-room starts in a room) follow
+**Sprint and brainstorm agents** (the agents agent-room starts in a room) follow
 `rulebooks/citizenship.md`, `rulebooks/group-chat.md` and `rulebooks/discussing.md`, joined in
 that order and sent to them as system instructions by the harness; **research board agents**
 receive `rulebooks/citizenship.md`, `rulebooks/group-chat.md` and `rulebooks/researching.md`.

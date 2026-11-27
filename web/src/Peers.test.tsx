@@ -38,7 +38,7 @@ it('switches room from a chooser of this server rooms, in this tab or a new wind
   const options = [...groups[0].querySelectorAll('option')];
   expect(options.map((o) => [o.textContent, o.disabled])).toEqual([
     ['/Users/me/my-room · discussions/live · 1 page open (current)', true],
-    ['/Users/me/other · No discussion started · 0 pages open', false],
+    ['/Users/me/other · No sprint started · 0 pages open', false],
     ['/Users/me/busy · discussions/x · 2 pages open (open in another window)', true]]);
   fireEvent.change(chooser, { target: { value: 'window:/r/b/__room' } });
   expect(open).toHaveBeenCalledWith(new URL('/r/b/__room', location.href).href, '_blank', expect.stringMatching(/^width=/));

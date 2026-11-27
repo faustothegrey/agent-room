@@ -47,13 +47,13 @@ it('confirms Delete, refuses deletion of an open board, and uses board-kind refe
 
 it('requires separate confirmations for both brainstorm conversions and research conversion', async () => {
   setup(); const user = userEvent.setup(); await user.click(await screen.findByLabelText('Board actions for idea'));
-  await user.click(within(menu('idea')).getByRole('button', { name: 'Turn into a discussion' })); expect(says()).toEqual([]);
+  await user.click(within(menu('idea')).getByRole('button', { name: 'Turn into a sprint' })); expect(says()).toEqual([]);
   await user.click(within(menu('idea')).getByRole('button', { name: 'Click again: it moves to discussions/' }));
   await waitFor(() => expect(says()).toContain('/convert brainstorms/' + idea));
   await user.click(screen.getByLabelText('Board actions for idea')); await user.click(within(menu('idea')).getByRole('button', { name: 'Turn into research' }));
   await user.click(within(menu('idea')).getByRole('button', { name: 'Click again: it moves to discussions/ as a research board' }));
   await waitFor(() => expect(says()).toContain('/convert brainstorms/' + idea + ' research'));
-  await user.click(screen.getByLabelText('Board actions for study')); await user.click(within(menu('study')).getByRole('button', { name: 'Turn into a discussion' }));
+  await user.click(screen.getByLabelText('Board actions for study')); await user.click(within(menu('study')).getByRole('button', { name: 'Turn into a sprint' }));
   await user.click(within(menu('study')).getByRole('button', { name: 'Click again: research sessions end and scheduled tasks turn off' }));
   await waitFor(() => expect(says()).toContain('/convert discussions/' + research));
 });
@@ -61,7 +61,7 @@ it('requires separate confirmations for both brainstorm conversions and research
 it('queues rollback separately, shows its report, and requires ready, closed and two clicks to archive', async () => {
   setup(); const user = userEvent.setup(); await user.click(await screen.findByLabelText('Board actions for closed'));
   await user.click(within(menu('closed')).getByRole('button', { name: 'Archive with rollback' })); expect(says()).toEqual([]);
-  await user.click(within(menu('closed')).getByRole('button', { name: 'Click again: queue rollback of this discussion’s implementation' }));
+  await user.click(within(menu('closed')).getByRole('button', { name: 'Click again: queue rollback of this sprint’s implementation' }));
   await waitFor(() => expect(says()).toContain('/rollback ' + closed));
   Source.current.send({ type: 'room', room: { ...room, rollbacks: [{ name: closed, status: 'running', report: 'In progress' }] } });
   expect((within(menu('closed')).getByRole('button', { name: 'Rollback running' }) as HTMLButtonElement).disabled).toBe(true);
@@ -78,7 +78,7 @@ it('queues rollback separately, shows its report, and requires ready, closed and
 it('uses legacy resume and Peek tooltips and expires row confirmations', async () => {
   setup(); const user = userEvent.setup(); await user.click(await screen.findByLabelText('Board actions for closed'));
   expect(within(menu('closed')).getByRole('button', { name: 'Resume' }).title).toBe('Reopen from its closing statement (or pending handoff) with new agent and worker sessions.');
-  expect(within(menu('closed')).getByRole('button', { name: 'Peek chat & files' }).title).toBe('Look at this closed discussion read-only: its conversation and files, without reopening it.');
+  expect(within(menu('closed')).getByRole('button', { name: 'Peek chat & files' }).title).toBe('Look at this closed sprint read-only: its conversation and files, without reopening it.');
   vi.useFakeTimers(); fireEvent.click(within(menu('closed')).getByRole('button', { name: 'Start fresh' }));
   await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
   expect(within(menu('closed')).getByRole('button', { name: 'Start fresh' })).toBeTruthy(); expect(says()).toEqual([]);
@@ -90,6 +90,6 @@ it('uses archived rollback references and does not permit confirming archive for
   expect((within(menu('Live')).getByRole('button', { name: 'Confirm archive after rollback' }) as HTMLButtonElement).disabled).toBe(true);
   await user.click(screen.getByText('Archived · Deferred (1)')); await user.click(screen.getByLabelText('Board actions for old'));
   await user.click(within(menu('old')).getByRole('button', { name: 'Archive with rollback' }));
-  await user.click(within(menu('old')).getByRole('button', { name: 'Click again: queue rollback of this discussion’s implementation' }));
+  await user.click(within(menu('old')).getByRole('button', { name: 'Click again: queue rollback of this sprint’s implementation' }));
   await waitFor(() => expect(says()).toContain('/rollback archive/' + archived));
 });
