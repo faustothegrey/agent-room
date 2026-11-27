@@ -261,7 +261,7 @@ function handleScreen(req, res, url, dir, screen) {
       // While another node's line is open in View, it is read-only: only these commands pass.
       if (screen.isViewing?.(req.headers['x-view-client']) && !VIEW_COMMANDS.includes(body.text.trim())) return send(409, 'text/plain; charset=utf-8', `Read-only: you are viewing a received line. Go back to this node's line first.`);
       if (files) return sayWithFiles(body.text.trim(), files, body.confirmed === true);
-      const warning = screen.say(body.text.trim(), body.confirmed === true);
+      const warning = screen.say(body.text.trim(), body.confirmed === true, body.researchKind);
       if (typeof warning === 'string') return send(409, 'text/plain; charset=utf-8', warning);
       send(204, 'text/plain', '');
     });

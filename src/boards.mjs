@@ -44,6 +44,28 @@ function workbenchNames(ctx) {
 }
 const RESEARCH_MARKER = '.research';
 const isResearchDir = (dir) => !!dir && existsSync(join(dir, RESEARCH_MARKER));
+// A research board's kind, chosen once when it is created and saved in its .research marker as
+// words after "research" ("research deep theoretical"). A marker without them (every board made
+// before kinds, and a brainstorm turned into research) is Feasibility: { deep: false, theoretical: false }.
+function readResearchKind(dir) {
+  let words = [];
+  try { words = readFileSync(join(dir, RESEARCH_MARKER), 'utf8').split(/\s+/); } catch {}
+  return { deep: words.includes('deep'), theoretical: words.includes('theoretical') };
+}
+const researchMarker = (kind) => ['research', ...(kind?.deep ? ['deep'] : []), ...(kind?.theoretical ? ['theoretical'] : [])].join(' ') + '\n';
+// Before a round or summary: the kind of the research board in use, read from its marker, so the
+// lap cap and the agents' intro follow the saved board. A board not created yet keeps the choice
+// sent with its first message (set by chooseResearchKind).
+function syncResearchKind(ctx) {
+  if (!ctx.state.research) delete ctx.state.researchKind;
+  else if (ctx.discussion?.dir && isResearchDir(ctx.discussion.dir)) ctx.state.researchKind = readResearchKind(ctx.discussion.dir);
+}
+// The Deep / Theoretical choice sent with a new research board's first message: taken only while
+// the board is not created yet (the kind can't change afterwards).
+function chooseResearchKind(ctx, kind) {
+  if (!ctx.state.research || ctx.discussion || !kind || typeof kind !== 'object') return;
+  ctx.state.researchKind = { deep: kind.deep === true, theoretical: kind.theoretical === true };
+}
 function researchNames(ctx) {
   const parent = join(ctx.cwd, 'discussions');
   if (!existsSync(parent)) return [];
@@ -99,7 +121,8 @@ function researchStats(ctx, now = new Date()) {
           if (candidate.getTime() + 60_000 <= now.getTime() || (candidate <= now && t.lastTriggerKey === trigger)) candidate.setDate(candidate.getDate() + 1);
           return candidate;
         }).sort((a, b) => a - b)[0];
-      result[e.name] = { ...stats, nextRun: next?.toISOString() ?? null };
+      const kind = readResearchKind(join(dir, e.name));
+      result[e.name] = { ...stats, nextRun: next?.toISOString() ?? null, ...(kind.deep && { deep: true }), ...(kind.theoretical && { theoretical: true }) };
     }
   }
   return result;
@@ -376,7 +399,7 @@ async function openDiscussion(ctx, line) {
       const name = createDiscussionFolder(parent, title, now, takenElsewhere(ctx.cwd, brainstorm));
       const dir = join(parent, name);
       if (workbench) writeFileSync(join(dir, WORKBENCH_MARKER), 'workbench\n');
-      if (research) writeFileSync(join(dir, RESEARCH_MARKER), 'research\n');
+      if (research) writeFileSync(join(dir, RESEARCH_MARKER), researchMarker(ctx.state.researchKind));
       ctx.discussion = { name, dir, title: title ?? `${kindCap} — ${when(now)}`, continued: false };
       log(ctx, how);
     }
@@ -1398,6 +1421,7 @@ function endSession(ctx, why, onReset = null) {
   state.brainstorm = false;
   state.workbench = false;
   state.research = false;
+  delete state.researchKind;
   ctx.retryFailure = null;
   ctx.autoDev = null; // Resume, Start fresh, New discussion and New brainstorm end an auto dev run
   ctx.autoDevSent = [];
@@ -1751,5 +1775,5 @@ async function closeNamedDiscussion(ctx, name, { extraLine = null, rethrow = fal
 }
 
 
-return { SECTIONS, DATED, BRAINSTORMS, isWorkbenchDir, isWorkbenchName, workbenchNames, isResearchDir, researchNames, recordResearchLap, researchStats, isDiscussion, folderOf, discussionRef, moveDiscussion, requestRollback, confirmRollbackArchive, rollbackReport, openDiscussion, briefing, closedEntries, closedDiscussions, checkpoints, writeCheckpoint, readCheckpoint, captureRound, saveCheckpoint, workOf, persistWork, clock, firstLine, leftBehind, detachWorker, saveLeftWorker, peekDiscussion, resumeDiscussion, refOf, startFresh, convertBrainstormToResearch, convertResearchToDiscussion, convertBrainstorm, deleteBrainstorm, deleteResearch, newDiscussion, newBrainstorm, newWorkbench, newResearch, goto, openBeside, closeContext, newDiscussionBeside, newBrainstormBeside, newWorkbenchBeside, newResearchBeside, closeDiscussion, cancelCreation, cancelClose, closeNamedDiscussion, WORKBENCH_MARKER, RESEARCH_MARKER, createDiscussionFolder, createSessionFile };
+return { SECTIONS, DATED, BRAINSTORMS, isWorkbenchDir, isWorkbenchName, workbenchNames, isResearchDir, readResearchKind, syncResearchKind, chooseResearchKind, researchNames, recordResearchLap, researchStats, isDiscussion, folderOf, discussionRef, moveDiscussion, requestRollback, confirmRollbackArchive, rollbackReport, openDiscussion, briefing, closedEntries, closedDiscussions, checkpoints, writeCheckpoint, readCheckpoint, captureRound, saveCheckpoint, workOf, persistWork, clock, firstLine, leftBehind, detachWorker, saveLeftWorker, peekDiscussion, resumeDiscussion, refOf, startFresh, convertBrainstormToResearch, convertResearchToDiscussion, convertBrainstorm, deleteBrainstorm, deleteResearch, newDiscussion, newBrainstorm, newWorkbench, newResearch, goto, openBeside, closeContext, newDiscussionBeside, newBrainstormBeside, newWorkbenchBeside, newResearchBeside, closeDiscussion, cancelCreation, cancelClose, closeNamedDiscussion, WORKBENCH_MARKER, RESEARCH_MARKER, createDiscussionFolder, createSessionFile };
 }

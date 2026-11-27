@@ -95,3 +95,52 @@ it('hides creation while peeking or in terminal mode and shows a failed request'
   Source.current.send({ type: 'reset', room, input: false, doc: null, messages: [], peek: null });
   expect(screen.queryByRole('button', { name: 'New brainstorm' })).toBeNull();
 });
+
+const sayBodies = () => fetchMock.mock.calls.filter(([url]) => url === '__say').map(([, init]) => JSON.parse(init.body));
+const kindGroup = () => screen.queryByRole('group', { name: 'Research kind' });
+
+it('sends each Deep / Theoretical combination with a new research board’s first message', async () => {
+  setup({ active: null, multi: true, research: true }); const user = userEvent.setup();
+  for (const [deep, theoretical] of [[false, false], [true, false], [false, true], [true, true]]) {
+    reset({ active: null, multi: true, research: true, folder: `/room-${deep}-${theoretical}` }); // a new unstarted board each time
+    const group = kindGroup()!;
+    for (const [name, on] of [['Deep', deep], ['Theoretical', theoretical]] as const) {
+      const button = within(group).getByRole('button', { name });
+      expect(button.getAttribute('aria-pressed')).toBe('false');
+      if (on) await user.click(button);
+      expect(button.getAttribute('aria-pressed')).toBe(String(on));
+    }
+    const text = `Quest ${deep} ${theoretical}`;
+    await user.type(screen.getByRole('textbox', { name: 'Message to the agents' }), `${text}{Enter}`);
+    await waitFor(() => expect(sayBodies().find((body) => body.text === text)).toEqual({ text, researchKind: { deep, theoretical } }));
+  }
+});
+
+it('keeps the text and both toggles when the first Send fails, and sends no kind with a command', async () => {
+  setup({ active: null, multi: true, research: true }); const user = userEvent.setup();
+  fetchMock.mockImplementation(async (url: string, init?: { body: string }) => url === '__say' && JSON.parse(init!.body).text === 'Quest'
+    ? { ok: false, status: 409, text: async () => 'Refused.', json: async () => ({}) }
+    : { ok: true, text: async () => '', json: async () => [] });
+  const group = kindGroup()!;
+  await user.click(within(group).getByRole('button', { name: 'Deep' }));
+  await user.click(within(group).getByRole('button', { name: 'Theoretical' }));
+  const box = screen.getByRole('textbox', { name: 'Message to the agents' }) as HTMLTextAreaElement;
+  await user.type(box, 'Quest{Enter}');
+  await waitFor(() => expect(sayBodies()).toEqual([{ text: 'Quest', researchKind: { deep: true, theoretical: true } }]));
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); }); // the refusal is handled
+  expect(box.value).toBe('Quest');
+  for (const name of ['Deep', 'Theoretical']) expect(within(kindGroup()!).getByRole('button', { name }).getAttribute('aria-pressed')).toBe('true');
+  await user.clear(box); await user.type(box, '/summary{Enter}');
+  await waitFor(() => expect(sayBodies().at(-1)).toEqual({ text: '/summary' }));
+});
+
+it('shows the kind toggles only on an unstarted research board', () => {
+  setup({ active: null, multi: true, research: true }); expect(kindGroup()).toBeTruthy();
+  for (const extra of [
+    { active: 'discussions/2026-11-01-quest', research: true }, // started research board
+    { active: null, research: false, started: false }, // new discussion
+    { active: null, research: false, brainstorm: true }, // new brainstorm
+    { active: null, research: false, workbench: true }, // new workbench
+    { active: 'discussions/2026-11-01-live' }, // started discussion
+  ]) { reset({ multi: true, ...extra }); expect(kindGroup()).toBeNull(); }
+});

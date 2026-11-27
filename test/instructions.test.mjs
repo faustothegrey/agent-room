@@ -11,7 +11,12 @@ test('prompt builders fill the displayed templates and retain their wording', ()
   const add = (key, actual, template, values = {}, suffix = '') => cases.push([key, actual, i.fill(template, values) + suffix]);
   const introValues = { name: 'A', participants: 'A, B', order: 'A, then B' };
   add('intro', i.intro(agents[0], agents), i.INTRO, introValues);
-  add('researchIntro', i.intro(agents[0], agents, true), i.RESEARCH_INTRO, introValues);
+  const feasibility = { kind: 'Feasibility', effort: 'Feasibility', output: 'Feasibility' };
+  add('researchIntro', i.intro(agents[0], agents, true), i.RESEARCH_INTRO, { ...introValues, ...feasibility });
+  add('researchIntroFeasibility', i.intro(agents[0], agents, { deep: false, theoretical: false }), i.RESEARCH_INTRO, { ...introValues, ...feasibility });
+  add('researchIntroDeep', i.intro(agents[0], agents, { deep: true }), i.RESEARCH_INTRO, { ...introValues, kind: 'Deep', effort: 'Deep', output: 'Feasibility' });
+  add('researchIntroTheoretical', i.intro(agents[0], agents, { theoretical: true }), i.RESEARCH_INTRO, { ...introValues, kind: 'Theoretical', effort: 'Feasibility', output: 'Theoretical' });
+  add('researchIntroDeepTheoretical', i.intro(agents[0], agents, { deep: true, theoretical: true }), i.RESEARCH_INTRO, { ...introValues, kind: 'Deep · Theoretical', effort: 'Deep', output: 'Theoretical' });
   for (const [brainstorm, kind] of [[true, 'Brainstorm'], [false, 'Discussion']]) {
     const tail = brainstorm ? 'Quote its latest version word for word when it is the Next step.' : "Quote its latest version word for word when it is the Next step; under Later refer to it by name,\nwith its full text kept in the discussion's pending-instructions.md.";
     add(`summary${kind}`, i.summaryFormat(brainstorm), i.SUMMARY_FORMAT, { 'next-step-tail': tail });

@@ -8,7 +8,7 @@ export const SCHEDULE_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 export function createScheduler({ siblings, toScreen, showHeader, checkpoints, DATED, isWorkbenchDir,
   SECTIONS, shopOf, discussionRef, day, pad, load, isResearchDir, isDiscussion, readCheckpoint,
   roomDefaults, parseSpec, refreshQuota, openBeside, resumeDiscussion, newResearch, wire,
-  openDiscussion, runRound, saveCheckpoint, fresh, closeContext }) {
+  openDiscussion, runRound, saveCheckpoint, fresh, closeContext, chooseResearchKind }) {
 // ── Scheduler (research tasks) ─────────────────────────────────
 // Per-room schedule stored in agent-room's local state, outside the project's working tree:
 // ~/.local/state/agent-room/schedules/<sha256 of realpath(room folder)>.json
@@ -85,11 +85,15 @@ function getSchedule(ctx) {
       prompt: t.prompt,
       time: t.time,
       enabled: !!t.enabled,
+      researchKind: taskKind(t),
       lastRun: t.lastRun ?? null,
       running: running.has(t.id),
     })),
   };
 }
+
+// The research kind a task's board is created with; a task saved before kinds has none: Feasibility.
+const taskKind = (t) => ({ deep: t?.researchKind?.deep === true, theoretical: t?.researchKind?.theoretical === true });
 
 function validateTaskInput(ctx, body) {
   const kind = body?.kind;
@@ -107,9 +111,9 @@ function validateTaskInput(ctx, body) {
     const date = String(body.date ?? '').trim();
     const parsed = new Date(`${date}T12:00:00`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsed.getTime()) || day(parsed) !== date) throw new Error('Enter a valid local date.');
-    return { kind, title, prompt, date, time, enabled: true };
+    return { kind, title, prompt, date, time, enabled: true, researchKind: taskKind(body) };
   }
-  return { kind, title, prompt, time, enabled: body.enabled === undefined ? true : !!body.enabled };
+  return { kind, title, prompt, time, enabled: body.enabled === undefined ? true : !!body.enabled, researchKind: taskKind(body) };
 }
 
 function saveSchedule(ctx, body) {
@@ -129,6 +133,8 @@ function saveSchedule(ctx, body) {
     if (task.kind !== body.kind) throw new Error('Cannot change task type.');
     const fields = validateTaskInput(ctx, body);
     const timeChanged = task.time !== fields.time || task.date !== fields.date;
+    // Once a task's board exists, the board's saved kind wins: the task keeps the kind it had.
+    if (task.board) fields.researchKind = taskKind(task);
     Object.assign(task, fields);
     if (timeChanged) { task.lastTriggerKey = null; if (task.kind === 'research') task.lastRun = null; }
   } else if (action === 'toggle') {
@@ -237,6 +243,8 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
     if (!runCtx.logPath) {
       const suggestTitle = runCtx.suggestTitle;
       if (!task.board && task.title) runCtx.suggestTitle = async () => ({ title: task.title });
+      // A new board is created with the task's kind (ignored when the board already exists).
+      chooseResearchKind(runCtx, taskKind(task));
       let opened;
       try { opened = await openDiscussion(runCtx, task.prompt); } finally { runCtx.suggestTitle = suggestTitle; }
       if (!opened) throw new Error('Could not create the research board or transcript.');
