@@ -4901,6 +4901,14 @@ test('Close and Merge: greyed-out reasons, Catch up when main moved, change betw
   assert.ok(first.screen.room.closedDiscussions.includes(name));
   const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
   assert.ok(stmt.includes(`Worker work merged into \`main\` as \`${merged.mergeCommit}\`.`));
+  assert.deepEqual(merged.restart, [], 'a merge touching no restart-only module asks for no Restart');
+});
+
+test('restartOnlyChanges: a merge into this server\'s own source names the modules Reload cannot replace', async () => {
+  const { restartOnlyChanges } = await import('../src/lanes.mjs');
+  const files = ['src/host-shell.mjs', 'src/notes.mjs', 'src/cli.mjs', 'src/boards.mjs', 'README.md', 'test/cli.mjs'];
+  assert.deepEqual(restartOnlyChanges('/repo', files, '/repo/src'), ['host-shell.mjs', 'notes.mjs', 'cli.mjs']);
+  assert.deepEqual(restartOnlyChanges('/other', files, '/repo/src'), [], 'another project\'s files never ask this server to restart');
 });
 
 test('Close and Merge active-work notice and shared room lock with Close and Discard', async () => {
