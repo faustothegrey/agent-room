@@ -389,13 +389,27 @@ export function parseCodexLogin(text) {
 const LOGIN_COMMANDS = { claude: ['claude', ['auth', 'status', '--json'], (out) => parseClaudeAuth(out)],
   codex: ['codex', ['login', 'status'], (out, err) => parseCodexLogin(`${out}\n${err}`)] };
 // The auth mode the status command states, for Check now's Launch environment, or 'unknown'. Only
-// fixed words or a short plain label: never anything that could carry a key.
-const PLAIN = /^[\w. -]{1,40}$/;
+// known values mapped to fixed display labels: never anything from CLI output verbatim.
+const CLAUDE_AUTH_METHODS = new Map([
+  ['claude.ai', 'claude.ai'],
+  ['oauth_token', 'OAuth token'],
+  ['api_key', 'API key'],
+  ['console', 'Console'],
+  ['third_party', 'third-party'],
+]);
+const CLAUDE_API_PROVIDERS = new Map([
+  ['firstParty', 'firstParty'],
+  ['bedrock', 'Bedrock'],
+  ['vertex', 'Vertex'],
+  ['foundry', 'Foundry'],
+]);
 export function authModeOf(provider, stdout, stderr = '') {
   if (provider === 'claude') {
     let s; try { s = JSON.parse(stdout); } catch { return 'unknown'; }
-    if (typeof s?.authMethod !== 'string' || !PLAIN.test(s.authMethod)) return 'unknown';
-    return s.authMethod + (typeof s.apiProvider === 'string' && PLAIN.test(s.apiProvider) ? ` (${s.apiProvider})` : '');
+    const method = typeof s?.authMethod === 'string' ? CLAUDE_AUTH_METHODS.get(s.authMethod) : null;
+    if (!method) return 'unknown';
+    const apiProvider = typeof s?.apiProvider === 'string' ? CLAUDE_API_PROVIDERS.get(s.apiProvider) : null;
+    return apiProvider ? `${method} (${apiProvider})` : method;
   }
   const t = `${stdout}\n${stderr}`;
   return /^logged in using chatgpt\b/im.test(t) ? 'ChatGPT' : /^logged in using an api key\b/im.test(t) ? 'API key' : 'unknown';

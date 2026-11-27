@@ -7551,7 +7551,7 @@ test('Check now diagnostics: CLI processes by owner, launch environment by varia
   assert.deepEqual(d.launch.claude.env.result, ['ANTHROPIC_API_KEY']);
   assert.deepEqual(d.launch.codex.env.result, ['CODEX_HOME']); // an empty variable is not set
   assert.equal(d.launch.claude.authMode.result, 'claude.ai (firstParty)');
-  assert.equal(d.launch.codex.authMode.checked, undefined); assert.match(d.launch.codex.authMode.error.message, /ENOENT/);
+  assert.equal(d.launch.codex.authMode.checked, undefined); assert.equal(d.launch.codex.authMode.error.message, 'login status not read');
   assert.deepEqual(d.launch.agy.authMode, {});
   assert.ok(!JSON.stringify(m.healthView(ctx)).includes(secret));
   // A failed rerun records its error and keeps the previous result with its own time.
@@ -7562,4 +7562,70 @@ test('Check now diagnostics: CLI processes by owner, launch environment by varia
   const again = m.healthView(ctx).diagnostics.processes;
   assert.equal(again.checked, before); assert.equal(again.result.length, 4);
   assert.equal(again.error.message, 'ps: denied'); assert.ok(again.error.at >= before);
+});
+
+test('Check now auth mode never leaks tokens from Claude JSON fields, Codex status text, or failing/unreadable status output', async () => {
+  const { createMonitor } = await import('../src/monitor.mjs');
+  const { checkLogin } = await import('../src/usage.mjs');
+  const token = 'sk-fake-tok98765';
+  const catalog = { status: () => ({ loaded: true, checked: 'x', models: [], error: null }), refresh: async () => {} };
+  const m = createMonitor({ hubOf: (c) => c.hub, toScreen: () => {}, currentSettings: () => ({ agents: [], worker: { provider: 'claude', model: '' } }),
+    claudeModels: [], codexModels: Object.assign(() => [], catalog), agyModels: catalog, modelAlignment: () => 'as saved', readDefaults: () => null,
+    sessionView: () => ({ agents: [], worker: {} }), folderOf: () => null });
+  const runDiag = async (command, args) => (command === 'ps' ? '' : args[1] === 'claude' ? '/a/claude\n' : '');
+  const runCase = async (execs) => {
+    const hub = { rooms: new Map(), monitor: { login: {}, leftovers: [], cli: {}, errors: { login: {}, cli: {}, leftovers: null } } };
+    const ctx = { cwd: '/a', hub, usage: { checkLogin: (p, _, opts) => checkLogin(p, execs[p], opts) }, room: { agents: [] }, worker: { provider: 'claude' },
+      screen: { clients: new Set(), transcript: [] }, programs: { running: new Set() }, recordedPids: () => [], state: {}, sessions: new Map() };
+    hub.rooms.set('a', ctx);
+    await m.checkLogins(hub, true, ['claude', 'codex', 'agy'], { authMode: true });
+    await m.checkDiagnostics(hub, { run: runDiag, env: {}, home: '/h', exists: () => false });
+    return m.healthView(ctx);
+  };
+  const exec = (result) => (command, args, options, done) => done(...result);
+
+  // 1. Fake token in Claude JSON fields (short plain token) and Codex status text: neither leaks anywhere in healthView.
+  const okView = await runCase({
+    claude: exec([null, JSON.stringify({ loggedIn: true, authMethod: token, apiProvider: token }), '']),
+    codex: exec([null, '', `Logged in using an API key - ${token}\n`]),
+  });
+  assert.equal(okView.diagnostics.launch.claude.authMode.result, 'unknown');
+  assert.equal(okView.diagnostics.launch.codex.authMode.result, 'API key');
+  assert.ok(!JSON.stringify(okView).includes(token));
+
+  // 2. Fake token in Claude apiProvider with known authMethod: authMode stays known label, token absent.
+  const apiProvView = await runCase({
+    claude: exec([null, JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', apiProvider: token }), '']),
+    codex: exec([null, '', 'Logged in using ChatGPT\n']),
+  });
+  assert.equal(apiProvView.diagnostics.launch.claude.authMode.result, 'claude.ai');
+  assert.ok(!JSON.stringify(apiProvView).includes(token));
+
+  // 3. Unreadable or failing status output carrying a fake token: authMode reports fixed error without the token.
+  const exit1 = Object.assign(new Error('exit 1'), { code: 1 });
+  const failView = await runCase({
+    claude: exec([exit1, `bad output ${token}`, `stderr ${token}`]),
+    codex: exec([Object.assign(new Error(`spawn failed ${token}`), { code: 'ENOENT' })]),
+  });
+  assert.equal(failView.diagnostics.launch.claude.authMode.error.message, 'login status not read');
+  assert.equal(failView.diagnostics.launch.codex.authMode.error.message, 'login status not read');
+  assert.ok(!JSON.stringify(failView.diagnostics).includes(token));
+  // Legacy login error fields remain unchanged and still carry the raw error text.
+  assert.ok(failView.errors.login.claude.message.includes(token));
+  assert.ok(failView.loginCurrent.claude.error.includes(token));
+  assert.ok(failView.errors.login.codex.message.includes(token));
+  assert.ok(failView.loginCurrent.codex.error.includes(token));
+
+  // 4. Unreadable Claude loginExpiresAt and unreadable Codex status text carrying a fake token.
+  const unreadableView = await runCase({
+    claude: exec([null, JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', loginExpiresAt: token }), '']),
+    codex: exec([null, '', `unexpected output ${token}\n`]),
+  });
+  assert.equal(unreadableView.diagnostics.launch.claude.authMode.error.message, 'login status not read');
+  assert.equal(unreadableView.diagnostics.launch.codex.authMode.error.message, 'login status not read');
+  assert.ok(!JSON.stringify(unreadableView.diagnostics).includes(token));
+  assert.ok(unreadableView.errors.login.claude.message.includes(token));
+  assert.ok(unreadableView.loginCurrent.claude.error.includes(token));
+  assert.ok(unreadableView.errors.login.codex.message.includes(token));
+  assert.ok(unreadableView.loginCurrent.codex.error.includes(token));
 });

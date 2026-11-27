@@ -266,7 +266,7 @@ async function checkDiagnostics(hub, { run = execText, env = process.env, home =
       // Only what checkLogin's status command said; agy's login is not monitored.
       p !== 'agy' && attempt(l.authMode, async () => {
         const login = hub.monitor.loginCurrent?.[p];
-        if (!login || (login.state === 'unknown' && login.error)) throw new Error(login?.error ?? 'login status not read');
+        if (!login || login.state === 'unknown') throw new Error('login status not read');
         return login.authMode ?? 'unknown';
       })]; })]);
 }
