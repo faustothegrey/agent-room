@@ -47,7 +47,7 @@ function resetEvent(screen) {
     thinking: screen.thinking, status: screen.status, busy: !!screen.busy, input: !!screen.say,
     room: screen.room ?? null, worker: peek?.kind === 'workbench' ? (peek.worker ?? []) : (screen.workerForPage?.() ?? screen.worker ?? []), working: screen.working ?? null, workInput: !!screen.work, workerInfo: screen.workerInfo ?? null,
     quota: screen.quota, quotaAt: screen.quotaAt ?? null, monitor: screen.monitor ?? null, newRoom: !!screen.newRoom, page: page(), webVersion: webVersion(screen),
-    replica: screen.replica ?? null, replicaOff: screen.replicaOff ?? null, viewing: screen.viewing ?? null, peek };
+    replica: screen.replica ?? null, replicaOff: screen.replicaOff ?? null, viewing: screen.viewing ?? null, peek, startup: screen.startup ?? null };
 }
 
 return { messageView, broadcast, endAll, resetEvent };

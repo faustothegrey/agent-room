@@ -32,7 +32,7 @@ body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 #header { position: relative; grid-column: 1 / -1; display: grid; grid-template-columns: fit-content(20rem) minmax(0, 1fr) auto; gap: .5rem .8rem; align-items: center; padding: .4rem .8rem; border-bottom: 1px solid var(--line); font-size: .80rem; }
 .zone { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; border: 1.5px solid var(--zone); border-radius: 6px; padding: .3rem .6rem; align-self: stretch; justify-content: center; }
 #room-zone { --zone: #5a7bd8; padding-inline: 1.5rem; } #disc-zone { --zone: #4caf7a; } #server-zone { --zone: #d6a84c; }
-/* Details shown on hover or keyboard focus of the room name and of "Server" (not while their menu is open). */
+/* Details shown on hover or keyboard focus of the room name and of "Server" in the left bar (not while their menu is open). */
 .hover-detail { display: none; position: absolute; top: 100%; left: 0; z-index: 11; flex-direction: column; gap: .1rem; width: max-content; max-width: min(26rem, 80vw); padding: .4rem .6rem; border: 1px solid var(--zone); border-radius: 6px; background: Canvas; box-shadow: 0 6px 20px #0004; font-size: .7rem; color: var(--dim); overflow-wrap: anywhere; }
 /* No gap under the trigger, and it stays while hovered, so the version's own tooltip can be reached. */
 .menu:not([open]):is(:hover, :has(> summary:focus-visible)) + .hover-detail:not(:empty), .hover-detail:not(:empty):hover { display: flex; }
@@ -73,11 +73,17 @@ body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 #board-actions { display: contents; }
 #board-actions[hidden] { display: none; }
 #server-zone { grid-column: 3; flex-direction: row; align-items: center; gap: .5rem; }
-#server-box { flex: none; display: flex; align-items: center; gap: .15rem; }
-/* Right of "● Server": some replication peer is unreachable (as in Peers…). Amber; red stays the server's. */
+#server-box { flex: none; display: flex; align-items: center; gap: .15rem; min-width: 0; max-width: 100%; }
+/* The server machine's name, under the room name; a long name is cut with an ellipsis. */
+#host { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; color: var(--dim); }
+/* Right of the machine's name: some replication peer is unreachable (as in Peers…). Amber; red stays the server's. */
 #peer-warning { border: 0; background: none; padding: 0 .2rem; font-size: .8rem; line-height: 1.1; color: light-dark(#92600a, #d6a84c); }
 #peer-warning[hidden] { display: none; }
-#server-details { flex-direction: column; }
+/* The Server entry tops the left bar; its menu and details open to its right. The bar has no --zone. */
+#server-menu > summary { margin: 0; padding: .42rem .15rem; white-space: normal; }
+#server-menu > summary::after { content: none; }
+#server-menu .menu-items { top: 0; left: calc(100% + .25rem); }
+#server-details { flex-direction: column; top: 0; left: 100%; border-color: #5a7bd8; }
 /* The gauges' own children join this grid, with "on" above "HH:MM" in the first column. */
 #monitor { display: grid; grid-template-rows: auto auto; align-items: center; gap: .1rem .5rem; flex: none; font-size: .65rem; color: var(--dim); }
 #gauges .quota { grid-row: 1 / span 2; }
@@ -117,7 +123,7 @@ body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 #winfo .branch-diagram svg { max-width: 100%; height: auto; display: block; }
 #winfo .branch-diagram-note { margin-top: .25rem; font-style: italic; }
 #winfo button { align-self: flex-start; font-size: .75rem; margin-top: .2rem; }
-#server { max-width: 100%; font-size: .75rem; color: light-dark(#3d5fc4, #5a7bd8); display: inline-flex; align-items: center; gap: .4rem; }
+#server .ctrl-ico { height: 1.155rem; display: flex; align-items: center; }
 #server[data-state="down"] { color: #ef4444; font-weight: 600; }
 #beat { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; flex: none; }
 #server[data-state="up"] #beat { background: #22c55e; } #server[data-state="down"] #beat { background: #ef4444; }

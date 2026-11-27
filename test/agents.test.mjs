@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { claudeTitle, createAgyAgent, createClaudeAgent, createCodexAgent, parseAgyOutput, findLeftovers, parseCodexEvents, probeProcess, recordProgram, run } from '../src/agents.mjs';
+import { claudeTitle, permissionReport, readPermissionConfig, createAgyAgent, createClaudeAgent, createCodexAgent, parseAgyOutput, parseClaudeStream, findLeftovers, parseCodexEvents, probeProcess, recordProgram, run } from '../src/agents.mjs';
 
 // A fake runner that records each call and returns scripted stdout.
 function fakeRunner(outputs) {
@@ -155,6 +155,41 @@ test('each turn reports its usage: claude from its JSON result, codex from turn.
   assert.deepEqual(codex.lastUsage, { input: 15973, cached: 7168, output: 5 });
   await codex.turn('p2'); // no turn.completed this time: no stale usage from the previous turn
   assert.equal(codex.lastUsage, null);
+});
+
+// Lines as claude -p --output-format stream-json --verbose printed them (2.1.318, 2026-11-27), trimmed.
+const STREAM = [
+  '{"type":"system","subtype":"init","session_id":"s"}',
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"OK"}]}}',
+  '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1795780200,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":0.05,"resetsAt":1795780200,"status":"allowed"},"seven_day":{"utilization":0.31,"resetsAt":1796194800,"status":"allowed"}}}}',
+  '{"type":"result","subtype":"success","is_error":false,"result":"OK","total_cost_usd":0.01,"usage":{"input_tokens":2,"output_tokens":4}}',
+].join('\n');
+
+test('parseClaudeStream: the result event, and the rate-limit windows scaled from 0-1 to percent', () => {
+  const { result, quota } = parseClaudeStream(STREAM, 1795770000000);
+  assert.equal(result.result, 'OK');
+  assert.deepEqual(quota, { received_at: 1795770000000, five_hour: { used_percent: 5, resets_at: 1795780200 }, seven_day: { used_percent: 31, resets_at: 1796194800 } });
+  // A lone JSON object (the json format) is read as the result; no event, no reading.
+  assert.deepEqual(parseClaudeStream(JSON.stringify({ result: 'hi', is_error: false })), { result: { result: 'hi', is_error: false }, quota: null });
+  // A window without a utilization is left out; one with neither gives no reading.
+  const partial = STREAM.replace('"utilization":0.31,', '');
+  assert.deepEqual(Object.keys(parseClaudeStream(partial).quota), ['received_at', 'five_hour']);
+  assert.equal(parseClaudeStream(partial.replace('"utilization":0.05,', '')).quota, null);
+  assert.throws(() => parseClaudeStream('{"type":"system"}\nnot json'), /no result/);
+});
+
+test('claude turns run with stream-json and carry the turn quota reading out', async () => {
+  const { calls, runner } = fakeRunner([STREAM, JSON.stringify({ result: 'no events', is_error: false })]);
+  const agent = createClaudeAgent({ name: 'A', runner });
+  assert.equal(await agent.turn('p'), 'OK');
+  assert.deepEqual(calls[0].args.slice(0, 4), ['-p', '--output-format', 'stream-json', '--verbose']);
+  assert.equal(agent.lastQuota.five_hour.used_percent, 5);
+  assert.deepEqual(agent.lastUsage, { input: 2, cached: 0, output: 4, cost: 0.01 });
+  await agent.turn('p2');
+  assert.equal(agent.lastQuota, null); // no stale reading from the previous turn
+  const title = fakeRunner([STREAM]);
+  await claudeTitle('x', { runner: title.runner });
+  assert.ok(title.calls[0].args.includes('stream-json'));
 });
 
 test('claude worker: Bash is available and pre-approved', async () => {
@@ -379,4 +414,45 @@ test('run gives `started` the process as soon as it is spawned (the worker\'s St
   const turn = run('sh', ['-c', 'echo ok'], { started: (p) => { started = p; } });
   assert.equal(typeof started?.stopGroup, 'function'); // already, before the program ends
   assert.equal(await turn, 'ok\n');
+});
+
+test('parseClaudeStream: the init event\'s permission mode, when it reports one', () => {
+  assert.equal(parseClaudeStream(STREAM.replace('"session_id":"s"', '"session_id":"s","permissionMode":"plan"')).permissionMode, 'plan');
+  assert.equal('permissionMode' in parseClaudeStream(STREAM), false);
+});
+
+test('permission check: launch modes against each CLI\'s config, problems only where unattended work could block', () => {
+  const reader = (text) => () => { if (text instanceof Error) throw text; return text; };
+  const missing = Object.assign(new Error('gone'), { code: 'ENOENT' });
+  const read = (provider, text) => readPermissionConfig(provider, '/f', reader(text));
+  const verdict = (provider, text, live) => { const r = permissionReport(provider, read(provider, text), live); return [r.state, r.problems]; };
+  // A missing file is no local override; an unreadable or unparseable one is unknown.
+  for (const p of ['claude', 'codex', 'agy']) {
+    assert.deepEqual(read(p, missing), { file: '/f', found: false });
+    assert.deepEqual(verdict(p, missing), ['ok', []]);
+    assert.equal(verdict(p, Object.assign(new Error('denied'), { code: 'EACCES' }))[0], 'unknown');
+  }
+  assert.equal(verdict('claude', '{ not json')[0], 'unknown');
+  assert.equal(permissionReport('claude', null).state, 'unknown');
+  // Claude: deny or ask rules on pre-approved tools, a plan mode (live wins over the file), unknown modes.
+  const claude = (permissions, live) => verdict('claude', JSON.stringify({ permissions }), live);
+  assert.deepEqual(claude({ defaultMode: 'bypassPermissions', allow: ['Bash'] }), ['ok', []]);
+  assert.deepEqual(claude({ deny: ['Bash(rm:*)', 'NotebookEdit'], ask: ['mcp__claude-in-chrome'] }), ['problem', ['deny rule Bash(rm:*)', 'ask rule mcp__claude-in-chrome']]);
+  assert.deepEqual(claude({ defaultMode: 'plan' }), ['problem', ['permission mode plan: tools never run']]);
+  assert.deepEqual(claude({ defaultMode: 'plan' }, { mode: 'default', at: 't' }), ['ok', []]);
+  assert.deepEqual(claude({}, { mode: 'plan', at: 't' })[0], 'problem');
+  assert.deepEqual(claude({}, { mode: 'strange', at: 't' }), ['unknown', ['permission mode strange not recognised']]);
+  // Codex: -c overrides sandbox_mode; a legacy profile or "untrusted" makes codex refuse to start (0.167).
+  assert.deepEqual(verdict('codex', 'approval_policy = "never"\nsandbox_mode = "read-only"\n[profiles.x]\nprofile = "x"\n'), ['ok', []]);
+  assert.equal(permissionReport('codex', read('codex', 'approval_policy = "on-request"')).mode, 'approval_policy on-request · sandbox_mode not set (overridden)');
+  assert.deepEqual(verdict('codex', 'profile = "work"\n'), ['problem', ['legacy profile = "work": codex refuses to start']]);
+  assert.deepEqual(verdict('codex', "approval_policy = 'untrusted'"), ['problem', ['approval_policy "untrusted": codex refuses to start']]);
+  assert.equal(verdict('codex', 'approval_policy = "granular"')[0], 'unknown');
+  // Agy: deny rules still apply with --dangerously-skip-permissions; allow and ask rules don't block.
+  assert.deepEqual(verdict('agy', JSON.stringify({ permissions: { allow: ['command(tail)'], ask: ['command(rm)'] } })), ['ok', []]);
+  assert.deepEqual(verdict('agy', JSON.stringify({ permissions: { deny: ['command(git push)'] } })), ['problem', ['deny rule command(git push)']]);
+  // Agy modes: default, accept-edits and auto are normal, plan is a problem, anything else unknown.
+  for (const mode of ['default', 'accept-edits', 'auto']) assert.deepEqual(verdict('agy', JSON.stringify({ permissions: { defaultMode: mode } })), ['ok', []]);
+  assert.deepEqual(verdict('agy', JSON.stringify({ permissions: { defaultMode: 'plan' } })), ['problem', ['permission mode plan: plans wait for review']]);
+  assert.deepEqual(verdict('agy', JSON.stringify({ permissions: { defaultMode: 'strange' } })), ['unknown', ['permission mode strange not recognised']]);
 });

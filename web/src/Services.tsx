@@ -123,6 +123,12 @@ function Health({ open, post }: { open: boolean; post: ProvidersPost }) {
     for (const provider of ['claude', 'codex', 'agy']) {
       const cli = data.cli[provider], login = data.login[provider], cliError = data.errors.cli[provider] as { path?: string; at?: string; message?: string } | null | undefined;
       line(provider.toUpperCase() + ' · CLI: ' + (cli ? cli.path + ' · ' + cli.version + ' · last success ' + when(cli.checked) : cliError?.path ? 'found at ' + cliError.path + ', version unavailable' : 'not checked successfully') + err(cliError));
+      const perm = data.permissions?.[provider];
+      if (perm) line('Permission mode: ' + perm.state + (perm.problems.length ? ' (' + perm.problems.join('; ') + ')' : '') + ' · launch: ' + perm.launch
+        + ' · ' + (perm.config ? perm.config.file + (perm.config.error ? ': unreadable' : perm.config.found ? ': read' : ': not found, no local override') : 'config not read')
+        + (perm.mode ? ' · mode ' + perm.mode : '') + (provider === 'claude' ? ' · live: ' + (perm.live ? perm.live.mode + ' (Test prompt, ' + when(perm.live.at) + ')' : 'no Test prompt yet') : '')
+        + ' · checked ' + when(perm.checked));
+      else line('Permission mode: not checked yet (Check now)');
       line('Login: ' + (provider === 'agy' ? 'not monitored' : login ? login.state + (login.expiresAt ? ' · ends ' + when(login.expiresAt) : '') + ' · last success ' + when(login.checked) : 'not checked successfully') + err(data.errors.login[provider]) + (provider === 'agy' ? '' : data.scheduledProviders.includes(provider) ? ' · next scheduled check ' + when(data.nextLogin) : ' · not on the 10-minute schedule (Check now only)'));
     }
     const sources: Record<string, string> = { claude: "agent-room's fixed list in modelChoices", codex: 'models_cache.json', agy: 'agy models' };

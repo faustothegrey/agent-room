@@ -7,7 +7,8 @@ import { join } from 'node:path';
 export function createMonitor({ hubOf, toScreen, currentSettings, claudeModels, codexModels, agyModels,
   modelAlignment, readDefaults, sessionView, folderOf }) {
 // Turn records live only in memory, keyed by the actual provider session, never in checkpoints.
-function monitorAgentTurns(agent, session, records) {
+// With `ctx` (its room), each turn that ends also updates its provider's quota (turnQuota).
+function monitorAgentTurns(agent, session, records, ctx) {
   const turn = agent.turn.bind(agent), reset = agent.reset?.bind(agent);
   agent.turn = async (...args) => {
     try {
@@ -18,7 +19,7 @@ function monitorAgentTurns(agent, session, records) {
       const ended = new Date().toISOString();
       records.set(session, { ended, outcome: 'error', error: { message: err?.message ?? String(err), at: ended } });
       throw err;
-    }
+    } finally { if (ctx) turnQuota(ctx, agent); }
   };
   if (reset) agent.reset = (...args) => { records.delete(session); return reset(...args); };
   return agent;
@@ -35,6 +36,17 @@ async function refreshQuota(ctx, quota) {
   ctx.screen.quotaAt = { measured: quota?.last_update ?? null, providers: Object.fromEntries(providers.map((p) => [p, quota?.[p === 'agy' ? 'antigravity' : p]?.updated_at ?? null])), checked: new Date().toISOString() };
   toScreen(ctx, { type: 'quota', gauges: ctx.screen.quota, at: ctx.screen.quotaAt });
   return quota;
+}
+
+// After a turn: its provider's entry in the shared quota cache (a Claude turn's own reading, the
+// Codex rollouts, agy's /usage), then every open room's gauges, without waiting for the 120 s poll.
+// Not with an HTTP meter (AGENT_ROOM_METER), which the cache doesn't feed.
+function turnQuota(ctx, agent) { return feedQuota(ctx, agent.provider, agent.lastQuota); }
+function feedQuota(ctx, provider, reading) {
+  const hub = hubOf(ctx), usage = ctx.usage;
+  if (!hub.quotaCache || !usage?.refreshProviderQuota || usage.METER_URL) return Promise.resolve();
+  return usage.refreshProviderQuota(provider, reading, hub.quotaCache)
+    .then(() => Promise.all(loadedRooms(hub).map((r) => refreshQuota(r).catch(() => null)))).catch(() => {});
 }
 
 // The monitor panel's warnings (see README, "The header"), checked once per server: each provider's
@@ -61,6 +73,8 @@ function watchMonitor(ctx) {
     }
   }
   ctx.showMonitor = () => showMonitor(ctx);
+  // The latest startup summary, sent again to pages that connect later (screen-events.mjs).
+  if (ctx.screen) ctx.screen.startup = hub.startupSummary ?? null;
   if (!hub.monitorTimers) {
     hub.monitor.nextLogin = new Date(Date.now() + LOGIN_EVERY_MS).toISOString();
     hub.monitor.nextLeftovers = new Date(Date.now() + LEFTOVERS_EVERY_MS).toISOString();
@@ -119,12 +133,12 @@ async function runPromptTest(ctx, provider, model, runner, parsers) {
   if (hub.promptRunning.has(provider)) throw new Error('A prompt test for this provider is already running.');
   hub.promptRunning.add(provider);
   const started = Date.now(), at = new Date(started).toISOString();
-  let dir, reply = '', error = null;
+  let dir, reply = '', error = null, quota = null;
   try {
     dir = mkdtempSync(join(tmpdir(), 'agent-room-prompt-test-'));
     let args;
     if (provider === 'claude') {
-      args = ['-p', '--output-format', 'json', '--no-session-persistence', '--strict-mcp-config'];
+      args = ['-p', ...parsers.CLAUDE_STREAM, '--no-session-persistence', '--strict-mcp-config'];
       if (model) args.push('--model', model);
       args.push('--tools', '');
     } else if (provider === 'codex') {
@@ -137,7 +151,10 @@ async function runPromptTest(ctx, provider, model, runner, parsers) {
     }
     const output = await runner(provider, args, { input: 'Reply with exactly OK.', cwd: dir, timeoutMs: 30_000, agent: 'prompt test' });
     if (provider === 'claude') {
-      const result = JSON.parse(output);
+      const parsed = parsers.parseClaudeStream(output), { result } = parsed;
+      quota = parsed.quota ?? null;
+      // Its init event's permission mode: Claude's live report for the permission check.
+      if (parsed.permissionMode) (hub.permissionLive ??= {}).claude = { mode: parsed.permissionMode, at };
       if (result.is_error) throw new Error(`claude: ${result.result || 'test failed'}`);
       reply = String(result.result ?? '').trim();
     } else if (provider === 'codex') reply = parsers.parseCodexEvents(output).text;
@@ -153,7 +170,22 @@ async function runPromptTest(ctx, provider, model, runner, parsers) {
   hub.promptResults ??= new Map();
   if (!hub.promptResults.has(provider)) hub.promptResults.set(provider, new Map());
   hub.promptResults.get(provider).set(model, result);
+  // Claude's reply carries its quota reading: the gauges need not wait for a turn or the poll.
+  if (quota) await feedQuota(ctx, 'claude', quota);
+  updateStartupSummary(hub);
   return result;
+}
+// Each provider's permission configuration, read afresh (Check now and the startup checks).
+async function checkPermissions(hub) {
+  const rooms = loadedRooms(hub), perms = rooms[0]?.permissions;
+  if (!perms) return;
+  hub.monitor.permissions ??= {};
+  for (const p of PROVIDERS) hub.monitor.permissions[p] = { config: perms.read(p), checked: new Date().toISOString() };
+}
+function permissionReports(hub) {
+  const perms = loadedRooms(hub)[0]?.permissions;
+  if (!perms || !hub.monitor?.permissions) return null;
+  return Object.fromEntries(PROVIDERS.map((p) => [p, { ...perms.report(p, hub.monitor.permissions[p]?.config, hub.permissionLive?.[p] ?? null), checked: hub.monitor.permissions[p]?.checked ?? null }]));
 }
 function healthView(ctx) {
   const hub = hubOf(ctx), m = hub.monitor;
@@ -171,7 +203,7 @@ function healthView(ctx) {
   return { promptResults: [...(hub.promptResults?.values() ?? [])].flatMap((results) => [...results.values()]),
     promptRunning: [...(hub.promptRunning ?? [])], sessions, scheduledProviders: [...new Set(rooms.flatMap(providersOf))], catalogs,
     configured: rooms.map((r) => ({ room: r.cwd, discussion: folderOf(r), agents: configured(currentSettings(r)).map((a) => ({ ...a, enabled: a.role === 'worker' || !(r.state.disabledAgents ?? []).includes(a.name) })) })),
-    defaults: defaults ? configured(defaults) : null, login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
+    defaults: defaults ? configured(defaults) : null, permissions: permissionReports(hub), login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
     leftovers: m.leftovers, leftoversChecked: m.leftoversChecked, nextLogin: m.nextLogin, nextLeftovers: m.nextLeftovers,
     running: loadedRooms(hub).flatMap((r) => [...(r.programs?.running ?? [])].map((p) => ({ pid: p.pid, provider: p.provider, ...p.monitorInfo }))),
     quota: loadedRooms(hub).map((r) => ({ room: r.cwd, reachable: r.screen.quota === undefined ? null : r.screen.quota !== null, ...r.screen.quotaAt })) };
@@ -179,9 +211,66 @@ function healthView(ctx) {
 async function checkProviderHealth(ctx) {
   const hub = hubOf(ctx);
   codexModels();
-  await Promise.all([agyModels.refresh(), checkLogins(hub, true, ['claude', 'codex', 'agy']), checkLeftovers(hub),
+  await Promise.all([agyModels.refresh(), checkLogins(hub, true, ['claude', 'codex', 'agy']), checkLeftovers(hub), checkPermissions(hub),
     ...['claude', 'codex', 'agy'].map((p) => checkCli(hub, p)), ...loadedRooms(hub).map((r) => refreshQuota(r).catch(() => null))]);
+  updateStartupSummary(hub);
   return healthView(ctx);
+}
+
+// Startup diagnostics (README, "Providers"): once per server start or Restart, after the restored
+// rooms have loaded (cli.mjs; not on Reload), everything Check now does plus one Test prompt per
+// provider with its CLI default model, in the background.
+const PROVIDERS = ['claude', 'codex', 'agy'];
+async function startupChecks(hub, health = checkProviderHealth) {
+  const rooms = loadedRooms(hub);
+  if (!rooms.length || hub.startupChecks) return;
+  const ctx = rooms[0];
+  hub.startupChecks = 'running';
+  await Promise.all([health(ctx).catch(() => null),
+    ...PROVIDERS.map((p) => ctx.testPrompt(ctx, p, '').catch(() => null))]);
+  hub.startupChecks = 'done';
+  updateStartupSummary(hub, true);
+}
+// What the startup summary counts as a problem, from the latest results (so a later Check now or
+// Test prompt can resolve it). An error counts while no success is newer.
+function startupProblems(hub) {
+  const m = hub.monitor ?? {}, errors = m.errors ?? {}, rooms = loadedRooms(hub);
+  const current = (err, ok) => !!err?.at && !(ok && ok >= err.at);
+  const problems = [];
+  for (const p of ['claude', 'codex']) if ((m.loginCurrent?.[p] ?? m.login?.[p])?.state !== 'ok') problems.push(`${p} login`);
+  for (const p of PROVIDERS) if (current(errors.cli?.[p], m.cli?.[p]?.checked)) problems.push(`${p} CLI`);
+  const catalogs = { codex: codexModels.status(), agy: agyModels.status() };
+  const settings = [...rooms.map((r) => currentSettings(r)), readDefaults()].filter(Boolean);
+  for (const p of ['codex', 'agy']) {
+    if (!catalogs[p].loaded) problems.push(`${p} model list`);
+    else if (settings.some((s) => [...s.agents, s.worker].some((a) => a.provider === p && modelAlignment(a.model, catalogs[p]) === 'not in list'))) problems.push(`${p} model not in list`);
+  }
+  if (current(errors.leftovers, m.leftoversChecked)) problems.push('leftovers check');
+  const reports = permissionReports(hub);
+  for (const p of PROVIDERS) if (reports && reports[p].state !== 'ok') problems.push(`${p} permission mode`);
+  for (const p of PROVIDERS) {
+    const latest = [...(hub.promptResults?.get(p)?.values() ?? [])].sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+    if (latest?.outcome === 'failed') problems.push(`${p} test prompt`);
+  }
+  return problems;
+}
+// One line in every open room's System messages when the startup checks find problems (none when
+// all pass). Kept in hub.startupSummary for pages that connect later; a later Check now or Test
+// prompt updates it, or clears it once the problems are resolved.
+function updateStartupSummary(hub, first = false) {
+  if (hub.startupChecks !== 'done') return;
+  const before = hub.startupSummary ?? null;
+  if (!first && before === null) return;
+  const problems = startupProblems(hub), n = problems.length;
+  const text = n ? `Startup checks: ${n} problem${n === 1 ? '' : 's'} (${problems.join(', ')}) · see Providers` : null;
+  hub.startupSummary = text;
+  if (text === before) return;
+  const shown = text ?? 'Startup checks: the problems are resolved';
+  console.log(shown);
+  for (const r of loadedRooms(hub)) {
+    if (r.screen) r.screen.startup = text;
+    toScreen(r, { type: 'note', text: shown, error: !!text });
+  }
 }
 // What this room's panel shows, per provider: its login, how many of this room's programs are in its
 // procs, and the leftovers of this room, or of a room not open on this server. A provider with a
@@ -206,5 +295,5 @@ function showMonitor(ctx) {
 
 
 return { monitorAgentTurns, refreshQuota, watchMonitor, checkLogins, checkLeftovers, checkCli,
-  runPromptTest, healthView, checkProviderHealth, monitorView, showMonitor };
+  runPromptTest, healthView, checkProviderHealth, monitorView, showMonitor, startupChecks, startupProblems, checkPermissions };
 }

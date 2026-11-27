@@ -12,7 +12,7 @@ test('dev rebuild and Reload notify the new page after publishing the build', { 
   const root = mkdtempSync(join(tmpdir(), 'next-rebuild-'));
   for (const name of ['src', 'rulebooks', 'web']) cpSync(join(source, name), join(root, name), { recursive: true, filter: (p) => !p.includes('/web/dist') });
   symlinkSync(join(source, 'node_modules'), join(root, 'node_modules'), 'dir');
-  const cli = spawn(process.execPath, [join(root, 'src/cli.mjs'), '--cwd', root, '--port', '0', '--dev'], { env: { ...process.env, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const cli = spawn(process.execPath, [join(root, 'src/cli.mjs'), '--cwd', root, '--port', '0', '--dev'], { env: { ...process.env, HOME: root, AGENT_ROOM_NO_STARTUP_CHECKS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '', reader;
   cli.stdout.on('data', (d) => { output += d; }); cli.stderr.on('data', (d) => { output += d; });
   const until = async (fn) => {
@@ -79,7 +79,7 @@ test('Reload loads each extracted document module again', { timeout: 30000 }, as
   for (const name of ['src', 'rulebooks', 'web']) cpSync(join(source, name), join(root, name), { recursive: true, filter: (p) => !p.includes('/web/dist') });
   symlinkSync(join(source, 'node_modules'), join(root, 'node_modules'), 'dir');
   execFileSync(process.execPath, [join(root, 'src/cli.mjs'), '--build-web'], { cwd: root });
-  const cli = spawn(process.execPath, [join(root, 'src/cli.mjs'), '--cwd', root, '--port', '0'], { env: { ...process.env, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const cli = spawn(process.execPath, [join(root, 'src/cli.mjs'), '--cwd', root, '--port', '0'], { env: { ...process.env, HOME: root, AGENT_ROOM_NO_STARTUP_CHECKS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   cli.stdout.on('data', (d) => { output += d; }); cli.stderr.on('data', (d) => { output += d; });
   const until = async (fn) => {
@@ -126,7 +126,7 @@ test('direct start builds a missing or stale page and survives a failed build', 
   for (const name of ['src', 'rulebooks', 'web']) cpSync(join(source, name), join(root, name), { recursive: true, filter: (p) => !p.includes('/web/dist') });
   symlinkSync(join(source, 'node_modules'), join(root, 'node_modules'), 'dir');
   const run = async (missing = false) => {
-    const cli = spawn(process.execPath, [join(root, 'src/cli.mjs'), '--cwd', root, '--port', '0'], { env: { ...process.env, HOME: root }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const cli = spawn(process.execPath, [join(root, 'src/cli.mjs'), '--cwd', root, '--port', '0'], { env: { ...process.env, HOME: root, AGENT_ROOM_NO_STARTUP_CHECKS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     cli.stdout.on('data', (d) => { output += d; }); cli.stderr.on('data', (d) => { output += d; });
     try {

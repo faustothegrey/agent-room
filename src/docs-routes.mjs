@@ -2,21 +2,25 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, networkInterfaces } from 'node:os';
 import { extname, join } from 'node:path';
-import { handleShell } from './host-shell.mjs';
+import { handleShell, ownHost } from './host-shell.mjs';
 import { handleNotes } from './notes.mjs';
 
 export function createRoutes({ broadcast, resetEvent, handleNext, files }) {
 const { docFiles, servable, isViewable, roomBranch } = files;
+// The machine's short name for the header (not the --node name): hostname up to its first dot
+// (Machiste.local → Machiste) unless it is an IPv4 address; else the first LAN IPv4 address.
+function shortHost() {
+  try {
+    const name = hostname().trim();
+    const short = /^\d{1,3}(\.\d{1,3}){3}$/.test(name) ? name : name.split('.')[0];
+    if (short) return short;
+  } catch {}
+  try { return Object.values(networkInterfaces()).flat().find((i) => i?.family === 'IPv4' && !i.internal)?.address ?? null; } catch { return null; }
+}
 // Input endpoints accept only the page itself: same host, JSON. A page on another site can't send
 // a JSON POST here without a CORS preflight, which this server never approves, and the Host check
 // stops DNS-rebinding tricks. That matters because the agents act on what the User says.
-// The room listens on the LAN too: this machine's own addresses and names count as its own host.
-function ownHost(host) {
-  const name = host.replace(/:\d+$/, '').toLowerCase();
-  const mine = ['127.0.0.1', 'localhost', hostname().toLowerCase(), `${hostname().toLowerCase().replace(/\.local$/, '')}.local`,
-    ...Object.values(networkInterfaces()).flat().filter((i) => i.family === 'IPv4').map((i) => i.address)];
-  return mine.includes(name);
-}
+// The room listens on the LAN too: ownHost (host-shell.mjs) is this machine's own addresses and names.
 function fromOwnPage(req) {
   const host = req.headers.host ?? '';
   if (!ownHost(host)) return false;
@@ -80,7 +84,7 @@ function handleScreen(req, res, url, dir, screen) {
   if (handleNotes(req, res, url, dir)) return true; // the Notes pane (notes.mjs)
   // The heartbeat: the page and the Dock app ask every few seconds; a new pid means a new process.
   if (url.pathname === '/__health') {
-    send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, root: dir,
+    send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, root: dir, host: shortHost(),
       startedAt: screen.startedAt ?? null, discussion: screen.room?.active ?? null, pages: screen.clients.size }));
     return true;
   }

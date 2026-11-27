@@ -69,7 +69,8 @@ export type Monitor = Record<string, { login: MonitorLogin | null; running: numb
 // The checkout the server runs (codeInfo in ui.mjs), shown beside the server's state.
 export interface CodeInfo { path: string; branch: string | null; commit: string | null; dirty: boolean; startedAt?: string | null; reloaded?: { at: string; commit: string | null; dirty: boolean } }
 // GET __health (the heartbeat, every 3 s); 404 when this room is no longer on the server.
-export interface HealthReply { app: 'agent-room'; pid: number; root: string; startedAt: string | null; discussion: string | null; pages: number }
+// host: the server machine's short name (hostname before its first dot, else its LAN IPv4), or null.
+export interface HealthReply { app: 'agent-room'; pid: number; root: string; host: string | null; startedAt: string | null; discussion: string | null; pages: number }
 // Replication (replicaStatus in ui.mjs): this node's own lines, the lines received from peers, and the peers.
 export interface ProjectVersion { commit: string | null; dirty: boolean }
 export interface OwnLine { discussion: string; round: number; sent: Record<string, boolean> }
@@ -84,7 +85,7 @@ export interface ViewReply { viewing: ViewedLine | true | null }
 // POST __pair: { peer } checks (both rooms' folders), { peer, confirm: true } pairs.
 export interface PairRequest { peer: string; confirm?: boolean }
 export interface PairCheck { local: { node: string; root: string; roomId: string | null }; peer: { node: string; root: string } }
-// My notes (notes.mjs, this computer only): GET __notes lists them, GET __notes/read?id= reads one
+// My notes (notes.mjs, the room's own Hosts, LAN ones too; stored on the agent-room computer): GET __notes lists them, GET __notes/read?id= reads one
 // ({ …entry, text }); POST __notes/new { text }, __notes/save { id, text } (404: removed meanwhile), __notes/remove { id }.
 export interface NoteEntry { id: string; title: string; tags: string[]; savedAt: string }
 export type NoteRequest = { text: string } | { id: string; text: string } | { id: string };
@@ -106,10 +107,17 @@ export interface ProviderHealthReply {
   errors: { cli: Record<string, (HealthError & { path?: string }) | { path?: string } | null | undefined>; login: Record<string, HealthError>; leftovers?: HealthError };
   scheduledProviders: string[]; nextLogin: string | null; catalogs: Record<string, { loaded: boolean; checked: string | null; models: unknown[]; error?: HealthError }>;
   configured: { room: string; discussion: string | null; agents: HealthAgent[] }[]; defaults: HealthAgent[] | null;
+  permissions?: Record<string, PermissionReport> | null;
   promptRunning: string[]; promptResults: { provider: string; model: string; at: string; durationMs: number; outcome: string; reply?: string | null; error?: string | null }[];
   sessions: { room: string; discussion: string | null; agents: { role: string; name: string; provider: string; id: string | null; lastTurn?: { ended: string; outcome: string; error?: { at: string; message: string } | null } | null }[] }[];
   leftoversChecked: string | null; nextLeftovers: string | null; running: HealthProgram[]; leftovers: HealthProgram[];
   quota: { room: string; reachable: boolean | null; measured: string | null; providers?: Record<string, string | null>; checked: string | null }[];
+}
+// One provider's permission check (agents.mjs, permissionReport): its launch mode, its config file's
+// reading and (Claude) the live mode from a Test prompt's init event.
+export interface PermissionReport {
+  launch: string; state: 'ok' | 'problem' | 'unknown'; mode: string | null; problems: string[]; checked: string | null;
+  config: { file: string; found?: boolean; error?: string } | null; live: { mode: string; at: string } | null;
 }
 export interface HealthProgram { pid: number; provider: string; agent: string; room: string; started?: string | null; unverified?: boolean }
 export interface PromptTestRequest { provider: string; model: string }
@@ -126,6 +134,7 @@ export interface ResetEvent {
   working: string | null; workInput: boolean; workerInfo: WorkerInfo | null;
   quota?: Gauge[] | null; quotaAt: QuotaAt | null; monitor: Monitor | null; newRoom: boolean;
   page: string; webVersion: string | null; replica: Replica | null; replicaOff: string | null; viewing: unknown; peek: Peek | null;
+  startup?: string | null; // the latest startup checks' summary of problems (monitor.mjs), or null
 }
 export type ScreenEvent = ResetEvent
   | { type: 'message'; message: MessageView }
@@ -154,7 +163,7 @@ export interface Screen {
   nextDist?: string; busy?: unknown; say?: unknown; room?: Room | null; workerForPage?: () => WorkerMessage[];
   worker?: WorkerMessage[]; working?: string | null; work?: unknown; workerInfo?: WorkerInfo | null;
   quota?: Gauge[] | null; quotaAt?: QuotaAt | null; monitor?: Monitor | null; newRoom?: unknown;
-  replica?: Replica | null; replicaOff?: string | null; viewing?: unknown; peek?: Peek | null;
+  replica?: Replica | null; replicaOff?: string | null; viewing?: unknown; peek?: Peek | null; startup?: string | null;
 }
 
 // First routes used by the React page. Event-stream bodies consist of ScreenEvent JSON frames.

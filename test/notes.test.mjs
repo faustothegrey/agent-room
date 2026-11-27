@@ -2,10 +2,11 @@ import { test } from './helpers/test.mjs';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { mkdtempSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { handle } from '../src/docs.mjs';
 import { handleNotes, notesDirectory } from '../src/notes.mjs';
+import { refusal } from '../src/host-shell.mjs';
 
 // The Notes pane's server side (notes.mjs), reached through the room page's handler (docs.mjs).
 process.env.HOME = mkdtempSync(join(tmpdir(), 'notes-home-'));
@@ -96,23 +97,32 @@ test('notes: bad ids, bodies and methods are refused; ids never reach outside th
 
 // Requests a test can't send from a LAN address: a fake one, as in host-shell.test.mjs.
 function fake(path, { from = '127.0.0.1', host = '127.0.0.1:5566', origin, method = 'GET' } = {}) {
-  const headers = { host }; if (origin) headers.origin = origin;
+  const headers = { host }; if (origin) headers.origin = origin; if (method === 'POST') headers['content-type'] = 'application/json';
   const req = { url: path, method, headers, socket: { remoteAddress: from }, on() {} };
-  let status = null;
+  let status = 'pending'; // a POST that passed the checks waits for its body
   const res = { writeHead(s) { status = s; }, end() {} };
   return handleNotes(req, res, new URL(path, 'http://x'), room()) ? status : 'not handled';
 }
 
-test('notes: only from this computer, with the terminal pane\'s Host and Origin checks', () => {
+test('notes: from the room\'s own addresses (this machine\'s LAN ones too), never a foreign Host or Origin', () => {
   assert.equal(fake('/__notes'), 200);
-  for (const from of ['192.168.1.20', '::ffff:192.168.1.20', 'fe80::1']) {
-    assert.equal(fake('/__notes', { from }), 403, from);
-    assert.equal(fake('/__notes/new', { from, method: 'POST', origin: 'http://127.0.0.1:5566' }), 403, from);
+  const lan = Object.values(networkInterfaces()).flat().find((i) => i.family === 'IPv4' && !i.internal)?.address;
+  const mine = [`${hostname()}:5566`, `${hostname().replace(/\.local$/, '')}.local:5566`, ...(lan ? [`${lan}:5566`] : [])];
+  for (const host of mine) {
+    assert.equal(fake('/__notes', { from: lan ?? '192.168.1.20', host }), 200, host); // a page on another device
+    assert.equal(fake('/__notes/new', { from: lan ?? '192.168.1.20', host, method: 'POST', origin: `http://${host}` }), 'pending', host);
+    assert.equal(fake('/__notes', { host, origin: 'http://127.0.0.1:5566' }), 403, host); // Origin not matching Host
   }
-  for (const host of ['mac.local:5566', '192.168.1.20:5566', 'rebind.example:5566']) assert.equal(fake('/__notes', { host }), 403, host);
+  for (const host of ['rebind.example:5566', '203.0.113.9:5566', 'box.tail1234.ts.net:5566', '']) assert.equal(fake('/__notes', { host }), 403, host);
   assert.equal(fake('/__notes/remove', { method: 'POST', origin: 'http://evil.example' }), 403); // another site's page
+  assert.equal(fake('/__notes/new', { method: 'POST', origin: 'http://evil.example' }), 403);
   assert.equal(fake('/__notes', { origin: 'http://localhost:5566' }), 403); // Origin not matching Host
   assert.equal(fake('/__notes', { host: 'localhost:5566' }), 200);
   assert.equal(fake('/__notes', { from: '::1', host: '[::1]:5566' }), 200);
+  assert.equal(fake('/__notes', { from: '::1', host: '[::1]:5566', origin: 'http://[::1]:5566' }), 200);
+  // The terminal's checks are unchanged: loopback only.
+  for (const from of ['192.168.1.20', '::ffff:192.168.1.20', 'fe80::1']) assert.equal(refusal({ socket: { remoteAddress: from }, headers: { host: '127.0.0.1:5566' } }, { originRequired: false })?.[0], 403, from);
+  if (lan) assert.equal(refusal({ socket: { remoteAddress: '127.0.0.1' }, headers: { host: `${lan}:5566` } }, { originRequired: false })?.[0], 403);
+  assert.equal(refusal({ socket: { remoteAddress: '127.0.0.1' }, headers: { host: '127.0.0.1:5566' } }, { originRequired: false }), null);
   assert.equal(fake('/__other'), 'not handled'); // not a notes path: left to the page's other handlers
 });

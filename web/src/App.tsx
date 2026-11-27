@@ -191,15 +191,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [boardsClosed, setBoardsClosed] = useState(() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } });
   // Services (openService on /__room): a panel beside the board; opening one folds the Boards list
   // (unsaved) and closing it restores the list. While one is open, divider drags aren't saved.
-  // My notes is offered only on a page opened on this computer, as the server serves it only there.
+  // The Terminal is offered only on a page opened on this computer, as the server serves it only
+  // there; My notes is offered on every page (the server serves it to the room's own addresses).
   const isLocalPage = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
   const [notesKept] = useState<NoteDraft | null>(() => { try { const kept = JSON.parse(sessionStorage.getItem(NOTES_DRAFT_KEY) ?? 'null') as NoteDraft | null; sessionStorage.removeItem(NOTES_DRAFT_KEY); return kept; } catch { return null; } });
   const [notesHidden] = useState(() => { try { const hidden = sessionStorage.getItem('next-notes-hidden') === '1'; sessionStorage.removeItem('next-notes-hidden'); return hidden; } catch { return false; } });
-  const [service, setService] = useState<Service | null>(() => notesKept && isLocalPage && !notesHidden ? 'notes' : null);
+  const [service, setService] = useState<Service | null>(() => notesKept && !notesHidden ? 'notes' : null);
   const serviceRef = useRef(service); serviceRef.current = service;
-  const listBeforeService = useRef<boolean | null>(notesKept && isLocalPage && !notesHidden ? (() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } })() : null);
+  const listBeforeService = useRef<boolean | null>(notesKept && !notesHidden ? (() => { try { return localStorage.getItem('agent-room:list-collapsed') === '1'; } catch { return false; } })() : null);
   const notesApi = useRef<NotesApi | null>(null);
   const [shellAlive, setShellAlive] = useState(false);
+  const [serverSlot, setServerSlot] = useState<HTMLElement | null>(null); // RoomZones puts the Server menu here
   const [healthOpen, setHealthOpen] = useState(false);
   const [scheduleReload, setScheduleReload] = useState(0);
   const openService = (name: Service | null) => {
@@ -796,6 +798,9 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         setWorkInput(!!event.workInput); setWorking(event.working ?? null); setRetryBusy(null);
         setWorkerMessages((event.worker ?? []).filter((m) => !('note' in m))); setWorkerHint(!event.worker?.length); setChatReset((n) => n + 1);
         for (const m of event.worker ?? []) if ('note' in m) addStatus(m.note, !!m.error, 'Worker');
+        // The startup checks' summary, kept by the server for pages that connect after it was sent.
+        const startup = event.startup;
+        if (startup) setStatus((lines) => lines.some((l) => l.text === startup) ? lines : [...lines, { text: startup, error: true }].slice(-2));
         if (event.peek ? event.peek.kind === 'workbench' : event.room?.workbench) { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); }
         else if ((event.peek ? event.peek.kind === 'research' : event.room?.research || roomRef.current?.workbench) && tabRef.current === 'worker') { tabRef.current = 'discussion'; setTab('discussion'); }
         viewing.current = remoteRef.current ?? event.viewing;
@@ -1093,7 +1098,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     <RoomZones openHealth={() => { setHealthOpen(true); openService('providers'); }} folder={room?.folder ?? null} active={room?.active ?? null} replica={replica} replicaOff={replicaOff} viewing={remote?.line ?? null} newRoom={newRoom} readOnly={!!peek || !!viewLayout}
       post={(path, body) => post(path, body)} status={(text, error) => addStatus(text, error)} navigate={(url) => notesGuard(() => navigate(url))}
       roomName={room?.folder?.replace(/[/]+$/, '').split('/').pop() || room?.folder || 'agent-room'} code={room?.code} gauges={quota.gauges} at={quota.at} monitor={monitor}
-      ended={ended} restarting={restarting} command={(text) => void boardCommand(text)} shutdown={() => void shutdownServer()} serverChanged={serverChanged}>
+      ended={ended} restarting={restarting} command={(text) => void boardCommand(text)} shutdown={() => void shutdownServer()} serverChanged={serverChanged} serverSlot={serverSlot}>
     <div id="disc-zone" className="zone disc-zone" aria-label="Activity">
       <section id="system-messages" aria-label="System messages" role="log" aria-live="polite" aria-relevant="additions">
         {failure && <div id="pinned-error" className="pinned-error"><span title={failure.error}>✗ {failure.agent} failed {failure.time}: {failure.error.split(/\r?\n/)[0]}{failure.earlier ? ` (+${failure.earlier} earlier)` : ''}</span> <button type="button" title="Dismiss" aria-label="Dismiss pinned error" onClick={() => setFailure(null)}>✕</button></div>}
@@ -1123,11 +1128,12 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       <button type="button" disabled={dialogBusy} onClick={() => setBoardDialog(null)}>Cancel</button> <button type="button" disabled={dialogBusy} onClick={() => void confirmBoardAction()}>{boardDialog.kind === 'merge' ? 'Confirm ' + boardDialog.preview.title : boardDialog.kind === 'discard' ? 'Confirm Close and Discard' : 'Catch up with ' + boardDialog.target}</button>
     </dialog>}
     <nav id="control-bar" aria-label="Services">
+      <div id="server-head" ref={setServerSlot} />
       <button type="button" className="ctrl-btn" id="ctrl-boards" aria-pressed={service === null} title="Boards and conversation" onClick={() => { if (service) openService(null); else if (boardsClosed) { setBoardsClosed(false); refreshWorker(); try { localStorage.setItem('agent-room:list-collapsed', '0'); } catch {} } }}><span className="ctrl-ico">💬</span> <span className="ctrl-lbl">Boards</span></button>
       <button type="button" className="ctrl-btn" aria-pressed={service === 'providers'} title="Default providers and models for new discussions, and provider health" onClick={() => openService(service === 'providers' ? null : 'providers')}><span className="ctrl-ico">⚙</span> <span className="ctrl-lbl">Providers</span></button>
       <button type="button" className="ctrl-btn" aria-pressed={service === 'instructions'} title="The prompts and rulebooks sent to each agent, and when" onClick={() => openService(service === 'instructions' ? null : 'instructions')}><span className="ctrl-ico">📜</span> <span className="ctrl-lbl">Instructions</span></button>
       <button type="button" className="ctrl-btn" aria-pressed={service === 'schedule'} title="Scheduled tasks and quota guard" onClick={() => openService(service === 'schedule' ? null : 'schedule')}><span className="ctrl-ico">⏰</span> <span className="ctrl-lbl">Schedule</span></button>
-      {isLocalPage && <button type="button" className="ctrl-btn" aria-pressed={service === 'notes'} title="Your own notes for this room's folder, kept on this computer only (not in the folder, not sent to peers). The agents are not told about them; the files are outside the room's folder." onClick={() => openService(service === 'notes' ? null : 'notes')}><span className="ctrl-ico">📝</span> <span className="ctrl-lbl">My notes</span></button>}
+      <button type="button" className="ctrl-btn" aria-pressed={service === 'notes'} title="Your own notes for this room's folder, stored on the agent-room computer (not in the folder, not sent to peers); usable from the room's own addresses, the LAN ones too. The agents are not told about them; the files are outside the room's folder." onClick={() => openService(service === 'notes' ? null : 'notes')}><span className="ctrl-ico">📝</span> <span className="ctrl-lbl">My notes</span></button>
       {isLocalPage && <button type="button" id="ctrl-terminal" className={'ctrl-btn' + (shellAlive ? ' running' : '')} aria-pressed={service === 'terminal'} title="A shell on this computer, in the room's folder. Only from this computer, not from other devices." onClick={() => openService(service === 'terminal' ? null : 'terminal')}><span className="ctrl-ico">⌨</span> <span className="ctrl-lbl">Terminal</span></button>}
     </nav>
     <section id="services-panel" aria-label="Services panel" hidden={!service}>
@@ -1135,7 +1141,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       {service === 'providers' && <div className="view" id="providers"><ProvidersPanel open healthOpen={healthOpen} setHealthOpen={setHealthOpen} warning={Object.keys(monitor).some((p) => providerHealth(monitor, p)?.level)} post={(path, body) => post(path, body)} queue={settingsQueue} done={() => openService(null)} /></div>}
       <div className="view" id="instructions" hidden={service !== 'instructions'}><InstructionsPanel open={service === 'instructions'} /></div>
       <div className="view" id="schedule" hidden={service !== 'schedule'}><SchedulePanel open={service === 'schedule'} reload={scheduleReload} post={(path, body) => post(path, body)} /></div>
-      {isLocalPage && <div className="view" id="notes" hidden={service !== 'notes'}><Notes open={service === 'notes'} show={() => openService('notes')} api={notesApi} kept={notesKept} brainstorm={(value) => createBoard('/brainstorm', value)} brainstormDisabled={canAddBoards ? '' : ended ? 'This room has ended.' : peek ? 'Leave the peek to create a brainstorm.' : viewLayout ? 'This view is read-only.' : 'A brainstorm cannot be created here.'} armed={!!armedCreation['/brainstorm']} post={(path, body) => post(path, body)} /></div>}
+      <div className="view" id="notes" hidden={service !== 'notes'}><Notes open={service === 'notes'} show={() => openService('notes')} api={notesApi} kept={notesKept} brainstorm={(value) => createBoard('/brainstorm', value)} brainstormDisabled={canAddBoards ? '' : ended ? 'This room has ended.' : peek ? 'Leave the peek to create a brainstorm.' : viewLayout ? 'This view is read-only.' : 'A brainstorm cannot be created here.'} armed={!!armedCreation['/brainstorm']} post={(path, body) => post(path, body)} /></div>
       {isLocalPage && <div className="view" id="terminal" hidden={service !== 'terminal'}><TerminalPane visible={service === 'terminal'} fitKey={layout} running={setShellAlive} /></div>}
     </section>
     <aside ref={listPanel} id="list-panel" className="next-boards" aria-label="Boards">

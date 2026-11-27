@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, mkdir, writeFile, readFile, utimes, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { addUsage, agentUsageLine, checkLogin, checkQuotaFloor, fetchQuota, parseClaudeAuth, parseCodexLogin, formatUsage, quotaGauges, quotaSummary, usageReport, readClaudeQuota, readCodexQuota, parseAgyQuota, refreshQuotaCache, useQuotaCache } from '../src/usage.mjs';
+import { addUsage, agentUsageLine, checkLogin, checkQuotaFloor, fetchQuota, parseClaudeAuth, parseCodexLogin, formatUsage, quotaGauges, quotaSummary, usageReport, readClaudeQuota, readCodexQuota, parseAgyQuota, refreshQuotaCache, useQuotaCache, claudeStreamQuota, refreshProviderQuota } from '../src/usage.mjs';
 
 // The shape the quota meter returned on 2026-10-20 (trimmed).
 const QUOTA = {
@@ -282,6 +282,31 @@ test('background quota cache returns immediately while Agy is pending and retain
   useQuotaCache({ value: null });
 });
 
+
+test('a Claude turn reading becomes the claude entry, and an older reading never replaces a newer one', async () => {
+  const turn = claudeStreamQuota({ received_at: Date.parse('2026-11-27T07:00:00Z'), five_hour: { used_percent: 5, resets_at: 1795780200 }, seven_day: { used_percent: 31.4 } });
+  assert.equal(turn.ok, true); assert.equal(turn.source, 'claude-stream'); assert.equal(turn.updated_at, '2026-11-27T07:00:00.000Z');
+  assert.equal(turn.parsed.current_session.used_percent, 5);
+  assert.equal(turn.parsed.current_session.resets_at, new Date(1795780200 * 1000).toISOString());
+  assert.equal(turn.parsed.current_week_all_models.used_percent, 31);
+  assert.equal(claudeStreamQuota({ received_at: 1 }).ok, false);
+  const cache = { value: null }, used = [];
+  const readers = { claude: async () => { used.push('claude'); return { ok: false }; }, codex: async () => { used.push('codex'); return { ok: true, updated_at: '2026-11-27T06:00:00Z' }; }, agy: async () => { used.push('agy'); return { ok: false }; } };
+  await refreshProviderQuota('claude', { received_at: Date.parse('2026-11-27T07:00:00Z'), five_hour: { used_percent: 5 } }, cache, readers);
+  await refreshProviderQuota('codex', null, cache, readers);
+  assert.deepEqual(used, ['codex']); // no reader (and no agy -p /usage) for a Claude turn with a reading
+  assert.equal(cache.value.claude.source, 'claude-stream');
+  assert.equal(cache.value.codex.updated_at, '2026-11-27T06:00:00Z');
+  // An older ~/.claude.json reading is kept out; a newer one replaces the turn reading.
+  const old = { ok: true, source: 'claude.json', updated_at: '2026-11-27T06:59:00.000Z', parsed: {} };
+  await refreshQuotaCache(cache, [async () => old, async () => ({ ok: false }), async () => ({ ok: false })]);
+  assert.equal(cache.value.claude.source, 'claude-stream');
+  assert.equal(cache.value.codex.updated_at, '2026-11-27T06:00:00Z');
+  await refreshQuotaCache(cache, [async () => ({ ...old, updated_at: '2026-11-27T07:01:00.000Z' }), async () => ({ ok: false }), async () => ({ ok: false })]);
+  assert.equal(cache.value.claude.source, 'claude.json');
+  await refreshProviderQuota('agy', null, cache, readers);
+  assert.deepEqual(used, ['codex', 'agy']);
+});
 
 test('Codex reads at most 30 newest files and stops after the first with a valid event', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'codex-files-'));

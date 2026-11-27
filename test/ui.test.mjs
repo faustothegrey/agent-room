@@ -4267,9 +4267,32 @@ test('last-turn records stay in memory by session and retain the latest error af
   assert.equal(records.get(session), undefined);
 });
 
+test('each ended turn updates its provider quota entry and every open room gauge', async () => {
+  const { monitorAgentTurns } = await import('../src/ui.mjs');
+  const calls = [];
+  const usage = { refreshProviderQuota: async (provider, reading, cache) => { calls.push({ provider, reading, cache }); },
+    fetchQuota: async () => ({ claude: { ok: true } }), quotaGauges: () => [{ provider: 'claude', label: '5h', used: 5 }] };
+  const ctx = { cwd: '/tmp/q', usage, room: { agents: [{ provider: 'claude' }] }, worker: { provider: 'claude' }, screen: {},
+    docs: { broadcast: () => {} } };
+  ctx.hub = { rooms: new Map([['q', ctx]]), quotaCache: { value: null } };
+  let failure = null;
+  const agent = monitorAgentTurns({ provider: 'claude', lastQuota: { received_at: 1 }, turn: async () => { if (failure) throw failure; return 'ok'; } }, {}, new WeakMap(), ctx);
+  await agent.turn();
+  failure = new Error('failed');
+  await assert.rejects(agent.turn(), /failed/);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.deepEqual(calls.map((c) => [c.provider, c.reading]), [['claude', { received_at: 1 }], ['claude', { received_at: 1 }]]);
+  assert.equal(calls[0].cache, ctx.hub.quotaCache);
+  assert.deepEqual(ctx.screen.quota, [{ provider: 'claude', label: '5h', used: 5 }]);
+  // With an HTTP meter the cache is not fed.
+  calls.length = 0; usage.METER_URL = 'http://meter';
+  await agent.turn().catch(() => {});
+  assert.equal(calls.length, 0);
+});
+
 test('prompt diagnostics use isolated calls, retain results and leave agent sessions alone', async () => {
   const { runPromptTest } = await import('../src/ui.mjs');
-  const { parseCodexEvents, parseAgyOutput } = await import('../src/agents.mjs');
+  const { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM } = await import('../src/agents.mjs');
   const { existsSync, readdirSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const agentSession = { threadId: 'existing-thread' }, workerSession = { conversationId: 'existing-worker' };
@@ -4277,7 +4300,7 @@ test('prompt diagnostics use isolated calls, retain results and leave agent sess
     room: { agents: [{ provider: 'codex' }, { provider: 'claude' }] }, worker: { provider: 'agy' }, usage: {},
     sessions: new Map([['A', agentSession], ['worker:W', workerSession]]) };
   ctx.hub = { rooms: new Map([['room', ctx]]) };
-  const parsers = { parseCodexEvents, parseAgyOutput }, calls = [], dirs = [];
+  const parsers = { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM }, calls = [], dirs = [];
   const runner = async (provider, args, options) => {
     calls.push({ provider, args, options }); dirs.push(options.cwd);
     assert.ok(options.cwd.startsWith(tmpdir()));
@@ -4878,6 +4901,14 @@ test('Close and Merge: greyed-out reasons, Catch up when main moved, change betw
   assert.ok(first.screen.room.closedDiscussions.includes(name));
   const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
   assert.ok(stmt.includes(`Worker work merged into \`main\` as \`${merged.mergeCommit}\`.`));
+  assert.deepEqual(merged.restart, [], 'a merge touching no restart-only module asks for no Restart');
+});
+
+test('restartOnlyChanges: a merge into this server\'s own source names the modules Reload cannot replace', async () => {
+  const { restartOnlyChanges } = await import('../src/lanes.mjs');
+  const files = ['src/host-shell.mjs', 'src/notes.mjs', 'src/cli.mjs', 'src/boards.mjs', 'README.md', 'test/cli.mjs'];
+  assert.deepEqual(restartOnlyChanges('/repo', files, '/repo/src'), ['host-shell.mjs', 'notes.mjs', 'cli.mjs']);
+  assert.deepEqual(restartOnlyChanges('/other', files, '/repo/src'), [], 'another project\'s files never ask this server to restart');
 });
 
 test('Close and Merge active-work notice and shared room lock with Close and Discard', async () => {
@@ -7199,4 +7230,129 @@ test('Reload preserves per-context quota, per-workshop schedule and server monit
     globalThis.setInterval = originalSet; globalThis.clearInterval = originalClear;
     rmSync(root, { recursive: true, force: true, maxRetries: 5 });
   }
+});
+
+test('startup checks: one summary of problems in every room, replayed to later pages and resolved by later checks', async () => {
+  const { createMonitor } = await import('../src/monitor.mjs');
+  const { modelAlignment } = await import('../src/ui.mjs');
+  const { createScreenEvents } = await import('../src/screen-events.mjs');
+  const { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM } = await import('../src/agents.mjs');
+  const sent = [], logged = [];
+  const catalog = (models) => ({ status: () => ({ loaded: true, checked: 'x', models, error: null }), refresh: async () => {} });
+  const codexModels = Object.assign(() => [], catalog([{ id: 'gpt' }])), agyModels = catalog([{ id: 'gem' }]);
+  // Claude's model is outside agent-room's fixed list: not a problem; Codex's "old" is.
+  const settings = { agents: [{ provider: 'codex', model: 'old' }, { provider: 'claude', model: 'custom' }], worker: { provider: 'agy', model: '' } };
+  const m = createMonitor({ hubOf: (c) => c.hub, toScreen: (c, e) => sent.push([c.cwd, e]), currentSettings: () => settings, claudeModels: [],
+    codexModels, agyModels, modelAlignment, readDefaults: () => null, sessionView: () => ({ agents: [], worker: {} }), folderOf: () => null });
+  const quotaCalls = [];
+  const usage = { refreshProviderQuota: async (provider, reading) => { quotaCalls.push([provider, reading.five_hour.used_percent]); },
+    fetchQuota: async () => ({}), quotaGauges: () => [{ provider: 'claude', label: '5h', used: 5 }] };
+  let agyFails = true;
+  const runner = async (provider) => {
+    if (provider === 'agy' && agyFails) throw new Error('agy failed');
+    if (provider === 'codex') return '{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n';
+    if (provider === 'agy') return JSON.stringify({ status: 'SUCCESS', response: 'OK' });
+    return '{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.05,"resetsAt":1795780200}}}}\n{"type":"result","result":"OK","is_error":false}\n';
+  };
+  const parsers = { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM }, models = [];
+  const hub = { rooms: new Map(), quotaCache: { value: null } };
+  const room = (cwd) => ({ cwd, hub, usage, room: { agents: [{ provider: 'codex' }] }, worker: { provider: 'agy' }, screen: { clients: new Set(), transcript: [] },
+    testPrompt: (ctx, provider, model) => { models.push([provider, model]); return m.runPromptTest(ctx, provider, model, runner, parsers); } });
+  const a = room('/a'), b = room('/b');
+  hub.rooms.set('a', a); hub.rooms.set('b', b);
+  const now = new Date().toISOString();
+  const health = async () => {
+    hub.monitor = { login: {}, loginCurrent: { claude: { state: 'ok' }, codex: { state: 'out' }, agy: { state: 'unknown' } },
+      cli: { claude: { checked: now } }, errors: { login: {}, cli: {}, leftovers: null }, leftoversChecked: now };
+  };
+  const log = console.log; console.log = (line) => logged.push(line);
+  try {
+    await m.startupChecks(hub, health);
+    // Once per server: a second call (a Reload's code, say) runs nothing.
+    await m.startupChecks(hub, health);
+  } finally { console.log = log; }
+  assert.deepEqual(models.sort(), [['agy', ''], ['claude', ''], ['codex', '']]);
+  // Claude's Test prompt reading fed the quota cache, and every open room's gauges.
+  assert.deepEqual(quotaCalls, [['claude', 5]]);
+  assert.deepEqual(a.screen.quota, [{ provider: 'claude', label: '5h', used: 5 }]);
+  assert.deepEqual(b.screen.quota, [{ provider: 'claude', label: '5h', used: 5 }]);
+  const text = 'Startup checks: 3 problems (codex login, codex model not in list, agy test prompt) · see Providers';
+  const notes = () => sent.filter(([, e]) => e.type === 'note');
+  assert.deepEqual(notes(), [['/a', { type: 'note', text, error: true }], ['/b', { type: 'note', text, error: true }]]);
+  assert.deepEqual(logged, [text]);
+  assert.equal(hub.startupSummary, text);
+  // A page that connects later gets it in its reset event.
+  const events = createScreenEvents({ parse: (t) => t }, () => 'page', () => null);
+  assert.equal(events.resetEvent(a.screen).startup, text);
+  // A later Test prompt updates the line; once the rest is fixed, the next check clears it.
+  sent.length = 0; agyFails = false;
+  console.log = (line) => logged.push(line);
+  try {
+    await m.runPromptTest(a, 'agy', '', runner, parsers);
+    hub.monitor.loginCurrent.codex = { state: 'ok' }; settings.agents[0].model = 'gpt';
+    await m.runPromptTest(a, 'codex', '', runner, parsers);
+    await m.runPromptTest(a, 'codex', '', runner, parsers);
+  } finally { console.log = log; }
+  const updated = 'Startup checks: 2 problems (codex login, codex model not in list) · see Providers', resolved = 'Startup checks: the problems are resolved';
+  assert.deepEqual(notes().map(([cwd, e]) => [cwd, e.text, e.error]), [['/a', updated, true], ['/b', updated, true], ['/a', resolved, false], ['/b', resolved, false]]);
+  assert.equal(hub.startupSummary, null);
+  assert.equal(events.resetEvent(b.screen).startup, null);
+});
+
+test('startup checks: nothing in System messages when every check passes, and later failures do not post', async () => {
+  const { createMonitor } = await import('../src/monitor.mjs');
+  const { modelAlignment } = await import('../src/ui.mjs');
+  const sent = [];
+  const catalog = { status: () => ({ loaded: true, checked: 'x', models: [], error: null }), refresh: async () => {} };
+  const m = createMonitor({ hubOf: (c) => c.hub, toScreen: (c, e) => sent.push(e), currentSettings: () => ({ agents: [], worker: { provider: 'claude', model: '' } }),
+    claudeModels: [], codexModels: Object.assign(() => [], catalog), agyModels: catalog, modelAlignment, readDefaults: () => null,
+    sessionView: () => ({ agents: [], worker: {} }), folderOf: () => null });
+  const hub = { rooms: new Map() };
+  const now = new Date().toISOString();
+  let fail = false;
+  const ctx = { cwd: '/a', hub, usage: {}, room: { agents: [] }, worker: { provider: 'claude' }, screen: { clients: new Set(), transcript: [] },
+    testPrompt: async (c, provider) => { (hub.promptResults ??= new Map()).set(provider, new Map([['', { provider, model: '', at: new Date().toISOString(), outcome: fail ? 'failed' : 'ok' }]])); } };
+  hub.rooms.set('a', ctx);
+  // A CLI error older than its last success, and a leftovers error older than its last check, are past.
+  const health = async () => { hub.monitor = { login: {}, loginCurrent: { claude: { state: 'ok' }, codex: { state: 'ok' } }, cli: { codex: { checked: now } },
+    errors: { login: {}, cli: { codex: { message: 'old', at: '2026-01-01T00:00:00.000Z' } }, leftovers: { message: 'old', at: '2026-01-01T00:00:00.000Z' } }, leftoversChecked: now }; };
+  await m.startupChecks(hub, health);
+  assert.deepEqual(m.startupProblems(hub), []);
+  assert.deepEqual(sent.filter((e) => e.type === 'note'), []);
+  assert.equal(hub.startupSummary, null);
+  fail = true;
+  await m.runPromptTest(ctx, 'claude', '', async () => { throw new Error('down'); }, {});
+  assert.deepEqual(m.startupProblems(hub), ['claude test prompt']);
+  assert.deepEqual(sent.filter((e) => e.type === 'note'), []);
+});
+
+test('startup checks: permission modes join the summary, read by Check now and from a Claude Test prompt\'s init event', async () => {
+  const { createMonitor } = await import('../src/monitor.mjs');
+  const { modelAlignment } = await import('../src/ui.mjs');
+  const { parseClaudeStream, readPermissionConfig, permissionReport } = await import('../src/agents.mjs');
+  const sent = [];
+  const catalog = { status: () => ({ loaded: true, checked: 'x', models: [], error: null }), refresh: async () => {} };
+  const m = createMonitor({ hubOf: (c) => c.hub, toScreen: (c, e) => sent.push(e), currentSettings: () => ({ agents: [], worker: { provider: 'claude', model: '' } }),
+    claudeModels: [], codexModels: Object.assign(() => [], catalog), agyModels: catalog, modelAlignment, readDefaults: () => null,
+    sessionView: () => ({ agents: [], worker: {} }), folderOf: () => null });
+  const files = { claude: '{"permissions":{"defaultMode":"plan"}}', codex: Object.assign(new Error('gone'), { code: 'ENOENT' }), agy: Object.assign(new Error('denied'), { code: 'EACCES' }) };
+  const permissions = { read: (p) => readPermissionConfig(p, `/${p}`, () => { if (files[p] instanceof Error) throw files[p]; return files[p]; }), report: permissionReport };
+  const hub = { rooms: new Map() }, now = new Date().toISOString();
+  const ctx = { cwd: '/a', hub, usage: {}, permissions, room: { agents: [] }, worker: { provider: 'claude' }, screen: { clients: new Set(), transcript: [] } };
+  ctx.testPrompt = async () => null;
+  hub.rooms.set('a', ctx);
+  hub.monitor = { login: {}, loginCurrent: { claude: { state: 'ok' }, codex: { state: 'ok' } }, cli: {}, errors: { login: {}, cli: {}, leftovers: null }, leftoversChecked: now };
+  await m.startupChecks(hub, async () => { await m.checkPermissions(hub); });
+  assert.deepEqual(m.startupProblems(hub), ['claude permission mode', 'agy permission mode']);
+  assert.equal(hub.startupSummary, 'Startup checks: 2 problems (claude permission mode, agy permission mode) · see Providers');
+  const view = m.healthView(ctx).permissions;
+  assert.equal(view.codex.state, 'ok'); assert.equal(view.codex.config.found, false);
+  assert.equal(view.agy.state, 'unknown');
+  assert.deepEqual(view.claude.problems, ['permission mode plan: tools never run']);
+  // A Claude Test prompt's init event reports the live mode, which wins over the file.
+  const init = '{"type":"system","subtype":"init","permissionMode":"default"}\n{"type":"result","result":"OK","is_error":false}\n';
+  await m.runPromptTest(ctx, 'claude', '', async () => init, { parseClaudeStream, CLAUDE_STREAM: [] });
+  assert.equal(hub.permissionLive.claude.mode, 'default');
+  assert.equal(hub.startupSummary, 'Startup checks: 1 problem (agy permission mode) · see Providers');
+  assert.equal(sent.filter((e) => e.type === 'note').at(-1).text, hub.startupSummary);
 });

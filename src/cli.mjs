@@ -278,6 +278,9 @@ for (const r of restored) {
   try { await addRoom(r.cwd, { agents: r.agents, worker: r.worker, reopen: r.reopen, context: r.context }); }
   catch (err) { console.error(`✗ The room in ${r.cwd} could not be restored: ${err.message}`); }
 }
+// Startup diagnostics, in the background once every room has loaded (start and Restart, not Reload).
+// AGENT_ROOM_NO_STARTUP_CHECKS: for tests, which must not call the real CLIs.
+if (!noScreen && !process.env.AGENT_ROOM_NO_STARTUP_CHECKS) ui.startupChecks(hub).catch((err) => console.log(`✗ Startup checks: ${err.message}`));
 if (values.dev) {
   watchWeb();
   if (!noScreen) watchSource();
