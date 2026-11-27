@@ -520,7 +520,11 @@ the Control bar closes the panel). Before the
 discussion starts, its changes apply to it too; after, they change only the defaults (for new
 discussions in this room and every other), never the running agents or worker. Below the settings,
 the Provider health section is folded until opened; the whole page scrolls as one column. The
-Discussion and Worker tabs' own panels work as before.
+Discussion and Worker tabs' own panels work as before. Hovering or focusing **Providers** on the Control
+bar shows **This room's sessions**: one line per discussion member (name · provider · the first 8
+characters of its CLI session ID, or `No session yet`), plus the worker once it has a session. It
+follows the room's updates (a round's new sessions appear when the round ends); full IDs are in the
+Discussion and Worker tabs' panels.
 
 Defaults save automatically to `~/.config/agent-room/defaults.json`, shared across project
 folders and subsequent launches, including the Dock launcher. Dropdown selections save on change;

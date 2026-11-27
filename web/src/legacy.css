@@ -14,6 +14,11 @@ body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 .ctrl-btn:hover { background: #8882; color: CanvasText; }
 .ctrl-btn.on { background: #3b82f624; border-color: #3b82f666; color: CanvasText; font-weight: 600; }
 #ctrl-terminal.running::after { content: ''; position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
+/* A light tooltip beside a Control bar button, shown on hover and keyboard focus (⚙ Providers' sessions). */
+.ctrl-tip-wrap { position: relative; }
+.ctrl-tip { display: none; position: absolute; left: calc(100% + 8px); top: 0; z-index: 50; padding: .4rem .55rem; border: 1px solid var(--line); border-radius: 6px; background: Canvas; color: CanvasText; font-size: .75rem; line-height: 1.35; white-space: nowrap; box-shadow: 0 2px 8px #0004; pointer-events: none; }
+.ctrl-tip strong { display: block; margin-bottom: .15rem; }
+.ctrl-tip-wrap:hover .ctrl-tip, .ctrl-btn:focus-visible + .ctrl-tip { display: block; }
 .ctrl-ico { font-size: 1.05rem; line-height: 1.1; }
 .ctrl-lbl { font-size: .62rem; line-height: 1.1; }
 #services-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: Canvas; }

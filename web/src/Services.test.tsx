@@ -162,3 +162,21 @@ it('shows provider health, checks now, runs a prompt test, and opens from a prov
   await user.click(within(panel()).getByText(/^Provider health · all rooms on this server/));
   expect(await within(panel()).findByText('Could not load provider health: Provider health is unavailable.')).toBeTruthy();
 });
+
+it('describes ⚙ Providers with this board\'s CLI sessions, following room updates, or its usual text without them', async () => {
+  render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
+  const button = () => screen.getByRole('button', { name: '⚙ Providers' });
+  expect(button().getAttribute('title')).toBe('Default providers and models for new discussions, and provider health');
+  expect(document.getElementById('providers-tip')).toBeNull();
+  const cliSessions = { agents: [{ name: 'Claude', provider: 'claude', id: null }, { name: 'Codex', provider: 'codex', id: null }], worker: { name: 'Worker', provider: 'claude', id: null } };
+  Source.current.send({ type: 'room', room: { ...room, cliSessions } });
+  const lines = () => [...document.getElementById('providers-tip')!.children].map((el) => el.textContent);
+  expect(lines()).toEqual(["This room's sessions", 'Claude · claude · No session yet', 'Codex · codex · No session yet']);
+  expect(button().getAttribute('title')).toBeNull(); expect(button().getAttribute('aria-describedby')).toBe('providers-tip');
+  Source.current.send({ type: 'room', room: { ...room, cliSessions: { ...cliSessions, agents: [{ ...cliSessions.agents[0], id: '0123456789abcdef' }, cliSessions.agents[1]], worker: { ...cliSessions.worker, id: 'fedcba9876543210' } } } });
+  expect(lines()).toEqual(["This room's sessions", 'Claude · claude · 01234567…', 'Codex · codex · No session yet', 'Worker · claude · fedcba98…']);
+  expect(document.getElementById('providers-tip')!.textContent).not.toContain('0123456789abcdef');
+  await user.click(button()); expect(button().getAttribute('aria-pressed')).toBe('true');
+  Source.current.send({ type: 'room', room: { ...room, cliSessions: null } });
+  expect(document.getElementById('providers-tip')).toBeNull(); expect(button().getAttribute('title')).toContain('Default providers');
+});
