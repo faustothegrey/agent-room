@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { CodeInfo, Gauge, HealthReply, Monitor, NewRoomReply, NewRoomRequest, PairCheck, PairRequest, QuotaAt, Replica, RoomEntry, ViewedLine } from '../../src/contract';
 
 // The page header's Room and Monitoring zones, as on /__room: the room menu (Quit room), the
-// server menu (Reload, Restart, Shutdown server) with its state from the heartbeat, and the quota
-// gauges with each provider's health. Quit, Restart and Shutdown each take a second click.
+// server machine's name, and the quota gauges with each provider's health; and, at the top of the
+// left bar (serverSlot), the server menu (Reload, Restart, Shutdown server) with its state from the
+// heartbeat. Quit, Restart and Shutdown each take a second click.
 const hhmm = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const longDate = (iso: string) => { const d = new Date(iso); return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) + ' ' + hhmm(d); };
 const startTime = (iso: string) => { const d = new Date(iso); return (d.toDateString() === new Date().toDateString() ? '' : d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ') + hhmm(d); };
@@ -102,7 +104,7 @@ function version(c: CodeInfo | null | undefined): { text: string; title: string 
   return { text, title };
 }
 const upFor = (t: string) => { const m = Math.max(0, Math.floor((Date.now() - Date.parse(t)) / 60000)); return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h ' + (m % 60) + 'm'; };
-type Server = { state: 'up' | 'down' | null; text: string; title: string; beat: number };
+type Server = { state: 'up' | 'down' | null; text: string; title: string; beat: number; host: string | null };
 const receivedTime = (at: string | null | undefined) => at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'time unavailable';
 export function peerActivity(replica: Replica | null, name: string) {
   const p = replica?.peers.find((peer) => peer.name === name);
@@ -123,8 +125,9 @@ type Props = {
   children?: ReactNode; roomName: string; folder: string | null; active: string | null; replica: Replica | null; replicaOff: string | null; viewing: ViewedLine | null; newRoom: boolean; readOnly: boolean;
   post: (path: '__newroom' | '__pair', body: NewRoomRequest | PairRequest) => Promise<Response>; status: (text: string, error?: boolean) => void; navigate: (url: string) => void; code: CodeInfo | null | undefined; gauges: Gauge[] | null | undefined; at: QuotaAt | null | undefined; monitor: Monitor;
   openHealth: () => void; ended: boolean; restarting: boolean; command: (text: string) => void; shutdown: () => void; serverChanged: () => void;
+  serverSlot: HTMLElement | null; // where the server menu goes: the top of the left bar
 };
-export function RoomZones({ children, roomName, folder, active, replica, replicaOff, viewing, newRoom, readOnly, post, status, navigate, code, gauges, at, monitor, openHealth, ended, restarting, command, shutdown, serverChanged }: Props) {
+export function RoomZones({ children, roomName, folder, active, replica, replicaOff, viewing, newRoom, readOnly, post, status, navigate, code, gauges, at, monitor, openHealth, ended, restarting, command, shutdown, serverChanged, serverSlot }: Props) {
   // A modal question drawn in the page, as ask() does: each button's act runs inside its click (so
   // it may open a window); the promise resolves to what it returns (undefined for Escape).
   const [question, setQuestion] = useState<Ask | null>(null);
@@ -215,7 +218,7 @@ export function RoomZones({ children, roomName, folder, active, replica, replica
   }, []);
   // The heartbeat: every 3 s the page asks the server how it is. A different server answering on
   // this address (after Restart, or the Dock app starting it again) refreshes the page.
-  const [server, setServer] = useState<Server>({ state: null, text: 'Connecting to the server…', title: '', beat: 0 });
+  const [server, setServer] = useState<Server>({ state: null, text: 'Connecting to the server…', title: '', beat: 0, host: null });
   const live = useRef({ ended, restarting, serverChanged, pid: null as number | null });
   live.current.ended = ended; live.current.restarting = restarting; live.current.serverChanged = serverChanged;
   useEffect(() => {
@@ -238,7 +241,7 @@ export function RoomZones({ children, roomName, folder, active, replica, replica
       if (state.pid !== null && h.pid !== state.pid) { state.serverChanged(); return; }
       state.pid = h.pid;
       const startedAt = h.startedAt;
-      setServer((s) => ({ state: 'up', beat: s.beat + 1,
+      setServer((s) => ({ state: 'up', beat: s.beat + 1, host: h.host ?? s.host,
         text: 'Server up' + (startedAt ? ' ' + upFor(startedAt) : '') + ' · port ' + location.port,
         title: 'Process ' + h.pid + (startedAt ? ', started ' + new Date(startedAt).toLocaleString() : '') }));
     };
@@ -260,9 +263,12 @@ export function RoomZones({ children, roomName, folder, active, replica, replica
       </details>
       <span id="replica-header" className="hover-detail" role="tooltip" aria-label="Room details">{folder && <code>{folder}</code>}{replica && <span>{replicaLine(replica, active, viewing, location.port)}</span>}</span>
       </div><div id="server-box">
-      <span id="server-head">
+      {server.host && <span id="host">{server.host}</span>}
+      {down > 0 && server.state !== 'down' && <button type="button" id="peer-warning" title={downText} aria-label={downText} onClick={() => setPeersOpen(true)}>⚠</button>}
+      </div>
+      {serverSlot && createPortal(<>
         <details className="menu" id="server-menu" ref={serverMenu} onToggle={(e) => { if (e.currentTarget.open && roomMenu.current) roomMenu.current.open = false; }}>
-          <summary><span id="server" className="server" data-state={server.state ?? undefined} title={server.title}><i id="beat" key={server.beat} className={server.state === 'up' ? 'on' : undefined} aria-hidden="true" />Server</span></summary>
+          <summary id="server" className="ctrl-btn server" data-state={server.state ?? undefined} title={server.title}><span className="ctrl-ico"><i id="beat" key={server.beat} className={server.state === 'up' ? 'on' : undefined} aria-hidden="true" /></span><span className="ctrl-lbl">Server</span></summary>
           <div className="menu-items">
             {!readOnly && <button type="button" onClick={() => { closeMenus(); command('/reload'); }}>Reload</button>}
             <button type="button" title="Start a new server on this address, with every room, each in its discussion in use, from its handoff. The chats clear." onClick={() => twice('restart', () => command('/restart'))}>{armed.restart ? 'Click again: the chat clears' : 'Restart'}</button>
@@ -271,9 +277,7 @@ export function RoomZones({ children, roomName, folder, active, replica, replica
           </div>
         </details>
         <span id="server-details" className="hover-detail" role="tooltip" aria-label="Server state"><span id="server-text">{server.text}</span><span id="code" title={v.title}>{v.text}</span></span>
-      </span>
-      {down > 0 && <button type="button" id="peer-warning" title={downText} aria-label={downText} onClick={() => setPeersOpen(true)}>⚠</button>}
-      </div>
+      </>, serverSlot)}
       {rooms && <select id="rooms" aria-label="Running rooms" value="" onChange={(e) => chooseRoom(e.target.value)}>
         <option value="">Choose a running room…</option>
         {([['tab', 'Switch this tab to'], ['window', 'Open in new window']] as const).map(([mode, heading]) => <optgroup key={mode} label={heading}>{rooms.map((r) => {

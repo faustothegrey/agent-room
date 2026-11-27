@@ -101,6 +101,13 @@ it('shows peers with reachability and pairs after confirming both folders; warns
   expect(within(await screen.findByRole('dialog', { name: 'Peers' })).getByText('Replication is off: start the room with --node.')).toBeTruthy();
 });
 
+it('hides the peer warning while the server is down', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => url === '__health' ? Promise.reject(new Error('down')) : ok([])));
+  render(<App version="one" refresh={() => {}} />); reset();
+  await waitFor(() => expect(document.querySelector('.server')?.getAttribute('data-state')).toBe('down'));
+  expect(screen.queryByRole('button', { name: '1 peer unreachable' })).toBeNull();
+});
+
 it('shows the room folder and replica line beside the room menu', () => {
   render(<App version="one" refresh={() => {}} />); reset();
   expect(screen.getByLabelText('Room details').textContent).toBe("/Users/me/my-room" + "studio 192.168.1.5:8080 · studio's line, round 2 · agents run on studio · Project abc + uncommitted");

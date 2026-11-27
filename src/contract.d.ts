@@ -69,7 +69,8 @@ export type Monitor = Record<string, { login: MonitorLogin | null; running: numb
 // The checkout the server runs (codeInfo in ui.mjs), shown beside the server's state.
 export interface CodeInfo { path: string; branch: string | null; commit: string | null; dirty: boolean; startedAt?: string | null; reloaded?: { at: string; commit: string | null; dirty: boolean } }
 // GET __health (the heartbeat, every 3 s); 404 when this room is no longer on the server.
-export interface HealthReply { app: 'agent-room'; pid: number; root: string; startedAt: string | null; discussion: string | null; pages: number }
+// host: the server machine's short name (hostname before its first dot, else its LAN IPv4), or null.
+export interface HealthReply { app: 'agent-room'; pid: number; root: string; host: string | null; startedAt: string | null; discussion: string | null; pages: number }
 // Replication (replicaStatus in ui.mjs): this node's own lines, the lines received from peers, and the peers.
 export interface ProjectVersion { commit: string | null; dirty: boolean }
 export interface OwnLine { discussion: string; round: number; sent: Record<string, boolean> }
