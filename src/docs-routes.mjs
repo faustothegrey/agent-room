@@ -7,9 +7,6 @@ import { handleNotes } from './notes.mjs';
 
 export function createRoutes({ broadcast, resetEvent, handleNext, files }) {
 const { docFiles, servable, isViewable, roomBranch } = files;
-// Input endpoints accept only the page itself: same host, JSON. A page on another site can't send
-// a JSON POST here without a CORS preflight, which this server never approves, and the Host check
-// stops DNS-rebinding tricks. That matters because the agents act on what the User says.
 // The machine's short name for the header (not the --node name): hostname up to its first dot
 // (Machiste.local → Machiste) unless it is an IPv4 address; else the first LAN IPv4 address.
 function shortHost() {
@@ -20,6 +17,9 @@ function shortHost() {
   } catch {}
   try { return Object.values(networkInterfaces()).flat().find((i) => i?.family === 'IPv4' && !i.internal)?.address ?? null; } catch { return null; }
 }
+// Input endpoints accept only the page itself: same host, JSON. A page on another site can't send
+// a JSON POST here without a CORS preflight, which this server never approves, and the Host check
+// stops DNS-rebinding tricks. That matters because the agents act on what the User says.
 // The room listens on the LAN too: ownHost (host-shell.mjs) is this machine's own addresses and names.
 function fromOwnPage(req) {
   const host = req.headers.host ?? '';
