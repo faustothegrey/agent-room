@@ -1378,20 +1378,28 @@ async function deleteResearch(ctx, ref) {
     return note(ctx, `✗ ${d.name} is active: archive or defer it before deleting it. Nothing was deleted.`, true);
   }
   const shop = shopOf(ctx);
-  if (shop.closing?.has(d.name)) return note(ctx, `✗ ${d.name} is closing.`, true);
-  if (!closedBoards(ctx).includes(d.name) || siblings(ctx).some((c) => !c.stopped && isBoard(c, d.name))) {
-    return note(ctx, `✗ ${d.name} is open: close it before deleting it. Nothing was deleted.`, true);
-  }
+  const refusal = () => {
+    if (!existsSync(dir)) return `✗ No board "${ref}" in ${parent}.`;
+    if (shop.closing?.has(d.name)) return `✗ ${d.name} is closing.`;
+    if (!closedBoards(ctx).includes(d.name) || siblings(ctx).some((c) => !c.stopped && isBoard(c, d.name))) {
+      return `✗ ${d.name} is open: close it before deleting it. Nothing was deleted.`;
+    }
+    if (!research) {
+      const rollback = shop.rollbacks?.get(d.name);
+      if (rollback && ['queued', 'running'].includes(rollback.status)) {
+        return `✗ ${d.name} has a rollback ${rollback.status}: wait for it to finish before deleting it. Nothing was deleted.`;
+      }
+      const hasWorkerTask = [...runningTasks(shop), ...queuedTasks(shop)]
+        .some((t) => t.owner === d.name || t.lane === d.name || t.workName === d.name);
+      if (hasWorkerTask) {
+        return `✗ ${d.name} has a worker task running or queued: wait for it to finish before deleting it. Nothing was deleted.`;
+      }
+    }
+    return null;
+  };
+  const before = refusal();
+  if (before) return note(ctx, before, true);
   if (!research) {
-    const rollback = shop.rollbacks?.get(d.name);
-    if (rollback && ['queued', 'running'].includes(rollback.status)) {
-      return note(ctx, `✗ ${d.name} has a rollback ${rollback.status}: wait for it to finish before deleting it. Nothing was deleted.`, true);
-    }
-    const hasWorkerTask = [...runningTasks(shop), ...queuedTasks(shop)]
-      .some((t) => t.owner === d.name || t.lane === d.name || t.workName === d.name);
-    if (hasWorkerTask) {
-      return note(ctx, `✗ ${d.name} has a worker task running or queued: wait for it to finish before deleting it. Nothing was deleted.`, true);
-    }
     const own = await workerPlace(ctx.cwd, d.name);
     if (!own.disabled) {
       try {
@@ -1406,6 +1414,8 @@ async function deleteResearch(ctx, ref) {
         return note(ctx, `✗ Can't check worker state for ${d.name}: ${err.message}. Nothing was deleted.`, true);
       }
     }
+    const after = refusal();
+    if (after) return note(ctx, after, true);
   }
   const fromRel = d.section ? `discussions/${d.section}/${d.name}` : `discussions/${d.name}`;
   try { rmSync(dir, { recursive: true }); } catch (err) { return note(ctx, `✗ Couldn't delete ${d.name}: ${err.message}`, true); }

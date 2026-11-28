@@ -7720,6 +7720,14 @@ test('delete archived and deferred sprints/workbenches: succeeds, clears finishe
     assert.match(lastStatus().text, new RegExp(`rollback ${status}`, 'i'));
   }
 
+  // 6b. Refusal: rollback queued during the awaited Git check is caught by the synchronous recheck before rmSync.
+  ctx.shop.rollbacks.delete(name);
+  const deleteInFlight = handleLine(`/delete archive/${name}`, ctx);
+  ctx.shop.rollbacks.set(name, { name, status: 'queued', report: null, commit: null });
+  await deleteInFlight;
+  assert.equal(existsSync(archiveDir), true);
+  assert.match(lastStatus().text, /rollback queued/i);
+
   // 7. Success: archived sprint deleted, finished rollback entry cleared, peek reset, moved event emitted.
   ctx.shop.rollbacks.set(name, { name, status: 'ready', report: 'Done', commit: 'abc123' });
   ctx.screen.peek = { path: `discussions/archive/${name}` };
