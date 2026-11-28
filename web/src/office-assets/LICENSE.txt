@@ -1,0 +1,12 @@
+MetroCity - Free Top Down Character Pack
+Author: JIK-A-4
+Source: https://jik-a-4.itch.io/metrocity-free-topdown-character-pack
+License: Creative Commons Zero v1.0 Universal (CC0 1.0)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Files included from the pack (unmodified):
+- CharacterModel.png (from MetroCity/CharacterModel/Character Model.png)
+- Shadow.png (from MetroCity/CharacterModel/Shadow.png)
+- Hairs.png (from MetroCity/Hair/Hairs.png)
+- Suit1.png (from MetroCity 2.0/Suit1.png)
+- Suit.png (from MetroCity 2.0/Suit.png)
