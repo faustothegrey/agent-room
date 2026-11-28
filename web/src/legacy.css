@@ -31,6 +31,7 @@ body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 #main-panel.side-closed > #split, #main-panel.side-closed > #right { display: none; }
 #cancel-creation { margin-left: auto; }
 #disc-header { grid-column: 1 / -1; display: flex; align-items: center; gap: .4rem .8rem; padding: .3rem .65rem; border-bottom: 1px solid var(--line); background: #88808; min-height: 2.2rem; min-width: 0; }
+#disc-header.new-board { --new-board-accent: light-dark(#2563eb, #60a5fa); background: #3b82f61f; border-bottom-color: var(--new-board-accent); }
 #disc-header.peeking { background: #f59e0b1f; border-bottom-color: #f59e0b; }
 #disc-info { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .6rem; min-width: 0; overflow-wrap: anywhere; }
 /* The header: three zones, room (left), activity (middle: system messages and busy workers), monitoring (right).
@@ -68,6 +69,7 @@ body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 #disc { min-width: 0; }
 #disc-status { font-size: .75rem; color: var(--dim); line-height: 1.35; }
 #disc-status:empty { display: none; }
+#disc-header.new-board #disc-status { padding: .05rem .5rem; border: 1px solid var(--new-board-accent); border-radius: 999px; background: #3b82f622; color: light-dark(#1e40af, #bfdbfe); font-weight: 600; }
 #disc-header.peeking #disc-status { padding: .05rem .5rem; border: 1px solid #f59e0b; border-radius: 999px; background: #f59e0b22; color: light-dark(#92400e, #fcd34d); font-weight: 600; }
 #disc-autodev { font-size: .75rem; color: light-dark(#15803d, #86efac); line-height: 1.35; }
 #disc-autodev.paused { color: light-dark(#b45309, #fcd34d); }

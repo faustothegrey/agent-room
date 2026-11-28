@@ -115,6 +115,41 @@ test('discussion folders: date + title, date and time without a title, -2 when t
   assert.equal(createBoardFolder(parent, '!!!', now), '2026-11-02-0905-2'); // nothing left of the title
 });
 
+test('first send keeps the new header until a board folder exists, even if its transcript cannot be created', async () => {
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const ctx = await scriptedCtx([]);
+  ctx.cwd = await tmp('first-send-failure-');
+  ctx.logPath = null;
+  ctx.suggestTitle = async () => ({ title: 'A named sprint' });
+  const { reloaded } = await import('../src/ui.mjs');
+  await reloaded(ctx);
+
+  // A file in place of the brainstorm parent blocks creation before any board exists.
+  ctx.state.brainstorm = true;
+  writeFileSync(`${ctx.cwd}/brainstorms`, '');
+  await handleLine('First message', ctx);
+  assert.equal(ctx.screen.room.active, null);
+  assert.equal(ctx.screen.room.board, 'New brainstorm');
+
+  // Simulate the next failure point, after openBoard has assigned ctx.board.
+  ctx.state.brainstorm = false;
+  const name = '2026-11-28-named-sprint';
+  const dir = `${ctx.cwd}/discussions/${name}`;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(`${dir}/transcripts`, '');
+  ctx.board = { name, dir, title: 'A named sprint', continued: false };
+  const events = [];
+  ctx.docs = { ...ctx.docs, broadcast: (screen, event) => events.push(event) };
+  await handleLine('First message', ctx);
+  assert.equal(events.at(-2).type, 'note');
+  assert.equal(events.at(-2).error, true);
+  assert.equal(events.at(-1).type, 'room');
+  assert.equal(ctx.screen.room.active, `discussions/${name}`);
+  assert.equal(ctx.screen.room.board, 'A named sprint');
+  assert.equal(ctx.screen.room.started, false);
+  assert.equal(ctx.state.transcript.length, 0);
+});
+
 test('session transcripts: session-<date>-<time>.md, -2 when taken, never overwritten', async () => {
   const { createSessionFile } = await import('../src/ui.mjs');
   const { readFileSync } = await import('node:fs');
@@ -571,7 +606,7 @@ test('terminal: New discussion or Resume ends the brainstorm session (its folder
   await handleLine('/brainstorm', ctx);
   await handleLine('just talking', ctx);
   await handleLine('/new', ctx);
-  assert.deepEqual([ctx.state.brainstorm, ctx.state.transcript.length, ctx.screen.room.board], [false, 0, 'No sprint started']);
+  assert.deepEqual([ctx.state.brainstorm, ctx.state.transcript.length, ctx.screen.room.board], [false, 0, 'New sprint']);
   await handleLine('now for real', ctx);
   assert.equal(ctx.board.title, 'Real topic');
   assert.match(ctx.logPath, /discussions\/[^/]*-real-topic-2\/transcripts\/session-/); // -1 is the brainstorm's
@@ -659,7 +694,7 @@ test('/new after a round: the session ends as with Resume; the next message star
   assert.equal(ctx.board, null);
   assert.equal(ctx.logPath, null);
   assert.deepEqual(ctx.state.transcript, []);
-  assert.equal(ctx.screen.room.board, 'No sprint started');
+  assert.equal(ctx.screen.room.board, 'New sprint');
   assert.deepEqual(ctx.screen.room.back, { name, title: 'First topic' });
   assert.match(readFileSync(first, 'utf8'), /session ended: starting a new sprint/);
   assert.deepEqual(readdirSync(`${ctx.cwd}/discussions`), [name]); // nothing created yet

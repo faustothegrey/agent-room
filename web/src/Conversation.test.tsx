@@ -10,7 +10,7 @@ class Source {
   close() {}
   send(event: object) { act(() => this.onmessage?.({ data: JSON.stringify(event) } as MessageEvent)); }
 }
-const room = { board: 'Discussion', started: true, autoDev: { status: null } };
+const room = { board: 'Discussion', active: 'discussions/2026-11-01-discussion', started: true, autoDev: { status: null } };
 const message = (speaker: string, html: string, fields: object = {}) => ({ speaker, html, error: false, pass: false, ...fields });
 beforeEach(() => vi.stubGlobal('EventSource', Source));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });

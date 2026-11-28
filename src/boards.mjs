@@ -423,7 +423,8 @@ async function openBoard(ctx, line) {
     return true;
   } finally {
     ctx.busy = wasBusy;
-    if (!ctx.board) showHeader(ctx);
+    // On failure, publish the restored busy state and any board folder already created.
+    if (!ctx.logPath) showHeader(ctx);
   }
 }
 
