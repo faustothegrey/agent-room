@@ -9,9 +9,9 @@ class Source {
   close() {}
   send(data: object) { act(() => this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)); }
 }
-const room = { folder: '/Users/me/my-room', discussion: 'Live', active: 'discussions/2026-11-25-live', started: true, multi: true, brainstorm: false, research: false, workbench: false, open: [], checkpoints: [], researches: [], closedDiscussions: [], closingDiscussions: {}, rollbacks: [] };
-const line = { discussion: 'd1', node: 'mini', commit: 'c1', round: 3, name: '2026-11-20-shared-plan', title: 'Shared plan', receivedAt: '2026-11-25T08:00:00Z', local: null };
-const replica = { node: 'studio', addresses: ['192.168.1.5:8080'], roomId: 'r1', project: { commit: 'abc', dirty: true }, own: { '2026-11-25-live': { discussion: 'd9', round: 2, sent: {} } }, received: [line],
+const room = { folder: '/Users/me/my-room', board: 'Live', active: 'discussions/2026-11-25-live', started: true, multi: true, brainstorm: false, research: false, workbench: false, open: [], checkpoints: [], researches: [], closedBoards: [], closingBoards: {}, rollbacks: [] };
+const line = { board: 'd1', node: 'mini', commit: 'c1', round: 3, name: '2026-11-20-shared-plan', title: 'Shared plan', receivedAt: '2026-11-25T08:00:00Z', local: null };
+const replica = { node: 'studio', addresses: ['192.168.1.5:8080'], roomId: 'r1', project: { commit: 'abc', dirty: true }, own: { '2026-11-25-live': { board: 'd9', round: 2, sent: {} } }, received: [line],
   peers: [{ name: 'mini', address: '192.168.1.6:8080', reachable: true, since: null, activity: 'Ada is thinking', project: { commit: 'def', dirty: false }, paired: true, mismatch: false, error: null },
     { name: 'air', address: '192.168.1.7:8080', reachable: false, since: '2026-11-25T07:00:00Z', activity: null, project: null, paired: false, mismatch: false, error: 'timeout' }] };
 const ok = (body: unknown = {}) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
@@ -25,9 +25,9 @@ beforeEach(() => { localStorage.clear(); answer = () => ok([]); fetchMock.mockCl
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it('switches room from a chooser of this server rooms, in this tab or a new window', async () => {
-  const rooms = [{ id: 'a', path: '/r/a/__room', root: '/Users/me/my-room', discussion: 'discussions/live', pages: 1, current: true },
-    { id: 'b', path: '/r/b/__room', root: '/Users/me/other', discussion: null, pages: 0, current: false },
-    { id: 'c', path: '/r/c/__room', root: '/Users/me/busy', discussion: 'discussions/x', pages: 2, current: false }];
+  const rooms = [{ id: 'a', path: '/r/a/__room', root: '/Users/me/my-room', board: 'discussions/live', pages: 1, current: true },
+    { id: 'b', path: '/r/b/__room', root: '/Users/me/other', board: null, pages: 0, current: false },
+    { id: 'c', path: '/r/c/__room', root: '/Users/me/busy', board: 'discussions/x', pages: 2, current: false }];
   answer = (url) => url === '__rooms' ? ok(rooms) : ok([]);
   const navigate = vi.fn(), open = vi.spyOn(window, 'open').mockReturnValue(null);
   render(<App version="one" refresh={() => {}} navigate={navigate} />); reset(); const user = userEvent.setup();
@@ -134,7 +134,7 @@ it('lists received lines, peeks at their files and views a peer chat read-only u
   await user.click(within(section).getByLabelText('Board actions for Shared plan'));
   await user.click(within(section).getByRole('button', { name: 'View chat' }));
   await waitFor(() => expect(screen.getByText('Peer talk')).toBeTruthy());
-  expect(bodies('__view')).toEqual([{ discussion: 'd1', node: 'mini' }]);
+  expect(bodies('__view')).toEqual([{ board: 'd1', node: 'mini' }]);
   expect(screen.queryByText('Local talk')).toBeNull(); expect(screen.queryByText('pass')).toBeNull();
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Shared plan');
   const banner = screen.getByRole('status', { name: 'Viewing a peer' });
@@ -148,7 +148,7 @@ it('lists received lines, peeks at their files and views a peer chat read-only u
   renew = fail(400, 'View expired. Select the line again.');
   await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
   expect(banner.textContent).toContain('View expired. Select the received line again.');
-  Source.current.send({ type: 'replica', replica: { ...replica, own: { other: { discussion: 'd1', round: 1, sent: {} } }, received: [{ ...line, commit: 'c2', round: 4 }] } });
+  Source.current.send({ type: 'replica', replica: { ...replica, own: { other: { board: 'd1', round: 1, sent: {} } }, received: [{ ...line, commit: 'c2', round: 4 }] } });
   expect(within(banner).getByRole('button', { name: 'View newer received round 4' })).toBeTruthy();
   await user.click(within(banner).getByRole('button', { name: "Back to studio's line" }));
   await waitFor(() => expect(screen.getByText('Live while away')).toBeTruthy());
@@ -168,7 +168,7 @@ it('reports a refused View chat and keeps the local chat', async () => {
 
 it('hides received lines that are this node own discussions', async () => {
   answer = (url) => url.startsWith('__files') ? ok({ files: ['discussions/2026-11-25-live/notes.md'], unviewable: [] }) : ok([]);
-  render(<App version="one" refresh={() => {}} />); reset({ replica: { ...replica, received: [{ ...line, discussion: 'd9' }, { ...line, discussion: 'd2', local: 'mine' }, { ...line, discussion: 'd3' }] } });
+  render(<App version="one" refresh={() => {}} />); reset({ replica: { ...replica, received: [{ ...line, board: 'd9' }, { ...line, board: 'd2', local: 'mine' }, { ...line, board: 'd3' }] } });
   await screen.findByLabelText('Board actions for Live');
   expect(screen.getByText('Received from peers (1)')).toBeTruthy(); // only d3: d9 is this node's own line, d2 is a local discussion
 });

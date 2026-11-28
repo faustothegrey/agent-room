@@ -15,7 +15,7 @@ h1#disc[data-active="true"] { color: #60a5fa; font-weight: 600; }
 #busy[data-state] > span { display: none; }
 /* Boards: rows without a drag handle or menu keep the legacy row layout. */
 #board-list .discussion-row > a.entry, #board-list .discussion-row > button.entry { flex: 1; min-width: 0; }
-#board-list .entry.discussion::before { content: '🏃'; } #board-list .entry.brainstorm::before { content: '💡'; }
+#board-list .entry.sprint::before { content: '🏃'; } #board-list .entry.brainstorm::before { content: '💡'; }
 .row-menu-items { min-width: 12rem; }
 .row-menu .row-menu-items { left: auto; right: 0; }
 #board-list details:not(.menu) > summary { cursor: pointer; }

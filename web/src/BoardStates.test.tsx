@@ -12,7 +12,7 @@ class Source {
 }
 const name = '2026-11-01-alpha', path = `discussions/${name}`;
 const files = [`${path}/notes.md`, 'discussions/2026-11-02-research/notes.md'];
-const room = { folder: '/project', active: path, discussion: 'Alpha', started: true, closedDiscussions: [], workbenches: [], researches: ['2026-11-02-research'], researchStats: {}, busyWorkers: [], closingDiscussions: {}, open: [{ active: path, current: true, title: 'Alpha', started: true }], autoDev: { status: null } };
+const room = { folder: '/project', active: path, board: 'Alpha', started: true, closedBoards: [], workbenches: [], researches: ['2026-11-02-research'], researchStats: {}, busyWorkers: [], closingBoards: {}, open: [{ active: path, current: true, title: 'Alpha', started: true }], autoDev: { status: null } };
 const fetchMock = vi.fn();
 const setup = (extra: object = {}, workerInfo: object | null = null) => { render(<App version="one" refresh={() => {}} />); Source.current.send({ type: 'reset', room: { ...room, ...extra }, input: true, messages: [], doc: null, workerInfo }); };
 const alpha = () => screen.getByRole('button', { name: 'Alpha' }).parentElement!;
@@ -29,7 +29,7 @@ it('applies state precedence, reasons and worker conflict warnings', async () =>
   expect(within(alpha()).getByText('⚠ Worker conflict: a.txt')).toBeTruthy();
   Source.current.send({ type: 'room', room: { ...room, open: [{ ...entry, working: true }], busyWorkers: [name] } });
   expect(within(alpha()).getByText('ongoing · worker working')).toBeTruthy(); expect(within(alpha()).queryByText('⚠ Worker conflict: a.txt')).toBeNull();
-  Source.current.send({ type: 'room', room: { ...room, open: [{ ...entry, started: false }], closedDiscussions: [name] } });
+  Source.current.send({ type: 'room', room: { ...room, open: [{ ...entry, started: false }], closedBoards: [name] } });
   expect(within(alpha()).getByText('closed')).toBeTruthy();
 });
 
@@ -44,7 +44,7 @@ it('shows readiness, merge suffix, no changes, merged and closing phase', async 
   Source.current.send({ type: 'workerinfo', info: { lines: [], mergeable: { [name]: { canMerge: true, catchUp: false } } } });
   expect(within(alpha()).getByText('work ready · mergeable')).toBeTruthy();
   Source.current.send({ type: 'room', room: { ...room, open: [{ ...entry, started: false }] } }); expect(within(alpha()).getByText('not started')).toBeTruthy();
-  Source.current.send({ type: 'room', room: { ...room, closingDiscussions: { [name]: 'waiting' } } }); expect(within(alpha()).getByText('ongoing · closing · waiting for worker')).toBeTruthy();
+  Source.current.send({ type: 'room', room: { ...room, closingBoards: { [name]: 'waiting' } } }); expect(within(alpha()).getByText('ongoing · closing · waiting for worker')).toBeTruthy();
 });
 
 it('shows research lap details and refreshes worker state on expansion and throttled return', async () => {

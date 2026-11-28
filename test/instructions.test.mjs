@@ -29,7 +29,7 @@ test('prompt builders fill the displayed templates and retain their wording', ()
   for (const reports of ['', 'Report']) add(reports ? 'closingReports' : 'closing', i.closingTask({ dir: '/dir', workerReports: reports }), i.CLOSING_TASK, { dir: '/dir', 'worker-reports': reports ? `Recent worker reports:\n${reports}\n\n` : '' });
   add('brief', i.workerBrief({ dir: '/dir' }, {}, place), i.WORKER_BRIEF, { dir: '/dir', cwd: '/tree' }, '\n\n');
   add('brainstorm', i.workerBrief(null, { brainstorm: true }, place), i.WORKER_BRAINSTORM, {}, '\n\n');
-  add('noDiscussion', i.workerBrief(null, { briefed: '/old' }, place), i.WORKER_NO_DISCUSSION, { dir: '/old' }, '\n\n');
+  add('noDiscussion', i.workerBrief(null, { briefed: '/old' }, place), i.WORKER_NO_SPRINT, { dir: '/old' }, '\n\n');
   const location = { cwd: '/tree', branch: 'worker/x', root: '/root', notes: '/tree/.worker-notes' };
   add('location', i.workerLocation({}, place, { cwd: '/root' }, '.worker-notes'), i.WORKER_LOCATION, location, '\n\n');
   add('moved', i.workerLocation({ tree: '/old' }, place, { cwd: '/root' }, '.worker-notes'), `${i.WORKER_MOVED} ${i.WORKER_LOCATION}`, { ...location, old: '/old' }, '\n\n');

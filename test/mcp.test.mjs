@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recordRoom } from '../src/ui.mjs';
-import { listRoomsTool, listDiscussionsTool } from '../src/mcp.mjs';
+import { listRoomsTool, listBoardsTool } from '../src/mcp.mjs';
 
 const MCP_BIN = fileURLToPath(new URL('../src/mcp.mjs', import.meta.url));
 
@@ -23,7 +23,7 @@ async function withMockServer(roomsProvider, fn) {
     const room = match && rooms.find((r) => r.id === decodeURIComponent(match[1]));
     if (room && req.method === 'GET') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ app: 'agent-room', root: room.root, discussion: room.discussion }));
+      res.end(JSON.stringify({ app: 'agent-room', root: room.root, board: room.board }));
       return;
     }
     res.writeHead(404);
@@ -86,8 +86,8 @@ test('mcp list_rooms merges saved and running rooms, skips missing folders, and 
     writeFileSync(roomsFile, JSON.stringify([runningRoom, stoppedRoom, missingRoom]) + '\n');
 
     await withMockServer([
-      { id: 'a1', root: runningRoom, discussion: 'discussions/2026-11-22-live-topic', pages: 1 },
-      { id: 'g1', root: serverOnlyRoom, discussion: null, pages: 0 },
+      { id: 'a1', root: runningRoom, board: 'discussions/2026-11-22-live-topic', pages: 1 },
+      { id: 'g1', root: serverOnlyRoom, board: null, pages: 0 },
     ], async (port) => {
       const res = await listRoomsTool({ port, roomsFile });
       assert.equal(res.isError, undefined);
@@ -112,7 +112,7 @@ test('mcp list_rooms merges saved and running rooms, skips missing folders, and 
   }
 });
 
-test('mcp list_discussions lists open dated discussions and brainstorms and matches active status by realpath', async () => {
+test('mcp list_boards lists open dated discussions and brainstorms and matches active status by realpath', async () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'mcp-discs-')));
   try {
     const room = join(dir, 'proj');
@@ -130,14 +130,14 @@ test('mcp list_discussions lists open dated discussions and brainstorms and matc
 
     // Running on server (matched through symlink via realpath)
     await withMockServer([
-      { id: 'p1', root: room, discussion: 'discussions/2026-11-22-open-one', pages: 1 },
+      { id: 'p1', root: room, board: 'discussions/2026-11-22-open-one', pages: 1 },
     ], async (port) => {
-      const res = await listDiscussionsTool({ root: roomLink }, { port });
+      const res = await listBoardsTool({ root: roomLink }, { port });
       assert.equal(res.isError, undefined);
       const text = res.content[0].text;
       assert.match(text, new RegExp(`Room: ${room}`));
       assert.match(text, /Status: running/);
-      assert.match(text, /2026-11-22-open-one \(discussion\) \[active\]/);
+      assert.match(text, /2026-11-22-open-one \(sprint\) \[active\]/);
       assert.match(text, /2026-11-21-wild-idea \(brainstorm\)(?! \[active\])/);
       assert.doesNotMatch(text, /2026-11-01-old-one/);
       assert.doesNotMatch(text, /2026-11-02-later-one/);
@@ -148,19 +148,19 @@ test('mcp list_discussions lists open dated discussions and brainstorms and matc
 
     // Server answers without this room
     await withMockServer([], async (port) => {
-      const res = await listDiscussionsTool({ root: room }, { port });
+      const res = await listBoardsTool({ root: room }, { port });
       assert.equal(res.isError, undefined);
       assert.match(res.content[0].text, /Status: not running on this server/);
     });
 
     // No server answers
     const deadPort = await unusedPort();
-    const offline = await listDiscussionsTool({ root: room }, { port: deadPort });
+    const offline = await listBoardsTool({ root: room }, { port: deadPort });
     assert.equal(offline.isError, undefined);
     assert.match(offline.content[0].text, new RegExp(`running status unknown \\(no server answered on port ${deadPort}\\)`));
 
     // Non-room folder returns an error
-    const bad = await listDiscussionsTool({ root: plain }, { port: deadPort });
+    const bad = await listBoardsTool({ root: plain }, { port: deadPort });
     assert.equal(bad.isError, true);
     assert.match(bad.content[0].text, /Not a room folder/);
   } finally {
@@ -178,7 +178,7 @@ test('mcp stdio server handles initialize, ping, tools/list, and tools/call over
     writeFileSync(join(home, '.local', 'state', 'agent-room', 'rooms.json'), JSON.stringify([room]) + '\n');
 
     await withMockServer([
-      { id: 'r1', root: room, discussion: 'discussions/2026-11-22-stdio-test', pages: 1 },
+      { id: 'r1', root: room, board: 'discussions/2026-11-22-stdio-test', pages: 1 },
     ], async (port) => {
       const child = spawn(process.execPath, [MCP_BIN], {
         env: { ...process.env, HOME: home, AGENT_ROOM_PORT: String(port) },
@@ -223,17 +223,17 @@ test('mcp stdio server handles initialize, ping, tools/list, and tools/call over
         send({ jsonrpc: '2.0', id: 3, method: 'tools/list' });
         const listed = await nextMsg();
         assert.equal(listed.id, 3);
-        assert.deepEqual(listed.result.tools.map((t) => t.name), ['list_rooms', 'list_discussions']);
+        assert.deepEqual(listed.result.tools.map((t) => t.name), ['list_rooms', 'list_boards']);
 
         send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'list_rooms', arguments: {} } });
         const roomsRes = await nextMsg();
         assert.equal(roomsRes.id, 4);
         assert.match(roomsRes.result.content[0].text, new RegExp(`${room} — running, active: discussions/2026-11-22-stdio-test`));
 
-        send({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'list_discussions', arguments: { root: room } } });
+        send({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'list_boards', arguments: { root: room } } });
         const discsRes = await nextMsg();
         assert.equal(discsRes.id, 5);
-        assert.match(discsRes.result.content[0].text, /2026-11-22-stdio-test \(discussion\) \[active\]/);
+        assert.match(discsRes.result.content[0].text, /2026-11-22-stdio-test \(sprint\) \[active\]/);
 
         send({ jsonrpc: '2.0', id: 6, method: 'unknown/method' });
         const errRes = await nextMsg();

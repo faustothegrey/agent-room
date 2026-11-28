@@ -183,14 +183,14 @@ function inside(dir, rel) {
   } catch { return null; }
 }
 
-const isDatedDiscussion = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(name);
+const isDatedBoard = (name) => /^[0-9]{4}-[0-9]{2}-[0-9]{2}-/.test(name);
 const DISC_SECTIONS = new Set(['archive', 'deferred']);
-// Files inside a dated discussion (active, archived or deferred) or brainstorm (brainstorms/<date>-…):
+// Files inside a dated board (active, archived or deferred) or brainstorm (brainstorms/<date>-…):
 // kept even when .gitignore ignores patterns such as transcripts/. Room checkout files outside them respect .gitignore.
-function inDiscussion(rel) {
+function inBoard(rel) {
   const p = rel.split(/[/\\]/);
-  if (p[0] === 'brainstorms') return p.length >= 2 && (isDatedDiscussion(p[1]) || DISC_SECTIONS.has(p[1]));
-  return p[0] === 'discussions' && ((p.length >= 2 && isDatedDiscussion(p[1])) || (p.length >= 2 && DISC_SECTIONS.has(p[1])));
+  if (p[0] === 'brainstorms') return p.length >= 2 && (isDatedBoard(p[1]) || DISC_SECTIONS.has(p[1]));
+  return p[0] === 'discussions' && ((p.length >= 2 && isDatedBoard(p[1])) || (p.length >= 2 && DISC_SECTIONS.has(p[1])));
 }
 function isGitIgnored(dir, rel) {
   try {
@@ -205,7 +205,7 @@ const servable = (dir, rel, screen) => {
   if (!inSection(screen, rel)) return null;
   const target = inside(dir, rel);
   if (!target) return null;
-  if (!screen?.sections && !inDiscussion(rel) && isGitIgnored(dir, rel)) return null;
+  if (!screen?.sections && !inBoard(rel) && isGitIgnored(dir, rel)) return null;
   return target;
 };
 export function docFiles(dir, screen) {
@@ -216,25 +216,25 @@ export function docFiles(dir, screen) {
   try {
     const out = execFileSync('git', ['-C', dir, 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     rootFiles = [...new Set(out.split('\0').filter(Boolean))]
-      .filter((f) => !f.split('/').some((p) => p.startsWith('.')) && !inDiscussion(f) && inside(dir, f));
+      .filter((f) => !f.split('/').some((p) => p.startsWith('.')) && !inBoard(f) && inside(dir, f));
   } catch {
-    rootFiles = listFiles(dir).map((f) => f.split(sep).join('/')).filter((f) => !inDiscussion(f));
+    rootFiles = listFiles(dir).map((f) => f.split(sep).join('/')).filter((f) => !inBoard(f));
   }
   const discFiles = [];
   for (const top of ['discussions', 'brainstorms']) {
-    try { discFiles.push(...listFiles(join(dir, top)).map((f) => top + '/' + f.split(sep).join('/')).filter(inDiscussion)); } catch {}
+    try { discFiles.push(...listFiles(join(dir, top)).map((f) => top + '/' + f.split(sep).join('/')).filter(inBoard)); } catch {}
   }
   return [...new Set([...rootFiles, ...discFiles])].sort();
 }
 export function roomBranch(dir) {
   try { return execFileSync('git', ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null; } catch { return null; }
 }
-function discussionDirs(dir) {
+function boardDirs(dir) {
   const found = [];
   for (const prefix of ['discussions', 'discussions/archive', 'discussions/deferred']) {
     try {
       for (const e of readdirSync(join(dir, prefix), { withFileTypes: true })) {
-        if (e.isDirectory() && isDatedDiscussion(e.name)) found.push(`${prefix}/${e.name}`);
+        if (e.isDirectory() && isDatedBoard(e.name)) found.push(`${prefix}/${e.name}`);
       }
     } catch {}
   }
@@ -447,4 +447,4 @@ document.addEventListener('click', (e) => {
 }
 
 
-export { TYPES, esc, md, mdText, servable, discussionDirs, LIBS, page };
+export { TYPES, esc, md, mdText, servable, boardDirs, LIBS, page };

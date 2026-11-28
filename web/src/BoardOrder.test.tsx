@@ -12,7 +12,7 @@ class Source {
 }
 const folder = '/room', alpha = '2026-11-01-alpha', beta = '2026-11-02-beta', idea = '2026-11-03-idea', other = '2026-11-04-other';
 let paths: string[];
-const room = { folder, active: `discussions/${alpha}`, discussion: 'Alpha', started: true, workbenches: [], researches: [], closedDiscussions: [], checkpoints: [], open: [], autoDev: { status: null } };
+const room = { folder, active: `discussions/${alpha}`, board: 'Alpha', started: true, workbenches: [], researches: [], closedBoards: [], checkpoints: [], open: [], autoDev: { status: null } };
 const key = (kind: string, root = folder) => `agent-room.${kind}-order:${root}`;
 const setup = () => { render(<App version="one" refresh={() => {}} />); Source.current.send({ type: 'reset', room, messages: [], input: true, doc: null }); };
 const rowTitles = (section: string) => [...screen.getByText(section).closest('details')!.querySelectorAll('.board-row > .discussion-block > button.entry')].map((item) => item.textContent);

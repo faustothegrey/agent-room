@@ -10,7 +10,7 @@ class Source {
   close() {}
   send(event: object) { act(() => this.onmessage?.({ data: JSON.stringify(event) } as MessageEvent)); }
 }
-const room = { discussion: 'Discussion', started: true, active: 'discussions/example', autoDev: { status: null } };
+const room = { board: 'Discussion', started: true, active: 'discussions/example', autoDev: { status: null } };
 const reply = (status: number, text = '') => ({ ok: status >= 200 && status < 300, status, text: async () => text });
 const fetchMock = vi.fn();
 const setup = (input = true, active: string | null = room.active) => {

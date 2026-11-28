@@ -10,7 +10,7 @@ This page describes the current design. Operating instructions are in the
 [README](../README.md); open decisions and design history are in
 [`discussions/`](../discussions/README.md).
 
-In code, APIs and on disk, "discussion" is the legacy general name for a board, and `kind: 'discussion'` is the board type shown as Sprint.
+On disk (folders, saved files, storage keys), "discussion" is the old general name for a board.
 
 ## Two harnesses
 
@@ -49,7 +49,7 @@ One Node process serves several rooms, one per folder. Its source modules:
 | `src/docs-routes.mjs`, `src/docs-http.mjs`, `src/docs-files.mjs`, `src/docs-next.mjs` | Room endpoints, document viewer and file serving, and built page assets. |
 | `web/` | React and TypeScript room page, styles and component tests; Vite builds it into `web/dist/`. |
 | `src/host-shell.mjs` | The Terminal pane's shell (this computer only). |
-| `src/replicate.mjs` | Optional replication of sprints to peer servers (`--node`, `--peer`). |
+| `src/replicate.mjs` | Optional replication of boards to peer servers (`--node`, `--peer`). |
 | `src/usage.mjs` | Token totals and the optional quota meter. |
 | `src/instructions.mjs` | Prompt builders and the instruction catalog displayed in the Instructions panel. |
 | `src/mcp.mjs` | Read-only MCP stdio service for listing rooms and boards. |
@@ -227,10 +227,10 @@ the researching rulebook), which moves its folder to `discussions/`.
 
 ## Replication (optional)
 
-With `--node` and `--peer`, each round of the launch room's sprints is saved as a Git commit
+With `--node` and `--peer`, each closed non-workbench board under `discussions/` (sprints and research boards) in the launch room is saved as a Git commit
 in `<root>/.agent-room/store.git` (not the project's repository) and sent to paired peer servers,
 which check it and show it as a read-only snapshot. Peer files are never merged into a working
-sprint.
+board.
 
 ![Replication: capture, transfer, validation, publication and acknowledgement between paired nodes](diagrams/replication.svg)
 

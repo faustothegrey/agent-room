@@ -31,38 +31,38 @@ test('closed discussion lifecycle publishes only on Close', { timeout: 30000 }, 
     await R.pair(a.replica, 'Pi');
     Object.assign(a.sessions.get('A'), { id: 'old-agent', started: true });
     Object.assign(a.sessions.get('worker:W'), { id: 'old-worker', started: true });
-    a.room.agents[0].turn = async (p) => p.includes('The User is closing this discussion.') ? 'Closing statement; pending-instructions.md' : p.includes('User asked for a summary') ? 'An agreed summary' : 'PASS';
+    a.room.agents[0].turn = async (p) => p.includes('The User is closing this sprint.') ? 'Closing statement; pending-instructions.md' : p.includes('User asked for a summary') ? 'An agreed summary' : 'PASS';
     await ui.handleLine('first round', a);
     await ui.handleLine('/summary', a);
-    const name = a.discussion.name, dir = a.discussion.dir;
+    const name = a.board.name, dir = a.board.dir;
     assert.deepEqual(await R.ownLines(a.replica.s), {});
     assert.deepEqual(await R.receivedLines(b.replica.s), []);
     await ui.handleLine('/close', a);
     assert.match(await fs.readFile(join(dir, 'closing-statement.md'), 'utf8'), /pending-instructions\.md/);
-    assert.ok(a.screen.room.closedDiscussions.includes(name));
+    assert.ok(a.screen.room.closedBoards.includes(name));
     assert.notEqual(a.sessions.get('A').id, 'old-agent');
     assert.notEqual(a.sessions.get('worker:W').id, 'old-worker');
     await wait(async () => (await R.receivedLines(b.replica.s)).length === 1);
     const [line] = await R.receivedLines(b.replica.s);
-    const old = await R.readPointer(b.replica.s, line.discussion, 'Mac');
+    const old = await R.readPointer(b.replica.s, line.board, 'Mac');
     await ui.handleLine(`/move ${name} archive`, a);
     await ui.handleLine(`/move archive/${name} active`, a);
-    assert.ok(a.screen.room.closedDiscussions.includes(name));
+    assert.ok(a.screen.room.closedBoards.includes(name));
     await ui.handleLine(`/resume ${name}`, a);
-    assert.ok(!a.screen.room.closedDiscussions.includes(name));
+    assert.ok(!a.screen.room.closedBoards.includes(name));
     assert.notEqual(a.sessions.get('A').id, 'old-agent');
     assert.notEqual(a.sessions.get('worker:W').id, 'old-worker');
     const prompts = [];
-    a.room.agents[0].turn = async (p) => { prompts.push(p); return p.includes('The User is closing this discussion.') ? 'Updated statement; pending-instructions.md' : 'PASS'; };
+    a.room.agents[0].turn = async (p) => { prompts.push(p); return p.includes('The User is closing this sprint.') ? 'Updated statement; pending-instructions.md' : 'PASS'; };
     await ui.handleLine('after reopening', a);
     assert.match(prompts[0], /Closing statement; pending-instructions\.md/);
-    await fs.writeFile(join(a.discussion.dir, 'after-reopen.md'), 'not yet replicated');
+    await fs.writeFile(join(a.board.dir, 'after-reopen.md'), 'not yet replicated');
     await R.kick(a.replica, 'Pi');
-    assert.equal((await R.readPointer(b.replica.s, line.discussion, 'Mac')).commit, old.commit);
+    assert.equal((await R.readPointer(b.replica.s, line.board, 'Mac')).commit, old.commit);
     await ui.handleLine('/close', a);
-    await wait(async () => (await R.readPointer(b.replica.s, line.discussion, 'Mac')).round === old.round + 1);
-    const latest = await R.readPointer(b.replica.s, line.discussion, 'Mac');
-    assert.ok(R.snapshotFile(b.replica.s, line.discussion, 'Mac', latest.commit, 'after-reopen.md'));
+    await wait(async () => (await R.readPointer(b.replica.s, line.board, 'Mac')).round === old.round + 1);
+    const latest = await R.readPointer(b.replica.s, line.board, 'Mac');
+    assert.ok(R.snapshotFile(b.replica.s, line.board, 'Mac', latest.commit, 'after-reopen.md'));
   } finally {
     for (const c of rooms) { ui.ended(c); clearInterval(c.quotaTimer); await new Promise((r) => c.server.close(r)); }
     await R.removeTree(root);
@@ -87,9 +87,9 @@ test('replication startup publishes a closed snapshot interrupted before its lin
     const a = await make('Mac'), b = await make('Pi');
     a.peers.push({ name: 'Pi', url: b.origin }); b.peers.push({ name: 'Mac', url: a.origin });
     await R.pair(a.replica, 'Pi');
-    a.room.agents[0].turn = async (p) => p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS';
+    a.room.agents[0].turn = async (p) => p.includes('The User is closing this sprint.') ? 'Statement: pending-instructions.md' : 'PASS';
     await ui.handleLine('first', a);
-    const { name } = a.discussion;
+    const { name } = a.board;
     let marked;
     const stopped = new Promise((resolve) => { marked = resolve; });
     a.replicate = { ...a.replicate, publishCapture: async (_store, snapshot) => { marked(snapshot); await new Promise(() => {}); } };
@@ -100,10 +100,10 @@ test('replication startup publishes a closed snapshot interrupted before its lin
     ui.ended(a); clearInterval(a.quotaTimer); await new Promise((resolve) => a.server.close(resolve));
     rooms.splice(rooms.indexOf(a), 1);
     const restarted = await make('Mac', [{ name: 'Pi', url: b.origin }]);
-    assert.ok(restarted.screen.room.closedDiscussions.includes(name));
-    assert.equal((await R.ownLines(restarted.replica.s))[snapshot.discussion].commit, snapshot.commit);
+    assert.ok(restarted.screen.room.closedBoards.includes(name));
+    assert.equal((await R.ownLines(restarted.replica.s))[snapshot.board].commit, snapshot.commit);
     await wait(async () => (await R.receivedLines(b.replica.s)).length === 1);
-    const peer = await R.readPointer(b.replica.s, snapshot.discussion, 'Mac');
+    const peer = await R.readPointer(b.replica.s, snapshot.board, 'Mac');
     assert.equal(peer.commit, snapshot.commit);
   } finally {
     for (const c of rooms) { ui.ended(c); clearInterval(c.quotaTimer); await new Promise((resolve) => c.server.close(resolve)); }
@@ -130,13 +130,13 @@ test('failed Close captures cannot reach peers, including after restart and retr
     const a = await make('Mac'), b = await make('Pi');
     a.peers.push({ name: 'Pi', url: b.origin }); b.peers.push({ name: 'Mac', url: a.origin });
     await R.pair(a.replica, 'Pi');
-    const script = () => { a.room.agents[0].turn = async (p) => p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS'; };
+    const script = () => { a.room.agents[0].turn = async (p) => p.includes('The User is closing this sprint.') ? 'Statement: pending-instructions.md' : 'PASS'; };
     script(); await ui.handleLine('first', a);
-    const { name, dir } = a.discussion;
+    const { name, dir } = a.board;
     await ui.handleLine('/close', a);
     await wait(async () => (await R.receivedLines(b.replica.s)).length === 1);
     const [line] = await R.receivedLines(b.replica.s);
-    const previous = await R.readPointer(b.replica.s, line.discussion, 'Mac');
+    const previous = await R.readPointer(b.replica.s, line.board, 'Mac');
     await ui.handleLine(`/resume ${name}`, a); script();
     await fs.writeFile(join(dir, 'failed-only.md'), 'must not be published');
     const notes = [], broadcast = a.docs.broadcast;
@@ -144,25 +144,25 @@ test('failed Close captures cannot reach peers, including after restart and retr
     const real = a.replicate;
     a.replicate = { ...real, capture: async () => { throw new Error('capture failed'); } };
     await ui.handleLine('/close', a);
-    assert.equal(a.discussion.name, name);
-    assert.ok(!a.screen.room.closedDiscussions.includes(name));
+    assert.equal(a.board.name, name);
+    assert.ok(!a.screen.room.closedBoards.includes(name));
     assert.ok(notes.some((text) => text.includes('capture failed')));
     a.replicate = { ...real, publishCapture: async (...args) => { await real.publishCapture(...args); throw new Error('publish failed'); } };
     await ui.handleLine('/close', a);
-    assert.equal(a.discussion.name, name);
-    assert.ok(!a.screen.room.closedDiscussions.includes(name));
-    assert.equal((await R.ownLines(a.replica.s))[line.discussion].commit, previous.commit);
+    assert.equal(a.board.name, name);
+    assert.ok(!a.screen.room.closedBoards.includes(name));
+    assert.equal((await R.ownLines(a.replica.s))[line.board].commit, previous.commit);
     const reopenedStore = await R.openStore(a.cwd, 'Mac');
-    assert.equal((await R.ownLines(reopenedStore))[line.discussion].commit, previous.commit);
+    assert.equal((await R.ownLines(reopenedStore))[line.board].commit, previous.commit);
     await R.kick(a.replica, 'Pi');
-    assert.equal((await R.readPointer(b.replica.s, line.discussion, 'Mac')).commit, previous.commit);
+    assert.equal((await R.readPointer(b.replica.s, line.board, 'Mac')).commit, previous.commit);
     await fs.unlink(join(dir, 'failed-only.md'));
     a.replicate = real;
     await ui.handleLine('/close', a);
-    assert.ok(a.screen.room.closedDiscussions.includes(name));
-    await wait(async () => (await R.readPointer(b.replica.s, line.discussion, 'Mac')).round === previous.round + 1);
-    const latest = await R.readPointer(b.replica.s, line.discussion, 'Mac');
-    assert.equal(R.snapshotFile(b.replica.s, line.discussion, 'Mac', latest.commit, 'failed-only.md'), null);
+    assert.ok(a.screen.room.closedBoards.includes(name));
+    await wait(async () => (await R.readPointer(b.replica.s, line.board, 'Mac')).round === previous.round + 1);
+    const latest = await R.readPointer(b.replica.s, line.board, 'Mac');
+    assert.equal(R.snapshotFile(b.replica.s, line.board, 'Mac', latest.commit, 'failed-only.md'), null);
   } finally {
     for (const c of rooms) { ui.ended(c); clearInterval(c.quotaTimer); await new Promise((r) => c.server.close(r)); }
     await R.removeTree(root);
@@ -181,7 +181,7 @@ test('two rooms: pairing, round hooks, independent browser pins, deletion and re
     ctx.closingAgent = () => ({ name: 'W', turn: (p) => ctx.room.agents.at(-1).turn(p) });
     hub.rooms.set(ctx.key, ctx);
     ctx.usage={...ctx.usage,fetchQuota:async()=>null};
-    ctx.room=createRoom([{name:'A',provider:'claude',turn:async(p)=>p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS'}],ctx.state);
+    ctx.room=createRoom([{name:'A',provider:'claude',turn:async(p)=>p.includes('The User is closing this sprint.') ? 'Statement: pending-instructions.md' : 'PASS'}],ctx.state);
     ctx.suggestTitle=async()=>({title:'Replication test'});
     await ui.start(ctx); rooms.push(ctx);
     assert.deepEqual(ctx.screen.replica.project, ctx.project);
@@ -198,49 +198,49 @@ test('two rooms: pairing, round hooks, independent browser pins, deletion and re
     assert.equal(preview.peer.root,b.cwd); assert.equal(preview.local.root,a.cwd); assert.equal(preview.peer.project.commit,null);
     assert.equal((await post(a,'/__pair',{peer:'Pi',confirm:true})).status,200);
     await ui.handleLine('first round',a);
-    const name=a.discussion.name, dir=a.discussion.dir;
+    const name=a.board.name, dir=a.board.dir;
     assert.deepEqual(await R.receivedLines(b.replica.s),[]);
     await ui.handleLine('/close',a);
     await wait(async()=> (await R.receivedLines(b.replica.s)).length===1);
     const [line]=await R.receivedLines(b.replica.s);
-    assert.ok((await fs.readdir(R.snapshotPath(b.replica.s,line.discussion,'Mac',line.commit))).includes('transcripts'));
-    const view=async(client)=> (await post(b,'/__view',{discussion:line.discussion,node:'Mac'},client)).json();
+    assert.ok((await fs.readdir(R.snapshotPath(b.replica.s,line.board,'Mac',line.commit))).includes('transcripts'));
+    const view=async(client)=> (await post(b,'/__view',{board:line.board,node:'Mac'},client)).json();
     const v1=await view('browser-one'),v2=await view('browser-two');
     assert.equal(v1.viewing.commit,line.commit); assert.equal(v2.viewing.commit,line.commit);
     assert.equal((await post(b,'/__say',{text:'must refuse'})).status,409);
     await ui.handleLine('/resume '+name,a);
-    a.room.agents[0].turn=async(p)=>p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS';
+    a.room.agents[0].turn=async(p)=>p.includes('The User is closing this sprint.') ? 'Statement: pending-instructions.md' : 'PASS';
     await fs.writeFile(join(dir,'drawing.svg'),'<svg xmlns="http://www.w3.org/2000/svg"/>');
     await ui.handleLine('second round',a);
-    assert.equal((await R.readPointer(b.replica.s,line.discussion,'Mac')).commit,line.commit);
+    assert.equal((await R.readPointer(b.replica.s,line.board,'Mac')).commit,line.commit);
     await ui.handleLine('/close',a);
-    await wait(async()=> (await R.readPointer(b.replica.s,line.discussion,'Mac')).round===2);
-    const latest=await R.readPointer(b.replica.s,line.discussion,'Mac');
-    assert.ok(R.snapshotFile(b.replica.s,line.discussion,'Mac',line.commit,'transcripts/'+(await fs.readdir(join(R.snapshotPath(b.replica.s,line.discussion,'Mac',line.commit),'transcripts')))[0]));
+    await wait(async()=> (await R.readPointer(b.replica.s,line.board,'Mac')).round===2);
+    const latest=await R.readPointer(b.replica.s,line.board,'Mac');
+    assert.ok(R.snapshotFile(b.replica.s,line.board,'Mac',line.commit,'transcripts/'+(await fs.readdir(join(R.snapshotPath(b.replica.s,line.board,'Mac',line.commit),'transcripts')))[0]));
     await post(b,'/__view',{back:true},'browser-one');
-    assert.ok(await fs.stat(R.snapshotPath(b.replica.s,line.discussion,'Mac',line.commit)));
+    assert.ok(await fs.stat(R.snapshotPath(b.replica.s,line.board,'Mac',line.commit)));
     await post(b,'/__view',{back:true},'browser-two');
-    await assert.rejects(fs.stat(R.snapshotPath(b.replica.s,line.discussion,'Mac',line.commit)),{code:'ENOENT'});
+    await assert.rejects(fs.stat(R.snapshotPath(b.replica.s,line.board,'Mac',line.commit)),{code:'ENOENT'});
     await ui.handleLine('/resume '+name,a);
-    a.room.agents[0].turn=async(p)=>p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS';
+    a.room.agents[0].turn=async(p)=>p.includes('The User is closing this sprint.') ? 'Statement: pending-instructions.md' : 'PASS';
     await fs.rm(join(dir,'drawing.svg'));
     await ui.handleLine('third round',a);
-    assert.equal((await R.readPointer(b.replica.s,line.discussion,'Mac')).commit,latest.commit);
+    assert.equal((await R.readPointer(b.replica.s,line.board,'Mac')).commit,latest.commit);
     await ui.handleLine('/close',a);
-    await wait(async()=> (await R.readPointer(b.replica.s,line.discussion,'Mac')).round===3);
-    const third=await R.readPointer(b.replica.s,line.discussion,'Mac');
-    assert.equal(R.snapshotFile(b.replica.s,line.discussion,'Mac',third.commit,'drawing.svg'),null);
-    await wait(async()=> !(await fs.stat(R.snapshotPath(b.replica.s,line.discussion,'Mac',latest.commit)).catch(()=>null)));
-    await assert.rejects(fs.stat(R.snapshotPath(b.replica.s,line.discussion,'Mac',latest.commit)),{code:'ENOENT'});
+    await wait(async()=> (await R.readPointer(b.replica.s,line.board,'Mac')).round===3);
+    const third=await R.readPointer(b.replica.s,line.board,'Mac');
+    assert.equal(R.snapshotFile(b.replica.s,line.board,'Mac',third.commit,'drawing.svg'),null);
+    await wait(async()=> !(await fs.stat(R.snapshotPath(b.replica.s,line.board,'Mac',latest.commit)).catch(()=>null)));
+    await assert.rejects(fs.stat(R.snapshotPath(b.replica.s,line.board,'Mac',latest.commit)),{code:'ENOENT'});
     await ui.handleLine('/resume '+name,a);
     a.room = createRoom([{name:'A',provider:'claude',turn:async()=>{throw new Error('provider failed');}}],a.state);
     await ui.handleLine('failed round',a);
-    let own=(await R.ownLines(a.replica.s))[line.discussion];
+    let own=(await R.ownLines(a.replica.s))[line.board];
     assert.equal(own.commit,third.commit);
     const replies=['an idea','PASS',new Error('summary failed')];
     a.room=createRoom([{name:'A',provider:'claude',turn:async()=>{const r=replies.shift();if(r instanceof Error)throw r;return r??'PASS';}}],a.state);
     await ui.handleLine('failed auto summary',a);
-    own=(await R.ownLines(a.replica.s))[line.discussion];
+    own=(await R.ownLines(a.replica.s))[line.board];
     assert.equal(own.commit,third.commit);
     // A receiver restored with a different room identity refuses pairing and preserves both IDs.
     const before=await R.roomInfo(a.replica.s);
@@ -265,7 +265,7 @@ test('every closed discussion of a --node launch room replicates, through the la
     ctx.closingAgent = () => ({ name: 'W', turn: (p) => ctx.room.agents.at(-1).turn(p) });
     ctx.hub.rooms.set(ctx.key, ctx);
     ctx.usage={...ctx.usage,fetchQuota:async()=>null};
-    ctx.room=createRoom([{name:'A',provider:'claude',turn:async(p)=>p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS'}],ctx.state);
+    ctx.room=createRoom([{name:'A',provider:'claude',turn:async(p)=>p.includes('The User is closing this sprint.') ? 'Statement: pending-instructions.md' : 'PASS'}],ctx.state);
     await ui.start(ctx); rooms.push(ctx);
     return ctx;
   };
@@ -277,7 +277,7 @@ test('every closed discussion of a --node launch room replicates, through the la
     const post=(path,body)=>fetch(a.base+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
     assert.equal((await post('/__pair',{peer:'Pi',confirm:true})).status,200);
     await ui.handleLine('a round in the first discussion',a);
-    const name=a.discussion.name;
+    const name=a.board.name;
     assert.deepEqual(await R.receivedLines(b.replica.s),[]);
     await ui.handleLine('/close',a);
     await wait(async()=> (await R.receivedLines(b.replica.s)).length===1);
@@ -295,12 +295,12 @@ test('every closed discussion of a --node launch room replicates, through the la
     ui.ended(second); clearInterval(second.quotaTimer);
     assert.notEqual(a.replica.state.stopped,true);
     await ui.handleLine('/resume '+name,a);
-    a.room.agents[0].turn=async(p)=>p.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : 'PASS';
+    a.room.agents[0].turn=async(p)=>p.includes('The User is closing this sprint.') ? 'Statement: pending-instructions.md' : 'PASS';
     await ui.handleLine('another round in the first',a);
     const first=(await R.receivedLines(b.replica.s)).find((l)=>l.title==='First topic');
-    assert.equal((await R.readPointer(b.replica.s,first.discussion,'Mac')).round,1);
+    assert.equal((await R.readPointer(b.replica.s,first.board,'Mac')).round,1);
     await ui.handleLine('/close',a);
-    await wait(async()=> (await R.readPointer(b.replica.s,first.discussion,'Mac')).round===2);
+    await wait(async()=> (await R.readPointer(b.replica.s,first.board,'Mac')).round===2);
   } finally {
     for(const c of rooms) { if (c.context) continue; ui.ended(c); clearInterval(c.quotaTimer); await new Promise(r=>c.server.close(r)); }
   }
@@ -321,7 +321,7 @@ test('storage ignores project filters/transcripts rules, preserves Git state and
     await fs.mkdir(join(dir,'transcripts'),{recursive:true}); await fs.writeFile(join(dir,'transcripts','session.md'),'history');
     git('add','discussions'); // ignored transcript leaves source/index untouched
     const c=await R.capture(s,{name,dir,title:'Test'},{kind:'round',outcome:'interrupted',ending:'test interruption',summary:null,agents:[],conversation:[]});
-    assert.equal(await R.discussionId(s,'archive/'+name),c.discussion);
+    assert.equal(await R.boardId(s,'archive/'+name),c.board);
     assert.ok((await R.listTree(s.store,c.commit)).some(e=>e.path==='transcripts/session.md'));
     assert.deepEqual([git('rev-parse','HEAD'),git('status','--porcelain'),git('ls-files','--stage')],before);
     await assert.rejects(R.openStore(root,'AnotherNode'),/belongs to node Mac/);
@@ -374,7 +374,7 @@ test('workbench: never replicated to peers on Close or startup publishing', asyn
     await ui.handleLine('/workbench', ctx);
     await ui.handleLine('Tweak spacing', ctx);
     await ctx.workQueue;
-    const wbName = ctx.discussion.name;
+    const wbName = ctx.board.name;
     await ui.handleLine('/close', ctx);
 
     // Close did not capture or publish the workbench, and canSend refuses it.
@@ -382,7 +382,7 @@ test('workbench: never replicated to peers on Close or startup publishing', asyn
     assert.equal(ctx.replica.canSend(wbName), false);
 
     // Startup publishing also ignores any closed entry belonging to a workbench.
-    const fakeSnap = { discussion: 'fake-wb-id', commit: '0'.repeat(40), parent: null };
+    const fakeSnap = { board: 'fake-wb-id', commit: '0'.repeat(40), parent: null };
     const closedDir = join(homedir(), '.local', 'state', 'agent-room', 'paused',
       createHash('sha256').update(realpathSync(cwd)).digest('hex'), 'closed');
     const closedFile = join(closedDir, createHash('sha256').update(wbName).digest('hex'));

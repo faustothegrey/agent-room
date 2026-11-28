@@ -224,12 +224,12 @@ function healthView(ctx) {
   const sessions = rooms.map((r) => {
     const view = sessionView(r);
     const entry = (agent, role, key) => ({ ...agent, role, lastTurn: r.turnRecords?.get(r.sessions.get(key)) ?? null });
-    return { room: r.cwd, discussion: folderOf(r), agents: [
+    return { room: r.cwd, board: folderOf(r), agents: [
       ...view.agents.map((a) => entry(a, 'member', a.name)), entry(view.worker, 'worker', `worker:${view.worker.name}`) ] };
   });
   return { promptResults: [...(hub.promptResults?.values() ?? [])].flatMap((results) => [...results.values()]),
     promptRunning: [...(hub.promptRunning ?? [])], sessions, scheduledProviders: [...new Set(rooms.flatMap(providersOf))], catalogs,
-    configured: rooms.map((r) => ({ room: r.cwd, discussion: folderOf(r), agents: configured(currentSettings(r)).map((a) => ({ ...a, enabled: a.role === 'worker' || !(r.state.disabledAgents ?? []).includes(a.name) })) })),
+    configured: rooms.map((r) => ({ room: r.cwd, board: folderOf(r), agents: configured(currentSettings(r)).map((a) => ({ ...a, enabled: a.role === 'worker' || !(r.state.disabledAgents ?? []).includes(a.name) })) })),
     defaults: defaults ? configured(defaults) : null, diagnostics: m.diagnostics ?? null, permissions: permissionReports(hub), login: m.login, loginCurrent: m.loginCurrent ?? {}, cli: m.cli, errors: m.errors,
     leftovers: m.leftovers, leftoversChecked: m.leftoversChecked, nextLogin: m.nextLogin, nextLeftovers: m.nextLeftovers,
     running: loadedRooms(hub).flatMap((r) => [...(r.programs?.running ?? [])].map((p) => ({ pid: p.pid, provider: p.provider, ...p.monitorInfo }))),

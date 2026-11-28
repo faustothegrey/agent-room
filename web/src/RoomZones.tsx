@@ -283,7 +283,7 @@ export function RoomZones({ children, roomName, folder, active, replica, replica
         {([['tab', 'Switch this tab to'], ['window', 'Open in new window']] as const).map(([mode, heading]) => <optgroup key={mode} label={heading}>{rooms.map((r) => {
           const open = !r.current && (r.pages ?? 0) > 0;
           const pages = r.pages == null ? '' : ' · ' + r.pages + (r.pages === 1 ? ' page' : ' pages') + ' open';
-          return <option key={r.id} value={mode + ':' + r.path} disabled={r.current || open}>{r.root + ' · ' + (r.discussion || 'No sprint started') + pages + (r.current ? ' (current)' : open ? ' (open in another window)' : '')}</option>;
+          return <option key={r.id} value={mode + ':' + r.path} disabled={r.current || open}>{r.root + ' · ' + (r.board || 'No sprint started') + pages + (r.current ? ' (current)' : open ? ' (open in another window)' : '')}</option>;
         })}</optgroup>)}
       </select>}
       {question && <dialog ref={askDialog} id="ask" aria-label={question.text} onCancel={(e) => { e.preventDefault(); answer(); }}>

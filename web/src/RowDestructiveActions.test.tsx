@@ -12,7 +12,7 @@ class Source {
 }
 const live = '2026-11-01-live', closed = '2026-11-02-closed', idea = '2026-11-03-idea', research = '2026-11-04-study', archived = '2026-10-01-old';
 const files = [`discussions/${live}/notes.md`, `discussions/${closed}/notes.md`, `brainstorms/${idea}/notes.md`, `discussions/${research}/notes.md`, `discussions/archive/${archived}/notes.md`];
-const room = { folder: '/room', active: `discussions/${live}`, discussion: 'Live', started: true, multi: true, brainstorm: false, research: false, workbench: false, workbenches: [], researches: [research], closedDiscussions: [closed, research, archived], checkpoints: [], open: [], rollbacks: [], autoDev: { status: null } };
+const room = { folder: '/room', active: `discussions/${live}`, board: 'Live', started: true, multi: true, brainstorm: false, research: false, workbench: false, workbenches: [], researches: [research], closedBoards: [closed, research, archived], checkpoints: [], open: [], rollbacks: [], autoDev: { status: null } };
 const fetchMock = vi.fn();
 const says = () => fetchMock.mock.calls.filter(([url]) => url === '__say').map(([, init]) => JSON.parse(init.body).text);
 const menu = (name: string) => screen.getByLabelText(`Board actions for ${name}`).parentElement!;
@@ -71,7 +71,7 @@ it('queues rollback separately, shows its report, and requires ready, closed and
   expect(says()).not.toContain('/archive-rollback ' + closed);
   await user.click(within(menu('closed')).getByRole('button', { name: 'Click again: I reviewed the rollback report; archive' }));
   await waitFor(() => expect(says()).toContain('/archive-rollback ' + closed));
-  Source.current.send({ type: 'room', room: { ...room, closedDiscussions: [], rollbacks: [{ name: closed, status: 'ready', report: 'Reviewed report' }] } });
+  Source.current.send({ type: 'room', room: { ...room, closedBoards: [], rollbacks: [{ name: closed, status: 'ready', report: 'Reviewed report' }] } });
   expect((within(menu('closed')).getByRole('button', { name: 'Confirm archive after rollback' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
@@ -85,7 +85,7 @@ it('uses legacy resume and Peek tooltips and expires row confirmations', async (
 });
 
 it('uses archived rollback references and does not permit confirming archive for an active board', async () => {
-  setup({ closedDiscussions: [live, closed, research, archived], rollbacks: [{ name: live, status: 'ready', report: 'Active report' }, { name: archived, status: 'ready', report: 'Archived report' }] });
+  setup({ closedBoards: [live, closed, research, archived], rollbacks: [{ name: live, status: 'ready', report: 'Active report' }, { name: archived, status: 'ready', report: 'Archived report' }] });
   const user = userEvent.setup(); await user.click(await screen.findByLabelText('Board actions for Live'));
   expect((within(menu('Live')).getByRole('button', { name: 'Confirm archive after rollback' }) as HTMLButtonElement).disabled).toBe(true);
   await user.click(screen.getByText('Archived · Deferred (1)')); await user.click(screen.getByLabelText('Board actions for old'));

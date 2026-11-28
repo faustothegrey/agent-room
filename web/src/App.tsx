@@ -33,8 +33,8 @@ type Layout = { stacked: boolean; sideClosed: boolean; left: number | null; top:
 type BoardDialog = { kind: 'merge'; name: string; preview: MergePreview; changed: boolean; error?: string } | { kind: 'discard'; name: string; preview: DiscardPreview; changed: boolean; error?: string } | { kind: 'catchup'; name: string; target: string; behind: number; message: string; changed: boolean; error?: string };
 type Service = 'providers' | 'instructions' | 'schedule' | 'notes' | 'terminal';
 const SERVICES: Record<Service, string> = { providers: 'Providers', instructions: 'Instructions', schedule: 'Schedule', notes: 'My notes', terminal: 'Terminal' };
-type OrderKind = 'discussions' | 'brainstorms';
-const orderKey = (folder: string, kind: OrderKind) => `agent-room.${kind === 'discussions' ? 'discussion' : 'brainstorm'}-order:${folder}`;
+type OrderKind = 'sprints' | 'brainstorms';
+const orderKey = (folder: string, kind: OrderKind) => `agent-room.${kind === 'sprints' ? 'discussion' : 'brainstorm'}-order:${folder}`;
 function readOrder(folder: string, kind: OrderKind): string[] {
   try { const value: unknown = JSON.parse(localStorage.getItem(orderKey(folder, kind)) || '[]'); return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
 }
@@ -229,11 +229,11 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     document.addEventListener('click', close); document.addEventListener('keydown', escape);
     return () => { document.removeEventListener('click', close); document.removeEventListener('keydown', escape); for (const timer of Object.values(actionTimers.current)) clearTimeout(timer); };
   }, []);
-  const [boardSections, setBoardSections] = useState(() => new Set(['discussions', 'research', 'brainstorms']));
+  const [boardSections, setBoardSections] = useState(() => new Set(['sprints', 'research', 'brainstorms']));
   const [orderRevision, setOrderRevision] = useState(0);
   const [dragged, setDragged] = useState<{ kind: OrderKind; name: string; names: string[] } | null>(null);
   const [subtab, setSubtab] = useState<'explorer' | 'document'>('explorer');
-  const [explorerMode, setExplorerMode] = useState<'discussion' | 'root'>('discussion');
+  const [explorerMode, setExplorerMode] = useState<'board' | 'root'>('board');
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const explorer = useRef<HTMLElement>(null);
   const [offers, setOffers] = useState<string[]>([]);
@@ -242,7 +242,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [pointed, setPointed] = useState<Pick<PointMessage, 'label' | 'text'>[]>([]);
   const viewing = useRef<unknown>(null);
-  const [viewLayout, setViewLayout] = useState<{ name?: string; discussion?: string } | null>(null);
+  const [viewLayout, setViewLayout] = useState<{ name?: string; board?: string } | null>(null);
   // Replication: the room's replica status, and the received line this browser views (View chat,
   // a leased pin renewed every 30 s) or peeks at (Peek files: its received files in Explorer).
   const [replica, setReplica] = useState<Replica | null>(null);
@@ -250,7 +250,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [newRoom, setNewRoom] = useState(false);
   const [remote, setRemote] = useState<{ line: ViewedLine; expired: boolean } | null>(null);
   const remoteRef = useRef<ViewedLine | null>(null);
-  const [receivedPeek, setReceivedPeek] = useState<{ discussion: string; node: string; commit: string; round: number; name: string; title: string | null } | null>(null);
+  const [receivedPeek, setReceivedPeek] = useState<{ board: string; node: string; commit: string; round: number; name: string; title: string | null } | null>(null);
   const [receivedFiles, setReceivedFiles] = useState<string[]>([]);
   const [layout, setLayout] = useState<Layout>(initialLayout);
   const layoutRef = useRef(layout); layoutRef.current = layout;
@@ -273,7 +273,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     const folder = room?.folder;
     if (!folder) return;
     const readonly = !!peek || !!viewLayout;
-    const board = boardName(viewLayout ? viewLayout.name || viewLayout.discussion : peek ? peek.path || peek.name : room?.active);
+    const board = boardName(viewLayout ? viewLayout.name || viewLayout.board : peek ? peek.path || peek.name : room?.active);
     const id = JSON.stringify([readonly, folder, board || '']);
     const previous = layoutContext.current;
     if (previous?.id === id) return;
@@ -409,7 +409,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     document.addEventListener('scroll', afterChange, true); document.addEventListener('keydown', key, true);
     return () => { cancelAnimationFrame(frame); document.removeEventListener('mousemove', refreshOutline, true); document.removeEventListener('click', click, true); document.removeEventListener('scroll', afterChange, true); document.removeEventListener('keydown', key, true); };
   }, [capturing]);
-  const shownBoard = JSON.stringify([room?.folder, room?.active, room?.workbench, room?.brainstorm, room?.research, peek?.path, viewLayout?.name, viewLayout?.discussion]);
+  const shownBoard = JSON.stringify([room?.folder, room?.active, room?.workbench, room?.brainstorm, room?.research, peek?.path, viewLayout?.name, viewLayout?.board]);
   const previousBoard = useRef(shownBoard);
   // The Deep / Theoretical toggles: only on a research board not created yet (before its first message).
   const choosingKind = !!(room?.research && !room.active && !peek && !viewLayout && !remote);
@@ -477,18 +477,18 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   // View chat: pins a received line for this browser and shows its chat read-only; null goes back.
   const viewRemote = async (line: ReceivedLine | ViewedLine | null) => {
     try {
-      const response = await post('__view', line ? { discussion: line.discussion, node: line.node } : { back: true });
+      const response = await post('__view', line ? { board: line.board, node: line.node } : { back: true });
       if (!response.ok) { addStatus(await response.text(), true); return; }
       const next = (await response.json() as ViewReply).viewing;
       const shown = next && next !== true ? next : null;
       remoteRef.current = shown; viewing.current = shown;
       setRemote(shown ? { line: shown, expired: false } : null);
-      setViewLayout(shown ? { name: shown.name ?? undefined, discussion: shown.discussion } : null);
+      setViewLayout(shown ? { name: shown.name ?? undefined, board: shown.board } : null);
       setReceivedPeek(null); setFilePeek(null); setRowMenu(null);
       docRef.current = null; setDoc(null); setSubtab('explorer');
       offerEpoch.current++; setOffers([]);
       setMessages(shown ? shown.messages.filter((m) => !m.pass && !m.hidden) : liveMessages.current);
-      if (shown) setExplorerMode('discussion');
+      if (shown) setExplorerMode('board');
     } catch (error) { addStatus(error instanceof Error ? error.message : String(error), true); }
   };
   useEffect(() => {
@@ -502,10 +502,10 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   useEffect(() => {
     if (!received) { setReceivedFiles([]); return; }
     let live = true;
-    fetch('__rfiles?d=' + encodeURIComponent(received.discussion) + '&n=' + encodeURIComponent(received.node) + '&c=' + encodeURIComponent(received.commit || ''))
+    fetch('__rfiles?d=' + encodeURIComponent(received.board) + '&n=' + encodeURIComponent(received.node) + '&c=' + encodeURIComponent(received.commit || ''))
       .then((r) => r.json() as Promise<string[]>).then((files) => { if (live) setReceivedFiles(Array.isArray(files) ? files : []); }, () => { if (live) setReceivedFiles([]); });
     return () => { live = false; };
-  }, [received?.discussion, received?.node, received?.commit]);
+  }, [received?.board, received?.node, received?.commit]);
   // One menu open at a time, as on /__room: opening the room or server menu, Actions ▾ or a row ⋯ closes the others.
   useEffect(() => {
     const opened = (event: Event) => {
@@ -731,7 +731,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   useEffect(() => {
     const changed = (event: StorageEvent) => {
       const folder = roomRef.current?.folder;
-      if (folder && (event.key === orderKey(folder, 'discussions') || event.key === orderKey(folder, 'brainstorms'))) setOrderRevision((revision) => revision + 1);
+      if (folder && (event.key === orderKey(folder, 'sprints') || event.key === orderKey(folder, 'brainstorms'))) setOrderRevision((revision) => revision + 1);
     };
     window.addEventListener('storage', changed); return () => window.removeEventListener('storage', changed);
   }, []);
@@ -809,11 +809,11 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         if (event.peek ? event.peek.kind === 'workbench' : event.room?.workbench) { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); }
         else if ((event.peek ? event.peek.kind === 'research' : event.room?.research || roomRef.current?.workbench) && tabRef.current === 'worker') { tabRef.current = 'discussion'; setTab('discussion'); }
         viewing.current = remoteRef.current ?? event.viewing;
-        setViewLayout(remoteRef.current ? { name: remoteRef.current.name ?? undefined, discussion: remoteRef.current.discussion } : event.viewing && typeof event.viewing === 'object' ? event.viewing as { name?: string; discussion?: string } : null);
+        setViewLayout(remoteRef.current ? { name: remoteRef.current.name ?? undefined, board: remoteRef.current.board } : event.viewing && typeof event.viewing === 'object' ? event.viewing as { name?: string; board?: string } : null);
         setReplica(event.replica ?? null); setReplicaOff(event.replicaOff ?? null); setNewRoom(!!event.newRoom);
         roomRef.current = event.room; peekRef.current = event.peek ?? null;
         setRoom(event.room); setPeek(event.peek ?? null); setInput(event.input);
-        if (event.peek) { setFilePeek(null); setExplorerMode('discussion'); void loadDetails(); }
+        if (event.peek) { setFilePeek(null); setExplorerMode('board'); void loadDetails(); }
         else if (event.room?.folder) void loadDetails();
         if (!preservePeekDoc.current || event.peek) { docRef.current = event.doc ?? null; setDoc(event.doc ?? null); setSubtab(event.doc ? 'document' : 'explorer'); }
         if (!event.peek) preservePeekDoc.current = false;
@@ -900,7 +900,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         setPendingArchives((previous) => { const next = new Set(previous); next.delete(event.from); return next; });
         const folder = roomRef.current?.folder, name = event.from?.split('/').at(-1);
         if (folder && name) {
-          const kind: OrderKind = event.from.startsWith('brainstorms/') ? 'brainstorms' : 'discussions';
+          const kind: OrderKind = event.from.startsWith('brainstorms/') ? 'brainstorms' : 'sprints';
           saveOrder(kind, readOrder(folder, kind).filter((item) => item !== name));
         }
         void loadDetails();
@@ -920,10 +920,10 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     return () => { events.close(); clearTimeout(state.show); clearTimeout(state.fail); state.show = undefined; state.fail = undefined; };
   }, [version, refresh, navigate]);
 
-  const title = (remote ? displayTitle(remote.line.name ?? undefined, remote.line.title ?? undefined) : displayTitle(peek?.name ?? room?.active?.split('/').at(-1), peek?.title ?? room?.discussion)) || 'agent-room';
+  const title = (remote ? displayTitle(remote.line.name ?? undefined, remote.line.title ?? undefined) : displayTitle(peek?.name ?? room?.active?.split('/').at(-1), peek?.title ?? room?.board)) || 'agent-room';
   const receivedTime = (at: string | null | undefined) => at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'time unavailable';
-  const ownLine = remote && replica ? Object.values(replica.own).find((line) => line.discussion === remote.line.discussion) : undefined;
-  const newerLine = remote && replica?.received.find((line) => line.discussion === remote.line.discussion && line.node === remote.line.node && line.commit !== remote.line.commit);
+  const ownLine = remote && replica ? Object.values(replica.own).find((line) => line.board === remote.line.board) : undefined;
+  const newerLine = remote && replica?.received.find((line) => line.board === remote.line.board && line.node === remote.line.node && line.commit !== remote.line.commit);
   const busyWorkers = (room?.open ?? []).filter((entry) => entry.working);
   // A board that becomes fresh opens its members panel, also when that happened during a Peek (the
   // panel isn't shown then): the request waits for the panel (setRoom's fresh on /__room).
@@ -938,14 +938,14 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const sessionLabel = (s: CliSession) => `${s.name} · ${s.provider} · ${s.id ? s.id.slice(0, 8) + '…' : 'No session yet'}`;
   const sessionList = room?.cliSessions ? [...room.cliSessions.agents.map(sessionLabel), ...(room.cliSessions.worker?.id ? [sessionLabel(room.cliSessions.worker)] : [])] : [];
   const sessionLines = sessionList.length ? sessionList : null;
-  const boardTitle = (name: string, path: string, brainstorm: boolean) => displayTitle(name, room?.open?.find((entry) => entry.active === path)?.title ?? (room?.active === path ? room.discussion : undefined) ?? room?.checkpoints?.find((entry) => entry.name === (brainstorm ? 'brainstorms/' + name : name))?.title);
+  const boardTitle = (name: string, path: string, brainstorm: boolean) => displayTitle(name, room?.open?.find((entry) => entry.active === path)?.title ?? (room?.active === path ? room.board : undefined) ?? room?.checkpoints?.find((entry) => entry.name === (brainstorm ? 'brainstorms/' + name : name))?.title);
   // Document's path line (docLabel): the discussion (current, peeked or received) or "Room checkout",
   // plus the file's path inside it; the browser tab is named after it, or after the board.
   const docLabel = (file: string | null) => {
     if (!file) return 'No document shown.';
     if (file.startsWith('__received/')) {
       const [, d, node, , ...rest] = file.split('/');
-      const rec = replica?.received.find((l) => l.discussion === d && l.node === node), mine = received?.discussion === d ? received : null;
+      const rec = replica?.received.find((l) => l.board === d && l.node === node), mine = received?.board === d ? received : null;
       return displayTitle((mine?.name || rec?.local || rec?.name || d) ?? undefined, (mine?.title || rec?.title) ?? undefined) + ' · ' + rest.join('/');
     }
     const p = file.split('/'), dated = (n: string | undefined) => /^\d{4}-\d{2}-\d{2}-/.test(n ?? '');
@@ -970,27 +970,27 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const boardRow = (name: string, path: string, brainstorm: boolean, archived = false, ordering?: { kind: OrderKind; names: string[] }) => {
     const current = room?.active === path, open = room?.open?.find((entry) => entry.active === path && !entry.current);
     const entry = room?.open?.find((item) => item.active === path);
-    const closed = brainstorm ? !current && !open : !!room?.closedDiscussions?.includes(name);
-    const kind = brainstorm ? 'brainstorm' : room?.workbenches?.includes(name) ? 'workbench' : room?.researches?.includes(name) ? 'research' : 'discussion';
+    const closed = brainstorm ? !current && !open : !!room?.closedBoards?.includes(name);
+    const kind = brainstorm ? 'brainstorm' : room?.workbenches?.includes(name) ? 'workbench' : room?.researches?.includes(name) ? 'research' : 'sprint';
     const label = boardTitle(name, path, brainstorm);
     const work = workerInfo?.pending?.find((item) => item.lane === name);
-    const isResearch = kind === 'research', isDiscussion = !brainstorm && !isResearch;
-    const closing = brainstorm ? null : room?.closingDiscussions?.[name];
-    const workerBusy = isDiscussion && !!(entry?.working || entry?.workerBusy || room?.busyWorkers?.includes(name));
-    const conflicts = isDiscussion ? work?.conflicts ?? [] : [];
+    const isResearch = kind === 'research', isSprint = !brainstorm && !isResearch;
+    const closing = brainstorm ? null : room?.closingBoards?.[name];
+    const workerBusy = isSprint && !!(entry?.working || entry?.workerBusy || room?.busyWorkers?.includes(name));
+    const conflicts = isSprint ? work?.conflicts ?? [] : [];
     const state = entry?.ongoing || entry?.working || closing || workerBusy ? 'ongoing' : closed ? 'closed' : conflicts.length ? 'waiting for input' : entry ? !entry.started ? 'not started' : entry.waitingForInput ? 'waiting for input' : entry.readyForAutoDev ? 'ready for auto dev' : entry.workReady && !entry.workbench && !entry.brainstorm ? 'work ready' : 'idle' : current && !room?.started ? 'not started' : 'idle';
     const merge = workerInfo?.mergeable?.[name];
-    const suffix = state === 'work ready' && isDiscussion && merge ? merge.canMerge ? ' · mergeable' : merge.catchUp ? ' · needs catch-up' : ' · merge blocked' : '';
+    const suffix = state === 'work ready' && isSprint && merge ? merge.canMerge ? ' · mergeable' : merge.catchUp ? ' · needs catch-up' : ' · merge blocked' : '';
     const conflictText = conflicts.length ? 'Worker conflict: ' + conflicts.join(', ') : '';
     const tooltip = state === 'waiting for input' ? conflictText || entry?.waitingReason : suffix === ' · merge blocked' ? merge?.disabledReason : undefined;
     const closingText = closing ? closing === 'waiting' ? ' · closing · waiting for worker' : ' · closing · writing statement' : '';
-    const changed = isDiscussion && !archived ? workerInfo?.merged?.includes(name) ? ' · merged' : workerInfo?.pending && !work ? ' · no changes' : '' : '';
+    const changed = isSprint && !archived ? workerInfo?.merged?.includes(name) ? ' · merged' : workerInfo?.pending && !work ? ' · no changes' : '' : '';
     const pendingText = work ? [work.ahead && `${work.ahead} ${work.ahead === 1 ? 'commit' : 'commits'} not merged into main`, work.dirty && 'uncommitted changes'].filter(Boolean).join(' · ') : '';
     const stats = room?.researchStats?.[name];
     const count = Number.isSafeInteger(stats?.laps) && stats!.laps >= 0 ? stats!.laps : 0;
     const date = (value?: string | null) => { if (!value) return '—'; const d = new Date(value); return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
     const ref = brainstorm ? path : archived ? path.slice('discussions/'.length) : name;
-    const rollback = isDiscussion ? room?.rollbacks?.find((item) => item.name === name) : undefined;
+    const rollback = isSprint ? room?.rollbacks?.find((item) => item.name === name) : undefined;
     const rowKey = (action: string) => path + ':' + action;
     const saved = room?.checkpoints?.find((item) => item.name === (brainstorm ? 'brainstorms/' + name : name));
     const resumeTip = open ? 'Show it: its agents carry on, nothing is restarted.' : closed ? 'Reopen from its closing statement (or pending handoff) with new agent and worker sessions.' : saved?.kind === 'full' ? 'Continue where it stopped: the same agent and worker sessions, and its chat.' : saved?.kind === 'fresh' && saved.summary !== false ? 'Start from its handoff and notes, with the summary chosen at Start fresh.' : 'No saved session: start from its handoff and notes.';
@@ -1002,24 +1002,24 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     const deleteWarning = brainstorm ? 'Click again: its folder (transcripts, drawings) and checkpoint are removed; uncommitted files are lost for good' : 'Click again: its folder and checkpoint are removed; uncommitted files are lost for good';
     const action = () => {
       if (current) { if (peekRef.current) void backToCurrent(); else setFilePeek(null); return; }
-      if (closed || brainstorm) { setExplorerMode('discussion'); setSubtab('explorer'); void boardCommand('/peek ' + ref); }
+      if (closed || brainstorm) { setExplorerMode('board'); setSubtab('explorer'); void boardCommand('/peek ' + ref); }
       else if (!archived && input && !viewing.current) void boardCommand('/resume ' + ref);
-      else { setFilePeek({ path, name, title: label, readonly: archived }); setExplorerMode('discussion'); setSubtab('explorer'); }
+      else { setFilePeek({ path, name, title: label, readonly: archived }); setExplorerMode('board'); setSubtab('explorer'); }
     };
     const kindBadge = isResearch ? [stats?.deep && 'Deep', stats?.theoretical && 'Theoretical'].filter(Boolean).join(' · ') : '';
     const content = <>{kind === 'workbench' ? '🔧 ' : kind === 'research' ? '🔬 ' : ''}{label}</>;
-    const archivedState = archived ? (path.includes('/archive/') ? 'archived' : 'deferred') + (brainstorm ? ' brainstorm' : isResearch ? ' research' : '') + (!brainstorm && closed ? ' · closed' : '') + closingText + (isDiscussion && workerInfo?.merged?.includes(name) ? ' · merged' : '') : null;
+    const archivedState = archived ? (path.includes('/archive/') ? 'archived' : 'deferred') + (brainstorm ? ' brainstorm' : isResearch ? ' research' : '') + (!brainstorm && closed ? ' · closed' : '') + closingText + (isSprint && workerInfo?.merged?.includes(name) ? ' · merged' : '') : null;
     const index = ordering?.names.indexOf(name) ?? -1;
     const reorder = (from: string, to: number) => { if (!ordering) return; const next = ordering.names.filter((item) => item !== from); next.splice(Math.max(0, Math.min(to, next.length)), 0, from); saveOrder(ordering.kind, next); };
     return <div className={'board-row row discussion-row' + (current ? ' in-use' : '') + (peek?.path === path || filePeek?.path === path ? ' peeking' : '')} key={path} onDragOver={(event) => { if (dragged && ordering?.kind === dragged.kind) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } }} onDrop={(event) => { if (!dragged || !ordering || dragged.kind !== ordering.kind || dragged.name === name) return; event.preventDefault(); const remaining = dragged.names.filter((item) => item !== dragged.name); const bounds = event.currentTarget.getBoundingClientRect(); const target = remaining.indexOf(name); if (target < 0) return; remaining.splice(target + (event.clientY > bounds.top + bounds.height / 2 ? 1 : 0), 0, dragged.name); saveOrder(dragged.kind, remaining); setDragged(null); }}>
       {ordering && ordering.names.length > 1 && <span className="drag-handle" draggable title="Drag to reorder" aria-label={`Drag ${label} to reorder`} onDragStart={(event) => { setDragged({ kind: ordering.kind, name, names: ordering.names }); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', name); }} onDragEnd={() => setDragged(null)}>⠿</span>}
       <div className="discussion-block">
       {open ? <a className={'entry ' + kind} title={path} href={open.url}>{content}</a> : <button type="button" className={'entry ' + kind} title={path} aria-current={current ? 'true' : undefined} onClick={action}>{content}</button>}
-      <div className="local-label" title={tooltip || undefined}>{archivedState ?? (state + suffix + (isDiscussion && entry?.working ? ' · worker working' : '') + closingText + changed)}</div>
-      {isDiscussion && !archived && work && <div className="worker-pending">⚠ Worker: {pendingText}</div>}
+      <div className="local-label" title={tooltip || undefined}>{archivedState ?? (state + suffix + (isSprint && entry?.working ? ' · worker working' : '') + closingText + changed)}</div>
+      {isSprint && !archived && work && <div className="worker-pending">⚠ Worker: {pendingText}</div>}
       {!!conflictText && !workerBusy && <div className="worker-conflict">⚠ {conflictText}</div>}
       {isResearch && <div className="local-label">{kindBadge && <><span className="research-kind-badge" title="Research kind, chosen when the board was created">{kindBadge}</span> </>}<span className={count > 30 ? 'research-laps-high' : undefined}>Laps: {stats?.priorUnknown ? '≥' : ''}{count}</span> · Last: {date(stats?.lastRun)} · Next: {date(stats?.nextRun)}</div>}
-      {!!(room && input && !viewing.current && isDiscussion && closing === 'waiting') && <button type="button" onClick={() => void cancelClose(name)}>Cancel close</button>}
+      {!!(room && input && !viewing.current && isSprint && closing === 'waiting') && <button type="button" onClick={() => void cancelClose(name)}>Cancel close</button>}
       {!!(room && input && !viewing.current && rollback?.report) && <details><summary>Rollback report · {rollback.status}</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{rollback.report}</pre></details>}
       </div>
       {!!(room && input && !viewing.current) && <details className="menu row-menu" open={rowMenu === path} onToggle={(event) => { const isOpen = event.currentTarget.open; if (isOpen && rowMenuRef.current !== path) { if (actionsMenu.current) actionsMenu.current.open = false; rowMenuRef.current = path; setRowMenu(path); refreshWorker(); } else if (!isOpen && rowMenuRef.current === path) { rowMenuRef.current = null; setRowMenu(null); } }}>
@@ -1027,11 +1027,11 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
           {current && peek && <button type="button" title={`Return to this ${isResearch ? 'research board' : brainstorm ? 'brainstorm' : 'sprint'}: leave the peek.`} onClick={() => { setRowMenu(null); void backToCurrent(); }}>Back to this {isResearch ? 'research board' : brainstorm ? 'brainstorm' : 'sprint'}</button>}
           {!current && <>
             {open && !open.started && !brainstorm ? <a href={open.url} title={`Show this open ${isResearch ? 'research board' : 'sprint'}: it has not started yet`}>Go to</a> : <button type="button" title={resumeTitle} onClick={() => { setRowMenu(null); if (open) { const url = open.url; notesGuard(() => navigate(url)); } else void boardCommand('/resume ' + ref); }}>{open && brainstorm ? 'Go to' : closed ? 'Resume' : 'Continue'}</button>}
-            {!(open && !open.started && !brainstorm) && <button type="button" title={`Show this ${isResearch ? 'research board’s' : brainstorm ? 'brainstorm’s' : 'sprint’s'} files in Explorer without ${archived ? 'moving it' : 'switching'}`} onClick={() => { setRowMenu(null); setFilePeek({ path, name, title: label, readonly: archived || closed }); setExplorerMode('discussion'); setSubtab('explorer'); openDocument(); }}>Peek files</button>}
-            {closed && !isResearch && (!brainstorm || archived) && <button type="button" title={`Look at this closed ${brainstorm ? 'brainstorm' : 'sprint'} read-only: its conversation and files, without reopening it.`} onClick={() => { setRowMenu(null); setExplorerMode('discussion'); setSubtab('explorer'); void boardCommand('/peek ' + ref); }}>Peek chat &amp; files</button>}
+            {!(open && !open.started && !brainstorm) && <button type="button" title={`Show this ${isResearch ? 'research board’s' : brainstorm ? 'brainstorm’s' : 'sprint’s'} files in Explorer without ${archived ? 'moving it' : 'switching'}`} onClick={() => { setRowMenu(null); setFilePeek({ path, name, title: label, readonly: archived || closed }); setExplorerMode('board'); setSubtab('explorer'); openDocument(); }}>Peek files</button>}
+            {closed && !isResearch && (!brainstorm || archived) && <button type="button" title={`Look at this closed ${brainstorm ? 'brainstorm' : 'sprint'} read-only: its conversation and files, without reopening it.`} onClick={() => { setRowMenu(null); setExplorerMode('board'); setSubtab('explorer'); void boardCommand('/peek ' + ref); }}>Peek chat &amp; files</button>}
           </>}
           {(!closed || brainstorm && !archived) && <button type="button" disabled={brainstorm && !(current || open)} title={brainstorm ? current || open ? 'Close it: its agents stop; its checkpoint is kept' : 'It is not open' : undefined} onClick={() => { setRowMenu(null); void boardCommand('/close ' + ref); }}>{!brainstorm && !isResearch && workerInfo?.pending?.some((item) => item.lane === name) ? 'Close with pending work' : 'Close'}</button>}
-          {!archived && isDiscussion && !closed && mergeControls(name)}
+          {!archived && isSprint && !closed && mergeControls(name)}
           {archived ? <>
             <button type="button" onClick={() => { setRowMenu(null); void boardCommand('/move ' + ref + ' active'); }}>Make active</button>
             {path.includes('/archive/') ? <button type="button" disabled={!brainstorm && !closed} title={!brainstorm && !closed ? `Close the ${isResearch ? 'research board' : 'sprint'} before moving it into deferred/.` : undefined} onClick={() => { setRowMenu(null); void boardCommand('/move ' + ref + ' deferred'); }}>Defer</button> : <button type="button" disabled={(!brainstorm && !closed) || pendingArchives.has(path)} aria-busy={pendingArchives.has(path)} title={!brainstorm && !closed ? `Close the ${isResearch ? 'research board' : 'sprint'} before moving it into archive/.` : undefined} onClick={() => void archiveBoard(path, ref)}>Archive</button>}
@@ -1043,22 +1043,22 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
           {!archived && brainstorm && <button type="button" title="Move it to discussions/ with a .research marker: the same agents start fresh sessions with the research rulebook, briefed from its transcripts and latest summary." onClick={() => runRowAction(rowKey('convert-research'), '/convert ' + path + ' research')}>{armedRows[rowKey('convert-research')] ? 'Click again: it moves to discussions/ as a research board' : 'Turn into research'}</button>}
           {(brainstorm || archived || !(current && !room.started)) && <button type="button" title={freshTitle} onClick={() => runRowAction(rowKey('fresh'), '/fresh ' + ref)}>{armedRows[rowKey('fresh')] ? freshWarning : 'Start fresh'}</button>}
           {(brainstorm || isResearch) && <button type="button" disabled={deleteDisabled} title={deleteTitle} onClick={() => runRowAction(rowKey('delete'), '/delete ' + ref)}>{armedRows[rowKey('delete')] ? deleteWarning : 'Delete'}</button>}
-          {isDiscussion && <><button type="button" disabled={!!rollback && ['queued', 'running'].includes(rollback.status)} title="Queue a worker rollback, including merged commits. Review its report before separately confirming archive; main stays yours to merge." onClick={() => runRowAction(rowKey('rollback'), '/rollback ' + ref, false)}>{armedRows[rowKey('rollback')] ? 'Click again: queue rollback of this sprint’s implementation' : rollback && ['queued', 'running'].includes(rollback.status) ? 'Rollback ' + rollback.status : 'Archive with rollback'}</button>
+          {isSprint && <><button type="button" disabled={!!rollback && ['queued', 'running'].includes(rollback.status)} title="Queue a worker rollback, including merged commits. Review its report before separately confirming archive; main stays yours to merge." onClick={() => runRowAction(rowKey('rollback'), '/rollback ' + ref, false)}>{armedRows[rowKey('rollback')] ? 'Click again: queue rollback of this sprint’s implementation' : rollback && ['queued', 'running'].includes(rollback.status) ? 'Rollback ' + rollback.status : 'Archive with rollback'}</button>
             {rollback?.status === 'ready' && <button type="button" disabled={current || !closed} title={!closed ? 'Close the sprint before archiving it.' : current ? 'Switch to another sprint before confirming archive' : 'Review the rollback report first. Archive the sprint; merging its worker branch into main stays manual.'} onClick={() => runRowAction(rowKey('archive-rollback'), '/archive-rollback ' + ref, false)}>{armedRows[rowKey('archive-rollback')] ? 'Click again: I reviewed the rollback report; archive' : 'Confirm archive after rollback'}</button>}</>}
           {ordering && <><button type="button" aria-label={`Move ${label} up`} disabled={index === 0} onClick={() => { setRowMenu(null); reorder(name, index - 1); }}>Move up</button><button type="button" aria-label={`Move ${label} down`} disabled={index === ordering.names.length - 1} onClick={() => { setRowMenu(null); reorder(name, index + 1); }}>Move down</button></>}
         </div>
       </details>}
     </div>;
   };
-  const discussions = namesUnder('discussions'), brainstorms = namesUnder('brainstorms');
-  const research = discussions.filter((name) => room?.researches?.includes(name));
-  const foundDiscussions = discussions.filter((name) => !room?.researches?.includes(name));
+  const boards = namesUnder('discussions'), brainstorms = namesUnder('brainstorms');
+  const research = boards.filter((name) => room?.researches?.includes(name));
+  const foundSprints = boards.filter((name) => !room?.researches?.includes(name));
   const folder = room?.folder;
-  const activeDiscussions = dragged?.kind === 'discussions' ? dragged.names : folder ? orderedNames(foundDiscussions, readOrder(folder, 'discussions')) : foundDiscussions;
+  const activeSprints = dragged?.kind === 'sprints' ? dragged.names : folder ? orderedNames(foundSprints, readOrder(folder, 'sprints')) : foundSprints;
   const orderedBrainstorms = dragged?.kind === 'brainstorms' ? dragged.names : folder ? orderedNames(brainstorms, readOrder(folder, 'brainstorms')) : brainstorms;
   useEffect(() => {
     if (!folder || !fileDetails || dragged) return;
-    for (const [kind, found] of [['discussions', foundDiscussions], ['brainstorms', brainstorms]] as [OrderKind, string[]][]) {
+    for (const [kind, found] of [['sprints', foundSprints], ['brainstorms', brainstorms]] as [OrderKind, string[]][]) {
       const next = orderedNames(found, readOrder(folder, kind));
       try { if (localStorage.getItem(orderKey(folder, kind)) !== JSON.stringify(next)) localStorage.setItem(orderKey(folder, kind), JSON.stringify(next)); } catch {}
     }
@@ -1069,12 +1069,12 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     const state = entry.ongoing || entry.working ? 'ongoing' : !entry.started ? 'not started' : entry.waitingForInput ? 'waiting for input' : entry.readyForAutoDev ? 'ready for auto dev' : entry.workReady && !entry.workbench && !entry.brainstorm ? 'work ready' : 'idle';
     return <div className="board-row row discussion-row" key={entry.url}><a href={entry.url}>{entry.workbench ? '🔧 ' : entry.research ? '🔬 ' : ''}{entry.title}</a><div className="local-label" title={state === 'waiting for input' ? entry.waitingReason || undefined : undefined}>{state}{entry.working && !researchBoard ? ' · worker working' : ''}</div>{researchBoard && <div className="local-label">Laps: 0 · Last: — · Next: —</div>}</div>;
   });
-  const remoteOnly = replica ? replica.received.filter((line) => !line.local && !foundDiscussions.some((name) => replica.own[name]?.discussion === line.discussion)) : [];
+  const remoteOnly = replica ? replica.received.filter((line) => !line.local && !foundSprints.some((name) => replica.own[name]?.board === line.board)) : [];
   // The sections' hints, as renderBoards writes them on /__room (the first message's effect, or how to add one).
   const canAddBoards = !!(room && input && !ended && !peek && !viewLayout); // canAct, defined further down
   const workerNow = room?.open?.find((entry) => entry.current)?.working ? ' · worker working' : '';
-  const discussionsHint = room?.brainstorm && canAddBoards ? ''
-    : !activeDiscussions.length && !unstarted.some((entry) => !entry.research) && !replica?.received.some((line) => !line.local) ? (room?.started ? '' : 'No active sprints: your first message starts one.') + workerNow
+  const sprintsHint = room?.brainstorm && canAddBoards ? ''
+    : !activeSprints.length && !unstarted.some((entry) => !entry.research) && !replica?.received.some((line) => !line.local) ? (room?.started ? '' : 'No active sprints: your first message starts one.') + workerNow
     : room && !room.started && canAddBoards ? 'Your first message starts a new sprint, or click a board to switch or peek.' + workerNow : '';
   const researchHint = room?.research && !room.active && canAddBoards ? 'Your first message names this research board and saves it here.' : !research.length && !unstarted.some((entry) => entry.research) ? 'No research boards yet: use the 🔬 icon in the header to start one.' : '';
   const brainstormsHint = room?.brainstorm && !room.active && canAddBoards ? 'Your first message names this brainstorm and saves it here.' : !orderedBrainstorms.length ? 'No brainstorms yet: use the 💡 icon in the header to start one.' : '';
@@ -1087,7 +1087,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const canClose = !!(canAct && room?.multi && (room.active || room.brainstorm || room.workbench || room.research || (room.open?.length ?? 0) > 1));
   // The status line under the title, for the selected tab (talkStatus on /__room): the closing
   // phase, the worker's state on the Worker tab, the peek or view, who is thinking, or your turn.
-  const closingNow = !peek && !remote && room && !room.brainstorm && room.active?.startsWith('discussions/') ? room.closingDiscussions?.[room.active.slice('discussions/'.length)] ?? null : null;
+  const closingNow = !peek && !remote && room && !room.brainstorm && room.active?.startsWith('discussions/') ? room.closingBoards?.[room.active.slice('discussions/'.length)] ?? null : null;
   const discStatus = closingNow === 'waiting' ? 'closing · waiting for worker' : closingNow === 'writing' ? 'closing · writing statement'
     : tab === 'worker' ? (working ? working + ' is working' : 'idle') : !room ? '' : peek ? 'peeking at ' + displayTitle(peek.name, peek.title) + ' · read-only'
     : remote || viewLayout ? 'read-only' : thinking ? thinking + ' is thinking' : room.autoDev?.status === 'running' ? '' : turnVisible ? 'your turn' : '';
@@ -1161,14 +1161,14 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       <div id="list-head">{!boardsClosed && <span id="list-title">Boards</span>}<button type="button" id="list-toggle" title={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); if (serviceRef.current === null) { try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} } }}>{boardsClosed ? '»' : '«'}</button></div>
       {!boardsClosed && <>
         <div id="list-pane"><div id="board-list">
-        <details className="list-section" open={boardSections.has('discussions')} onToggle={(e) => sectionToggle('discussions', e.currentTarget.open)}><summary><span className="boards-header"><span>Sprints ({activeDiscussions.length + unstarted.filter((entry) => !entry.research).length})</span>{room && canAddBoards && <span className="boards-new">{!!(room.active || room.brainstorm || room.workbench || room.research) && <button type="button" title={room.multi ? 'Open a new sprint beside this one, which stays open (click it in Boards to show it again).' : 'End this session: the chat clears and your next message starts a new sprint. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.'} aria-label="New sprint" className={armedCreation['/new'] ? 'armed' : undefined} onClick={(e) => { e.preventDefault(); e.stopPropagation(); createBoard('/new'); }}>+🏃</button>}<button type="button" title="Open a workbench: a special kind of sprint with only the worker (no agents), for one small fix. Your first message names it and goes straight to the worker." aria-label="New workbench" className={armedCreation['/workbench'] ? 'armed' : undefined} onClick={(e) => { e.preventDefault(); e.stopPropagation(); createBoard('/workbench'); }}>+🔧</button></span>}</span>{(armedCreation['/new'] || armedCreation['/workbench']) && <span className="boards-creation-warning">Click again: this session ends and the chat clears</span>}</summary>{openUnstarted(false)}{workerInfo?.pending?.filter((item) => !activeDiscussions.includes(item.lane ?? '')).map((item) => <div className="worker-pending" key={item.branch}>⚠ {item.branch}: {[item.ahead && `${item.ahead} ${item.ahead === 1 ? 'commit' : 'commits'} not merged into main`, item.dirty && 'uncommitted changes'].filter(Boolean).join(' · ')}</div>)}{activeDiscussions.map((name) => boardRow(name, 'discussions/' + name, false, false, canOrder ? { kind: 'discussions', names: activeDiscussions } : undefined))}{discussionsHint && <span className="hint">{discussionsHint}</span>}</details>
+        <details className="list-section" open={boardSections.has('sprints')} onToggle={(e) => sectionToggle('sprints', e.currentTarget.open)}><summary><span className="boards-header"><span>Sprints ({activeSprints.length + unstarted.filter((entry) => !entry.research).length})</span>{room && canAddBoards && <span className="boards-new">{!!(room.active || room.brainstorm || room.workbench || room.research) && <button type="button" title={room.multi ? 'Open a new sprint beside this one, which stays open (click it in Boards to show it again).' : 'End this session: the chat clears and your next message starts a new sprint. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.'} aria-label="New sprint" className={armedCreation['/new'] ? 'armed' : undefined} onClick={(e) => { e.preventDefault(); e.stopPropagation(); createBoard('/new'); }}>+🏃</button>}<button type="button" title="Open a workbench: a special kind of sprint with only the worker (no agents), for one small fix. Your first message names it and goes straight to the worker." aria-label="New workbench" className={armedCreation['/workbench'] ? 'armed' : undefined} onClick={(e) => { e.preventDefault(); e.stopPropagation(); createBoard('/workbench'); }}>+🔧</button></span>}</span>{(armedCreation['/new'] || armedCreation['/workbench']) && <span className="boards-creation-warning">Click again: this session ends and the chat clears</span>}</summary>{openUnstarted(false)}{workerInfo?.pending?.filter((item) => !activeSprints.includes(item.lane ?? '')).map((item) => <div className="worker-pending" key={item.branch}>⚠ {item.branch}: {[item.ahead && `${item.ahead} ${item.ahead === 1 ? 'commit' : 'commits'} not merged into main`, item.dirty && 'uncommitted changes'].filter(Boolean).join(' · ')}</div>)}{activeSprints.map((name) => boardRow(name, 'discussions/' + name, false, false, canOrder ? { kind: 'sprints', names: activeSprints } : undefined))}{sprintsHint && <span className="hint">{sprintsHint}</span>}</details>
         <details className="list-section" open={boardSections.has('research')} onToggle={(e) => sectionToggle('research', e.currentTarget.open)}><summary><span className="boards-header"><span>Research ({research.length + unstarted.filter((entry) => entry.research).length})</span>{room && canAddBoards && <span className="boards-new"><button type="button" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker." aria-label="New research" className={armedCreation['/research'] ? 'armed' : undefined} onClick={(e) => { e.preventDefault(); e.stopPropagation(); createBoard('/research'); }}>+🔬</button></span>}</span>{(armedCreation['/research']) && <span className="boards-creation-warning">Click again: this session ends and the chat clears</span>}</summary>{openUnstarted(true)}{research.map((name) => boardRow(name, 'discussions/' + name, false))}{researchHint && <span className="hint">{researchHint}</span>}</details>
         <details className="list-section" open={boardSections.has('brainstorms')} onToggle={(e) => sectionToggle('brainstorms', e.currentTarget.open)}><summary><span className="boards-header"><span>Brainstorms ({orderedBrainstorms.length})</span>{room && canAddBoards && <span className="boards-new"><button type="button" title={room.multi ? 'A conversation with the same agents, beside the open sprints and brainstorms, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a sprint for that.' : 'A conversation with the same agents, saved in brainstorms/: its first message names it. It sends no work to the worker; turn it into a sprint for that. It ends this session.'} aria-label="New brainstorm" className={armedCreation['/brainstorm'] ? 'armed' : undefined} onClick={(e) => { e.preventDefault(); e.stopPropagation(); createBoard('/brainstorm'); }}>+💡</button></span>}</span>{(armedCreation['/brainstorm']) && <span className="boards-creation-warning">Click again: this session ends and the chat clears</span>}</summary>{orderedBrainstorms.map((name) => boardRow(name, 'brainstorms/' + name, true, false, canOrder ? { kind: 'brainstorms', names: orderedBrainstorms } : undefined))}{brainstormsHint && <span className="hint">{brainstormsHint}</span>}</details>
         <details className="list-section" open={boardSections.has('archived-deferred')} onToggle={(e) => sectionToggle('archived-deferred', e.currentTarget.open)}><summary>Archived · Deferred ({inactive.length})</summary>{inactive.map(({ name, path, brainstorm }) => boardRow(name, path, brainstorm, true))}</details>
         {remoteOnly.length > 0 && <details className="list-section" open={boardSections.has('peers')} onToggle={(e) => sectionToggle('peers', e.currentTarget.open)}><summary>Received from peers ({remoteOnly.length})</summary>{remoteOnly.map((line) => {
-          const folderName = line.name || line.local || line.discussion, label = displayTitle(folderName, line.title ?? undefined), key = 'peer:' + line.discussion + ':' + line.node;
-          const peekReceived = () => { setRowMenu(null); setFilePeek(null); setReceivedPeek({ discussion: line.discussion, node: line.node, commit: line.commit, round: line.round, name: folderName, title: line.title ?? null }); setExplorerMode('discussion'); setSubtab('explorer'); openDocument(); };
-          return <div key={key} className={'board-row row discussion-row' + (receivedPeek?.discussion === line.discussion ? ' peeking' : '')}>
+          const folderName = line.name || line.local || line.board, label = displayTitle(folderName, line.title ?? undefined), key = 'peer:' + line.board + ':' + line.node;
+          const peekReceived = () => { setRowMenu(null); setFilePeek(null); setReceivedPeek({ board: line.board, node: line.node, commit: line.commit, round: line.round, name: folderName, title: line.title ?? null }); setExplorerMode('board'); setSubtab('explorer'); openDocument(); };
+          return <div key={key} className={'board-row row discussion-row' + (receivedPeek?.board === line.board ? ' peeking' : '')}>
             <button type="button" title={line.local ? 'discussions/' + line.local : /^\d{4}-\d{2}-\d{2}-/.test(folderName) ? 'discussions/' + folderName : folderName} onClick={peekReceived}>{label}</button>
             <div className="local-label">{line.node} · round {line.round}</div>
             <details className="menu row-menu" open={rowMenu === key} onToggle={(event) => { const isOpen = event.currentTarget.open; if (isOpen && rowMenuRef.current !== key) { rowMenuRef.current = key; setRowMenu(key); } else if (!isOpen && rowMenuRef.current === key) { rowMenuRef.current = null; setRowMenu(null); } }}>
@@ -1193,8 +1193,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         {canAct && <button type="button" title="Open a research board: investigate one question with no worker, saved in discussions/ with a .research marker." onClick={() => runAction('research', '/research', !room?.multi && !!room?.started)}>{armedActions.research ? 'Click again: this session ends and the chat clears' : 'New research'}</button>}
         {canAct && room?.active && (room.brainstorm || room.research) && <button type="button" title={room.research ? 'Keep the folder and start fresh sprint sessions; linked recurring tasks are turned off.' : 'Move this brainstorm to discussions/: its agents keep their sessions and are told the new folder.'} onClick={() => runAction('convert', '/convert ' + room.active, true)}>{armedActions.convert ? room.research ? 'Click again: research sessions end and scheduled tasks turn off' : 'Click again: it moves to discussions/' : 'Turn into a sprint'}</button>}
         {canAct && room?.active && room.brainstorm && <button type="button" title="Move it to discussions/ with a .research marker: the same agents start fresh sessions with the research rulebook, briefed from its transcripts and latest summary." onClick={() => runAction('convert-research', '/convert ' + room.active + ' research', true)}>{armedActions['convert-research'] ? 'Click again: it moves to discussions/ as a research board' : 'Turn into research'}</button>}
-        {canClose && <button type="button" title="Close this sprint: its agents stop; the other open sprints stay. Its checkpoint is kept: Resume it from Sprints." onClick={() => runAction('close', '/close', !!room?.started)}>{armedActions.close ? 'Click again: this sprint closes (its agents stop)' : closeLabel}</button>}
-        {canClose && lane && !room?.closedDiscussions?.includes(lane) && mergeControls(lane)}
+        {canClose && <button type="button" title={`Close this ${room?.brainstorm ? 'brainstorm' : room?.workbench ? 'workbench' : room?.research ? 'research board' : 'sprint'}: its agents stop; the other open boards stay. Its checkpoint is kept: Resume it from ${room?.brainstorm ? 'Brainstorms' : room?.research ? 'Research' : 'Sprints'}.`} onClick={() => runAction('close', '/close', !!room?.started)}>{armedActions.close ? `Click again: this ${room?.brainstorm ? 'brainstorm' : room?.workbench ? 'workbench' : room?.research ? 'research board' : 'sprint'} closes (its agents stop)` : closeLabel}</button>}
+        {canClose && lane && !room?.closedBoards?.includes(lane) && mergeControls(lane)}
       </div>
     </details>}
     <div id="disc-info"><h1 id="disc" data-active={!peek && !remote && room?.active ? 'true' : 'false'}>{title}</h1>
@@ -1294,12 +1294,12 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       <section ref={explorer} id="files" aria-label={peek || filePeek || received ? 'Peeked board files' : 'Explorer files'} hidden={subtab !== 'explorer'}>
         {receivedPeek && !remote && <p className="peek-banner">Looking at <b>{displayTitle(receivedPeek.name, receivedPeek.title ?? undefined)}</b> <button type="button" onClick={() => setReceivedPeek(null)}>Back to current</button></p>}
         {!receivedPeek && (peek || filePeek) && <p className="peek-banner">Looking at <b>{displayTitle((peek || filePeek)!.name, (peek || filePeek)!.title)}</b> <button type="button" onClick={() => { if (peek) void backToCurrent(); else setFilePeek(null); }}>Back to current</button></p>}
-        <div className="explorer-bar"><button type="button" className={(received ? explorerMode !== 'root' : !rootMode) ? 'on' : undefined} disabled={!base && !received} aria-pressed={received ? explorerMode !== 'root' : !rootMode} onClick={() => setExplorerMode('discussion')}>Board</button><button type="button" className={(received ? explorerMode === 'root' : rootMode) ? 'on' : undefined} aria-pressed={received ? explorerMode === 'root' : rootMode} onClick={() => setExplorerMode('root')}>Room checkout</button><button type="button" disabled title="Coming soon">Worker copy</button></div>
+        <div className="explorer-bar"><button type="button" className={(received ? explorerMode !== 'root' : !rootMode) ? 'on' : undefined} disabled={!base && !received} aria-pressed={received ? explorerMode !== 'root' : !rootMode} onClick={() => setExplorerMode('board')}>Board</button><button type="button" className={(received ? explorerMode === 'root' : rootMode) ? 'on' : undefined} aria-pressed={received ? explorerMode === 'root' : rootMode} onClick={() => setExplorerMode('root')}>Room checkout</button><button type="button" disabled title="Coming soon">Worker copy</button></div>
         <p className="explorer-sub">{received && explorerMode !== 'root' ? `${received.node} · round ${received.round}` : rootMode ? `${room?.folder?.replace(/\/+$/, '').split('/').at(-1) || 'agent-room'}/${fileDetails?.branch ? ` · ${fileDetails.branch}` : ''}` : `${base}/`}</p>
         {received && explorerMode !== 'root' ? <>
           {remote && <p>{remote.line.node} · round {remote.line.round} · received files</p>}
           <FileTree files={receivedFiles} prefix="" doc={doc?.startsWith('__received/') ? doc.split('/').slice(4).join('/') : null} unviewable={[]} expanded={expanded} toggle={(path, open) => setExpanded((previous) => { const next = new Set(previous); if (open) next.add(path); else next.delete(path); return next; })}
-            choose={(file) => { const full = '__received/' + received.discussion + '/' + received.node + '/' + received.commit + '/' + file; docRef.current = full; setDoc(full); setSubtab('document'); openDocument(); }} />
+            choose={(file) => { const full = '__received/' + received.board + '/' + received.node + '/' + received.commit + '/' + file; docRef.current = full; setDoc(full); setSubtab('document'); openDocument(); }} />
         </> : <FileTree files={treeFiles} prefix={rootMode ? '' : base!} doc={doc} unviewable={fileDetails?.unviewable ?? []} expanded={expanded} toggle={(path, open) => setExpanded((previous) => { const next = new Set(previous); if (open) next.add(path); else next.delete(path); return next; })} choose={(file) => { if ((peek || filePeek?.readonly) && !rootMode) { docRef.current = file; setDoc(file); setSubtab('document'); openDocument(); } else void showFile(file); }} />}
       </section>
       </div></div>

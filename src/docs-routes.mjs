@@ -85,7 +85,7 @@ function handleScreen(req, res, url, dir, screen) {
   // The heartbeat: the page and the Dock app ask every few seconds; a new pid means a new process.
   if (url.pathname === '/__health') {
     send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, root: dir, host: shortHost(),
-      startedAt: screen.startedAt ?? null, discussion: screen.room?.active ?? null, pages: screen.clients.size }));
+      startedAt: screen.startedAt ?? null, board: screen.room?.active ?? null, pages: screen.clients.size }));
     return true;
   }
   if (url.pathname === '/__rooms') {

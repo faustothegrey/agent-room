@@ -17,7 +17,7 @@
   <text x="42" y="136" font-size="10.5" fill="#444">&amp; brainstorms (unstarted brainstorm becomes it)</text>
   <text x="32" y="152" font-size="11">• Settings changes apply directly before 1st message</text>
   <text x="32" y="168" font-size="11">• Worker tasks before 1st message use <tspan font-family="monospace">worker/main</tspan></text>
-  <text x="32" y="184" font-size="10.5" fill="#555">• Valid 1st message → <tspan font-family="monospace">openDiscussion()</tspan>:</text>
+  <text x="32" y="184" font-size="10.5" fill="#555">• Valid 1st message → <tspan font-family="monospace">openBoard()</tspan>:</text>
   <text x="42" y="198" font-size="10.5" fill="#555"><tspan font-family="monospace">claudeTitle()</tspan> (30s) → mkdir + <tspan font-family="monospace">session-*.md</tspan></text>
 
   <!-- Arrow 1 -> 3 (First message) -->
@@ -83,7 +83,7 @@
   <text x="567" y="350" font-size="11">• <tspan font-family="monospace">/fresh &lt;name&gt;</tspan>: discards old CLI sessions &amp; chat; saves latest <tspan font-family="monospace">Summary</tspan> (<tspan font-family="monospace">fresh: true</tspan>)</text>
   <text x="567" y="367" font-size="11">• <tspan font-family="monospace">/resume</tspan> on a closed sprint clears closed flag &amp; starts fresh (<tspan font-family="monospace">fromClosed: true</tspan>)</text>
   <text x="567" y="384" font-size="11">• <tspan font-family="monospace">/resume &lt;name&gt;</tspan> with no full checkpoint also enters this state (<tspan font-family="monospace">continued: true</tspan>)</text>
-  <text x="567" y="401" font-size="11">• On the User's next message (<tspan font-family="monospace">openDiscussion()</tspan>, no new title requested):</text>
+  <text x="567" y="401" font-size="11">• On the User's next message (<tspan font-family="monospace">openBoard()</tspan>, no new title requested):</text>
   <text x="577" y="416" font-size="10.5" fill="#444">– Creates a new <tspan font-family="monospace">transcripts/session-YYYY-MM-DD-HHMM.md</tspan> file (older ones stay)</text>
   <text x="577" y="431" font-size="10.5" fill="#444">– Starts fresh agent &amp; worker CLI sessions</text>
   <text x="577" y="446" font-size="10.5" fill="#444">– <tspan font-family="monospace">briefing()</tspan> embeds <tspan font-family="monospace">closing-statement.md</tspan> (points to <tspan font-family="monospace">pending-instructions.md</tspan>),</text>
@@ -99,7 +99,7 @@
   <!-- Row 3: Archive, Defer & Rollback (x=20..1060, y=554..734) -->
   <rect x="20" y="554" width="1040" height="180" rx="6" fill="#fafafa" stroke="#888" stroke-width="1.5"/>
   <rect x="20" y="554" width="1040" height="26" rx="6" fill="#555"/>
-  <text x="540" y="572" fill="#fff" text-anchor="middle" font-weight="bold">5. Moving sprints: discussions/archive/&lt;name&gt;/ &amp; discussions/deferred/&lt;name&gt;/ (moveDiscussion in src/ui.mjs)</text>
+  <text x="540" y="572" fill="#fff" text-anchor="middle" font-weight="bold">5. Moving sprints: discussions/archive/&lt;name&gt;/ &amp; discussions/deferred/&lt;name&gt;/ (moveBoard in src/boards.mjs)</text>
 
   <!-- Left column inside Row 3 (x=34..530) -->
   <text x="34" y="596" font-weight="bold" fill="#1168bd">Common guards (enforced before any move):</text>

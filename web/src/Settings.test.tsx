@@ -13,7 +13,7 @@ const models = { claude: [{ id: 'opus', label: 'Opus' }], codex: [{ id: 'gpt', l
 const worker = { name: 'Worker', provider: 'claude', model: '' };
 const agents = [{ name: 'Claude', provider: 'claude', model: 'opus' }, { name: 'Codex', provider: 'codex', model: '' }];
 const settings = (started = false, extra: object = {}) => ({ settings: { agents, worker, autoDev: 5 }, defaults: { agents, worker, autoDev: 7 }, launchDefaults: { agents, worker: { ...worker, name: 'Launch' }, autoDev: 9 }, started, models, ...extra });
-const room = { folder: '/room', discussion: 'Live', active: 'discussions/2026-11-25-live', started: false, fresh: false, brainstorm: false, research: false, workbench: false, open: [], members: [], failedAgents: [],
+const room = { folder: '/room', board: 'Live', active: 'discussions/2026-11-25-live', started: false, fresh: false, brainstorm: false, research: false, workbench: false, open: [], members: [], failedAgents: [],
   cliSessions: { agents: [{ name: 'Claude', provider: 'claude', id: 's-1' }, { name: 'Codex', provider: 'codex', id: null }], worker: { name: 'Worker', provider: 'claude', id: null } }, workerModel: 'Claude default' };
 const ok = (body: unknown = {}) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
 const fail = (text: string) => ({ ok: false, status: 400, json: async () => ({}), text: async () => text });
@@ -109,7 +109,7 @@ it('opens the members panel for a fresh discussion, and hides it while peeking a
   expect(screen.queryByRole('form', { name: 'Discussion members' })).toBeNull();
   Source.current.send({ type: 'room', room: { ...room, fresh: true, active: null } });
   expect(await screen.findByRole('form', { name: 'Discussion members' })).toBeTruthy();
-  reset({ ...room }, { peek: { name: 'old', kind: 'discussion', path: 'discussions/old', title: 'Old' } });
+  reset({ ...room }, { peek: { name: 'old', kind: 'sprint', path: 'discussions/old', title: 'Old' } });
   expect(screen.queryByText(/^Discussion members/)).toBeNull();
   reset({ ...room, workbench: true }); expect(screen.queryByText(/^Discussion members/)).toBeNull();
 });

@@ -165,13 +165,13 @@ export async function recover(s) {
 // room.json: { roomId, paired: { <node>: { roomId, at } } }. discussions.json: { <folder name>: <ID> }.
 export const roomInfo = async (s) => (await readJson(join(s.dir, 'room.json'))) ?? { roomId: null, paired: {} };
 const saveRoom = (s, r) => writeAtomic(join(s.dir, 'room.json'), JSON.stringify(r, null, 2) + '\n');
-export async function discussionId(s, name, create = false) {
+export async function boardId(s, name, create = false) {
   name = basename(name);
   const map = (await readJson(join(s.dir, 'discussions.json'))) ?? {};
   if (!map[name] && create) { map[name] = `d-${rand()}`; await writeAtomic(join(s.dir, 'discussions.json'), JSON.stringify(map, null, 2) + '\n'); }
   return map[name] ?? null;
 }
-export const discussionIds = async (s) => (await readJson(join(s.dir, 'discussions.json'))) ?? {};
+export const boardIds = async (s) => (await readJson(join(s.dir, 'discussions.json'))) ?? {};
 
 // ── Capture: one commit per round on refs/lines/<discussion>/<this node> ──
 // Built from the folder's bytes with plumbing: no project index, ignore rules, attributes or filters
@@ -196,13 +196,13 @@ async function folderFiles(folder) {
 const stamps = (folder, files) => Promise.all(files.map((f) => fs.stat(join(folder, f)).then((st) => `${st.size}:${st.mtimeMs}`, () => 'gone')));
 
 export async function capture(s, { name, dir, title }, round, { attempts = 3, detached = false } = {}) {
-  const d = await discussionId(s, name, true), ref = lineRef(d, s.node);
+  const d = await boardId(s, name, true), ref = lineRef(d, s.node);
   const room = (await roomInfo(s)).roomId ?? null;
   for (let attempt = 1; ; attempt++) {
     const { files, skipped } = await folderFiles(dir);
-    if (files.length + 1 > LIMITS.files) throw new Error('Too many discussion files');
+    if (files.length + 1 > LIMITS.files) throw new Error('Too many board files');
     const stats = await Promise.all(files.map(f => fs.lstat(join(dir, f))));
-    if (stats.some(st => !st.isFile() || st.size > LIMITS.fileBytes) || stats.reduce((n, st) => n + st.size, 0) > LIMITS.bundleBytes * 4) throw new Error('Discussion files exceed snapshot limits');
+    if (stats.some(st => !st.isFile() || st.size > LIMITS.fileBytes) || stats.reduce((n, st) => n + st.size, 0) > LIMITS.bundleBytes * 4) throw new Error('Board files exceed snapshot limits');
     const before = await stamps(dir, files);
     const shas = files.length ? (await git(s.store, ['hash-object', '-w', '--no-filters', '--stdin-paths'], { cwd: dir, input: files.join('\n') + '\n' })).split('\n') : [];
     const after = await stamps(dir, files);
@@ -223,15 +223,15 @@ export async function capture(s, { name, dir, title }, round, { attempts = 3, de
       const who = { GIT_AUTHOR_NAME: s.node, GIT_AUTHOR_EMAIL: `${s.node}@agent-room.invalid`, GIT_COMMITTER_NAME: s.node, GIT_COMMITTER_EMAIL: `${s.node}@agent-room.invalid` };
       const commit = await git(s.store, ['commit-tree', tree, ...(parent ? ['-p', parent] : []), '-m', `${round.kind} ${number} (${round.outcome})`], { env: who });
       if (!detached) await git(s.store, ['update-ref', ref, commit, parent ?? ZERO]); // append-only: the old value is checked
-      return { discussion: d, commit, round: number, skipped, ...(detached && { parent }) };
+      return { board: d, commit, round: number, skipped, ...(detached && { parent }) };
     } finally { await fs.rm(index, { force: true }); }
   }
 }
 export async function publishCapture(s, capture) {
-  await git(s.store, ['update-ref', lineRef(capture.discussion, s.node), capture.commit, capture.parent ?? ZERO]);
+  await git(s.store, ['update-ref', lineRef(capture.board, s.node), capture.commit, capture.parent ?? ZERO]);
 }
 export async function discardCapture(s, capture) {
-  const ref = lineRef(capture.discussion, s.node);
+  const ref = lineRef(capture.board, s.node);
   if (await revParse(s.store, ref) !== capture.commit) return;
   if (capture.parent) await git(s.store, ['update-ref', ref, capture.parent, capture.commit]);
   else await git(s.store, ['update-ref', '-d', ref, capture.commit]);
@@ -293,7 +293,7 @@ export async function send(s, peer, url, d) {
   const room = (await roomInfo(s)).roomId;
   const commit = await revParse(s.store, lineRef(d, s.node));
   let base = await acked(s, peer, d);
-  const offer = { protocol: PROTOCOL, room, discussion: d, node: s.node, commit, base };
+  const offer = { protocol: PROTOCOL, room, board: d, node: s.node, commit, base };
   const o = await request(`${url}/replica/offer`, { headers: JSON_TYPE, body: JSON.stringify(offer) });
   if (o.status !== 200) throw new Refused(o.status, o.body.error, o.body.detail);
   const done = async (got) => {
@@ -321,7 +321,7 @@ export async function send(s, peer, url, d) {
 async function checkOffer(s, peers, o) {
   const bad = (status, code, why) => { throw new Refused(status, code, why); };
   if (!o || typeof o !== 'object' || o.protocol !== PROTOCOL) bad(400, 'invalid-schema', `protocol ${o?.protocol}`);
-  if (typeof o.discussion !== 'string' || !ID.test(o.discussion) || typeof o.node !== 'string' || !NODE.test(o.node)) bad(400, 'invalid-identity', 'bad discussion or node ID');
+  if (typeof o.board !== 'string' || !ID.test(o.board) || typeof o.node !== 'string' || !NODE.test(o.node)) bad(400, 'invalid-identity', 'bad board or node ID');
   if (!SHA.test(o.commit ?? '') || !(o.base === null || SHA.test(o.base ?? ''))) bad(400, 'invalid-schema', 'commit/base are not full commit IDs');
   if (o.node === s.node) bad(403, 'wrong-identity', `a peer can't write this node's own line (${o.node})`);
   const r = await roomInfo(s);
@@ -389,7 +389,7 @@ export function validateMeta(roomId, m, o, published) {
   if (!Array.isArray(m.agents) || !m.agents.every((a) => a && typeof a.name === 'string' && typeof a.provider === 'string')) bad('invalid-schema', 'agents');
   if (!Array.isArray(m.conversation) || !m.conversation.every((e) => e && typeof e.speaker === 'string' && typeof e.text === 'string')) bad('invalid-schema', 'conversation');
   // A commit made before this room was paired carries no room ID yet (null); later ones carry this room's.
-  if ((m.room !== null && m.room !== roomId) || m.discussion !== o.discussion || m.node !== o.node) bad('wrong-identity', `commit says ${m.room}/${m.discussion}/${m.node}, offer is ${roomId}/${o.discussion}/${o.node}`);
+  if ((m.room !== null && m.room !== roomId) || m.discussion !== o.board || m.node !== o.node) bad('wrong-identity', `commit says ${m.room}/${m.discussion}/${m.node}, offer is ${roomId}/${o.board}/${o.node}`);
   if (published && m.round <= published.round) bad('invalid-schema', `round ${m.round} after published round ${published.round}`);
 }
 
@@ -397,16 +397,16 @@ export function validateMeta(roomId, m, o, published) {
 export async function receive(s, peers, file, o, at = async () => {}) {
   await checkOffer(s, peers, o);
   await at('after-save');
-  return serial(s, `${o.discussion}/${o.node}`, async () => {
-    const line = lineDir(s, o.discussion, o.node), published = await readPointer(s, o.discussion, o.node);
+  return serial(s, `${o.board}/${o.node}`, async () => {
+    const line = lineDir(s, o.board, o.node), published = await readPointer(s, o.board, o.node);
     if (published?.commit === o.commit) return { acked: o.commit, duplicate: true }; // a duplicate, or a lost reply
     const { prereqs, heads } = await bundleHeader(file);
-    const want = lineRef(o.discussion, o.node);
+    const want = lineRef(o.board, o.node);
     if (heads.length !== 1 || heads[0].ref !== want) throw new Refused(422, 'wrong-identity', `bundle carries ${heads.map((h) => h.ref).join(', ')}, expected ${want}`);
     if (heads[0].sha !== o.commit) throw new Refused(422, 'wrong-identity', 'bundle tip differs from the offered commit');
     for (const p of prereqs) if (!(await has(s.store, p.sha))) throw new Refused(409, 'missing-base', `this node lacks ${p.sha}`);
     try { await git(s.store, ['bundle', 'verify', '-q', file]); } catch (e) { throw new Refused(400, 'corrupt', e.message); }
-    const tmpRef = incomingRef(o.discussion, o.node);
+    const tmpRef = incomingRef(o.board, o.node);
     try {
       try { await git(s.store, ['-c', 'fetch.fsckObjects=true', 'fetch', '-q', '--no-tags', '--no-write-fetch-head', file, `+${want}:${tmpRef}`]); }
       catch (e) { throw new Refused(400, 'corrupt', e.message); }
@@ -436,20 +436,20 @@ export async function receive(s, peers, file, o, at = async () => {}) {
       // Publication: the pointer's rename is the one atomic step; the received ref then follows it.
       const pointer = { commit: o.commit, round: meta.round, kind: meta.kind, outcome: meta.outcome, name: meta.name, title: meta.title, at: meta.at, receivedAt: new Date().toISOString() };
       await writeAtomic(join(line, 'published.json'), JSON.stringify(pointer, null, 2) + '\n');
-      await git(s.store, ['update-ref', receivedRef(o.discussion, o.node), o.commit]);
+      await git(s.store, ['update-ref', receivedRef(o.board, o.node), o.commit]);
       await at('after-publish');
-      await cleanLine(s, o.discussion, o.node);
+      await cleanLine(s, o.board, o.node);
       return { acked: o.commit, pointer };
     } finally { await git(s.store, ['update-ref', '-d', tmpRef]).catch(() => {}); }
   });
 }
 
-// Every received line: [{ discussion, node, ...pointer }].
+// Every received line: [{ board, node, ...pointer }].
 export async function receivedLines(s) {
   const out = [];
   for (const d of await dirs(s.received)) for (const n of await dirs(join(s.received, d))) {
     const p = await readPointer(s, d, n).catch(() => null);
-    if (p) out.push({ discussion: d, node: n, ...p });
+    if (p) out.push({ board: d, node: n, ...p });
   }
   return out;
 }
@@ -464,7 +464,7 @@ export function pin(s, d, n, commit = null) {
     const c = commit ?? p.commit, key = `${d}/${n}/${c}`;
     s.pins.set(key, (s.pins.get(key) ?? 0) + 1);
     const meta = JSON.parse(await fs.readFile(join(lineDir(s, d, n), 'snapshots', c, META), 'utf8'));
-    return { discussion: d, node: n, commit: c, round: meta.round, kind: meta.kind, outcome: meta.outcome, name: meta.name, title: meta.title, receivedAt: c === p.commit ? p.receivedAt : null, conversation: meta.conversation };
+    return { board: d, node: n, commit: c, round: meta.round, kind: meta.kind, outcome: meta.outcome, name: meta.name, title: meta.title, receivedAt: c === p.commit ? p.receivedAt : null, conversation: meta.conversation };
   });
 }
 export function unpin(s, d, n, commit) {
@@ -505,7 +505,7 @@ export async function handle(r, req, res) {
       const body = await bodyJson(req);
       if (path === '/replica/pair') return sendJson(res, 200, await acceptPairing(r, body));
       await checkOffer(s, r.peers.map((p) => p.name), body);
-      const p = await readPointer(s, body.discussion, body.node);
+      const p = await readPointer(s, body.board, body.node);
       return sendJson(res, 200, p?.commit === body.commit ? { status: 'have', commit: p.commit } : { status: 'send', published: p?.commit ?? null });
     }
     if (path !== '/replica/bundle') throw new Refused(404, 'not-found', path);
@@ -524,7 +524,7 @@ export async function handle(r, req, res) {
       const got = (await fs.stat(file)).size;
       if (got !== len) throw new Refused(400, 'incomplete', `${got} of ${len} bytes`);
       const result = await receive(s, r.peers.map((p) => p.name), file, o);
-      if (result.pointer) r.onReceived?.({ discussion: o.discussion, node: o.node, ...result.pointer });
+      if (result.pointer) r.onReceived?.({ board: o.board, node: o.node, ...result.pointer });
       if (r.dropReplyOnce) { r.dropReplyOnce = false; return req.socket.destroy(); } // tests: a lost acknowledgement
       return sendJson(res, 200, { ok: true, acked: result.acked, duplicate: !!result.duplicate });
     } finally { await fs.rm(file, { force: true }); }
@@ -613,7 +613,7 @@ async function syncPeer(r, name, p) {
   const room = await roomInfo(s);
   if (!room.paired[name] || st.roomId !== room.roomId) return false; // not paired (yet): nothing is sent
   let pending = false;
-  const names = r.canSend ? Object.fromEntries(Object.entries(await discussionIds(s)).map(([folder, id]) => [id, folder])) : {};
+  const names = r.canSend ? Object.fromEntries(Object.entries(await boardIds(s)).map(([folder, id]) => [id, folder])) : {};
   for (const [d, { commit }] of Object.entries(await ownLines(s))) {
     if ((await acked(s, name, d)) === commit) continue;
     const folder = names[d];
@@ -625,7 +625,7 @@ async function syncPeer(r, name, p) {
       active.get(folder).add(transfer);
       let res;
       try { res = await transfer; } finally { active.get(folder).delete(transfer); }
-      r.onSent?.({ peer: name, discussion: d, ...res, late: p.waiting.has(d) });
+      r.onSent?.({ peer: name, board: d, ...res, late: p.waiting.has(d) });
       p.waiting.delete(d);
     } catch (e) {
       if (!(e instanceof Refused)) throw e; // unreachable: the whole peer waits

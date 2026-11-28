@@ -9,7 +9,7 @@ class Source {
   close() {}
   send(data: object) { act(() => this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)); }
 }
-const room = { discussion: 'Live', active: 'discussions/2026-11-25-live', started: true, brainstorm: false, research: false, workbench: false, open: [] as object[] };
+const room = { board: 'Live', active: 'discussions/2026-11-25-live', started: true, brainstorm: false, research: false, workbench: false, open: [] as object[] };
 const msg = (speaker: string, text: string) => ({ speaker, html: `<p>${text}</p>`, error: false });
 const log = () => screen.getByRole('log', { name: 'System messages' });
 beforeEach(() => { vi.stubGlobal('EventSource', Source); vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [] }))); });
@@ -74,7 +74,7 @@ it('shows the worker info line: lines, disabled in red, brainstorm override and 
   expect(within(info()).getByText('The worker is disabled.').className).toBe('error');
   Source.current.send({ type: 'room', room: { ...room, brainstorm: true } });
   expect(within(info()).getByText('Turn this brainstorm into a sprint to send work.').className).toBe('error');
-  Source.current.send({ type: 'reset', room: { ...room, brainstorm: true }, messages: [], worker: [], input: true, workInput: true, workerInfo: { lines: ['Peeked worktree'] }, peek: { name: 'old', kind: 'discussion', path: 'discussions/old', title: 'Old' } });
+  Source.current.send({ type: 'reset', room: { ...room, brainstorm: true }, messages: [], worker: [], input: true, workInput: true, workerInfo: { lines: ['Peeked worktree'] }, peek: { name: 'old', kind: 'sprint', path: 'discussions/old', title: 'Old' } });
   expect(within(info()).getByText('Peeked worktree')).toBeTruthy();
 });
 

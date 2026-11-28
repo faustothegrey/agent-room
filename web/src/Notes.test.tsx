@@ -9,7 +9,7 @@ class Source {
   close() {}
   send(data: object) { act(() => this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)); }
 }
-const room = { folder: '/room', discussion: 'Live', active: 'discussions/2026-11-25-live', started: true, multi: true, brainstorm: false, research: false, workbench: false, members: [], failedAgents: [],
+const room = { folder: '/room', board: 'Live', active: 'discussions/2026-11-25-live', started: true, multi: true, brainstorm: false, research: false, workbench: false, members: [], failedAgents: [],
   open: [{ url: '/r/b/__room', current: false, title: 'Other board', active: null, brainstorm: false, workbench: false, research: false, started: false, working: false, workerBusy: false, ongoing: false }] };
 const list = [{ id: '20261125-080000-aaaaaaaa', title: 'Plan', tags: ['work', 'big idea'], savedAt: '2026-11-25T08:00:00Z' }, { id: '20261125-090000-bbbbbbbb', title: 'Ideas', tags: ['work'], savedAt: '2026-11-25T09:00:00Z' }];
 const ok = (body: unknown = {}) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
@@ -108,7 +108,7 @@ it('asks before dropping unsaved changes inside the panel, and removes or discar
 });
 
 it('guards board links and room switches while a note is unsaved, and warns before leaving the page', async () => {
-  answer = ((base) => (url: string, body: Record<string, unknown> | null) => url === '__rooms' ? ok([{ id: 'c', path: '/r/c/__room', root: '/c', discussion: null, pages: 0, current: false }]) : base(url, body))(answer);
+  answer = ((base) => (url: string, body: Record<string, unknown> | null) => url === '__rooms' ? ok([{ id: 'c', path: '/r/c/__room', root: '/c', board: null, pages: 0, current: false }]) : base(url, body))(answer);
   const navigate = vi.fn();
   render(<App version="one" refresh={() => {}} navigate={navigate} />); reset(); const user = userEvent.setup();
   await openNotes(user); await user.click(within(panel()).getByRole('button', { name: /^Plan/ }));
@@ -181,7 +181,7 @@ it('disables brainstorm for blank notes and unavailable boards', async () => {
   await user.click(within(panel()).getByRole('button', { name: 'New' })); await user.type(note(), 'Idea'); expect(button().disabled).toBe(false);
   Source.current.send({ type: 'reset', room, messages: [], worker: [], input: true, workInput: true, peek: { path: 'x' }, webVersion: 'one' });
   expect(button().disabled).toBe(true); expect(button().title).toMatch(/peek/i);
-  Source.current.send({ type: 'reset', room, messages: [], worker: [], input: true, workInput: true, viewing: { name: 'peer', discussion: 'other' }, webVersion: 'one' });
+  Source.current.send({ type: 'reset', room, messages: [], worker: [], input: true, workInput: true, viewing: { name: 'peer', board: 'other' }, webVersion: 'one' });
   expect(button().disabled).toBe(true); expect(button().title).toMatch(/read-only/i);
   Source.current.send({ type: 'ended' }); expect(button().disabled).toBe(true); expect(button().title).toMatch(/ended/i);
 });

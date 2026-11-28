@@ -10,7 +10,7 @@ class Source {
   close() {}
   send(event: object) { act(() => this.onmessage?.({ data: JSON.stringify(event) } as MessageEvent)); }
 }
-const room = { discussion: 'Discussion', started: true, autoDev: { status: null } };
+const room = { board: 'Discussion', started: true, autoDev: { status: null } };
 const message = (speaker: string, html: string, fields: object = {}) => ({ speaker, html, error: false, pass: false, ...fields });
 beforeEach(() => vi.stubGlobal('EventSource', Source));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -108,6 +108,6 @@ it('reports room end and restart on the status line', () => {
 
 it('uses the legacy display title when the stored title is a dated folder name', () => {
   render(<App version="one" refresh={() => {}} />);
-  Source.current.send({ type: 'reset', room: { ...room, active: 'discussions/2026-11-23-a-subject', discussion: '2026-11-23-a-subject' }, messages: [] });
+  Source.current.send({ type: 'reset', room: { ...room, active: 'discussions/2026-11-23-a-subject', board: '2026-11-23-a-subject' }, messages: [] });
   expect(screen.getByRole('heading', { name: 'a subject' })).toBeTruthy();
 });

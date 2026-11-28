@@ -30,7 +30,7 @@ export interface Peek {
   name: string;
   ref: string;
   path: string;
-  kind: 'brainstorm' | 'workbench' | 'research' | 'discussion';
+  kind: 'brainstorm' | 'workbench' | 'research' | 'sprint';
   title: string;
   messages: MessageView[];
   worker?: WorkerMessage[];
@@ -57,12 +57,12 @@ export interface CliSession { name: string; provider: string; id: string | null 
 export interface CliSessions { agents: CliSession[]; worker: CliSession | null }
 export interface Room {
   folder: string; ownCheckout?: boolean; agents: string[]; worker: string; workerModel: string | null;
-  cliSessions: CliSessions | null; discussion: string; active: string | null; started: boolean;
+  cliSessions: CliSessions | null; board: string; active: string | null; started: boolean;
   fresh: boolean; brainstorm: boolean; workbench: boolean; research: boolean;
   workbenches: string[]; researches: string[]; researchStats: Record<string, ResearchStats>; members: Member[];
   failedAgents: { name: string; disabled: boolean }[]; autoDev: AutoDev | null; workerStop: WorkerStop | null;
-  retryId: string | null; transcript: string | null; checkpoints: BoardCheckpoint[]; closedDiscussions: string[];
-  closingDiscussions: Record<string, string>; busyWorkers: string[]; back: unknown; code: CodeInfo | null;
+  retryId: string | null; transcript: string | null; checkpoints: BoardCheckpoint[]; closedBoards: string[];
+  closingBoards: Record<string, string>; busyWorkers: string[]; back: unknown; code: CodeInfo | null;
   rollbacks: BoardRollback[]; multi: boolean; open: OpenBoard[];
 }
 export interface MonitorLogin { state: 'ok' | 'ending' | 'expired' | 'out' | 'unknown' | 'unmonitored'; expiresAt?: string | null; error?: string | null }
@@ -72,17 +72,17 @@ export type Monitor = Record<string, { login: MonitorLogin | null; running: numb
 export interface CodeInfo { path: string; branch: string | null; commit: string | null; dirty: boolean; startedAt?: string | null; reloaded?: { at: string; commit: string | null; dirty: boolean } }
 // GET __health (the heartbeat, every 3 s); 404 when this room is no longer on the server.
 // host: the server machine's short name (hostname before its first dot, else its LAN IPv4), or null.
-export interface HealthReply { app: 'agent-room'; pid: number; root: string; host: string | null; startedAt: string | null; discussion: string | null; pages: number }
+export interface HealthReply { app: 'agent-room'; pid: number; root: string; host: string | null; startedAt: string | null; board: string | null; pages: number }
 // Replication (replicaStatus in ui.mjs): this node's own lines, the lines received from peers, and the peers.
 export interface ProjectVersion { commit: string | null; dirty: boolean }
-export interface OwnLine { discussion: string; round: number; sent: Record<string, boolean> }
-export interface ReceivedLine { discussion: string; node: string; commit: string; round: number; kind?: string; outcome?: string; name?: string | null; title?: string | null; at?: string; receivedAt?: string | null; local: string | null }
+export interface OwnLine { board: string; round: number; sent: Record<string, boolean> }
+export interface ReceivedLine { board: string; node: string; commit: string; round: number; kind?: string; outcome?: string; name?: string | null; title?: string | null; at?: string; receivedAt?: string | null; local: string | null }
 export interface ReplicaPeer { name: string; address: string; reachable: boolean | null; since: string | null; activity: string | null; project: ProjectVersion | null; paired: boolean; mismatch: boolean; error: string | null }
 export interface Replica { node: string; addresses: string[]; roomId: string; project: ProjectVersion | null; own: Record<string, OwnLine>; received: ReceivedLine[]; peers: ReplicaPeer[] }
-// POST __view: { discussion, node } pins a received line for this browser, { renew: true } keeps the
+// POST __view: { board, node } pins a received line for this browser, { renew: true } keeps the
 // pin, { back: true } releases it. Replies { viewing }: the pinned line with its chat, true (renewed), or null.
-export type ViewRequest = { discussion: string; node: string } | { renew: true } | { back: true };
-export interface ViewedLine { discussion: string; node: string; commit: string; round: number; kind?: string; outcome?: string; name?: string | null; title?: string | null; receivedAt: string | null; messages: MessageView[] }
+export type ViewRequest = { board: string; node: string } | { renew: true } | { back: true };
+export interface ViewedLine { board: string; node: string; commit: string; round: number; kind?: string; outcome?: string; name?: string | null; title?: string | null; receivedAt: string | null; messages: MessageView[] }
 export interface ViewReply { viewing: ViewedLine | true | null }
 // POST __pair: { peer } checks (both rooms' folders), { peer, confirm: true } pairs.
 export interface PairRequest { peer: string; confirm?: boolean }
@@ -109,11 +109,11 @@ export interface ProviderHealthReply {
   cli: Record<string, { path: string; version: string; checked: string } | null>; login: Record<string, { state: string; expiresAt?: string | null; checked: string } | null>;
   errors: { cli: Record<string, (HealthError & { path?: string }) | { path?: string } | null | undefined>; login: Record<string, HealthError>; leftovers?: HealthError };
   scheduledProviders: string[]; nextLogin: string | null; catalogs: Record<string, { loaded: boolean; checked: string | null; models: unknown[]; error?: HealthError }>;
-  configured: { room: string; discussion: string | null; agents: HealthAgent[] }[]; defaults: HealthAgent[] | null;
+  configured: { room: string; board: string | null; agents: HealthAgent[] }[]; defaults: HealthAgent[] | null;
   permissions?: Record<string, PermissionReport> | null;
   diagnostics?: HealthDiagnostics | null;
   promptRunning: string[]; promptResults: { provider: string; model: string; at: string; durationMs: number; outcome: string; reply?: string | null; error?: string | null }[];
-  sessions: { room: string; discussion: string | null; agents: { role: string; name: string; provider: string; id: string | null; lastTurn?: { ended: string; outcome: string; error?: { at: string; message: string } | null } | null }[] }[];
+  sessions: { room: string; board: string | null; agents: { role: string; name: string; provider: string; id: string | null; lastTurn?: { ended: string; outcome: string; error?: { at: string; message: string } | null } | null }[] }[];
   leftoversChecked: string | null; nextLeftovers: string | null; running: HealthProgram[]; leftovers: HealthProgram[];
   quota: { room: string; reachable: boolean | null; measured: string | null; providers?: Record<string, string | null>; checked: string | null }[];
 }
@@ -136,7 +136,7 @@ export interface PromptTestRequest { provider: string; model: string }
 // GET __shell/token (host-shell.mjs, pages on this computer only): the WebSocket's token.
 export interface ShellTokenReply { token: string }
 // GET __rooms: this server's rooms, for Switch room….
-export interface RoomEntry { id: string; path: string; root: string; discussion: string | null; pages: number | null; current: boolean }
+export interface RoomEntry { id: string; path: string; root: string; board: string | null; pages: number | null; current: boolean }
 // POST __newroom: {} asks the server's folder chooser; { token } creates the room it asked about; { token, cancel: true } drops it.
 export type NewRoomRequest = Record<string, never> | { token: string; cancel?: boolean };
 export interface NewRoomReply { cancelled?: boolean; confirm?: boolean; token?: string; folder?: string; url?: string; existing?: boolean; open?: boolean }

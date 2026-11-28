@@ -127,13 +127,13 @@ test('Restart: a new server process on the same port, resuming the discussion in
     assert.equal(before.app, 'agent-room');
     assert.equal(before.pid, cli.pid);
     await say('/resume 2026-11-03-a-topic');
-    await until((h) => h?.discussion === 'discussions/2026-11-03-a-topic');
+    await until((h) => h?.board === 'discussions/2026-11-03-a-topic');
 
     await say('/restart');
     assert.equal(await exited, 0);
     const after = await until((h) => h && h.pid !== before.pid);
     newPid = after.pid;
-    assert.equal(after.discussion, 'discussions/2026-11-03-a-topic'); // resumed there
+    assert.equal(after.board, 'discussions/2026-11-03-a-topic'); // resumed there
     assert.match(out, /Restarting: a new process takes over the server\./);
 
     await say('/quit');
@@ -307,7 +307,7 @@ test('CLI flags remain the defaults for a new brainstorm and a beside discussion
     await next();
     await say('/brainstorm'); await until((e) => e.type === 'note' && /New brainstorm/.test(e.text));
     assert.deepEqual((await (await fetch(base + '__settings')).json()).settings, flags);
-    await say('/new'); await until((e) => e.type === 'note' && /New discussion: your next message names it/.test(e.text)); // the new brainstorm, not started, becomes it
+    await say('/new'); await until((e) => e.type === 'note' && /New sprint: your next message names it/.test(e.text)); // the new brainstorm, not started, becomes it
     assert.deepEqual((await (await fetch(base + '__settings')).json()).settings, flags);
     await say('hello'); await until((e) => e.type === 'turn');
     await say('/new');

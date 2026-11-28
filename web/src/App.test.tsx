@@ -19,7 +19,7 @@ describe('room shell', () => {
     const view = render(<App version="one" refresh={vi.fn()} />);
     const source = FakeEvents.latest;
     expect(source.url).toBe('__events');
-    source.send({ type: 'reset', webVersion: 'one', room: { discussion: 'A room' }, messages: [{ speaker: 'Ada', html: '<p>Hello <em>there</em> <a href="#details">Details</a></p>' }], thinking: null });
+    source.send({ type: 'reset', webVersion: 'one', room: { board: 'A room' }, messages: [{ speaker: 'Ada', html: '<p>Hello <em>there</em> <a href="#details">Details</a></p>' }], thinking: null });
     expect(screen.getByRole('heading', { name: 'A room' })).toBeTruthy();
     expect(screen.getByText('there').tagName).toBe('EM');
     await userEvent.setup().click(screen.getByRole('link', { name: 'Details' }));
@@ -31,7 +31,7 @@ describe('room shell', () => {
     source.send({ type: 'turn', text: 'your turn' });
     expect(screen.queryByText('… Ada is thinking')).toBeNull();
     expect(screen.getByText('your turn')).toBeTruthy();
-    source.send({ type: 'reset', webVersion: 'one', room: { discussion: 'A room' }, messages: [{ speaker: 'Bo', html: '<p>Live</p>' }] });
+    source.send({ type: 'reset', webVersion: 'one', room: { board: 'A room' }, messages: [{ speaker: 'Bo', html: '<p>Live</p>' }] });
     expect(screen.queryByText('there')).toBeNull();
     expect(screen.getAllByText('Live')).toHaveLength(1);
     view.unmount(); expect(source.close).toHaveBeenCalledOnce();

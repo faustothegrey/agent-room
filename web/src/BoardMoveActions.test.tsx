@@ -12,7 +12,7 @@ class Source {
 }
 const live = '2026-11-01-live', closed = '2026-11-02-closed', old = '2026-10-01-old', idea = '2026-10-02-idea';
 const files = [`discussions/${live}/notes.md`, `discussions/${closed}/notes.md`, `discussions/archive/${old}/notes.md`, `brainstorms/deferred/${idea}/notes.md`];
-const room = { folder: '/room', active: `discussions/${live}`, discussion: 'Live', started: true, multi: true, brainstorm: false, research: false, workbench: false, workbenches: [], researches: [], closedDiscussions: [closed, old], checkpoints: [], open: [], autoDev: { status: null } };
+const room = { folder: '/room', active: `discussions/${live}`, board: 'Live', started: true, multi: true, brainstorm: false, research: false, workbench: false, workbenches: [], researches: [], closedBoards: [closed, old], checkpoints: [], open: [], autoDev: { status: null } };
 const fetchMock = vi.fn();
 const says = () => fetchMock.mock.calls.filter(([url]) => url === '__say').map(([, init]) => JSON.parse(init.body).text);
 const setup = () => { render(<App version="one" refresh={() => {}} />); Source.current.send({ type: 'reset', room, messages: [], input: true, peek: null, doc: null }); };

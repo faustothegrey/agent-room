@@ -167,7 +167,7 @@ function Health({ open, post }: { open: boolean; post: ProvidersPost }) {
     }
     line("Claude's list is agent-room's own; being in that list proves little about availability.");
     heading('Configured models');
-    for (const group of data.configured) { line('Room ' + group.room + ' · ' + (group.discussion || 'no sprint started')); for (const a of group.agents) line(a.role + ' ' + a.name + ' · ' + a.provider + ' · ' + (a.model || 'CLI default') + ' · ' + a.alignment); }
+    for (const group of data.configured) { line('Room ' + group.room + ' · ' + (group.board || 'no sprint started')); for (const a of group.agents) line(a.role + ' ' + a.name + ' · ' + a.provider + ' · ' + (a.model || 'CLI default') + ' · ' + a.alignment); }
     if (data.defaults) { line('Saved defaults'); for (const a of data.defaults) line(a.role + ' ' + a.name + ' · ' + a.provider + ' · ' + (a.model || 'CLI default') + ' · ' + a.alignment); }
     else line('Saved defaults: none available');
     heading('Prompt tests');
@@ -185,7 +185,7 @@ function Health({ open, post }: { open: boolean; post: ProvidersPost }) {
     heading('Operations');
     line('Operations · provider and model used now');
     for (const group of data.configured) {
-      line('Room ' + group.room + ' · ' + (group.discussion || 'no sprint started'));
+      line('Room ' + group.room + ' · ' + (group.board || 'no sprint started'));
       const members = group.agents.filter((a) => a.role === 'member'), worker = group.agents.find((a) => a.role === 'worker');
       const model = (a: { model: string } | undefined) => a?.model || 'CLI default';
       const rows = members.map((a) => ['Discussion turn · ' + a.name + (a.enabled ? '' : ' (disabled)'), a.provider, model(a)]);
@@ -197,7 +197,7 @@ function Health({ open, post }: { open: boolean; post: ProvidersPost }) {
     heading('Sessions');
     line('Sessions are memory between turns, not running programs. This list covers only sessions known to agent-room.');
     for (const group of data.sessions) {
-      line('Room ' + group.room + ' · ' + (group.discussion || 'no sprint started'));
+      line('Room ' + group.room + ' · ' + (group.board || 'no sprint started'));
       table(['Agent', 'Provider', 'Session ID', 'Last turn', 'Latest error'], group.agents.map((a) => [a.role + ' ' + a.name, a.provider, a.id || 'none yet',
         a.lastTurn ? when(a.lastTurn.ended) + ' · ' + a.lastTurn.outcome : 'none yet', a.lastTurn?.error ? when(a.lastTurn.error.at) + ' · ' + a.lastTurn.error.message : 'none']));
     }

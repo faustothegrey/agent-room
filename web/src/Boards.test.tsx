@@ -17,8 +17,8 @@ const files = [
   'brainstorms/2026-11-07-idea/notes.md', 'discussions/archive/2026-10-01-old/notes.md',
   'brainstorms/deferred/2026-09-01-later/notes.md', 'README.md',
 ];
-const room = { folder: '/project', active: 'discussions/2026-11-01-current', discussion: 'Current title', started: true,
-  workbenches: ['2026-11-03-work'], researches: ['2026-11-04-research'], closedDiscussions: ['2026-11-02-closed', '2026-10-01-old'],
+const room = { folder: '/project', active: 'discussions/2026-11-01-current', board: 'Current title', started: true,
+  workbenches: ['2026-11-03-work'], researches: ['2026-11-04-research'], closedBoards: ['2026-11-02-closed', '2026-10-01-old'],
   checkpoints: [{ name: '2026-11-02-closed', title: 'Saved title' }],
   open: [{ active: 'discussions/2026-11-06-open', current: false, title: 'Open board', url: '/r/other/__room' }], autoDev: { status: null } };
 const fetchMock = vi.fn();

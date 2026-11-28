@@ -9,7 +9,7 @@ class Source {
   close() {}
   send(data: object) { act(() => this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)); }
 }
-const room = { discussion: 'Live', active: 'discussions/live', started: true, brainstorm: false, research: false, workbench: false };
+const room = { board: 'Live', active: 'discussions/live', started: true, brainstorm: false, research: false, workbench: false };
 const worker = [{ speaker: 'Worker', html: '<p>Saved <strong>report</strong></p>', error: false }, { note: 'Prior note' }];
 beforeEach(() => { vi.stubGlobal('EventSource', Source); vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [] }))); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });

@@ -116,13 +116,13 @@ Point to pending-instructions.md for any unsent worker instructions; do not repl
 export function workerBrief(d, own, place) {
   if (d && own.briefed !== d.dir) return fill(WORKER_BRIEF, { dir: d.dir, cwd: place.cwd }) + '\n\n';
   if (!d && own.brainstorm && own.briefed !== 'brainstorm') return WORKER_BRAINSTORM + '\n\n';
-  if (!d && own.briefed && own.briefed !== 'brainstorm') return fill(WORKER_NO_DISCUSSION, { dir: own.briefed }) + '\n\n';
+  if (!d && own.briefed && own.briefed !== 'brainstorm') return fill(WORKER_NO_SPRINT, { dir: own.briefed }) + '\n\n';
   return '';
 }
 export const WORKER_BRIEF = `The active sprint's folder is {dir}: create, read and write this sprint's documents there, including your implementation notes and plans. The work itself goes in your worktree, {cwd}.`;
 
 export const WORKER_BRAINSTORM = `These instructions come from a brainstorm, which has no folder: keep your notes in your scratch folder only.`;
-export const WORKER_NO_DISCUSSION = `No sprint is active now: {dir} is no longer the active sprint's folder. You will be told the next one's folder once it exists.`;
+export const WORKER_NO_SPRINT = `No sprint is active now: {dir} is no longer the active sprint's folder. You will be told the next one's folder once it exists.`;
 
 // Where the worker works, with its first instruction (again if that changes).
 export function workerLocation(own, place, ctx, NOTES) {
@@ -225,7 +225,7 @@ export const instructionSets = [
       { id: 'location', intent: 'Its working directory and branch, where its scratch notes go, and what it must commit and report.', when: 'first instruction (again if the worktree changes)', content: WORKER_LOCATION },
       { id: 'moved', intent: 'Explains a change of worktree.', when: 'when the worktree changes', content: WORKER_MOVED },
       { id: 'brainstorm-brief', intent: 'Explains where brainstorm notes go.', when: 'first brainstorm instruction', content: WORKER_BRAINSTORM },
-      { id: 'no-discussion', intent: 'Notes that the prior sprint is no longer active.', when: 'after leaving a sprint', content: WORKER_NO_DISCUSSION },
+      { id: 'no-sprint', intent: 'Notes that the prior sprint is no longer active.', when: 'after leaving a sprint', content: WORKER_NO_SPRINT },
       { id: 'rollback-merge', intent: 'Requires rollback preflight before catch-up.', when: 'rollback when behind main', content: WORKER_ROLLBACK_MERGE },
       { id: 'brief', intent: 'The active sprint\'s folder (for its notes), or that it is a brainstorm with no folder.', when: 'first instruction in that sprint', content: WORKER_BRIEF },
       { id: 'commit-label', intent: 'The origin label every commit must carry.', when: 'once per worker session (again if the label changes)', content: WORKER_COMMIT },
