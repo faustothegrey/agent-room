@@ -1095,7 +1095,7 @@ async function runSummary(ctx, auto = false, extra) {
 // `speaker`: who the opening message is from (the User, auto dev's "Worker report", or "Scheduler").
 // `run`: the auto dev run this round belongs to: it is always summarized, and the summary decides what's next.
 // `beforeLap`: optional async hook checked before each lap after the first; returning a reason stops the round early.
-async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = null } = {}) {
+async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = null, onFirstTurn = null } = {}) {
   let started = 0;
   const roundStart = Date.now();
   let turns = 0;
@@ -1113,6 +1113,7 @@ async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = n
     const roundRes = await ctx.room.round(line, { speaker, beforeLap,
       onLapStart(lap) { if (ctx.state.research && ctx.board) recordResearchLap(ctx, lap); },
       onTurnStart(agent) {
+        if (!started) onFirstTurn?.();
         started = Date.now();
         startThinking(ctx, agent.name);
         setScreenThinking(ctx, agent.name);
@@ -1173,7 +1174,8 @@ async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = n
   } catch (err) {
     // An unknown @name: nothing was sent or recorded.
     showHeader(ctx);
-    note(ctx, `✗ ${err.message}`, true);
+    if (onFirstTurn && !started) out(ctx, red(`✗ ${err.message}`));
+    else note(ctx, `✗ ${err.message}`, true);
     return { ending: 'failed', stoppedReason: null, failedError: err.message, turns, spoke };
   }
 }
@@ -1557,6 +1559,6 @@ const { laneOf, cleanupMergedOnClose, worktreeFingerprint, recordTested } = lane
 const scheduler = schedulerModule.createScheduler({ siblings, toScreen, showHeader, checkpoints, DATED, isWorkbenchDir,
   SECTIONS, shopOf, boardRef, day, pad, load, isResearchDir, isBoard, readCheckpoint,
   roomDefaults, parseSpec, refreshQuota, openBeside, resumeBoard, newResearch, wire,
-  openBoard, runRound, saveCheckpoint, fresh, closeContext, chooseResearchKind });
+  openBoard, runRound, saveCheckpoint, fresh, closeContext, chooseResearchKind, firstLine });
 export const { scheduleFile, readSchedule, getSchedule, saveSchedule, runScheduledTask, checkSchedule } = scheduler;
 const { writeSchedule, broadcastSchedule, startScheduler, stopSchedulerIfLast } = scheduler;

@@ -8,7 +8,7 @@ export const SCHEDULE_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 export function createScheduler({ siblings, toScreen, showHeader, checkpoints, DATED, isWorkbenchDir,
   SECTIONS, shopOf, boardRef, day, pad, load, isResearchDir, isBoard, readCheckpoint,
   roomDefaults, parseSpec, refreshQuota, openBeside, resumeBoard, newResearch, wire,
-  openBoard, runRound, saveCheckpoint, fresh, closeContext, chooseResearchKind }) {
+  openBoard, runRound, saveCheckpoint, fresh, closeContext, chooseResearchKind, firstLine }) {
 // ── Scheduler (research tasks) ─────────────────────────────────
 // Per-room schedule stored in agent-room's local state, outside the project's working tree:
 // ~/.local/state/agent-room/schedules/<sha256 of realpath(room folder)>.json
@@ -172,16 +172,31 @@ async function runScheduledTask(ctx, taskId, { now = null, loadRoom = load } = {
 async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
   const at = (now ?? new Date()).toISOString();
   const clockMs = () => now ? now.getTime() : Date.now();
+  let runCtx = null;
+  let started = false;
+  const title = task.title?.trim();
+  const announce = (text, error = false) => {
+    for (const c of siblings(ctx)) if (!c.stopped && c.screen) toScreen(c, { type: 'note', text, error });
+  };
+  const finish = (status, reason) => {
+    recordTaskRun(ctx, task.id, status, reason, at, task.lastTriggerKey);
+    if (!started && (status === 'skipped' || status === 'failed')) {
+      const label = title || runCtx?.board?.title || (task.board && (
+        siblings(ctx).find((c) => !c.stopped && isBoard(c, task.board))?.board?.title
+        || readCheckpoint(ctx, task.board)?.discussion?.title || task.board
+      )) || firstLine(task.prompt);
+      announce(`Scheduled research did not start: ${label} — ${reason}`, true);
+    }
+    return { status, reason };
+  };
   const shop = shopOf(ctx);
   shop.schedulerRunningTasks ??= new Set();
   if (shop.schedulerRunningTasks.has(task.id)) {
     const reason = 'A round or summary is already in progress for this task';
-    recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
-    return { status: 'skipped', reason };
+    return finish('skipped', reason);
   }
   shop.schedulerRunningTasks.add(task.id);
   broadcastSchedule(ctx);
-  let runCtx = null;
   let createdBeside = false;
   try {
     const parent = join(ctx.cwd, 'discussions');
@@ -191,8 +206,7 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
     let open = task.board && siblings(ctx).find((c) => !c.stopped && isBoard(c, task.board));
     if (open?.busy) {
       const reason = `${task.board} has a round or summary in progress`;
-      recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
-      return { status: 'skipped', reason };
+      return finish('skipped', reason);
     }
     const saved = task.board && readCheckpoint(ctx, task.board);
     const specs = open?.agentSpecs ?? saved?.agentSpecs ?? roomDefaults(ctx).agents ?? ctx.agentSpecs ?? '';
@@ -218,23 +232,20 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
     const failure = failures.find(Boolean);
     if (failure) {
       const reason = `Test prompt failed for ${failure}`;
-      recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
-      return { status: 'skipped', reason };
+      return finish('skipped', reason);
     }
     const quota = await ctx.usage.fetchQuota();
     refreshQuota(ctx, quota).catch(() => {});
     const check = ctx.usage.checkQuotaFloor(quota, providers, data.quotaFloor, { now: clockMs() });
     if (!check.ok) {
-      recordTaskRun(ctx, task.id, 'skipped', check.reason, at, task.lastTriggerKey);
-      return { status: 'skipped', reason: check.reason };
+      return finish('skipped', check.reason);
     }
     if (task.board && !isResearchDir(join(parent, ref))) throw new Error(`Research board ${task.board} is no longer research.`);
     // Another round may have started during the prompt checks or quota fetch.
     open = task.board && siblings(ctx).find((c) => !c.stopped && isBoard(c, task.board));
     if (open?.busy) {
       const reason = `${task.board} has a round or summary in progress`;
-      recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
-      return { status: 'skipped', reason };
+      return finish('skipped', reason);
     }
     if (open) {
       runCtx = open;
@@ -259,8 +270,7 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
     }
     if (runCtx.busy) {
       const reason = `${task.board} has a round or summary in progress`;
-      recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
-      return { status: 'skipped', reason };
+      return finish('skipped', reason);
     }
     if (!runCtx.logPath) {
       const suggestTitle = runCtx.suggestTitle;
@@ -277,6 +287,12 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
     }
     const result = await runRound(task.prompt, runCtx, {
       speaker: 'Scheduler',
+      onFirstTurn() {
+        started = true;
+        const boardName = runCtx.board.title || runCtx.board.name;
+        const label = title && title !== boardName ? `${boardName} (${title})` : boardName;
+        announce(`Scheduled research started: ${label}`);
+      },
       beforeLap: async (lap) => {
         const q = await runCtx.usage.fetchQuota();
         refreshQuota(runCtx, q).catch(() => {});
@@ -288,12 +304,11 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
     const status = result?.stoppedReason ? 'stopped' : result?.failedError ? 'failed' : 'ran';
     const reason = result?.stoppedReason ?? result?.failedError ?? null;
     saveCheckpoint(runCtx);
-    recordTaskRun(ctx, task.id, status, reason, at, task.lastTriggerKey);
-    return { status, reason };
+    return finish(status, reason);
   } catch (err) {
-    recordTaskRun(ctx, task.id, 'failed', err.message, at, task.lastTriggerKey);
+    const result = finish('failed', err.message);
     if (createdBeside && runCtx && !runCtx.stopped && fresh(runCtx)) closeContext(runCtx);
-    return { status: 'failed', reason: err.message };
+    return result;
   } finally {
     shop.schedulerRunningTasks.delete(task.id);
     broadcastSchedule(ctx);
