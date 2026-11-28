@@ -368,9 +368,7 @@ function tokenizeNewHtml(html) {
   return { pieces, words };
 }
 
-function diffInlineHtml(oldText, newText, parser) {
-  const oldHtml = parser.parseInline(oldText);
-  const newHtml = parser.parseInline(newText);
+function diffHtmlWords(oldHtml, newHtml) {
   const oldWords = stripTags(oldHtml).trim().split(/\s+/).filter(Boolean);
   const { pieces, words: newWords } = tokenizeNewHtml(newHtml);
   const ops = diffSeq(oldWords, newWords);
@@ -433,28 +431,53 @@ function csvCellMap(text) {
   return map;
 }
 
+const renderToken = (tok, links, parser) => parser.parser(Object.assign([tok], { links }));
+
+const addRootClass = (html, cls) => {
+  if (/^<[a-z][a-z0-9]*\b[^>]*\bclass="/i.test(html)) {
+    return html.replace(/^(<[a-z][a-z0-9]*\b[^>]*\bclass=")/i, `$1${cls} `);
+  }
+  if (/^<[a-z][a-z0-9]*\b/i.test(html)) {
+    return html.replace(/^(<[a-z][a-z0-9]*\b)/i, `$1 class="${cls}"`);
+  }
+  return `<div class="${cls}">${html}</div>\n`;
+};
+
+const stripOuterTag = (html) => {
+  const m = /^(<([a-z][a-z0-9]*)\b[^>]*>)([\s\S]*)(<\/\2>\s*)$/i.exec(html);
+  return m ? { open: m[1], inner: m[3], close: m[4] } : null;
+};
+
+const renderListItemHtml = (item, listTok, links, parser) => {
+  const single = { ...listTok, items: [item] };
+  return renderToken(single, links, parser)
+    .replace(/^<(?:ul|ol)[^>]*>\n?/, '')
+    .replace(/<\/(?:ul|ol)>\n?$/, '');
+};
+
 function extractBlocks(source, parser) {
+  const tokens = parser.lexer(source);
+  const links = tokens.links;
   const blocks = [];
-  for (const tok of parser.lexer(source)) {
-    if (tok.type === 'space') continue;
+  for (const tok of tokens) {
+    if (tok.type === 'space' || tok.type === 'def') continue;
+    const html = renderToken(tok, links, parser);
     if (tok.type === 'heading') {
-      blocks.push({ kind: 'heading', depth: tok.depth, text: tok.text, raw: tok.raw, key: `h${tok.depth}:${tok.text}` });
+      blocks.push({ kind: 'heading', depth: tok.depth, text: tok.text, raw: tok.raw, tok, links, html, key: `h${tok.depth}:${html}` });
     } else if (tok.type === 'paragraph') {
-      blocks.push({ kind: 'paragraph', text: tok.text, raw: tok.raw, key: `p:${tok.text}` });
+      blocks.push({ kind: 'paragraph', text: tok.text, raw: tok.raw, tok, links, html, key: `p:${html}` });
     } else if (tok.type === 'list') {
-      for (const item of tok.items) {
-        blocks.push({ kind: 'list_item', ordered: !!tok.ordered, text: item.text, raw: item.raw, key: `li:${tok.ordered ? '1' : '0'}:${item.text}` });
-      }
+      blocks.push({ kind: 'list', ordered: !!tok.ordered, start: tok.start, text: tok.raw, raw: tok.raw, tok, links, html, key: `list:${html}` });
     } else if (tok.type === 'blockquote') {
-      blocks.push({ kind: 'blockquote', text: tok.text, raw: tok.raw, key: `bq:${tok.text}` });
+      blocks.push({ kind: 'blockquote', text: tok.text, raw: tok.raw, tok, links, html, key: `bq:${html}` });
     } else if (tok.type === 'code') {
       const [langKind, name] = String(tok.lang ?? '').trim().split(/\s+/);
-      if (langKind === 'csv') blocks.push({ kind: 'csv', name: name || 'table', text: tok.text, raw: tok.raw, key: `csv:${name || 'table'}:${tok.text}` });
-      else if (langKind === 'mermaid') blocks.push({ kind: 'mermaid', text: tok.text, raw: tok.raw, key: `mermaid:${tok.text}` });
-      else if (langKind === 'vega-lite') blocks.push({ kind: 'vega-lite', text: tok.text, raw: tok.raw, key: `vl:${tok.text}` });
-      else blocks.push({ kind: 'code', lang: tok.lang ?? '', text: tok.text, raw: tok.raw, key: `code:${tok.lang ?? ''}:${tok.text}` });
+      if (langKind === 'csv') blocks.push({ kind: 'csv', name: name || 'table', text: tok.text, raw: tok.raw, tok, links, html, key: `csv:${name || 'table'}:${tok.text}` });
+      else if (langKind === 'mermaid') blocks.push({ kind: 'mermaid', text: tok.text, raw: tok.raw, tok, links, html, key: `mermaid:${tok.text}` });
+      else if (langKind === 'vega-lite') blocks.push({ kind: 'vega-lite', text: tok.text, raw: tok.raw, tok, links, html, key: `vl:${tok.text}` });
+      else blocks.push({ kind: 'code', lang: tok.lang ?? '', text: tok.text, raw: tok.raw, tok, links, html, key: `code:${html}` });
     } else {
-      blocks.push({ kind: 'other', raw: tok.raw, key: `other:${tok.raw}` });
+      blocks.push({ kind: 'other', raw: tok.raw, tok, links, html, key: `other:${html}` });
     }
   }
   return blocks;
@@ -483,6 +506,13 @@ function pairHunk(dels, inss) {
       }
       if (d.kind === 'mermaid' || d.kind === 'vega-lite' || d.kind === 'code') {
         bestIdx = ii; bestScore = 1; break;
+      }
+      if (d.kind === 'list') {
+        if (d.ordered === inss[ii].ordered) {
+          const score = wordOverlap(d.text ?? d.raw, inss[ii].text ?? inss[ii].raw);
+          if (score > bestScore) { bestIdx = ii; bestScore = score; }
+        }
+        continue;
       }
       const score = wordOverlap(d.text ?? d.raw, inss[ii].text ?? inss[ii].raw);
       if (score >= 0.25 && score > bestScore) { bestIdx = ii; bestScore = score; }
@@ -513,13 +543,8 @@ function pairHunk(dels, inss) {
   return out;
 }
 
-export function renderMarkdownWithDiff(oldSource, newSource, parser = md) {
-  if (oldSource === newSource) return { html: parser.parse(newSource), changeCount: 0, removed: [] };
-  const oldBlocks = extractBlocks(oldSource, parser);
-  const newBlocks = extractBlocks(newSource, parser);
-  const rawOps = diffSeq(oldBlocks, newBlocks, (x, y) => x.key === y.key);
-
-  // Group consecutive del/ins hunks and pair modified blocks within each hunk.
+function diffBlockList(oldArr, newArr) {
+  const rawOps = diffSeq(oldArr, newArr, (x, y) => x.key === y.key);
   const ops = [];
   let dels = [], inss = [];
   const flushHunk = () => {
@@ -537,30 +562,56 @@ export function renderMarkdownWithDiff(oldSource, newSource, parser = md) {
     else inss.push(op.b);
   }
   flushHunk();
+  return ops;
+}
+
+function renderListDiff(oldBlock, newBlock, parser) {
+  const oldItems = oldBlock.tok.items.map((item) => {
+    const html = renderListItemHtml(item, oldBlock.tok, oldBlock.links, parser);
+    return { kind: 'list_item', text: item.text, raw: item.raw, html, key: html };
+  });
+  const newItems = newBlock.tok.items.map((item) => {
+    const html = renderListItemHtml(item, newBlock.tok, newBlock.links, parser);
+    return { kind: 'list_item', text: item.text, raw: item.raw, html, key: html };
+  });
+  const ops = diffBlockList(oldItems, newItems);
+  const tag = newBlock.tok.ordered ? 'ol' : 'ul';
+  const startAttr = newBlock.tok.ordered && newBlock.tok.start !== 1 && newBlock.tok.start !== '' ? ` start="${newBlock.tok.start}"` : '';
+  let out = `<${tag}${startAttr}>\n`;
+  let changes = 0;
+  for (const op of ops) {
+    if (op.op === 'eq') out += op.b.html;
+    else if (op.op === 'ins') { changes++; out += addRootClass(op.b.html, 'diff-ins-block'); }
+    else if (op.op === 'del') { changes++; out += addRootClass(op.a.html, 'diff-del-block'); }
+    else if (op.op === 'mod') {
+      changes++;
+      const oldParts = stripOuterTag(op.a.html), newParts = stripOuterTag(op.b.html);
+      out += oldParts && newParts
+        ? `${newParts.open}${diffHtmlWords(oldParts.inner, newParts.inner)}${newParts.close}`
+        : addRootClass(op.b.html, 'diff-ins-block');
+    }
+  }
+  if (changes === 0 && oldBlock.html !== newBlock.html) changes = 1; // e.g. start number changed
+  out += `</${tag}>\n`;
+  return { html: out, changes };
+}
+
+export function renderMarkdownWithDiff(oldSource, newSource, parser = md) {
+  if (oldSource === newSource) return { html: parser.parse(newSource), changeCount: 0, removed: [] };
+  const oldBlocks = extractBlocks(oldSource, parser);
+  const newBlocks = extractBlocks(newSource, parser);
+  const ops = diffBlockList(oldBlocks, newBlocks);
 
   let html = '', changeCount = 0;
   const removed = [];
-  let listTag = null;
-  const closeList = () => { if (listTag) { html += `</${listTag}>\n`; listTag = null; } };
-  const ensureList = (ordered) => {
-    const tag = ordered ? 'ol' : 'ul';
-    if (listTag !== tag) { closeList(); html += `<${tag}>\n`; listTag = tag; }
-  };
 
   for (const op of ops) {
     const blk = op.b ?? op.a;
-    if (blk.kind === 'list_item') ensureList(blk.ordered); else closeList();
-
     if (op.op === 'eq') {
-      if (blk.kind === 'list_item') html += `<li>${parser.parseInline(blk.text)}</li>\n`;
-      else html += parser.parse(blk.raw);
+      html += blk.html;
     } else if (op.op === 'ins') {
       changeCount++;
-      if (blk.kind === 'heading') html += `<h${blk.depth} class="diff-ins-block">${parser.parseInline(blk.text)}</h${blk.depth}>\n`;
-      else if (blk.kind === 'paragraph') html += `<p class="diff-ins-block">${parser.parseInline(blk.text)}</p>\n`;
-      else if (blk.kind === 'list_item') html += `<li class="diff-ins-block">${parser.parseInline(blk.text)}</li>\n`;
-      else if (blk.kind === 'blockquote') html += `<blockquote class="diff-ins-block">${parser.parse(blk.text)}</blockquote>\n`;
-      else if (blk.kind === 'csv') {
+      if (blk.kind === 'csv') {
         const cells = csvCellMap(blk.text);
         const changed = new Set([...cells.entries()].filter(([, v]) => v.raw !== '').map(([k]) => k));
         html += csvTable(blk.text, blk.name, changed);
@@ -569,18 +620,12 @@ export function renderMarkdownWithDiff(oldSource, newSource, parser = md) {
         html += `<div class="mermaid-box" data-changed-nodes="${esc(JSON.stringify(ids))}"><pre class="mermaid-src">${esc(blk.text)}</pre></div>\n`;
       } else if (blk.kind === 'vega-lite') {
         html += `<div class="vl-box diff-changed"><div class="diff-chart-badge">Changed since review</div><pre class="vl-src">${esc(blk.text)}</pre></div>\n`;
-      } else if (blk.kind === 'code') {
-        html += `<pre class="diff-ins-block"><code>${esc(blk.text)}</code></pre>\n`;
       } else {
-        html += `<div class="diff-ins-block">${parser.parse(blk.raw)}</div>\n`;
+        html += addRootClass(blk.html, 'diff-ins-block');
       }
     } else if (op.op === 'del') {
       changeCount++;
-      if (blk.kind === 'heading') html += `<h${blk.depth} class="diff-del-block">${parser.parseInline(blk.text)}</h${blk.depth}>\n`;
-      else if (blk.kind === 'paragraph') html += `<p class="diff-del-block">${parser.parseInline(blk.text)}</p>\n`;
-      else if (blk.kind === 'list_item') html += `<li class="diff-del-block">${parser.parseInline(blk.text)}</li>\n`;
-      else if (blk.kind === 'blockquote') html += `<blockquote class="diff-del-block">${parser.parse(blk.text)}</blockquote>\n`;
-      else if (blk.kind === 'csv') {
+      if (blk.kind === 'csv') {
         const prefix = blk.name === 'table' ? '' : `${blk.name}!`;
         for (const [ref, v] of csvCellMap(blk.text)) {
           if (v.raw !== '') removed.push(`table cell ${prefix}${ref}`);
@@ -591,25 +636,21 @@ export function renderMarkdownWithDiff(oldSource, newSource, parser = md) {
         else removed.push('diagram');
       } else if (blk.kind === 'vega-lite') {
         removed.push('chart');
-      } else if (blk.kind === 'code') {
-        html += `<pre class="diff-del-block"><code>${esc(blk.text)}</code></pre>\n`;
       } else {
-        html += `<div class="diff-del-block">${parser.parse(blk.raw)}</div>\n`;
+        html += addRootClass(blk.html, 'diff-del-block');
       }
     } else if (op.op === 'mod') {
       const a = op.a, b = op.b;
-      if (b.kind === 'heading') {
+      if (b.kind === 'heading' || b.kind === 'paragraph' || b.kind === 'blockquote') {
         changeCount++;
-        html += `<h${b.depth}>${diffInlineHtml(a.text, b.text, parser)}</h${b.depth}>\n`;
-      } else if (b.kind === 'paragraph') {
-        changeCount++;
-        html += `<p>${diffInlineHtml(a.text, b.text, parser)}</p>\n`;
-      } else if (b.kind === 'list_item') {
-        changeCount++;
-        html += `<li>${diffInlineHtml(a.text, b.text, parser)}</li>\n`;
-      } else if (b.kind === 'blockquote') {
-        changeCount++;
-        html += `<blockquote><p>${diffInlineHtml(a.text, b.text, parser)}</p></blockquote>\n`;
+        const oldParts = stripOuterTag(a.html), newParts = stripOuterTag(b.html);
+        html += oldParts && newParts
+          ? `${newParts.open}${diffHtmlWords(oldParts.inner, newParts.inner)}${newParts.close}`
+          : addRootClass(b.html, 'diff-ins-block');
+      } else if (b.kind === 'list') {
+        const res = renderListDiff(a, b, parser);
+        changeCount += res.changes;
+        html += res.html;
       } else if (b.kind === 'csv') {
         const oldCells = csvCellMap(a.text), newCells = csvCellMap(b.text);
         const changed = new Set();
@@ -627,24 +668,26 @@ export function renderMarkdownWithDiff(oldSource, newSource, parser = md) {
       } else if (b.kind === 'mermaid') {
         const oldBoxes = mermaidBoxes(a.text), newBoxes = mermaidBoxes(b.text);
         const changedIds = [];
+        const removedBoxes = [];
         for (const [id, spec] of newBoxes) {
           if (!oldBoxes.has(id) || oldBoxes.get(id) !== spec) { changedIds.push(id); changeCount++; }
         }
         for (const id of oldBoxes.keys()) {
-          if (!newBoxes.has(id)) { removed.push(`diagram box ${id}`); changeCount++; }
+          if (!newBoxes.has(id)) { removedBoxes.push(`diagram box ${id}`); changeCount++; }
         }
-        if (!changedIds.length && !removed.length) changeCount++; // edge-only change
-        html += `<div class="mermaid-box" data-changed-nodes="${esc(JSON.stringify(changedIds))}"><pre class="mermaid-src">${esc(b.text)}</pre></div>\n`;
+        removed.push(...removedBoxes);
+        const wholeChanged = !changedIds.length && !removedBoxes.length;
+        if (wholeChanged) changeCount++;
+        html += `<div class="mermaid-box${wholeChanged ? ' diff-changed' : ''}" data-changed-nodes="${esc(JSON.stringify(changedIds))}">${wholeChanged ? '<div class="diff-chart-badge">Changed since review</div>' : ''}<pre class="mermaid-src">${esc(b.text)}</pre></div>\n`;
       } else if (b.kind === 'vega-lite') {
         changeCount++;
         html += `<div class="vl-box diff-changed"><div class="diff-chart-badge">Changed since review</div><pre class="vl-src">${esc(b.text)}</pre></div>\n`;
       } else {
         changeCount++;
-        html += `<pre class="diff-ins-block"><code>${esc(b.text)}</code></pre>\n`;
+        html += addRootClass(b.html, 'diff-ins-block');
       }
     }
   }
-  closeList();
   return { html, changeCount, removed };
 }
 
@@ -689,6 +732,7 @@ table { border-collapse: collapse; } th, td { border: 1px solid #8886; padding: 
 .sheet td.hl { outline: 2px solid #e07a10; outline-offset: -2px; background: #e07a1026; }
 .sheet td.diff-changed { background: #a6e3a128; outline: 1px solid #a6e3a199; outline-offset: -1px; }
 .mermaid-box { margin: 1rem 0; overflow-x: auto; } .mermaid-box svg { max-width: 100%; height: auto; }
+.mermaid-box.diff-changed { border: 1px solid #a6e3a199; border-radius: 6px; padding: .4rem; background: #a6e3a10d; }
 .mermaid-box g.node { cursor: pointer; }
 .mermaid-box g.node:hover :is(rect, polygon, path, circle, ellipse) { stroke: #2f6fde !important; stroke-width: 2.5px !important; }
 .mermaid-box g.node.diff-changed :is(rect, polygon, path, circle, ellipse) { stroke: #a6e3a1 !important; stroke-width: 3px !important; }
@@ -754,6 +798,7 @@ async function renderCharts() {
   if (!window.vegaEmbed) return;
   for (const box of boxes) {
     const src = box.querySelector('.vl-src'); if (!src) continue;
+    const badge = box.querySelector('.diff-chart-badge');
     const fail = (err) => {
       if (!box.isConnected) return;
       const p = document.createElement('p'); p.className = 'mermaid-error'; p.textContent = 'This chart has an error: ' + ((err && err.message) || err);
@@ -764,6 +809,7 @@ async function renderCharts() {
     vegaEmbed(box, spec, { renderer: 'svg', actions: false, theme: 'dark' })
       .then(({ view }) => {
         if (!box.isConnected) { try { view.finalize(); } catch {} return; }
+        if (badge && !box.contains(badge)) box.prepend(badge);
         views.push(view);
         view.addEventListener('click', (e, item) => pointAtDatum(item));
       }).catch(fail);
@@ -804,12 +850,14 @@ async function renderDiagrams() {
   }
   for (const box of boxes) {
     const src = box.querySelector('.mermaid-src'); if (!src) continue;
+    const badge = box.querySelector('.diff-chart-badge');
     const changedNodes = (() => { try { return new Set(JSON.parse(box.dataset.changedNodes || '[]')); } catch { return new Set(); } })();
     const id = 'mermaid-' + (++mermaidSeq);
     try {
       const { svg } = await mermaid.render(id, src.textContent);
       if (box.isConnected) {
         box.innerHTML = svg;
+        if (badge) box.prepend(badge);
         if (changedNodes.size) {
           for (const g of box.querySelectorAll('g.node')) {
             if (changedNodes.has(nodeName(g))) g.classList.add('diff-changed');

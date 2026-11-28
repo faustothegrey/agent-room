@@ -1473,3 +1473,103 @@ test('change tracking (8): pointing at a paragraph with a deletion and one below
     dom.window.close();
   }
 });
+
+test('change tracking fidelity: varied document renders identically to normal view and preserves ordered start, nested/task/loose lists and reference-style links across edits', () => {
+  const varied = [
+    '# Varied Document',
+    '',
+    'Opening paragraph to edit later.',
+    '',
+    'Paragraph with **bold**, an [inline link](https://example.com/inline), and a [reference link][spec].',
+    '',
+    '4. Fourth ordered item',
+    '5. Fifth item with nested list',
+    '   - Nested bullet one',
+    '   - Nested bullet two',
+    '',
+    '- [x] Completed task',
+    '- [ ] Pending task',
+    '',
+    '- Loose item one',
+    '',
+    '- Loose item two',
+    '',
+    '> Quoted wisdom with [reference link][spec].',
+    '',
+    '```js',
+    'const x = 1;',
+    '```',
+    '',
+    '```csv runs',
+    'day,runs',
+    '16 Nov,10',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  A[Alpha] --> B[Beta]',
+    '```',
+    '',
+    '```vega-lite',
+    '{"mark":"bar","data":{"values":[{"day":"16 Nov","runs":10}]}}',
+    '```',
+    '',
+    '[spec]: https://example.com/spec',
+    '',
+  ].join('\n');
+
+  const normalHtml = md.parse(varied);
+  // Unchanged version (both identical string and whitespace-only difference hitting the block diff path) renders identical HTML.
+  assert.equal(renderMarkdownWithDiff(varied, varied, md).html, normalHtml);
+  const diffWhitespace = renderMarkdownWithDiff(varied + '\n', varied, md);
+  assert.equal(diffWhitespace.changeCount, 0);
+  assert.equal(diffWhitespace.html, normalHtml);
+
+  // After editing a different paragraph, the unchanged paragraph with reference-style link, ordered start=4, nested, task, and loose lists all survive intact.
+  const edited = varied.replace('Opening paragraph to edit later.', 'Opening paragraph was edited.');
+  const diffEdited = renderMarkdownWithDiff(varied, edited, md);
+  assert.equal(diffEdited.changeCount, 1);
+  assert.match(diffEdited.html, /<a href="https:\/\/example\.com\/spec">reference link<\/a>/);
+  assert.match(diffEdited.html, /<ol start="4">/);
+  assert.match(diffEdited.html, /<ul>\n<li>Nested bullet one<\/li>/);
+  assert.match(diffEdited.html, /<input checked="" disabled="" type="checkbox"> Completed task/);
+  assert.match(diffEdited.html, /<li><p>Loose item one<\/p>\n<\/li>/);
+  assert.match(diffEdited.html, /<pre><code class="language-js">const x = 1;/);
+});
+
+test('change tracking: removing a table cell and changing only an arrow in a Mermaid diagram counts and flags both', () => {
+  const before = [
+    '# Combined',
+    '',
+    '```csv runs',
+    'day,runs',
+    '16 Nov,10',
+    '17 Nov,20',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  A[Alpha] --> B[Beta]',
+    '```',
+  ].join('\n');
+  const after = [
+    '# Combined',
+    '',
+    '```csv runs',
+    'day,runs',
+    '16 Nov,10',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  A[Alpha] -.-> B[Beta]',
+    '```',
+  ].join('\n');
+
+  const diff = renderMarkdownWithDiff(before, after, md);
+  assert.ok(diff.removed.includes('table cell runs!A3'));
+  assert.ok(diff.removed.includes('table cell runs!B3'));
+  // 2 removed table cells + 1 arrow-only diagram change = 3 changes.
+  assert.equal(diff.changeCount, 3);
+  assert.match(diff.html, /<div class="mermaid-box diff-changed" data-changed-nodes="\[\]"><div class="diff-chart-badge">Changed since review<\/div>/);
+});
