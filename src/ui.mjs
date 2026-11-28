@@ -23,7 +23,7 @@ const schedulerModule = await import(`./scheduler.mjs${new URL(import.meta.url).
 const { SCHEDULE_TIME_RE } = schedulerModule;
 export const { branchDiagram, BRANCH_DIAGRAM_LIMIT, WORKER_BRANCH, NOTES, workerPlace, ensureWorktree,
   parsePorcelainConflicts, worktreeStatus, catchUp, checkWorkerReport } = laneModule;
-const { git, gitOk, plural, labelledCommits, lanePlace, existingLanes, mainRef, workerGitFacts } = laneModule;
+const { git, gitOk, plural, labelledCommits, lanePlace, existingLanes, mainRef, workerGitFacts, worktrees } = laneModule;
 const real = (p) => (existsSync(p) ? realpathSync(p) : p);
 
 export const USAGE = `Usage: agent-room [--agents claude,codex] [--worker claude:Worker] [--cwd DIR] [--port 5566] [--no-screen] [--open] [--reopen NAME] [--dev]
@@ -70,8 +70,8 @@ carries on), /brainstorm (New brainstorm: its first message names it, in DIR/bra
 saved like a discussion but sending no work; /resume brainstorms/<name> and /fresh brainstorms/<name> as
 for discussions), /workbench (New workbench: a worker-only board in DIR/discussions/<date>-<title>/; its first
 message names it and goes straight to the worker), /research (New research: a research board in DIR/discussions/<date>-<title>/ with a .research marker and no worker), /convert brainstorms/<name> [research] (Turn into a discussion or, with research, into a research board: its folder moves to discussions/,
-its agents keep their sessions), /delete brainstorms/<name> (delete a closed brainstorm's folder and
-checkpoint for good), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
+its agents keep their sessions), /delete <ref> (delete a closed brainstorm, closed research board,
+or closed archived/deferred sprint or workbench, removing its folder and checkpoint from this room), /move <name> active|archive|deferred (move a whole discussion; not the one in use),
 /rollback <name> (queue archive with rollback), /archive-rollback <name> (confirm archive after reviewing its report),
 /autodev (screen only: Start auto dev, relaying the latest agreed summary's worker instruction
 and the worker's reports, for up to 5 worker cycles), /summary (the agents agree a short
@@ -1489,7 +1489,7 @@ const boards = boardsModule.createBoards({
   baseKey, roomPath, roomDefaults, parseSpec, specFor, load, wire, note, out, red, dim, bold, log,
   toScreen, showHeader, runRound, refreshWorker: (...args) => refreshWorker(...args),
   laneOf: (...args) => laneOf(...args), lanePlace, workerPlace, workerHold: (...args) => workerHold(...args), WORKER_BRANCH,
-  worktreeStatus, git, gitOk, labelledCommits, plural, shopOf: (...args) => shopOf(...args),
+  worktreeStatus, worktrees, git, gitOk, labelledCommits, plural, shopOf: (...args) => shopOf(...args),
   laneState: (...args) => laneState(...args), lanesOf: (...args) => lanesOf(...args),
   runningTasks: (...args) => runningTasks(...args), queuedTasks: (...args) => queuedTasks(...args),
   workNote: (...args) => workNote(...args), queueWork: (...args) => queueWork(...args),

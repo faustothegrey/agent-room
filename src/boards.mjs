@@ -9,7 +9,7 @@ export function createBoards({
   day, hhmm, pad, slug, SCHEDULE_TIME_RE, readSchedule, siblings, multi, fresh, ownerOf, originLabel,
   baseKey, roomPath, roomDefaults, parseSpec, specFor, load, wire, note, out, red, dim, bold, log,
   toScreen, showHeader, runRound, refreshWorker, laneOf, lanePlace, workerPlace, workerHold, WORKER_BRANCH,
-  worktreeStatus, git, gitOk, labelledCommits, plural, shopOf, laneState, lanesOf, runningTasks, queuedTasks,
+  worktreeStatus, worktrees, git, gitOk, labelledCommits, plural, shopOf, laneState, lanesOf, runningTasks, queuedTasks,
   workNote, queueWork, pump, leftovers, autoDevInput, cleanupMergedOnClose, refreshQuota, pushReplica,
   recoverWorkerOwner, startThinking, stopThinking, setScreenThinking, when, describe, writeSchedule,
   broadcastSchedule, pageOf, mainRef, modelLabel, currentSettings, saveClosed,
@@ -1364,21 +1364,54 @@ function deleteBrainstorm(ctx, ref) {
   note(ctx, `Deleted the brainstorm ${name}: its folder and checkpoint are gone.`);
 }
 
-// /delete <name|archive/<name>|deferred/<name>> (Delete): for a closed research board only.
-function deleteResearch(ctx, ref) {
+// /delete <name|archive/<name>|deferred/<name>> (Delete): for a closed research board (any section)
+// or a closed sprint / workbench in archive/ or deferred/ only.
+async function deleteResearch(ctx, ref) {
   const parent = join(ctx.cwd, 'discussions');
   const d = boardRef(parent, ref);
-  if (!d) return note(ctx, `✗ No research board "${ref}" in ${parent}.`, true);
+  if (!d) return note(ctx, `✗ No board "${ref}" in ${parent}.`, true);
   const dir = join(parent, d.section ?? '', d.name);
-  if (!isResearchDir(dir)) return note(ctx, `✗ ${d.name} is not a research board: only brainstorms and research boards can be deleted.`, true);
-  if (shopOf(ctx).closing?.has(d.name)) return note(ctx, `✗ ${d.name} is closing.`, true);
+  const research = isResearchDir(dir);
+  const workbench = !research && isWorkbenchDir(dir);
+  const kind = research ? 'research board' : workbench ? 'workbench' : 'sprint';
+  if (!research && !d.section) {
+    return note(ctx, `✗ ${d.name} is active: archive or defer it before deleting it. Nothing was deleted.`, true);
+  }
+  const shop = shopOf(ctx);
+  if (shop.closing?.has(d.name)) return note(ctx, `✗ ${d.name} is closing.`, true);
   if (!closedBoards(ctx).includes(d.name) || siblings(ctx).some((c) => !c.stopped && isBoard(c, d.name))) {
     return note(ctx, `✗ ${d.name} is open: close it before deleting it. Nothing was deleted.`, true);
+  }
+  if (!research) {
+    const rollback = shop.rollbacks?.get(d.name);
+    if (rollback && ['queued', 'running'].includes(rollback.status)) {
+      return note(ctx, `✗ ${d.name} has a rollback ${rollback.status}: wait for it to finish before deleting it. Nothing was deleted.`, true);
+    }
+    const hasWorkerTask = [...runningTasks(shop), ...queuedTasks(shop)]
+      .some((t) => t.owner === d.name || t.lane === d.name || t.workName === d.name);
+    if (hasWorkerTask) {
+      return note(ctx, `✗ ${d.name} has a worker task running or queued: wait for it to finish before deleting it. Nothing was deleted.`, true);
+    }
+    const own = await workerPlace(ctx.cwd, d.name);
+    if (!own.disabled) {
+      try {
+        const hasBranch = await gitOk(own.top, 'rev-parse', '--verify', '-q', `refs/heads/${own.branch}`);
+        const realPath = existsSync(own.path) ? realpathSync(own.path) : own.path;
+        const hasWorktree = existsSync(own.path) || (await worktrees(own.top)).some((w) => w.path === realPath || w.branch === own.branch);
+        if (hasBranch || hasWorktree) {
+          const what = hasBranch && hasWorktree ? `worker branch ${own.branch} and worktree` : hasBranch ? `worker branch ${own.branch}` : `worker worktree (${own.path})`;
+          return note(ctx, `✗ ${d.name} still has a ${what}: make it active (and resume it) to use Close and Merge or Close and Discard first. Nothing was deleted.`, true);
+        }
+      } catch (err) {
+        return note(ctx, `✗ Can't check worker state for ${d.name}: ${err.message}. Nothing was deleted.`, true);
+      }
+    }
   }
   const fromRel = d.section ? `discussions/${d.section}/${d.name}` : `discussions/${d.name}`;
   try { rmSync(dir, { recursive: true }); } catch (err) { return note(ctx, `✗ Couldn't delete ${d.name}: ${err.message}`, true); }
   try { unlinkSync(checkpointFile(ctx, d.name)); } catch (err) { if (err.code !== 'ENOENT') note(ctx, `✗ Couldn't remove ${d.name}'s checkpoint: ${err.message}`, true); }
   setClosed(ctx, d.name, false);
+  shop.rollbacks?.delete(d.name);
   listedCheckpoints.clear();
   for (const c of siblings(ctx)) {
     if (!c.screen) continue;
@@ -1389,7 +1422,7 @@ function deleteResearch(ctx, ref) {
     toScreen(c, { type: 'moved', from: fromRel, to: null });
   }
   showHeader(ctx);
-  note(ctx, `Deleted the research board ${d.name}: its folder and checkpoint are gone.`);
+  note(ctx, `Deleted the ${kind} ${d.name}: its folder and checkpoint are gone.`);
 }
 
 // On the screen: `run` in a new context beside the open discussions, which the window then shows.
