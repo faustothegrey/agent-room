@@ -6950,7 +6950,8 @@ test('scheduler: one-shot research creates an open board, respects quota and nev
   const ctx = { cwd, scheduleFile: join(cwd, 'schedule.json'), agentSpecs: 'claude:A', workerSpec: 'claude:Worker',
     state, sessions: new Map(), screen: { clients: new Set(), transcript: state.transcript, worker: [] }, docs,
     usage: { ...usage, fetchQuota: async () => ({}), checkQuotaFloor: () => quotaOK ? { ok: true } : { ok: false, reason: 'low quota' } },
-    room: { agents: [{ name: 'A', provider: 'claude' }] }, worker: { name: 'Worker' }, totals: {}, noScreen: true, out: () => {} };
+    room: { agents: [{ name: 'A', provider: 'claude' }] }, worker: { name: 'Worker' }, totals: {}, noScreen: true, out: () => {},
+    testPrompt: async () => ({ outcome: 'ok' }) };
   const prompts = [];
   const loadRoom = async (next) => {
     loaded = next;
@@ -6992,6 +6993,7 @@ test('recurring research schedules a board and reuses its live session, skipping
   const { saveSchedule, getSchedule, checkSchedule } = await import('../src/ui.mjs');
   const { hub, first, contexts } = await multiRoom();
   first.scheduleFile = `${first.cwd}/schedule.json`;
+  first.testPrompt = async () => ({ outcome: 'ok' });
   first.usage.checkQuotaFloor = () => ({ ok: true });
   const addRoom = hub.addRoom;
   hub.addRoom = async (...args) => {
@@ -7031,6 +7033,7 @@ async function scheduledKindsRoom() {
   const { getSchedule, runScheduledTask } = await import('../src/ui.mjs');
   const { hub, first, contexts, gotoOf } = await multiRoom();
   first.scheduleFile = `${first.cwd}/schedule.json`;
+  first.testPrompt = async () => ({ outcome: 'ok' });
   first.usage.checkQuotaFloor = () => ({ ok: true });
   const addRoom = hub.addRoom;
   hub.addRoom = async (...args) => {
@@ -7117,8 +7120,14 @@ test('recurring research restores unloaded sessions and resumes a closed board f
   const cwd = await tmp('recurring-restore-');
   await gitRoom(cwd);
   const state = { transcript: [], seen: new Map() };
-  const ctx = { cwd, scheduleFile: `${cwd}/schedule.json`, agentSpecs: 'claude:A', workerSpec: 'claude:Worker', state, sessions: new Map(), noScreen: true };
+  const ctx = { cwd, scheduleFile: `${cwd}/schedule.json`, agentSpecs: 'claude:A:board-model', workerSpec: 'claude:Worker', state, sessions: new Map(), noScreen: true };
   Object.assign(ctx, await load(ctx, ''));
+  const testedModels = [];
+  const testPrompt = async (room, provider, model) => {
+    testedModels.push([provider, model]);
+    return { outcome: 'ok' };
+  };
+  ctx.testPrompt = testPrompt;
   ctx.say = () => {};
   await reloaded(ctx);
   ctx.usage = { ...ctx.usage, fetchQuota: async () => ({}), checkQuotaFloor: () => ({ ok: true }) };
@@ -7148,9 +7157,73 @@ test('recurring research restores unloaded sessions and resumes a closed board f
   ctx.closingAgent = () => ({ name: 'Worker', turn: async () => 'Closing statement: research findings. See pending-instructions.md.' });
   await handleLine('/close', ctx);
   assert.match(readFileSync(`${cwd}/discussions/${boardName}/closing-statement.md`, 'utf8'), /research findings/);
+  ctx.shop.launchDefaults.agents = 'claude:A:new-default';
+  ctx.testPrompt = testPrompt;
   assert.equal((await checkSchedule(ctx, new Date(2026, 10, 23, 3, 0), { loadRoom }))[0].status, 'ran');
+  assert.deepEqual(testedModels, Array.from({ length: 3 }, () => ['claude', 'board-model']));
   assert.notEqual(lastLoaded.sessions.get('A').id, firstSession);
   assert.match(prompts.at(-1), /Closing statement: research findings/);
+});
+
+test('scheduled prompt checks skip failed models and refresh stale Codex quota before the guard', async () => {
+  const { getSchedule, saveSchedule, runScheduledTask, runPromptTest } = await import('../src/ui.mjs');
+  const { parseCodexEvents } = await import('../src/agents.mjs');
+  const usage = await import('../src/usage.mjs');
+  const { hub, first, contexts } = await multiRoom();
+  first.scheduleFile = `${first.cwd}/schedule.json`;
+  first.agentSpecs = 'codex:A:saved-model,codex:B:saved-model,codex:C';
+  const now = new Date('2026-11-28T13:00:00Z');
+  const fresh = { ok: true, updated_at: now.toISOString(),
+    parsed: { five_hour_limit: { used_percent: 20 }, weekly_limit: { used_percent: 10 } } };
+  const stale = { ...fresh, updated_at: '2026-11-28T12:00:00Z' };
+  hub.quotaCache = { value: { codex: stale } };
+  hub.promptRunning = new Set(['codex']);
+  const manualResult = { outcome: 'ok' };
+  hub.promptResults = new Map([['codex', new Map([['', manualResult]])]]);
+  const calls = [];
+  let fail = true;
+  first.usage = { ...first.usage, METER_URL: null, fetchQuota: async () => hub.quotaCache.value,
+    refreshProviderQuota: (provider, reading, cache) => usage.refreshProviderQuota(provider, reading, cache, {
+      codex: async () => fail ? stale : fresh,
+    }),
+    checkQuotaFloor: (quota, providers, floor, options) => {
+      calls.push(['guard', providers]);
+      return usage.checkQuotaFloor(quota, providers, floor, options);
+    },
+  };
+  const runner = async (provider, args, { input }) => {
+    const model = args.includes('-m') ? args[args.indexOf('-m') + 1] : '';
+    calls.push([provider, model, input, args.includes('--ephemeral'), args.includes('resume')]);
+    if (model && fail) throw new Error('model unavailable');
+    return '{"type":"item.completed","item":{"type":"agent_message","text":"OK."}}';
+  };
+  first.testPrompt = (ctx, provider, model, options) =>
+    runPromptTest(ctx, provider, model, runner, { parseCodexEvents }, options);
+  const addRoom = hub.addRoom;
+  hub.addRoom = async (...args) => {
+    const result = await addRoom(...args);
+    result.ctx.usage.checkQuotaFloor = () => ({ ok: true });
+    return result;
+  };
+  const task = saveSchedule(first, { action: 'add', kind: 'recurring', title: 'Preflight', prompt: 'Investigate', time: '14:00' }).tasks[0];
+  const checks = [
+    ['codex', 'saved-model', 'Reply with exactly OK.', false, false],
+    ['codex', '', 'Reply with exactly OK.', false, false],
+  ];
+  const failed = await runScheduledTask(first, task.id, { now });
+  assert.deepEqual(calls, checks);
+  assert.deepEqual(failed, { status: 'skipped', reason: 'Test prompt failed for codex (saved-model): model unavailable' });
+  assert.deepEqual(getSchedule(first).tasks[0].lastRun, { at: now.toISOString(), ...failed });
+  assert.equal(contexts().length, 1);
+  assert.match(usage.checkQuotaFloor(hub.quotaCache.value, ['codex'], 50, { now: +now }).reason, /stale/i);
+
+  fail = false;
+  calls.length = 0;
+  assert.equal((await runScheduledTask(first, task.id, { now })).status, 'ran');
+  assert.deepEqual(calls, [...checks, ['guard', ['codex']]]);
+  assert.equal(hub.quotaCache.value.codex, fresh);
+  assert.deepEqual(hub.promptRunning, new Set(['codex']));
+  assert.deepEqual(hub.promptResults, new Map([['codex', new Map([['', manualResult]])]]));
 });
 
 test('research scheduler applies the real quota guard before creating a board and between laps', async () => {
@@ -7167,7 +7240,7 @@ test('research scheduler applies the real quota guard before creating a board an
   const ctx = { cwd, scheduleFile: `${cwd}/schedule.json`, agentSpecs: 'claude:A', workerSpec: 'claude:Worker', state,
     sessions: new Map(), screen: { clients: new Set(), transcript: state.transcript, worker: [] }, docs,
     usage: { ...usage, fetchQuota: async () => quota }, room: { agents: [{ name: 'A', provider: 'claude' }] },
-    worker: { name: 'Worker' }, totals: {}, noScreen: true, out: () => {} };
+    worker: { name: 'Worker' }, totals: {}, noScreen: true, out: () => {}, testPrompt: async () => ({ outcome: 'ok' }) };
   const id = saveSchedule(ctx, { action: 'add', kind: 'recurring', title: 'Quota research', prompt: 'Investigate', time: '03:00' }).tasks[0].id;
   const loadRoom = async (next) => {
     board = next;
@@ -7206,6 +7279,7 @@ test('research lap totals include manual and scheduled rounds and survive a boar
   const { saveSchedule, getSchedule, runScheduledTask } = await import('../src/ui.mjs');
   const { hub, first, contexts } = await multiRoom();
   first.scheduleFile = `${first.cwd}/schedule.json`;
+  first.testPrompt = async () => ({ outcome: 'ok' });
   first.usage.checkQuotaFloor = () => ({ ok: true });
   const addRoom = hub.addRoom;
   hub.addRoom = async (...args) => {
