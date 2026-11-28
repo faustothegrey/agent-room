@@ -126,3 +126,20 @@ it('sends a pointed passage naming the second heading with its full quote', asyn
   const body = JSON.parse(post.mock.calls.find(([url]) => url === '__say')![1].body);
   expect(body.text).toBe(`Tighten it\n[pointing at: ${passage}]`);
 });
+
+it('keeps two chips when pointing at two copies of the same sentence with the same short label', async () => {
+  const frame = setup(); const user = userEvent.setup();
+  const label = '↳ "Keep the shared draft … the spec before merging."';
+  const first = 'passage in discussions/x/notes.md, under "First section", paragraph 2: "Keep the shared draft clean and see the spec before merging."';
+  const second = 'passage in discussions/x/notes.md, under "Second section", paragraph 2: "Keep the shared draft clean and see the spec before merging."';
+  sendPoint(frame, { type: 'agent-room:point', kind: 'passage', label, text: first });
+  sendPoint(frame, { type: 'agent-room:point', kind: 'passage', label, text: second });
+  sendPoint(frame, { type: 'agent-room:point', kind: 'passage', label, text: second });
+  expect(screen.getByTitle(first)).toBeTruthy();
+  expect(screen.getByTitle(second)).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: `Stop pointing at ${label}` })).toHaveLength(2);
+  await user.type(screen.getByRole('textbox', { name: 'Message to the agents' }), 'Compare both{Enter}');
+  await waitFor(() => expect(post.mock.calls.filter(([url]) => url === '__say')).toHaveLength(1));
+  const body = JSON.parse(post.mock.calls.find(([url]) => url === '__say')![1].body);
+  expect(body.text).toBe(`Compare both\n[pointing at: ${first}; ${second}]`);
+});

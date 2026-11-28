@@ -6,7 +6,7 @@ import { createServer, request } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { JSDOM } from 'jsdom';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import { ATTACH_LIMIT, broadcast, csvTable, docFiles, handle, isTextFile, isViewable, listFiles, messageView, pick, roomBranch, saveAttachments } from '../src/docs.mjs';
 import { md, page } from '../src/docs-files.mjs';
 
@@ -955,5 +955,277 @@ test('passage pointing: 4000-character limit counts location + quote, shows a no
     assert.equal(win.document.getElementById('passage-note'), null);
   } finally {
     dom.window.close();
+  }
+});
+
+// Helper for in-place update tests: stubs polling interval, fetch, scroll, and dynamic Mermaid/Vega script loading.
+function openLiveDocDom(rel, initialMd, { withMermaid = false, withVega = false } = {}) {
+  let currentMd = initialMd;
+  let currentMtime = '1000';
+  let failPageFetch = false;
+  let pollFn = null;
+  let reloaded = false;
+  const loadedScripts = [];
+  const posted = [];
+  const scrollState = { x: 0, y: 0 };
+
+  const installMermaid = (win) => {
+    win.mermaid = {
+      initialize() {},
+      async render(id, src) {
+        const node = /([A-Za-z0-9_]+)\[([^\]]+)\]/.exec(src);
+        const nid = node ? node[1] : 'NodeA';
+        const label = node ? node[2] : 'NodeA';
+        return { svg: `<svg id="${id}"><g class="node" data-id="${nid}"><rect></rect><text>${label}</text></g></svg>` };
+      },
+    };
+  };
+  const installVega = (win) => {
+    win.vegaEmbed = async (box, spec) => {
+      const datum = (spec.data && spec.data.values && spec.data.values[0]) || { day: '16 Nov', runs: 42 };
+      const svg = win.document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      const rect = win.document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      svg.append(rect);
+      box.innerHTML = '';
+      box.append(svg);
+      const item = { datum, _svg: rect, mark: { role: 'mark' } };
+      let clickHandler = null;
+      const view = {
+        scenegraph: () => ({ root: { items: [item] } }),
+        addEventListener: (ev, fn) => { if (ev === 'click') clickHandler = fn; },
+        triggerClick: () => clickHandler && clickHandler({}, item),
+        finalize() {},
+      };
+      box._view = view;
+      return { view };
+    };
+  };
+
+  const html = page(rel, md.parse(currentMd), rel);
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on('jsdomError', (err) => {
+    if (/Not implemented: navigation/i.test(err.message)) reloaded = true;
+    else console.error(err);
+  });
+  const dom = new JSDOM(html, {
+    url: `http://127.0.0.1:5566/${rel}`,
+    runScripts: 'dangerously',
+    virtualConsole,
+    beforeParse(win) {
+      Object.defineProperty(win, 'parent', {
+        value: { postMessage: (data, origin) => posted.push({ data, origin }) },
+      });
+      win.setInterval = (fn) => { pollFn = fn; return 1; };
+      Object.defineProperty(win, 'scrollX', { get: () => scrollState.x, configurable: true });
+      Object.defineProperty(win, 'scrollY', { get: () => scrollState.y, configurable: true });
+      win.scrollTo = (x, y) => { scrollState.x = x; scrollState.y = y; };
+      win.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes('__mtime')) return { ok: true, text: async () => currentMtime };
+        if (failPageFetch) throw new Error('network down');
+        return { ok: true, text: async () => page(rel, md.parse(currentMd), rel) };
+      };
+      if (withMermaid) installMermaid(win);
+      if (withVega) installVega(win);
+      // Intercept dynamic <script src="/__lib/..."> appended to document.head.
+      const origAppend = win.Element.prototype.append;
+      win.Element.prototype.append = function (...nodes) {
+        const res = origAppend.apply(this, nodes);
+        for (const n of nodes) {
+          if (n && n.tagName === 'SCRIPT' && n.src && n.src.includes('/__lib/')) {
+            const name = n.src.slice(n.src.lastIndexOf('/') + 1);
+            loadedScripts.push(name);
+            if (name === 'mermaid.js') installMermaid(win);
+            if (name === 'vega-embed.js') installVega(win);
+            queueMicrotask(() => n.onload && n.onload());
+          }
+        }
+        return res;
+      };
+    },
+  });
+  const flush = () => new Promise((r) => setTimeout(r, 15));
+  return {
+    dom,
+    posted,
+    loadedScripts,
+    scrollState,
+    wasReloaded: () => reloaded,
+    setDoc(nextMd, nextMtime) { currentMd = nextMd; currentMtime = String(nextMtime); },
+    setFailPageFetch(flag) { failPageFetch = flag; },
+    async poll() { await pollFn(); await flush(); },
+  };
+}
+
+test('in-place update (1): preserves scroll and drawn marks while updating table, diagram, chart and pointing', async () => {
+  const initial = [
+    '# Live Doc',
+    '',
+    'Old intro paragraph.',
+    '',
+    '```csv runs',
+    'day,runs',
+    '16 Nov,10',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  OldBox[Old box]',
+    '```',
+    '',
+    '```vega-lite',
+    '{"mark":"bar","data":{"values":[{"day":"16 Nov","runs":10}]}}',
+    '```',
+  ].join('\n');
+  const updated = [
+    '# Live Doc',
+    '',
+    'Updated intro paragraph.',
+    '',
+    '```csv runs',
+    'day,runs',
+    '17 Nov,42',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  NewBox[New box]',
+    '```',
+    '',
+    '```vega-lite',
+    '{"mark":"bar","data":{"values":[{"day":"17 Nov","runs":42}]}}',
+    '```',
+  ].join('\n');
+
+  const env = openLiveDocDom('discussions/x/notes.md', initial, { withMermaid: true, withVega: true });
+  try {
+    const win = env.dom.window;
+    await env.poll(); // baseline mtime
+
+    // Scroll down, choose Pen tool, and add a drawn mark into #ink.
+    env.scrollState.y = 240;
+    win.document.querySelector('#ink-tools [data-tool="pen"]').click();
+    const ink = win.document.getElementById('ink');
+    assert.ok(ink);
+    const mark = win.document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    mark.setAttribute('d', 'M10 10L50 50');
+    mark.id = 'test-mark';
+    ink.append(mark);
+
+    // File changes on disk.
+    env.setDoc(updated, 2000);
+    await env.poll();
+
+    assert.equal(env.wasReloaded(), false);
+    assert.equal(env.scrollState.y, 240);
+    assert.equal(win.document.getElementById('test-mark'), mark);
+    assert.equal(win.document.body.classList.contains('drawing'), true);
+    assert.match(win.document.querySelector('main p').textContent, /Updated intro paragraph/);
+
+    // Switch back to Point and verify clicking cell, diagram box, chart mark, and selecting prose still point.
+    win.document.querySelector('#ink-tools [data-tool="point"]').click();
+    win.document.querySelector('.sheet td[data-cell="B2"]').click();
+    win.document.querySelector('.mermaid-box g.node').dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+    win.document.querySelector('.vl-box')._view.triggerClick();
+    selectElement(win, win.document.querySelector('main p'));
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+
+    assert.equal(env.posted.length, 4);
+    assert.match(env.posted[0].data.text, /table cell runs!B2 in discussions\/x\/notes\.md = 42/);
+    assert.match(env.posted[1].data.text, /diagram box NewBox \("New box"\)/);
+    assert.match(env.posted[2].data.text, /chart point day: 17 Nov, runs: 42/);
+    assert.match(env.posted[3].data.text, /passage in discussions\/x\/notes\.md, under "Live Doc", paragraph 1: "Updated intro paragraph\."/);
+  } finally {
+    env.dom.window.close();
+  }
+});
+
+test('in-place update (2): prose-only reloads on first diagram; table-only loads diagram and chart in place keeping marks', async () => {
+  // Part A: prose-only document gets its first diagram -> reloads so toolbar + Mermaid load.
+  const proseEnv = openLiveDocDom('discussions/x/prose.md', '# Prose\n\nJust words.\n');
+  try {
+    await proseEnv.poll();
+    assert.equal(proseEnv.dom.window.document.getElementById('ink'), null);
+    proseEnv.setDoc('# Prose\n\n```mermaid\nflowchart LR\n  A[Start]\n```\n', 2000);
+    await proseEnv.poll();
+    assert.equal(proseEnv.wasReloaded(), true);
+  } finally {
+    proseEnv.dom.window.close();
+  }
+
+  // Part B: table-only document with a drawn mark gets its first diagram and chart -> updates in place, loads libs, keeps mark.
+  const tableOnly = '# Table\n\n```csv t\na,b\n1,2\n```\n';
+  const withFigures = [
+    '# Table',
+    '',
+    '```csv t',
+    'a,b',
+    '1,3',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  Worker[The worker]',
+    '```',
+    '',
+    '```vega-lite',
+    '{"mark":"bar","data":{"values":[{"day":"18 Nov","runs":7}]}}',
+    '```',
+  ].join('\n');
+  const tableEnv = openLiveDocDom('discussions/x/table.md', tableOnly);
+  try {
+    const win = tableEnv.dom.window;
+    await tableEnv.poll();
+    const ink = win.document.getElementById('ink');
+    assert.ok(ink);
+    const mark = win.document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+    mark.id = 'kept-mark';
+    ink.append(mark);
+
+    tableEnv.setDoc(withFigures, 2000);
+    await tableEnv.poll();
+
+    assert.equal(tableEnv.wasReloaded(), false);
+    assert.equal(win.document.getElementById('kept-mark'), mark);
+    assert.ok(tableEnv.loadedScripts.includes('mermaid.js'));
+    assert.ok(tableEnv.loadedScripts.includes('vega.js'));
+    assert.ok(tableEnv.loadedScripts.includes('vega-lite.js'));
+    assert.ok(tableEnv.loadedScripts.includes('vega-embed.js'));
+    assert.ok(win.document.querySelector('.mermaid-box g.node[data-id="Worker"]'));
+    assert.ok(win.document.querySelector('.vl-box svg'));
+  } finally {
+    tableEnv.dom.window.close();
+  }
+});
+
+test('in-place update (3): failed fetch keeps pane and marks intact, and next successful poll updates it', async () => {
+  const initial = '# Doc\n\nBefore change.\n\n```csv t\na\n1\n```\n';
+  const updated = '# Doc\n\nAfter change.\n\n```csv t\na\n2\n```\n';
+  const env = openLiveDocDom('discussions/x/retry.md', initial);
+  try {
+    const win = env.dom.window;
+    await env.poll();
+    const ink = win.document.getElementById('ink');
+    const mark = win.document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    mark.id = 'retry-mark';
+    ink.append(mark);
+
+    env.setDoc(updated, 2000);
+    env.setFailPageFetch(true);
+    await env.poll();
+
+    assert.equal(env.wasReloaded(), false);
+    assert.equal(win.document.getElementById('retry-mark'), mark);
+    assert.match(win.document.querySelector('main p').textContent, /Before change/);
+
+    // Next poll succeeds with the same mtime (2000) because last was not advanced on failure.
+    env.setFailPageFetch(false);
+    await env.poll();
+
+    assert.equal(env.wasReloaded(), false);
+    assert.equal(win.document.getElementById('retry-mark'), mark);
+    assert.match(win.document.querySelector('main p').textContent, /After change/);
+  } finally {
+    env.dom.window.close();
   }
 });

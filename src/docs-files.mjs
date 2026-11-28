@@ -247,7 +247,7 @@ const LIBS = {
   'vega.js': 'vega/build/vega.min.js', 'vega-lite.js': 'vega-lite/build/vega-lite.min.js', 'vega-embed.js': 'vega-embed/build/vega-embed.min.js',
 };
 
-// The page polls the file's mtime and reloads when an agent changes it.
+// The page polls the file's mtime and updates its content in place when an agent changes it.
 // base: the room's address (/r/<id>/), so the page's links stay in its room.
 function page(title, body, watch, base = '/') {
   const home = `<a href="${esc(base)}">all files</a>`, mtime = `${base}__mtime?f=`;
@@ -284,18 +284,53 @@ nav { font-size: .85rem; opacity: .7; margin-bottom: 1rem; }
 ${body.includes('<div class="mermaid-box">') ? `<script src="${esc(base)}__lib/mermaid.js"></script>` : ''}
 ${body.includes('<div class="vl-box">') ? ['vega', 'vega-lite', 'vega-embed'].map((l) => `<script src="${esc(base)}__lib/${l}.js"></script>`).join('') : ''}
 <script>
+// Dynamic loader for Mermaid and Vega bundles when an in-place update adds the first diagram or chart.
+const LIB_BASE = ${JSON.stringify(base)} + '__lib/';
+const loadedLibs = new Map();
+const loadScript = (name) => {
+  if (loadedLibs.has(name)) return loadedLibs.get(name);
+  const p = new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = LIB_BASE + name;
+    s.onload = () => ok();
+    s.onerror = () => { loadedLibs.delete(name); fail(new Error('Failed to load ' + name)); };
+    document.head.append(s);
+  });
+  loadedLibs.set(name, p);
+  return p;
+};
 // Vega-Lite blocks: drawn here as SVG. views keeps each chart, for pointing and highlighting.
 const views = [];
-if (window.vegaEmbed) for (const box of document.querySelectorAll('.vl-box')) {
-  const src = box.querySelector('.vl-src'), fail = (err) => {
-    const p = document.createElement('p'); p.className = 'mermaid-error'; p.textContent = 'This chart has an error: ' + ((err && err.message) || err);
-    box.append(p);
-  };
-  let spec;
-  try { spec = JSON.parse(src.textContent); } catch (err) { fail(err); continue; }
-  vegaEmbed(box, spec, { renderer: 'svg', actions: false, theme: 'dark' })
-    .then(({ view }) => { views.push(view); view.addEventListener('click', (e, item) => pointAtDatum(item)); }).catch(fail);
+async function renderCharts() {
+  for (const v of views.splice(0)) { try { v.finalize(); } catch {} }
+  const boxes = [...document.querySelectorAll('.vl-box')].filter((b) => b.querySelector('.vl-src'));
+  if (!boxes.length) return;
+  if (!window.vegaEmbed) {
+    try {
+      await loadScript('vega.js');
+      await loadScript('vega-lite.js');
+      await loadScript('vega-embed.js');
+    } catch { return; }
+  }
+  if (!window.vegaEmbed) return;
+  for (const box of boxes) {
+    const src = box.querySelector('.vl-src'); if (!src) continue;
+    const fail = (err) => {
+      if (!box.isConnected) return;
+      const p = document.createElement('p'); p.className = 'mermaid-error'; p.textContent = 'This chart has an error: ' + ((err && err.message) || err);
+      box.append(p);
+    };
+    let spec;
+    try { spec = JSON.parse(src.textContent); } catch (err) { fail(err); continue; }
+    vegaEmbed(box, spec, { renderer: 'svg', actions: false, theme: 'dark' })
+      .then(({ view }) => {
+        if (!box.isConnected) { try { view.finalize(); } catch {} return; }
+        views.push(view);
+        view.addEventListener('click', (e, item) => pointAtDatum(item));
+      }).catch(fail);
+  }
 }
+renderCharts();
 // A chart item's plain fields, as "day: 16 Nov, runs: 42": not Vega's own (_x, and the
 // runs_start/runs_end it adds for stacking).
 const ownField = (d, k) => !k.startsWith('_') && !(/^(.+)_(start|end)$/.test(k) && k.replace(/_(start|end)$/, '') in d);
@@ -316,30 +351,82 @@ function chartItems() {
 }
 // Mermaid blocks: drawn here, with mermaid's strict security (no scripts or click handlers from
 // the source). A source with an error shows mermaid's message under it.
-if (window.mermaid) {
-  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark', flowchart: { htmlLabels: false } });
-  let n = 0;
-  for (const box of document.querySelectorAll('.mermaid-box')) {
-    const src = box.querySelector('.mermaid-src'), id = 'mermaid-' + (++n);
-    mermaid.render(id, src.textContent).then(({ svg }) => { box.innerHTML = svg; }).catch((err) => {
+let mermaidSeq = 0, mermaidInit = false;
+async function renderDiagrams() {
+  const boxes = [...document.querySelectorAll('.mermaid-box')].filter((b) => b.querySelector('.mermaid-src'));
+  if (!boxes.length) return;
+  if (!window.mermaid) {
+    try { await loadScript('mermaid.js'); } catch { return; }
+  }
+  if (!window.mermaid) return;
+  if (!mermaidInit) {
+    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark', flowchart: { htmlLabels: false } });
+    mermaidInit = true;
+  }
+  for (const box of boxes) {
+    const src = box.querySelector('.mermaid-src'); if (!src) continue;
+    const id = 'mermaid-' + (++mermaidSeq);
+    try {
+      const { svg } = await mermaid.render(id, src.textContent);
+      if (box.isConnected) box.innerHTML = svg;
+    } catch (err) {
       const stray = document.getElementById('d' + id); if (stray) stray.remove(); // mermaid's own error drawing, left at the end of the page
-      const p = document.createElement('p'); p.className = 'mermaid-error'; p.textContent = 'This diagram has an error: ' + ((err && err.message) || err);
-      box.append(p);
-    });
+      if (box.isConnected) {
+        const p = document.createElement('p'); p.className = 'mermaid-error'; p.textContent = 'This diagram has an error: ' + ((err && err.message) || err);
+        box.append(p);
+      }
+    }
   }
 }
+renderDiagrams();
 // A diagram box's name: its id in the source (Worker in "Worker[The worker]").
 const nodeName = (g) => g.dataset.id || (/flowchart-(.+)-\\d+$/.exec(g.id) || [])[1] || null;
-let last = null;
-setInterval(async () => {
-  const t = await (await fetch(${JSON.stringify(mtime)} + encodeURIComponent(${JSON.stringify(watch)}), { cache: 'no-store' })).text();
-  if (t === 'false') return; // missing for now (being saved?): keep showing it, ask again
-  if (last !== null && t !== last) location.reload();
-  last = t;
-}, 2000);
+let last = null, updating = false;
+async function refreshDoc() {
+  const res = await fetch(location.href, { cache: 'no-store' });
+  if (!res.ok) return false;
+  const html = await res.text();
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
+  const nextMain = parsed.querySelector('main');
+  const main = document.querySelector('main');
+  if (!nextMain || !main) return false;
+  const inkEl = document.getElementById('ink');
+  const nextHasFigures = !!nextMain.querySelector('.sheet, .mermaid-box, .vl-box');
+  if (parent !== window && !inkEl && nextHasFigures) { location.reload(); return true; }
+  const sx = window.scrollX, sy = window.scrollY;
+  const frag = document.createDocumentFragment();
+  for (const node of [...nextMain.childNodes]) frag.append(document.adoptNode(node));
+  for (const child of [...main.childNodes]) if (child !== inkEl) child.remove();
+  if (inkEl) main.insertBefore(frag, inkEl); else main.append(frag);
+  window.scrollTo(sx, sy);
+  renderDiagrams();
+  renderCharts();
+  return true;
+}
+async function pollMtime() {
+  if (updating) return;
+  updating = true;
+  try {
+    const res = await fetch(${JSON.stringify(mtime)} + encodeURIComponent(${JSON.stringify(watch)}), { cache: 'no-store' });
+    if (!res.ok) return;
+    const t = await res.text();
+    if (t === 'false') return; // missing for now (being saved?): keep showing it, ask again
+    if (last === null) { last = t; return; }
+    if (t !== last) {
+      const ok = await refreshDoc();
+      if (ok) last = t;
+    }
+  } catch {
+    // Keep the current pane as it is and try again at the next poll.
+  } finally {
+    updating = false;
+  }
+}
+pollMtime();
+setInterval(pollMtime, 2000);
 // Shown in the room page, with tables, diagrams or charts: a markup layer. Pen, Circle and Arrow
 // draw over the document; a finished mark points at what it covers (an arrow: what its tip is on).
-// Marks stay until Clear marks or a reload. Esc goes back to Point.
+// Marks stay until Clear marks or a manual reload. Esc goes back to Point.
 const pointables = () => [
   ...[...document.querySelectorAll('.sheet td[data-cell]')].map((td) => {
     const sheet = td.closest('table').dataset.sheet;

@@ -644,7 +644,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       const label = data.label, text = data.text;
       if (data.kind === 'passage') {
         if (text.length > 4000) return;
-        setPointed((previous) => [...previous.filter((item) => item.label !== label), { label: label.slice(0, 80), text }]);
+        setPointed((previous) => [...previous.filter((item) => item.text !== text), { label: label.slice(0, 80), text }]);
         return;
       }
       setPointed((previous) => [...previous.filter((item) => item.label !== label), { label: label.slice(0, 80), text: text.slice(0, 300) }]);
