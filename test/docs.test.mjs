@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createServer, request } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { JSDOM, VirtualConsole } from 'jsdom';
 import { ATTACH_LIMIT, broadcast, csvTable, docFiles, handle, isTextFile, isViewable, listFiles, messageView, pick, roomBranch, saveAttachments } from '../src/docs.mjs';
-import { md, page } from '../src/docs-files.mjs';
+import { md, page, RECENT_VERSION_LIMIT, readReviewed, renderMarkdownWithDiff, reviewedDir, sourceHash } from '../src/docs-files.mjs';
 
 // A proposal/ folder with a doc, a drawing, a hidden file, and a file just outside it.
 function fixture() {
@@ -1227,5 +1227,249 @@ test('in-place update (3): failed fetch keeps pane and marks intact, and next su
     assert.match(win.document.querySelector('main p').textContent, /After change/);
   } finally {
     env.dom.window.close();
+  }
+});
+
+test('change tracking (1, 2, 5, 7): multi-edit diff, Mark reviewed saves shown version, survives restart, stale version refused, path/origin checked', async () => {
+  const dir = fixture();
+  const screen = { clients: new Set(), transcript: [] };
+  const notesPath = join(dir, 'plan.md');
+  const v1 = [
+    '# Plan',
+    '',
+    'First paragraph stays here.',
+    '',
+    'Second paragraph mentions draft.',
+    '',
+    'Third paragraph is quite wordy and really should be tightened up nicely.',
+  ].join('\n');
+  writeFileSync(notesPath, v1);
+
+  const s1 = await serve(dir, screen);
+  try {
+    // First open establishes first-opened baseline.
+    const html1 = await (await s1.get('/plan.md')).text();
+    assert.match(html1, /Tracking changes since you first opened this document/);
+    const hash1 = /data-doc-hash="([0-9a-f]+)"/.exec(html1)?.[1];
+    assert.equal(hash1, sourceHash(v1));
+
+    // Security checks on /__review: foreign origin -> 403, unservable path -> 404.
+    assert.equal((await postFrom(s1, '/__review', { file: 'plan.md', hash: hash1 }, { origin: 'https://evil.example' })).status, 403);
+    assert.equal((await postFrom(s1, '/__review', { file: '../secret.txt', hash: hash1 })).status, 404);
+
+    // (1) Two sequential edits to paragraph 3 plus an outside edit to paragraph 2.
+    const v2 = v1.replace('Third paragraph is quite wordy and really should be tightened up nicely.', 'Third paragraph is wordy and should be tightened.');
+    writeFileSync(notesPath, v2);
+    const v3 = v2
+      .replace('Second paragraph mentions draft.', 'Second paragraph mentions final draft.')
+      .replace('Third paragraph is wordy and should be tightened.', 'Third paragraph is tight.');
+    writeFileSync(notesPath, v3);
+
+    const html3 = await (await s1.get('/plan.md')).text();
+    assert.match(html3, /Tracking changes since you first opened this document · 2 changes/);
+    assert.match(html3, /<ins class="diff-ins">final<\/ins>/);
+    assert.match(html3, /<ins class="diff-ins">tight\.<\/ins>/);
+    assert.match(html3, /<del class="diff-del">quite wordy and really should be tightened up nicely\.<\/del>/);
+    const hash3 = /data-doc-hash="([0-9a-f]+)"/.exec(html3)?.[1];
+    assert.equal(hash3, sourceHash(v3));
+
+    // (2) Save v4 lands on disk BEFORE Mark reviewed is clicked for shown version v3.
+    const v4 = v3 + '\n\nFourth paragraph added during review.\n';
+    writeFileSync(notesPath, v4);
+    const revRes = await postFrom(s1, '/__review', { file: 'plan.md', hash: hash3 });
+    assert.equal(revRes.status, 200);
+    // Now fetching plan.md compares v4 against reviewed v3: v4 stays shown as unreviewed!
+    const html4 = await (await s1.get('/plan.md')).text();
+    assert.match(html4, /1 change since you reviewed/);
+    assert.match(html4, /<p class="diff-ins-block">Fourth paragraph added during review\.<\/p>/);
+
+    // (5) Restart: close server 1, clear in-memory recent versions, start server 2 -> reviewed version v3 persists.
+    s1.close();
+    globalThis.__agentRoomDocVersions?.clear();
+    const s2 = await serve(dir, screen);
+    try {
+      const htmlAfterRestart = await (await s2.get('/plan.md')).text();
+      assert.match(htmlAfterRestart, /1 change since you reviewed/);
+      assert.match(htmlAfterRestart, /Fourth paragraph added during review/);
+      assert.equal(readReviewed(dir, 'plan.md')?.hash, hash3);
+
+      // (7) Stale pane: render RECENT_VERSION_LIMIT + 2 newer versions so an older rendered version drops out.
+      const staleSource = '# Plan\n\nStale version that will be evicted.\n';
+      writeFileSync(notesPath, staleSource);
+      const staleHtml = await (await s2.get('/plan.md')).text();
+      const staleHash = /data-doc-hash="([0-9a-f]+)"/.exec(staleHtml)?.[1];
+      for (let i = 0; i < RECENT_VERSION_LIMIT + 2; i++) {
+        writeFileSync(notesPath, `# Plan\n\nNewer version ${i}.\n`);
+        await (await s2.get('/plan.md')).text();
+      }
+      const beforeStaleReview = readReviewed(dir, 'plan.md');
+      const staleRes = await postFrom(s2, '/__review', { file: 'plan.md', hash: staleHash });
+      assert.equal(staleRes.status, 409);
+      const staleJson = await staleRes.json();
+      assert.equal(staleJson.unavailable, true);
+      assert.match(staleJson.message, /This version is no longer available: the pane will show the latest/);
+      // Reviewed version on disk is unchanged.
+      assert.deepEqual(readReviewed(dir, 'plan.md'), beforeStaleReview);
+    } finally {
+      s2.close();
+    }
+  } finally {
+    s1.close();
+    rmSync(reviewedDir(dir), { recursive: true, force: true });
+  }
+});
+
+test('change tracking (3): save B before the first poll is caught because poll compares against rendered hash', async () => {
+  const dir = fixture();
+  const screen = { clients: new Set(), transcript: [] };
+  const notesPath = join(dir, 'plan.md');
+  writeFileSync(notesPath, '# Plan\n\nVersion A.\n');
+  const s = await serve(dir, screen);
+  try {
+    const htmlA = await (await s.get('/plan.md')).text();
+    // Save Version B on disk BEFORE the first poll runs in the page.
+    writeFileSync(notesPath, '# Plan\n\nVersion B.\n');
+    let pollFn = null;
+    const dom = new JSDOM(htmlA, {
+      url: `${s.base}/plan.md`,
+      runScripts: 'dangerously',
+      beforeParse(win) {
+        Object.defineProperty(win, 'parent', { value: { postMessage() {} } });
+        win.setInterval = (fn) => { pollFn = fn; return 1; };
+        win.scrollTo = () => {};
+        win.fetch = (u, opts) => fetch(new URL(String(u), `${s.base}/plan.md`), opts);
+      },
+    });
+    try {
+      await new Promise((r) => setTimeout(r, 80));
+      if (pollFn) await pollFn();
+      await new Promise((r) => setTimeout(r, 80));
+      const d = dom.window.document;
+      assert.match(d.querySelector('main p').textContent, /Version/);
+      assert.ok(d.querySelector('main ins.diff-ins'));
+      assert.match(d.querySelector('main ins.diff-ins').textContent, /B\./);
+      assert.match(d.querySelector('#review-bar .review-status').textContent, /1 change/);
+    } finally {
+      dom.window.close();
+    }
+  } finally {
+    s.close();
+    rmSync(reviewedDir(dir), { recursive: true, force: true });
+  }
+});
+
+test('change tracking (4, 6): changed cell, changed box, removed box, changed chart, and top paragraph insertion', () => {
+  // (4) Table cell changed, diagram box changed + removed, chart changed.
+  const oldDoc = [
+    '# Figures',
+    '',
+    '```csv runs',
+    'day,runs',
+    '16 Nov,10',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  Worker[Old worker] --> GoneBox[Will be removed]',
+    '```',
+    '',
+    '```vega-lite',
+    '{"mark":"bar","data":{"values":[{"day":"16 Nov","runs":10}]}}',
+    '```',
+  ].join('\n');
+  const newDoc = [
+    '# Figures',
+    '',
+    '```csv runs',
+    'day,runs',
+    '16 Nov,42',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  Worker[New worker] --> StayBox[Stays]',
+    '```',
+    '',
+    '```vega-lite',
+    '{"mark":"bar","data":{"values":[{"day":"16 Nov","runs":42}]}}',
+    '```',
+  ].join('\n');
+
+  const diff4 = renderMarkdownWithDiff(oldDoc, newDoc, md);
+  assert.match(diff4.html, /<td data-cell="B2" class="num diff-changed"/);
+  assert.doesNotMatch(diff4.html, /<td data-cell="A2"[^>]*diff-changed/);
+  assert.match(diff4.html, /data-changed-nodes="\[&quot;Worker&quot;,&quot;StayBox&quot;\]"/);
+  assert.ok(diff4.removed.includes('diagram box GoneBox'));
+  assert.match(diff4.html, /<div class="vl-box diff-changed"><div class="diff-chart-badge">Changed since review<\/div>/);
+
+  // (6) Insert a paragraph near the top: one insertion shown, paragraphs below untouched.
+  const base6 = '# Doc\n\nPara one.\n\nPara two.\n\nPara three.\n';
+  const ins6 = '# Doc\n\nInserted near top.\n\nPara one.\n\nPara two.\n\nPara three.\n';
+  const diff6 = renderMarkdownWithDiff(base6, ins6, md);
+  assert.equal(diff6.changeCount, 1);
+  assert.match(diff6.html, /<p class="diff-ins-block">Inserted near top\.<\/p>/);
+  assert.match(diff6.html, /<p>Para one\.<\/p>\n<p>Para two\.<\/p>\n<p>Para three\.<\/p>/);
+});
+
+test('change tracking (8): pointing at a paragraph with a deletion and one below a deleted paragraph uses only current text and current paragraph number', () => {
+  const oldDoc = [
+    '## Section',
+    '',
+    'Keep the old slow path clean.',
+    '',
+    'This entire second paragraph will be deleted.',
+    '',
+    'Final paragraph stays below.',
+  ].join('\n');
+  const newDoc = [
+    '## Section',
+    '',
+    'Keep the fast path clean.',
+    '',
+    'Final paragraph stays below.',
+  ].join('\n');
+  const diff = renderMarkdownWithDiff(oldDoc, newDoc, md);
+  const html = page('discussions/x/notes.md', diff.html, 'discussions/x/notes.md', '/', {
+    hash: sourceHash(newDoc),
+    reviewed: true,
+    changeCount: diff.changeCount,
+    removed: diff.removed,
+  });
+  const posted = [];
+  const dom = new JSDOM(html, {
+    url: 'http://127.0.0.1:5566/discussions/x/notes.md',
+    runScripts: 'dangerously',
+    beforeParse(win) {
+      Object.defineProperty(win, 'parent', {
+        value: { postMessage: (data, origin) => posted.push({ data, origin }) },
+      });
+    },
+  });
+  try {
+    const win = dom.window;
+    const ps = [...win.document.querySelectorAll('main p')];
+    assert.equal(ps.length, 3); // edited p1, deleted p2 (.diff-del-block), current p3
+    assert.ok(ps[0].querySelector('del.diff-del'));
+    assert.ok(ps[1].classList.contains('diff-del-block'));
+
+    // Select paragraph 1 (which contains <del class="diff-del">old slow</del>).
+    selectElement(win, ps[0]);
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 1);
+    assert.equal(
+      posted[0].data.text,
+      'passage in discussions/x/notes.md, under "Section", paragraph 1: "Keep the fast path clean."',
+    );
+
+    // Select paragraph below the deleted paragraph: must be paragraph 2 (matching current Markdown).
+    selectElement(win, ps[2]);
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 2);
+    assert.equal(
+      posted[1].data.text,
+      'passage in discussions/x/notes.md, under "Section", paragraph 2: "Final paragraph stays below."',
+    );
+  } finally {
+    dom.window.close();
   }
 });
