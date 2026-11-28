@@ -1520,7 +1520,7 @@ const boards = boardsModule.createBoards({
   writeSchedule: (...args) => writeSchedule(...args), broadcastSchedule: (...args) => broadcastSchedule(...args), pageOf,
   mainRef, modelLabel, currentSettings, saveClosed,
 });
-export const { WORKBENCH_MARKER, isWorkbenchDir, RESEARCH_MARKER, isResearchDir, createBoardFolder, createSessionFile, cancelClose } = boards;
+export const { WORKBENCH_MARKER, isWorkbenchDir, RESEARCH_MARKER, isResearchDir, createBoardFolder, createSessionFile, cancelClose, opensBeside, runsAtOnce } = boards;
 const { SECTIONS, DATED, BRAINSTORMS, isWorkbenchName, workbenchNames, syncResearchKind, chooseResearchKind, researchNames, recordResearchLap, researchStats, isBoard, folderOf, boardRef, moveBoard, requestRollback, confirmRollbackArchive, rollbackReport, openBoard, briefing, closedEntries, closedBoards, checkpoints, writeCheckpoint, readCheckpoint, captureRound, saveCheckpoint, workOf, persistWork, clock, firstLine, leftBehind, detachWorker, saveLeftWorker, peekBoard, resumeBoard, refOf, startFresh, convertBrainstormToResearch, convertResearchToSprint, convertBrainstorm, deleteBrainstorm, deleteResearch, newSprint, newBrainstorm, newWorkbench, newResearch, goto, openBeside, closeContext, newSprintBeside, newBrainstormBeside, newWorkbenchBeside, newResearchBeside, closeBoard, cancelCreation, closeNamedBoard } = boards;
 
 // Workshop callbacks refer to the current room code; lane operations are resolved when called.

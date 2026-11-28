@@ -1591,38 +1591,45 @@ function closeContext(c, to) {
   c.say?.('/quit');
 }
 
+// Whether /new, /brainstorm, /workbench or /research on the screen opens a new board beside this
+// one rather than reusing an empty, idle board in place. Shared with cli.mjs so only beside
+// creations bypass the input queue.
+const BOARD_CREATION_COMMANDS = new Set(['/new', '/brainstorm', '/workbench', '/research']);
+const opensBeside = (ctx) => !fresh(ctx) || !!ctx.busy;
+const runsAtOnce = (command, ctx) => BOARD_CREATION_COMMANDS.has(command) && opensBeside(ctx);
+
 // /new on the screen: the discussion (or brainstorm) in use stays open. A new brainstorm not
 // started yet becomes the new discussion instead (unless this board is busy).
 async function newSprintBeside(ctx) {
-  if (!ctx.busy && (ctx.state.brainstorm || ctx.state.workbench || ctx.state.research) && fresh(ctx)) {
+  if (!opensBeside(ctx) && (ctx.state.brainstorm || ctx.state.workbench || ctx.state.research)) {
     const wasRes = !!ctx.state.research;
     endSession(ctx, 'starting a new sprint');
     await defaultsForNew(ctx, { reloadAgents: wasRes });
     switchTo(ctx, null);
     return note(ctx, 'New sprint: your next message names it and starts it.');
   }
-  if (!ctx.busy && fresh(ctx)) return note(ctx, 'No sprint started yet: your next message starts a new one.');
+  if (!opensBeside(ctx)) return note(ctx, 'No sprint started yet: your next message starts a new one.');
   const next = await openBeside(ctx);
   goto(ctx, next);
   note(ctx, `New sprint: ${ctx.board?.name ?? 'this one'} stays open (${ctx.state.brainstorm ? 'Brainstorms: Go to' : 'Sprints: Continue'} shows it again).`);
 }
 // /brainstorm on the screen: beside the open discussions and brainstorms (in this context if it is empty and not busy).
 async function newBrainstormBeside(ctx) {
-  if (!ctx.busy && fresh(ctx)) return newBrainstorm(ctx);
+  if (!opensBeside(ctx)) return newBrainstorm(ctx);
   const next = await openBeside(ctx);
   await newBrainstorm(next);
   goto(ctx, next);
 }
 // /workbench on the screen: beside the open boards (in this context if it is empty and not busy).
 async function newWorkbenchBeside(ctx) {
-  if (!ctx.busy && fresh(ctx)) return newWorkbench(ctx);
+  if (!opensBeside(ctx)) return newWorkbench(ctx);
   const next = await openBeside(ctx);
   await newWorkbench(next);
   goto(ctx, next);
 }
 // /research on the screen: beside the open boards (in this context if it is empty and not busy).
 async function newResearchBeside(ctx) {
-  if (!ctx.busy && fresh(ctx)) return newResearch(ctx);
+  if (!opensBeside(ctx)) return newResearch(ctx);
   const next = await openBeside(ctx);
   await newResearch(next);
   goto(ctx, next);
@@ -1826,5 +1833,5 @@ async function closeNamedBoard(ctx, name, { extraLine = null, rethrow = false } 
 }
 
 
-return { SECTIONS, DATED, BRAINSTORMS, isWorkbenchDir, isWorkbenchName, workbenchNames, isResearchDir, readResearchKind, syncResearchKind, chooseResearchKind, researchNames, recordResearchLap, researchStats, isBoard, folderOf, boardRef, moveBoard, requestRollback, confirmRollbackArchive, rollbackReport, openBoard, briefing, closedEntries, closedBoards, checkpoints, writeCheckpoint, readCheckpoint, captureRound, saveCheckpoint, workOf, persistWork, clock, firstLine, leftBehind, detachWorker, saveLeftWorker, peekBoard, resumeBoard, refOf, startFresh, convertBrainstormToResearch, convertResearchToSprint, convertBrainstorm, deleteBrainstorm, deleteResearch, newSprint, newBrainstorm, newWorkbench, newResearch, goto, openBeside, closeContext, newSprintBeside, newBrainstormBeside, newWorkbenchBeside, newResearchBeside, closeBoard, cancelCreation, cancelClose, closeNamedBoard, WORKBENCH_MARKER, RESEARCH_MARKER, createBoardFolder, createSessionFile };
+return { SECTIONS, DATED, BRAINSTORMS, isWorkbenchDir, isWorkbenchName, workbenchNames, isResearchDir, readResearchKind, syncResearchKind, chooseResearchKind, researchNames, recordResearchLap, researchStats, isBoard, folderOf, boardRef, moveBoard, requestRollback, confirmRollbackArchive, rollbackReport, openBoard, briefing, closedEntries, closedBoards, checkpoints, writeCheckpoint, readCheckpoint, captureRound, saveCheckpoint, workOf, persistWork, clock, firstLine, leftBehind, detachWorker, saveLeftWorker, peekBoard, resumeBoard, refOf, startFresh, convertBrainstormToResearch, convertResearchToSprint, convertBrainstorm, deleteBrainstorm, deleteResearch, newSprint, newBrainstorm, newWorkbench, newResearch, goto, openBeside, closeContext, opensBeside, runsAtOnce, newSprintBeside, newBrainstormBeside, newWorkbenchBeside, newResearchBeside, closeBoard, cancelCreation, cancelClose, closeNamedBoard, WORKBENCH_MARKER, RESEARCH_MARKER, createBoardFolder, createSessionFile };
 }
