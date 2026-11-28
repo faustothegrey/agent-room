@@ -367,10 +367,12 @@ export async function load(ctx, v) {
     gauges: ctx.screen?.quota,
     measured: ctx.screen?.quotaAt?.providers ?? ctx.screen?.quotaAt?.measured,
   });
+  const testPrompt = (room, provider, model, options) =>
+    runPromptTest(room, provider, model, runner, { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM }, options);
   return { room: createRoom(agents, ctx.state, instr, usageLine), worker, docs, lanes, workshopModule, boardsModule, monitorModule, schedulerModule, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers, recordedPids,
     permissions: { read: readPermissionConfig, report: permissionReport },
     shop: roomShop,
-    testPrompt: (room, provider, model) => runPromptTest(room, provider, model, runner, { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM }),
+    testPrompt,
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
     makeWorker,
     // Close's closing statement, written by a one-off agent with the worker's provider and model, in
