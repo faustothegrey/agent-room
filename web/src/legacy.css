@@ -31,6 +31,7 @@ body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 #main-panel.side-closed > #split, #main-panel.side-closed > #right { display: none; }
 #cancel-creation { margin-left: auto; }
 #disc-header { grid-column: 1 / -1; display: flex; align-items: center; gap: .4rem .8rem; padding: .3rem .65rem; border-bottom: 1px solid var(--line); background: #88808; min-height: 2.2rem; min-width: 0; }
+#disc-header.peeking { background: #f59e0b1f; border-bottom-color: #f59e0b; }
 #disc-info { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .6rem; min-width: 0; overflow-wrap: anywhere; }
 /* The header: three zones, room (left), activity (middle: system messages and busy workers), monitoring (right).
    Rare room and server actions sit in the ▾ menus; the gauges never shrink. */
@@ -67,6 +68,7 @@ body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 #disc { min-width: 0; }
 #disc-status { font-size: .75rem; color: var(--dim); line-height: 1.35; }
 #disc-status:empty { display: none; }
+#disc-header.peeking #disc-status { padding: .05rem .5rem; border: 1px solid #f59e0b; border-radius: 999px; background: #f59e0b22; color: light-dark(#92400e, #fcd34d); font-weight: 600; }
 #disc-autodev { font-size: .75rem; color: light-dark(#15803d, #86efac); line-height: 1.35; }
 #disc-autodev.paused { color: light-dark(#b45309, #fcd34d); }
 #disc-autodev[hidden] { display: none; }
@@ -196,6 +198,8 @@ body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 .tools label { display: inline-flex; gap: .3rem; align-items: center; color: var(--dim); }
 #list-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--line); background: #252526; }
 #list-head { display: flex; align-items: center; justify-content: space-between; gap: .3rem; padding: .35rem .5rem; border-bottom: 1px solid var(--line); min-height: 2.2rem; }
+#boards-peek-back { flex: none; margin: .4rem .45rem 0; padding: .3rem .55rem; border: 1px solid #f59e0b; border-radius: 6px; background: #f59e0b1f; color: light-dark(#92400e, #fcd34d); font-size: .8rem; font-weight: 600; text-align: center; }
+#boards-peek-back:hover { background: #f59e0b33; }
 #list-title { font-size: .75rem; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #list-toggle { border: 0; background: none; padding: .1rem .35rem; font-size: .95rem; line-height: 1; color: var(--dim); }
 #list-toggle:hover { background: #8882; color: CanvasText; }
@@ -207,6 +211,7 @@ body { margin: 0; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
 #list-pane { flex: 1; min-height: 0; overflow-y: auto; }
 .app.list-collapsed #list-title, .app.list-collapsed #list-pane { display: none; }
 .app.list-collapsed #list-head { justify-content: center; padding: .35rem 0; }
+.app.list-collapsed #boards-peek-back { margin: .35rem auto 0; padding: .2rem 0; width: 24px; font-size: .9rem; line-height: 1.1; }
 .app.list-collapsed #list-split { display: none; }
 #left { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 #tabs, #subtabs { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
