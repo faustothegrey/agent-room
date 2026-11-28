@@ -1089,10 +1089,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const canSummary = !!(room && !peek && !viewLayout && !room.workbench);
   const canClose = !!(canAct && room?.multi && (room.active || room.brainstorm || room.workbench || room.research || (room.open?.length ?? 0) > 1));
   // The status line under the title, for the selected tab (talkStatus on /__room): the closing
-  // phase, the worker's state on the Worker tab, the peek or view, who is thinking, or your turn.
+  // phase, a closed-board peek, the worker's state on the Worker tab, a peer view, who is thinking, or your turn.
+  const peeking = !!(peek || filePeek || (receivedPeek && !remote));
+  const leavePeek = () => {
+    if (receivedPeek && !remote) setReceivedPeek(null);
+    else if (peek) void backToCurrent();
+    else setFilePeek(null);
+  };
   const closingNow = !peek && !remote && room && !room.brainstorm && room.active?.startsWith('discussions/') ? room.closingBoards?.[room.active.slice('discussions/'.length)] ?? null : null;
   const discStatus = closingNow === 'waiting' ? 'closing · waiting for worker' : closingNow === 'writing' ? 'closing · writing statement'
-    : tab === 'worker' ? (working ? working + ' is working' : 'idle') : !room ? '' : peek ? 'peeking at ' + displayTitle(peek.name, peek.title) + ' · read-only'
+    : peek ? 'Peeking · read-only'
+    : tab === 'worker' ? (working ? working + ' is working' : 'idle') : !room ? ''
     : remote || viewLayout ? 'read-only' : thinking ? thinking + ' is thinking' : room.autoDev?.status === 'running' ? '' : turnVisible ? 'your turn' : '';
   const lane = !room?.brainstorm && !room?.research && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
   const closeLabel = room?.brainstorm ? 'Close brainstorm' : room?.research ? 'Close' : lane && workerInfo?.pending?.some((item) => item.lane === lane) ? 'Close with pending work' : 'Close';
@@ -1162,6 +1169,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     </section>
     <aside ref={listPanel} id="list-panel" className="next-boards" aria-label="Boards">
       <div id="list-head">{!boardsClosed && <span id="list-title">Boards</span>}<button type="button" id="list-toggle" title={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); if (serviceRef.current === null) { try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} } }}>{boardsClosed ? '»' : '«'}</button></div>
+      {peeking && <button type="button" id="boards-peek-back" title="Back to current" aria-label="Back to current" onClick={leavePeek}>{boardsClosed ? '↩' : '↩ Back to current'}</button>}
       {!boardsClosed && <>
         <div id="list-pane"><div id="board-list">
         <details className="list-section" open={boardSections.has('sprints')} onToggle={(e) => sectionToggle('sprints', e.currentTarget.open)}><summary><span className="boards-header"><span>Sprints ({activeSprints.length + unstartedOf('sprints').length})</span>{room && canAddBoards && <span className="boards-new">{!!(room.active || room.brainstorm || room.workbench || room.research) && <button type="button" title={room.multi ? 'Open a new sprint beside this one, which stays open (click it in Boards to show it again).' : 'End this session: the chat clears and your next message starts a new sprint. Its worker tasks finish in its own worker session; the new one gets a fresh worker session.'} aria-label="New sprint" className={armedCreation['/new'] ? 'armed' : undefined} onClick={(e) => { e.preventDefault(); e.stopPropagation(); createBoard('/new'); }}>+🏃</button>}<button type="button" title="Open a workbench: a special kind of sprint with only the worker (no agents), for one small fix. Your first message names it and goes straight to the worker." aria-label="New workbench" className={armedCreation['/workbench'] ? 'armed' : undefined} onClick={(e) => { e.preventDefault(); e.stopPropagation(); createBoard('/workbench'); }}>+🔧</button></span>}</span>{(armedCreation['/new'] || armedCreation['/workbench']) && <span className="boards-creation-warning">Click again: this session ends and the chat clears</span>}</summary>{openUnstarted('sprints')}{workerInfo?.pending?.filter((item) => !activeSprints.includes(item.lane ?? '')).map((item) => <div className="worker-pending" key={item.branch}>⚠ {item.branch}: {[item.ahead && `${item.ahead} ${item.ahead === 1 ? 'commit' : 'commits'} not merged into main`, item.dirty && 'uncommitted changes'].filter(Boolean).join(' · ')}</div>)}{activeSprints.map((name) => boardRow(name, 'discussions/' + name, false, false, canOrder ? { kind: 'sprints', names: activeSprints } : undefined))}{sprintsHint && <span className="hint">{sprintsHint}</span>}</details>
@@ -1187,7 +1195,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     </aside>
     {!boardsClosed && <Splitter id="list-split" label="Resize Boards list" onStart={() => { listDragStart.current = listWidth; }} onMove={(x) => resizeList(x, false)} onEnd={(x) => finishListDrag(x)} onKeyDown={(event) => { if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return; event.preventDefault(); const left = listPanel.current?.getBoundingClientRect().left ?? 0; resizeList(left + listWidth + (event.key === 'ArrowLeft' ? -24 : 24) + 3, true); }} />}
     <div ref={panel} id="main-panel" className={'next-layout' + (layout.stacked ? ' stacked' : '') + (layout.sideClosed ? ' closed side-closed' : '')} style={{ '--left': layout.left ? layout.left + 'px' : '55%', '--top': layout.top ? layout.top + 'px' : '55%' } as React.CSSProperties}>
-    <div id="disc-header" aria-label="Current discussion">
+    <div id="disc-header" className={peek ? 'peeking' : undefined} aria-label="Current discussion">
     {(canSummary || canAct) && <details ref={actionsMenu} id="actions-menu" className="menu actions-menu" onToggle={(event) => { if (event.currentTarget.open) { setRowMenu(null); refreshWorker(); } }}>
       <summary aria-label="Discussion actions" title="Actions">Actions</summary>
       <div className="menu-items">
@@ -1295,8 +1303,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         <span id="side-controls"><button type="button" className="pane-ctrl" title={layout.stacked ? 'Place conversation and side pane side by side' : 'Stack conversation above side pane'} onClick={() => applyLayout({ ...layoutRef.current, stacked: !layoutRef.current.stacked }, true, 'split-orient')}>{layout.stacked ? '⇆' : '⇅'}</button><button type="button" className="pane-ctrl" title="Close side pane" onClick={() => applyLayout({ ...layoutRef.current, sideClosed: true }, true, 'side-closed')}>✕</button></span></div>
       <div className="view" id="explorer" hidden={subtab !== 'explorer'}><div id="pane">
       <section ref={explorer} id="files" aria-label={peek || filePeek || received ? 'Peeked board files' : 'Explorer files'} hidden={subtab !== 'explorer'}>
-        {receivedPeek && !remote && <p className="peek-banner">Looking at <b>{displayTitle(receivedPeek.name, receivedPeek.title ?? undefined)}</b> <button type="button" onClick={() => setReceivedPeek(null)}>Back to current</button></p>}
-        {!receivedPeek && (peek || filePeek) && <p className="peek-banner">Looking at <b>{displayTitle((peek || filePeek)!.name, (peek || filePeek)!.title)}</b> <button type="button" onClick={() => { if (peek) void backToCurrent(); else setFilePeek(null); }}>Back to current</button></p>}
+        {receivedPeek && !remote && <p className="peek-banner">Looking at <b>{displayTitle(receivedPeek.name, receivedPeek.title ?? undefined)}</b> <button type="button" onClick={leavePeek}>Back to current</button></p>}
+        {!receivedPeek && (peek || filePeek) && <p className="peek-banner">Looking at <b>{displayTitle((peek || filePeek)!.name, (peek || filePeek)!.title)}</b> <button type="button" onClick={leavePeek}>Back to current</button></p>}
         <div className="explorer-bar"><button type="button" className={(received ? explorerMode !== 'root' : !rootMode) ? 'on' : undefined} disabled={!base && !received} aria-pressed={received ? explorerMode !== 'root' : !rootMode} onClick={() => setExplorerMode('board')}>Board</button><button type="button" className={(received ? explorerMode === 'root' : rootMode) ? 'on' : undefined} aria-pressed={received ? explorerMode === 'root' : rootMode} onClick={() => setExplorerMode('root')}>Room checkout</button><button type="button" disabled title="Coming soon">Worker copy</button></div>
         <p className="explorer-sub">{received && explorerMode !== 'root' ? `${received.node} · round ${received.round}` : rootMode ? `${room?.folder?.replace(/\/+$/, '').split('/').at(-1) || 'agent-room'}/${fileDetails?.branch ? ` · ${fileDetails.branch}` : ''}` : `${base}/`}</p>
         {received && explorerMode !== 'root' ? <>
