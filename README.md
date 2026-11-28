@@ -77,7 +77,9 @@ last successful result. Agy login is not monitored. The 10-minute login schedule
 only with Check now. Leftover checks continue at their usual interval; opening Providers does not run
 them. The health section also shows each provider's model list source, availability, count and latest
 error. Claude's list is agent-room's fixed list, Codex's is `models_cache.json`, and Agy's comes from
-`agy models`. Check now reloads all three lists, bypassing Agy's five-minute refresh limit. It compares
+`agy models`. Both background Agy probes (`agy -p /usage` and `agy models`) run detached without a
+controlling terminal so `agy` cannot open a login browser when token refresh fails (this relies on
+`agy` behaviour seen in its logs, not documented). Check now reloads all three lists, bypassing Agy's five-minute refresh limit. It compares
 each open discussion member and worker, and the saved defaults, with those lists: CLI default, in
 list, not in list, list not read yet or list unavailable. Claude's list is agent-room's own, so inclusion proves little
 about availability. These checks do not change configured models. Per-room operation tables show

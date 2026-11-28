@@ -1,9 +1,11 @@
 import { test } from './helpers/test.mjs';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, writeFile, readFile, utimes, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, writeFile, readFile, utimes, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { addUsage, agentUsageLine, checkLogin, checkQuotaFloor, fetchQuota, parseClaudeAuth, parseCodexLogin, formatUsage, quotaGauges, quotaSummary, usageReport, readClaudeQuota, readCodexQuota, parseAgyQuota, refreshQuotaCache, useQuotaCache, claudeStreamQuota, refreshProviderQuota } from '../src/usage.mjs';
 
 // The shape the quota meter returned on 2026-10-20 (trimmed).
@@ -376,4 +378,83 @@ test('auth mode: only known labels, never key text (even short plain tokens); on
   const exec = (result) => (command, args, options, done) => done(...result);
   assert.deepEqual(await checkLogin('codex', exec([null, '', 'Logged in using ChatGPT\n'])), { state: 'ok', expiresAt: null });
   assert.deepEqual(await checkLogin('codex', exec([null, '', 'Logged in using ChatGPT\n']), { authMode: true }), { state: 'ok', expiresAt: null, authMode: 'ChatGPT' });
+});
+
+test('background agy probes run detached without a controlling terminal (/dev/tty)', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'agy-tty-test-'));
+  try {
+    const bin = join(dir, 'bin');
+    const log = join(dir, 'tty.log');
+    const resultPath = join(dir, 'result.json');
+    const harness = join(dir, 'harness.mjs');
+    await mkdir(bin);
+    const fakeAgy = join(bin, 'agy');
+    await writeFile(fakeAgy, [
+      '#!/bin/sh',
+      'if ( : < /dev/tty ) 2>/dev/null; then tty=1; else tty=0; fi',
+      'printf \'%s\\t%s\\n\' "$1" "$tty" >> "$AGY_TTY_LOG"',
+      'if [ "$1" = "models" ]; then',
+      '  printf \'gemini-test\\tGemini Test\\n\'',
+      'elif [ "$1" = "-p" ]; then',
+      '  printf \'{"status":"SUCCESS","command":{"data":{"groups":[{"name":"Gemini","buckets":[{"id":"gemini-5h","name":"5h","remaining_fraction":0.8}]}]}}}\\n\'',
+      'fi',
+      '',
+    ].join('\n'));
+    await chmod(fakeAgy, 0o755);
+    await writeFile(harness, [
+      'import { execFileSync } from "node:child_process";',
+      'import { writeFileSync } from "node:fs";',
+      'import { pathToFileURL } from "node:url";',
+      'const [usagePath, uiPath, outPath] = process.argv.slice(2);',
+      'writeFileSync(outPath, JSON.stringify({ started: true }));',
+      'execFileSync("agy", ["control"]);',
+      'const { readAgyQuota } = await import(pathToFileURL(usagePath).href);',
+      'const { agyModelCatalog } = await import(pathToFileURL(uiPath).href);',
+      'const quota = await readAgyQuota();',
+      'const catalog = agyModelCatalog();',
+      'await catalog.refresh();',
+      'writeFileSync(outPath, JSON.stringify({ started: true, quota, catalog: catalog.status() }));',
+      '',
+    ].join('\n'));
+
+    const usagePath = fileURLToPath(new URL('../src/usage.mjs', import.meta.url));
+    const uiPath = fileURLToPath(new URL('../src/ui.mjs', import.meta.url));
+    const scriptArgs = process.platform === 'darwin'
+      ? ['-q', '/dev/null', process.execPath, harness, usagePath, uiPath, resultPath]
+      : ['-q', '-e', '-c', [process.execPath, harness, usagePath, uiPath, resultPath].map((s) => `'${s.replace(/'/g, "'\\''")}'`).join(' '), '/dev/null'];
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}`, AGY_TTY_LOG: log };
+    const runResult = await new Promise((resolve) => {
+      // stdin must be /dev/null ('ignore'), not a socket/pipe, or macOS script fails tcgetattr with ENOTSUP.
+      const child = spawn('script', scriptArgs, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '', stderr = '';
+      const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ err: new Error('script timed out'), stdout, stderr }); }, 15_000);
+      child.stdout.on('data', (d) => { stdout += d; });
+      child.stderr.on('data', (d) => { stderr += d; });
+      child.on('error', (err) => { clearTimeout(timer); resolve({ err, stdout, stderr }); });
+      child.on('close', (code, signal) => {
+        clearTimeout(timer);
+        const err = code === 0 ? null : new Error(`script exited ${code ?? signal}: ${stderr.trim()}`);
+        resolve({ err, stdout, stderr });
+      });
+    });
+
+    let result = null;
+    try { result = JSON.parse(await readFile(resultPath, 'utf8')); } catch {}
+    if (!result?.started) {
+      return t.skip(`could not start a pseudo-terminal with script: ${runResult.err?.message || runResult.stderr || 'unknown error'}`);
+    }
+    assert.ifError(runResult.err);
+
+    const entries = (await readFile(log, 'utf8')).trim().split('\n').map((line) => line.split('\t'));
+    const ttyFor = (cmd) => entries.find(([c]) => c === cmd)?.[1];
+    assert.equal(ttyFor('control'), '1', 'positive control under script must be able to open /dev/tty');
+    assert.equal(result.quota?.ok, true);
+    assert.equal(result.quota.parsed.groups.gemini.windows['5h'].used_percent, 20);
+    assert.equal(ttyFor('-p'), '0', 'readAgyQuota must not reach /dev/tty');
+    assert.equal(result.catalog?.loaded, true);
+    assert.deepEqual(result.catalog.models, [{ id: 'gemini-test', label: 'Gemini Test' }]);
+    assert.equal(ttyFor('models'), '0', 'agyModelCatalog must not reach /dev/tty');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

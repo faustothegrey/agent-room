@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import * as defaultInstructions from './instructions.mjs';
 import { formattedTurn as defaultFormattedTurn } from './room.mjs';
 // Preserve the public exports for callers that import ui.mjs directly.
+const { run: runCommand } = await import(`./agents.mjs${new URL(import.meta.url).search}`);
 const laneModule = await import(`./lanes.mjs${new URL(import.meta.url).search}`);
 const workshopModule = await import(`./workshop.mjs${new URL(import.meta.url).search}`);
 const boardsModule = await import(`./boards.mjs${new URL(import.meta.url).search}`);
@@ -118,9 +119,13 @@ export function readDefaults(file = defaultsFile()) {
 function currentSettings(ctx) {
   return { agents: ctx.agentSpecs.split(',').map((s) => parseSpec(s)), worker: parseSpec(ctx.workerSpec, true) };
 }
+// Run detached (no controlling terminal, own process group killed on timeout) so agy cannot open a login browser.
+const runDetached = (command, args, { cwd, timeout } = {}, done) => {
+  runCommand(command, args, { cwd, timeoutMs: timeout }).then((stdout) => done(null, stdout), (err) => done(err));
+};
 // Refresh in the background at most once every five minutes, including after a failed lookup.
 // Keep the previous list while refreshing; an unavailable catalog still allows a custom ID.
-export function agyModelCatalog(exec = execFile, now = Date.now) {
+export function agyModelCatalog(exec = runDetached, now = Date.now) {
   let models = [], lastAttempt = -Infinity, pending = null, loaded = false, lastError = null, checked = null;
   const start = () => {
     lastAttempt = now();
