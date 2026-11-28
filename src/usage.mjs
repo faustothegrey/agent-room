@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { readdir, readFile, stat, mkdtemp, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+const { run } = await import(`./agents.mjs${new URL(import.meta.url).search}`);
 
 export const METER_URL = process.env.AGENT_ROOM_METER || null;
 export const QUOTA_STALE_MS = 15 * 60_000;
@@ -164,7 +165,11 @@ export function parseAgyQuota(data, now = Date.now()) {
   if (models.length) { const top = models.reduce((a, b) => a.used_percent >= b.used_percent ? a : b); Object.assign(parsed, { highest_used_percent: top.used_percent, lowest_left_percent: 100 - top.used_percent, highest_used_group: top.group }); }
   return { ok: !!models.length, source: 'agy-json', updated_at: stamp(now), parsed };
 }
-export async function readAgyQuota(exec = execFile) {
+// Run detached (no controlling terminal, own process group killed on timeout) so agy cannot open a login browser.
+const runDetached = (command, args, { cwd, timeout } = {}, done) => {
+  run(command, args, { cwd, timeoutMs: timeout }).then((stdout) => done(null, stdout), (err) => done(err));
+};
+export async function readAgyQuota(exec = runDetached) {
   let dir;
   try {
     dir = await mkdtemp(join(tmpdir(), 'agy-quota-'));
