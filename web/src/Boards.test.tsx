@@ -89,3 +89,35 @@ it('lists unstarted boards in their own section (brainstorms under Brainstorms, 
   expect(within(researchSection).getByRole('link', { name: '🔬 New research board (not started)' }).getAttribute('href')).toBe('/r/r/__room');
   expect(within(brainstormsSection).getByRole('link', { name: 'New brainstorm (not started)' }).getAttribute('href')).toBe('/r/b/__room');
 });
+
+it('prefixes the board heading with its type icon, follows peek and return, and hides it while loading or unknown', async () => {
+  render(<App version="one" refresh={() => {}} />);
+  const heading = () => screen.getByRole('heading', { level: 1 });
+  expect(heading().textContent).toBe('agent-room');
+  expect(heading().querySelector('span')).toBeNull();
+
+  Source.current.send({ type: 'reset', room, input: true, messages: [], peek: null, doc: null });
+  expect(heading().textContent).toBe('🏃 Current title');
+  expect(within(heading()).getByTitle('Sprint').textContent).toBe('🏃');
+  expect(document.title).toBe('Current title · agent-room');
+
+  Source.current.send({ type: 'reset', room, input: true, messages: [], doc: null, peek: { name: '2026-11-04-research', kind: 'research', title: 'Research topic', path: 'discussions/2026-11-04-research' } });
+  expect(heading().textContent).toBe('🔬 Research topic');
+  expect(within(heading()).getByTitle('Research').textContent).toBe('🔬');
+
+  await userEvent.setup().click(within(screen.getByLabelText('Peeked board files')).getByRole('button', { name: 'Back to current' }));
+  expect(heading().textContent).toBe('🏃 Current title');
+  expect(within(heading()).getByTitle('Sprint').textContent).toBe('🏃');
+
+  Source.current.send({ type: 'reset', room: { ...room, workbench: true, board: 'Fix bug' }, input: true, messages: [], peek: null, doc: null });
+  expect(heading().textContent).toBe('🔧 Fix bug');
+  expect(within(heading()).getByTitle('Workbench').textContent).toBe('🔧');
+
+  Source.current.send({ type: 'reset', room: { ...room, brainstorm: true, board: 'New ideas' }, input: true, messages: [], peek: null, doc: null });
+  expect(heading().textContent).toBe('💡 New ideas');
+  expect(within(heading()).getByTitle('Brainstorm').textContent).toBe('💡');
+
+  Source.current.send({ type: 'reset', room, input: true, messages: [], doc: null, peek: { name: '2026-11-02-closed', kind: 'unknown', title: 'Unknown board', path: 'discussions/2026-11-02-closed' } });
+  expect(heading().textContent).toBe('Unknown board');
+  expect(heading().querySelector('span')).toBeNull();
+});

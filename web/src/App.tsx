@@ -33,6 +33,12 @@ type Layout = { stacked: boolean; sideClosed: boolean; left: number | null; top:
 type BoardDialog = { kind: 'merge'; name: string; preview: MergePreview; changed: boolean; error?: string } | { kind: 'discard'; name: string; preview: DiscardPreview; changed: boolean; error?: string } | { kind: 'catchup'; name: string; target: string; behind: number; message: string; changed: boolean; error?: string };
 type Service = 'providers' | 'instructions' | 'schedule' | 'notes' | 'terminal';
 const SERVICES: Record<Service, string> = { providers: 'Providers', instructions: 'Instructions', schedule: 'Schedule', notes: 'My notes', terminal: 'Terminal' };
+const BOARD_ICONS = new Map<string, { icon: string; label: string }>([
+  ['sprint', { icon: '🏃', label: 'Sprint' }],
+  ['workbench', { icon: '🔧', label: 'Workbench' }],
+  ['research', { icon: '🔬', label: 'Research' }],
+  ['brainstorm', { icon: '💡', label: 'Brainstorm' }],
+]);
 type OrderKind = 'sprints' | 'brainstorms';
 const orderKey = (folder: string, kind: OrderKind) => `agent-room.${kind === 'sprints' ? 'discussion' : 'brainstorm'}-order:${folder}`;
 function readOrder(folder: string, kind: OrderKind): string[] {
@@ -926,6 +932,8 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   }, [version, refresh, navigate]);
 
   const title = (remote ? displayTitle(remote.line.name ?? undefined, remote.line.title ?? undefined) : displayTitle(peek?.name ?? room?.active?.split('/').at(-1), peek?.title ?? room?.board)) || 'agent-room';
+  const titleKind = title === 'agent-room' ? null : remote ? remote.line.kind ?? null : peek ? peek.kind ?? null : room ? (room.brainstorm ? 'brainstorm' : room.workbench ? 'workbench' : room.research ? 'research' : 'sprint') : null;
+  const titleIcon = titleKind ? BOARD_ICONS.get(titleKind) ?? null : null;
   const receivedTime = (at: string | null | undefined) => at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'time unavailable';
   const ownLine = remote && replica ? Object.values(replica.own).find((line) => line.board === remote.line.board) : undefined;
   const newerLine = remote && replica?.received.find((line) => line.board === remote.line.board && line.node === remote.line.node && line.commit !== remote.line.commit);
@@ -1216,7 +1224,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         {canClose && lane && !room?.closedBoards?.includes(lane) && mergeControls(lane)}
       </div>
     </details>}
-    <div id="disc-info"><h1 id="disc" data-active={!peek && !remote && room?.active ? 'true' : 'false'}>{title}</h1>
+    <div id="disc-info"><h1 id="disc" data-active={!peek && !remote && room?.active ? 'true' : 'false'}>{titleIcon && <><span title={titleIcon.label} aria-hidden="true">{titleIcon.icon}</span>{' '}</>}{title}</h1>
       <span id="disc-status" aria-live="polite">{discStatus === 'your turn' ? <span aria-label="Turn status">your turn</span> : discStatus}</span>
     {autoDev?.status === 'running' && <span id="disc-autodev">Auto dev running · cycle {autoDev.cycle} of {autoDev.max} · {autoDev.waiting ? 'worker is working' : 'discussion is reviewing'}</span>}
     {autoDev?.status === 'paused' && <span id="disc-autodev" className="paused">Auto dev paused · {autoDev.reason}</span>}
