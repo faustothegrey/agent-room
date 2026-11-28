@@ -608,6 +608,32 @@ test('Reload keeps the brainstorm\'s messages and its mode: the next message goe
   assert.equal(ctx.logPath, logPath);
 });
 
+test('Reload migrates pre-rename ctx.discussion, worker.seat.discussion and peek.kind to board/sprint', async () => {
+  const { reloaded } = await import('../src/ui.mjs');
+  const ctx = await freshSession([], async () => ({ title: 'Board switching blocked' }));
+  await handleLine('/brainstorm', ctx);
+  await handleLine('an idea', ctx);
+  const board = ctx.board;
+  ctx.discussion = board;
+  delete ctx.board;
+  ctx.worker.seat = { discussion: board, logPath: ctx.logPath };
+  ctx.screen.peek = { name: '2026-11-01-old', ref: '2026-11-01-old', path: 'discussions/2026-11-01-old', kind: 'discussion', title: 'Old' };
+  Object.assign(ctx, { agentSpecs: 'claude:A,claude:B', workerSpec: 'claude:W', sessions: new Map(), code: {}, refreshQuota: () => {} });
+  Object.assign(ctx, await load(ctx, `?migrate=${Date.now()}`));
+  await reloaded(ctx);
+  assert.deepEqual(ctx.board, board);
+  assert.equal('discussion' in ctx, false);
+  assert.equal(ctx.screen.room.board, 'Board switching blocked');
+  assert.equal(ctx.screen.room.active, `brainstorms/${board.name}`);
+  assert.deepEqual(ctx.screen.room.open.map((o) => ({ title: o.title, active: o.active })), [{ title: 'Board switching blocked', active: `brainstorms/${board.name}` }]);
+  assert.equal(ctx.screen.peek.kind, 'sprint');
+  // Also verify reloaded() migrates a seat directly even without load() replacing worker
+  ctx.worker.seat = { discussion: board, logPath: ctx.logPath };
+  await reloaded(ctx);
+  assert.deepEqual(ctx.worker.seat.board, board);
+  assert.equal('discussion' in ctx.worker.seat, false);
+});
+
 test('/new: nothing to end before the first message; it creates nothing and changes nothing', async () => {
   const { readdirSync } = await import('node:fs');
   const ctx = await freshSession([], async () => ({ title: 'Topic' }));
