@@ -2474,6 +2474,113 @@ test('screen Cancel leaves an initially empty room empty for brainstorm and work
   }
 });
 
+test('on the screen, /new, /brainstorm, /workbench and /research open beside while ctx.busy is true even when fresh', async () => {
+  const { first, gotoOf, pageOf, contexts } = await multiRoom();
+  first.busy = true;
+  for (const [command, flag] of [['/new', null], ['/brainstorm', 'brainstorm'], ['/workbench', 'workbench'], ['/research', 'research']]) {
+    const before = contexts().length;
+    await handleLine(command, first);
+    assert.equal(contexts().length, before + 1, `${command} should open beside while busy`);
+    const created = contexts().at(-1);
+    assert.equal(gotoOf(first), pageOf(created));
+    if (flag) assert.equal(created.state[flag], true);
+    assert.equal(first.state.brainstorm, undefined);
+    assert.equal(first.state.workbench, undefined);
+    assert.equal(first.state.research, undefined);
+    assert.equal(first.resets, 0);
+  }
+  // A fresh brainstorm that is busy must not be converted in place by /new either.
+  const brain = contexts()[2];
+  assert.equal(brain.state.brainstorm, true);
+  brain.busy = true;
+  const before = contexts().length;
+  await handleLine('/new', brain);
+  assert.equal(contexts().length, before + 1);
+  assert.equal(brain.state.brainstorm, true);
+  assert.equal(gotoOf(brain), pageOf(contexts().at(-1)));
+});
+
+test('reusing an empty, idle board in place stays queued so a first message waits for /research setup', async () => {
+  const { opensBeside, runsAtOnce, isResearchDir } = await import('../src/ui.mjs');
+  const { first, contexts } = await multiRoom();
+
+  assert.equal(opensBeside(first), false);
+  for (const cmd of ['/new', '/brainstorm', '/workbench', '/research']) {
+    assert.equal(runsAtOnce(cmd, first), false, `${cmd} on an empty, idle board must stay queued`);
+  }
+
+  // Same dispatch rule as src/cli.mjs: only runsAtOnce(command, ctx) bypasses the input queue.
+  const END = Symbol('end');
+  const lines = [];
+  let wake = null;
+  const queue = {
+    push(line) { lines.push(line); wake?.(); },
+    async *[Symbol.asyncIterator]() {
+      for (;;) {
+        while (lines.length) yield lines.shift();
+        await new Promise((r) => { wake = r; });
+        wake = null;
+      }
+    },
+  };
+
+  const order = [];
+  let markSetupStarted, releaseSetup, markMessageDone;
+  const setupStarted = new Promise((r) => { markSetupStarted = r; });
+  const setupGate = new Promise((r) => { releaseSetup = r; });
+  const messageDone = new Promise((r) => { markMessageDone = r; });
+
+  const runLine = async (line) => {
+    if (line === '/research') {
+      order.push('setup:start');
+      markSetupStarted();
+      await setupGate;
+      await handleLine(line, first);
+      order.push('setup:end');
+      return;
+    }
+    order.push('message:start');
+    assert.equal(first.state.research, true, 'first message must see research setup already completed');
+    await handleLine(line, first);
+    order.push('message:end');
+    markMessageDone();
+  };
+
+  const say = (line) => {
+    const command = line.trim();
+    if (runsAtOnce(command, first)) { runLine(command); return; }
+    queue.push(line);
+  };
+
+  const loop = (async () => {
+    for await (const raw of queue) {
+      if (raw === END) break;
+      await runLine(raw.trim());
+    }
+  })();
+
+  say('/research');
+  await setupStarted;
+  say('first research question');
+  await new Promise((r) => setTimeout(r, 25));
+  assert.deepEqual(order, ['setup:start'], 'first message must wait while /research setup is still running');
+
+  releaseSetup();
+  await messageDone;
+  queue.push(END);
+  await loop;
+
+  assert.deepEqual(order, ['setup:start', 'setup:end', 'message:start', 'message:end']);
+  assert.equal(contexts().length, 1);
+  assert.equal(first.state.research, true);
+  assert.equal(isResearchDir(first.board.dir), true);
+
+  // Once started (or when busy), board creations open beside and run at once.
+  assert.equal(opensBeside(first), true);
+  assert.equal(runsAtOnce('/research', first), true);
+  assert.equal(runsAtOnce('/close', first), false);
+});
+
 test('one workshop per folder: tasks labelled by origin, one worker session, lane and queue each, reports back there; Close discussion; Quit room closes them all', async () => {
   const { readFileSync, realpathSync } = await import('node:fs');
   const { queueWork, reloaded } = await import('../src/ui.mjs');

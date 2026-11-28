@@ -153,12 +153,22 @@ async function addRoom(folder, { launch = false, agents, worker, reopen, context
       ctx.prompt = () => {};
       ctx.input = lineQueue();
       // Seen as they arrive, not when their turn comes: Restart and Shutdown start at once (every
-      // room then ends after its round in progress), and Quit room can't wait indefinitely.
+      // room then ends after its round in progress), Quit room can't wait indefinitely, and creating
+      // a board beside this one doesn't wait for the round in progress. Reusing an empty, idle board
+      // in place stays queued so a first message waits for its setup to finish.
       ctx.say = (line, confirmed = false) => {
         const command = line.trim();
         if (command === '/restart' || command === '/shutdown') return endServer(command.slice(1), confirmed);
         if (command === '/quit') ctx.ui.quitRequested(ctx);
         if (command.startsWith('/')) { ctx.commands = (ctx.commands ?? 0) + 1; setTimeout(() => showBusy(ctx), BUSY_AFTER_MS).unref(); }
+        if (ctx.ui.runsAtOnce(command, ctx)) {
+          (async () => {
+            try { await ctx.ui.handleLine(command, ctx); }
+            catch (err) { report(ctx, `✗ ${err.stack}\n`); }
+            finally { if (ctx.commands) { ctx.commands--; showBusy(ctx); } }
+          })();
+          return;
+        }
         ctx.input.push(line);
       };
     }

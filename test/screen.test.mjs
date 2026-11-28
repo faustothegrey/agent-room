@@ -317,3 +317,106 @@ test('CLI flags remain the defaults for a new brainstorm and a beside discussion
     assert.equal(await exited, 0);
   } finally { cli.kill(); }
 });
+
+test('creating a board during a round switches the screen at once, routes new messages there, and finishes the old round and summary on the old board', { timeout: 20000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), 'screen-busy-new-'));
+  const room = join(home, 'room'), bin = join(home, 'bin');
+  const started = join(home, 'round-started'), release = join(home, 'round-release');
+  mkdirSync(room); mkdirSync(bin);
+  // Fake claude: titles immediately; on the first board's round, writes `started` and waits for `release`
+  // before replying (which also triggers auto-summary); on the new board, replies immediately.
+  writeFileSync(join(bin, 'claude'), `#!${process.execPath}
+const fs = require('node:fs');
+let input = '';
+process.stdin.on('data', (d) => input += d);
+process.stdin.on('end', () => {
+  const reply = (result) => console.log(JSON.stringify({ result }));
+  if (process.argv.includes('--no-session-persistence')) {
+    return reply(input.includes('quick on new') ? 'New board' : 'Slow board');
+  }
+  if (input.includes('summary of the discussion')) {
+    return reply('Summary of slow round.');
+  }
+  if (input.includes('slow round')) {
+    fs.writeFileSync(${JSON.stringify(started)}, '1');
+    const poll = () => {
+      if (fs.existsSync(${JSON.stringify(release)})) return reply('Slow reply from Ada');
+      setTimeout(poll, 20);
+    };
+    return poll();
+  }
+  if (input.includes('quick on new')) return reply('Quick reply on new board');
+  return reply('PASS');
+});
+`, { mode: 0o755 });
+  const cli = spawn(process.execPath, [new URL('../src/cli.mjs', import.meta.url).pathname, '--cwd', room, '--port', '0',
+    '--agents', 'claude:Ada', '--worker', 'claude:W'],
+  { env: { ...process.env, HOME: home, PATH: bin + ':' + process.env.PATH } });
+  const exited = new Promise((done) => cli.once('exit', done));
+  try {
+    let out = '', errors = '';
+    cli.stderr.on('data', (d) => { errors += d; });
+    const base = await new Promise((resolve, reject) => {
+      cli.once('exit', (code) => reject(new Error(`CLI exited ${code}: ${errors}`)));
+      cli.stdout.on('data', (d) => {
+        out += d;
+        const match = out.match(/Room screen: (http:\/\/127\.0\.0\.1:\d+\/r\/[^/]+\/)__room/);
+        if (match) resolve(match[1]);
+      });
+    });
+    const stream = async (url) => {
+      const reader = (await fetch(url + '__events')).body.getReader();
+      let buffer = '';
+      const seen = [];
+      const next = async () => {
+        while (!buffer.includes('\n\n')) buffer += new TextDecoder().decode((await reader.read()).value);
+        const at = buffer.indexOf('\n\n'), chunk = buffer.slice(0, at); buffer = buffer.slice(at + 2);
+        const ev = JSON.parse(chunk.replace(/^data: /, ''));
+        seen.push(ev);
+        return ev;
+      };
+      const until = async (fn) => { for (;;) { const e = await next(); if (fn(e)) return e; } };
+      return { next, until, seen };
+    };
+    const say = (url, text) => fetch(url + '__say', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+
+    const oldStream = await stream(base);
+    await oldStream.next(); // initial reset
+
+    // Start a slow round on the old board and wait until the agent turn is actively running.
+    assert.equal((await say(base, 'slow round')).status, 204);
+    const { existsSync } = await import('node:fs');
+    for (let i = 0; i < 200 && !existsSync(started); i++) await new Promise((r) => setTimeout(r, 25));
+    assert.equal(existsSync(started), true, 'old board round should be in progress');
+
+    // Send /new while the round is still blocked: the screen must switch before the round ends.
+    assert.equal((await say(base, '/new')).status, 204);
+    const switched = await oldStream.until((e) => e.type === 'goto');
+    assert.equal(existsSync(release), false, 'screen switched before the old round ended');
+    const newBase = new URL(switched.url.replace(/__room$/, ''), base).href;
+    assert.notEqual(newBase, base);
+
+    // Connect to the new board and send a message there while the old board is still busy.
+    const newStream = await stream(newBase);
+    await newStream.next(); // initial reset on new board
+    assert.equal((await say(newBase, 'quick on new')).status, 204);
+    const newReply = await newStream.until((e) => e.type === 'message' && e.message.speaker === 'Ada');
+    assert.match(newReply.message.html, /Quick reply on new board/);
+    await newStream.until((e) => e.type === 'turn' && /auto-summary/.test(e.text));
+
+    // Release the old board's round and check that both its round and summary finish on the old board.
+    writeFileSync(release, '1');
+    const oldReply = await oldStream.until((e) => e.type === 'message' && e.message.speaker === 'Ada');
+    assert.match(oldReply.message.html, /Slow reply from Ada/);
+    const oldSummary = await oldStream.until((e) => e.type === 'message' && e.message.speaker.startsWith('Summary'));
+    assert.match(oldSummary.message.html, /Summary of slow round/);
+    await oldStream.until((e) => e.type === 'turn' && /auto-summary/.test(e.text));
+
+    // Old board never received the new board's message, and the new board never got a goto switching back.
+    assert.equal(oldStream.seen.some((e) => e.type === 'message' && /quick on new|Quick reply on new board/.test(e.message.html ?? '')), false);
+    assert.equal(newStream.seen.some((e) => e.type === 'goto'), false);
+
+    await fetch(new URL('/__shutdown', base), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(await exited, 0);
+  } finally { cli.kill(); }
+});
