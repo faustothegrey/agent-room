@@ -151,14 +151,16 @@ async function checkCli(hub, provider, run = commandOutput) {
   } catch (err) { hub.monitor.errors.cli[provider] = { ...errorAt(err), path: path ?? null }; }
 }
 // A diagnostic is a fresh provider invocation, separate from every agent's session and rulebook.
-async function runPromptTest(ctx, provider, model, runner, parsers) {
-  const hub = hubOf(ctx), rooms = loadedRooms(hub);
+async function runPromptTest(ctx, provider, model, runner, parsers, { scheduled = false } = {}) {
+  const hub = hubOf(ctx);
   if (!['claude', 'codex', 'agy'].includes(provider) || typeof model !== 'string') throw new Error('Choose a provider and model.');
-  const configured = rooms.flatMap((r) => { const s = currentSettings(r); return [...s.agents, s.worker]; });
-  if (model && !configured.some((a) => a.provider === provider && a.model === model)) throw new Error('Choose a model configured on this server.');
-  hub.promptRunning ??= new Set();
-  if (hub.promptRunning.has(provider)) throw new Error('A prompt test for this provider is already running.');
-  hub.promptRunning.add(provider);
+  if (!scheduled) {
+    const configured = loadedRooms(hub).flatMap((r) => { const s = currentSettings(r); return [...s.agents, s.worker]; });
+    if (model && !configured.some((a) => a.provider === provider && a.model === model)) throw new Error('Choose a model configured on this server.');
+    hub.promptRunning ??= new Set();
+    if (hub.promptRunning.has(provider)) throw new Error('A prompt test for this provider is already running.');
+    hub.promptRunning.add(provider);
+  }
   const started = Date.now(), at = new Date(started).toISOString();
   let dir, reply = '', error = null, quota = null;
   try {
@@ -169,7 +171,9 @@ async function runPromptTest(ctx, provider, model, runner, parsers) {
       if (model) args.push('--model', model);
       args.push('--tools', '');
     } else if (provider === 'codex') {
-      args = ['exec', '--json', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', '-c', 'web_search="disabled"'];
+      args = ['exec', '--json', '--skip-git-repo-check'];
+      if (!scheduled) args.push('--ephemeral');
+      args.push('-s', 'read-only', '-c', 'web_search="disabled"');
       if (model) args.push('-m', model);
       args.push('-');
     } else {
@@ -181,19 +185,23 @@ async function runPromptTest(ctx, provider, model, runner, parsers) {
       const parsed = parsers.parseClaudeStream(output), { result } = parsed;
       quota = parsed.quota ?? null;
       // Its init event's permission mode: Claude's live report for the permission check.
-      if (parsed.permissionMode) (hub.permissionLive ??= {}).claude = { mode: parsed.permissionMode, at };
+      if (!scheduled && parsed.permissionMode) (hub.permissionLive ??= {}).claude = { mode: parsed.permissionMode, at };
       if (result.is_error) throw new Error(`claude: ${result.result || 'test failed'}`);
       reply = String(result.result ?? '').trim();
     } else if (provider === 'codex') reply = parsers.parseCodexEvents(output).text;
     else reply = parsers.parseAgyOutput(output).text;
     if (!reply) throw new Error(`${provider}: no reply`);
-  } catch (err) { error = err?.message ?? String(err); }
+  } catch (err) { error = err?.message || String(err); }
   finally {
     try { if (dir) rmSync(dir, { recursive: true, force: true }); }
     catch (err) { error = [error, `Could not remove temporary folder: ${err.message}`].filter(Boolean).join('; '); }
-    hub.promptRunning.delete(provider);
+    if (!scheduled) hub.promptRunning.delete(provider);
   }
   const result = { provider, model, at, durationMs: Date.now() - started, outcome: error ? 'failed' : 'ok', reply: reply.slice(0, 200), error };
+  if (scheduled) {
+    if (provider === 'codex' || quota) await feedQuota(ctx, provider, quota);
+    return result;
+  }
   hub.promptResults ??= new Map();
   if (!hub.promptResults.has(provider)) hub.promptResults.set(provider, new Map());
   hub.promptResults.get(provider).set(model, result);

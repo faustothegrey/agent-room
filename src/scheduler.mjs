@@ -196,9 +196,31 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
     }
     const saved = task.board && readCheckpoint(ctx, task.board);
     const specs = open?.agentSpecs ?? saved?.agentSpecs ?? roomDefaults(ctx).agents ?? ctx.agentSpecs ?? '';
-    const providers = open
-      ? [...new Set(open.room.agents.filter((a) => !(open.state.disabledAgents ?? []).includes(a.name)).map((a) => a.provider))]
-      : [...new Set(specs.split(',').filter(Boolean).map((s) => parseSpec(s)).filter((a) => !(saved?.state?.disabledAgents ?? []).includes(a.name)).map((a) => a.provider))];
+    const configured = specs.split(',').filter(Boolean).map((s) => parseSpec(s));
+    const disabled = (open ? open.state : saved?.state)?.disabledAgents ?? [];
+    const models = new Map();
+    for (const { name, provider } of open?.room.agents ?? configured) {
+      if (disabled.includes(name)) continue;
+      const model = configured.find((a) => a.name === name && a.provider === provider)?.model ?? '';
+      if (!models.has(provider)) models.set(provider, new Set());
+      models.get(provider).add(model);
+    }
+    const providers = [...models.keys()];
+    const failures = await Promise.all([...models].flatMap(([provider, providerModels]) => [...providerModels].map(async (model) => {
+      const label = `${provider} (${model || 'CLI default'})`;
+      try {
+        const result = await ctx.testPrompt(ctx, provider, model, { scheduled: true });
+        return result.outcome === 'ok' ? null : `${label}: ${result.error}`;
+      } catch (err) {
+        return `${label}: ${err?.message || String(err)}`;
+      }
+    })));
+    const failure = failures.find(Boolean);
+    if (failure) {
+      const reason = `Test prompt failed for ${failure}`;
+      recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
+      return { status: 'skipped', reason };
+    }
     const quota = await ctx.usage.fetchQuota();
     refreshQuota(ctx, quota).catch(() => {});
     const check = ctx.usage.checkQuotaFloor(quota, providers, data.quotaFloor, { now: clockMs() });
@@ -207,7 +229,7 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
       return { status: 'skipped', reason: check.reason };
     }
     if (task.board && !isResearchDir(join(parent, ref))) throw new Error(`Research board ${task.board} is no longer research.`);
-    // Another round may have started while quota was being fetched.
+    // Another round may have started during the prompt checks or quota fetch.
     open = task.board && siblings(ctx).find((c) => !c.stopped && isBoard(c, task.board));
     if (open?.busy) {
       const reason = `${task.board} has a round or summary in progress`;
