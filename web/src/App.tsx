@@ -648,6 +648,11 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       const data = event.data as Partial<PointMessage> | null;
       if (data?.type !== 'agent-room:point' || typeof data.label !== 'string' || typeof data.text !== 'string') return;
       const label = data.label, text = data.text;
+      if (data.kind === 'passage') {
+        if (text.length > 4000) return;
+        setPointed((previous) => [...previous.filter((item) => item.text !== text), { label: label.slice(0, 80), text }]);
+        return;
+      }
       setPointed((previous) => [...previous.filter((item) => item.label !== label), { label: label.slice(0, 80), text: text.slice(0, 300) }]);
     };
     const reference = (event: Event) => {

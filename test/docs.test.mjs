@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createServer, request } from 'node:http';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { JSDOM, VirtualConsole } from 'jsdom';
 import { ATTACH_LIMIT, broadcast, csvTable, docFiles, handle, isTextFile, isViewable, listFiles, messageView, pick, roomBranch, saveAttachments } from '../src/docs.mjs';
+import { md, page, RECENT_VERSION_LIMIT, readReviewed, renderMarkdownWithDiff, reviewedDir, sourceHash } from '../src/docs-files.mjs';
 
 // A proposal/ folder with a doc, a drawing, a hidden file, and a file just outside it.
 function fixture() {
@@ -825,4 +827,749 @@ test('Archived and deferred brainstorms appear in Archived · Deferred with read
   assert.ok(listed.includes('brainstorms/archive/2026-11-10-old-idea/transcripts/s.md'));
   assert.ok(listed.includes('brainstorms/deferred/2026-11-11-later-idea/transcripts/s.md'));
 
+});
+
+function openDocDom(rel, markdown) {
+  const html = page(rel, md.parse(markdown), rel);
+  const posted = [];
+  const dom = new JSDOM(html, {
+    url: `http://127.0.0.1:5566/${rel}`,
+    runScripts: 'dangerously',
+    beforeParse(win) {
+      Object.defineProperty(win, 'parent', {
+        value: { postMessage: (data, origin) => posted.push({ data, origin }) },
+      });
+    },
+  });
+  return { dom, posted };
+}
+
+function selectElement(win, el) {
+  const range = win.document.createRange();
+  range.selectNodeContents(el);
+  const sel = win.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+test('passage pointing: selecting the second copy of a sentence with bold and a link names the second heading with the full quote', () => {
+  const markdown = [
+    '# Notes',
+    '',
+    '## First section',
+    '',
+    'Intro paragraph.',
+    '',
+    'Keep the **shared draft** clean and see [the spec](https://example.com/spec) before merging.',
+    '',
+    '## Second section',
+    '',
+    'Lead-in paragraph.',
+    '',
+    'Keep the **shared draft** clean and see [the spec](https://example.com/spec) before merging.',
+  ].join('\n');
+  const { dom, posted } = openDocDom('discussions/x/notes.md', markdown);
+  try {
+    const win = dom.window;
+    const paragraphs = [...win.document.querySelectorAll('main p')];
+    assert.equal(paragraphs.length, 4);
+    selectElement(win, paragraphs[3]);
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].origin, 'http://127.0.0.1:5566');
+    assert.equal(posted[0].data.type, 'agent-room:point');
+    assert.equal(posted[0].data.kind, 'passage');
+    assert.equal(
+      posted[0].data.text,
+      'passage in discussions/x/notes.md, under "Second section", paragraph 2: "Keep the shared draft clean and see the spec before merging."',
+    );
+    assert.equal(posted[0].data.label, '↳ "Keep the shared draft … the spec before merging."');
+  } finally {
+    dom.window.close();
+  }
+});
+
+test('passage pointing: 4000-character limit counts location + quote, shows a note when over, and ignores empty clicks and drawing tools', () => {
+  const rel = 'discussions/2026-11-28-a-very-long-sprint-folder-name-for-testing-limits/sub/notes.md';
+  const heading = 'B. A long section heading that takes up plenty of characters in the location hint';
+  const prefix1 = `passage in ${rel}, under "${heading}", paragraph 1: "`;
+  const prefix2 = `passage in ${rel}, under "${heading}", paragraph 2: "`;
+  const exactQuote = 'w'.repeat(4000 - prefix1.length - 1);
+  const overQuote = 'z'.repeat(4001 - prefix2.length - 1);
+  const markdown = [
+    `## ${heading}`,
+    '',
+    exactQuote,
+    '',
+    overQuote,
+    '',
+    '```csv runs',
+    'a,b',
+    '1,2',
+    '```',
+  ].join('\n');
+  const { dom, posted } = openDocDom(rel, markdown);
+  try {
+    const win = dom.window;
+    const [p1, p2] = [...win.document.querySelectorAll('main p')];
+
+    // Empty selection points at nothing.
+    win.getSelection().removeAllRanges();
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 0);
+
+    // Click without drag points at nothing even if a selection exists.
+    selectElement(win, p1);
+    win.document.dispatchEvent(new win.MouseEvent('mousedown', { bubbles: true, clientX: 20, clientY: 20 }));
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true, clientX: 20, clientY: 20, detail: 1 }));
+    assert.equal(posted.length, 0);
+
+    // Exactly 4000 characters (location + quote) is sent with no note.
+    selectElement(win, p1);
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].data.text.length, 4000);
+    assert.equal(win.document.getElementById('passage-note'), null);
+
+    // 4001 characters (location + quote) is not sent and shows the note.
+    selectElement(win, p2);
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 1);
+    const note = win.document.getElementById('passage-note');
+    assert.ok(note);
+    assert.match(note.textContent, /shorter passage/i);
+
+    // Drawing tools (Pen, Circle, Arrow) never also point at a passage.
+    for (const tool of ['pen', 'circle', 'arrow']) {
+      win.document.querySelector(`#ink-tools [data-tool="${tool}"]`).click();
+      selectElement(win, p1);
+      win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+      assert.equal(posted.length, 1, `tool ${tool} should not point at a passage`);
+    }
+
+    // Returning to Point re-enables passage pointing and clears the note.
+    win.document.querySelector('#ink-tools [data-tool="point"]').click();
+    selectElement(win, p1);
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 2);
+    assert.equal(win.document.getElementById('passage-note'), null);
+  } finally {
+    dom.window.close();
+  }
+});
+
+// Helper for in-place update tests: stubs polling interval, fetch, scroll, and dynamic Mermaid/Vega script loading.
+function openLiveDocDom(rel, initialMd, { withMermaid = false, withVega = false } = {}) {
+  let currentMd = initialMd;
+  let currentMtime = '1000';
+  let failPageFetch = false;
+  let pollFn = null;
+  let reloaded = false;
+  const loadedScripts = [];
+  const posted = [];
+  const scrollState = { x: 0, y: 0 };
+
+  const installMermaid = (win) => {
+    win.mermaid = {
+      initialize() {},
+      async render(id, src) {
+        const node = /([A-Za-z0-9_]+)\[([^\]]+)\]/.exec(src);
+        const nid = node ? node[1] : 'NodeA';
+        const label = node ? node[2] : 'NodeA';
+        return { svg: `<svg id="${id}"><g class="node" data-id="${nid}"><rect></rect><text>${label}</text></g></svg>` };
+      },
+    };
+  };
+  const installVega = (win) => {
+    win.vegaEmbed = async (box, spec) => {
+      const datum = (spec.data && spec.data.values && spec.data.values[0]) || { day: '16 Nov', runs: 42 };
+      const svg = win.document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      const rect = win.document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      svg.append(rect);
+      box.innerHTML = '';
+      box.append(svg);
+      const item = { datum, _svg: rect, mark: { role: 'mark' } };
+      let clickHandler = null;
+      const view = {
+        scenegraph: () => ({ root: { items: [item] } }),
+        addEventListener: (ev, fn) => { if (ev === 'click') clickHandler = fn; },
+        triggerClick: () => clickHandler && clickHandler({}, item),
+        finalize() {},
+      };
+      box._view = view;
+      return { view };
+    };
+  };
+
+  const html = page(rel, md.parse(currentMd), rel);
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on('jsdomError', (err) => {
+    if (/Not implemented: navigation/i.test(err.message)) reloaded = true;
+    else console.error(err);
+  });
+  const dom = new JSDOM(html, {
+    url: `http://127.0.0.1:5566/${rel}`,
+    runScripts: 'dangerously',
+    virtualConsole,
+    beforeParse(win) {
+      Object.defineProperty(win, 'parent', {
+        value: { postMessage: (data, origin) => posted.push({ data, origin }) },
+      });
+      win.setInterval = (fn) => { pollFn = fn; return 1; };
+      Object.defineProperty(win, 'scrollX', { get: () => scrollState.x, configurable: true });
+      Object.defineProperty(win, 'scrollY', { get: () => scrollState.y, configurable: true });
+      win.scrollTo = (x, y) => { scrollState.x = x; scrollState.y = y; };
+      win.fetch = async (url) => {
+        const u = String(url);
+        if (u.includes('__mtime')) return { ok: true, text: async () => currentMtime };
+        if (failPageFetch) throw new Error('network down');
+        return { ok: true, text: async () => page(rel, md.parse(currentMd), rel) };
+      };
+      if (withMermaid) installMermaid(win);
+      if (withVega) installVega(win);
+      // Intercept dynamic <script src="/__lib/..."> appended to document.head.
+      const origAppend = win.Element.prototype.append;
+      win.Element.prototype.append = function (...nodes) {
+        const res = origAppend.apply(this, nodes);
+        for (const n of nodes) {
+          if (n && n.tagName === 'SCRIPT' && n.src && n.src.includes('/__lib/')) {
+            const name = n.src.slice(n.src.lastIndexOf('/') + 1);
+            loadedScripts.push(name);
+            if (name === 'mermaid.js') installMermaid(win);
+            if (name === 'vega-embed.js') installVega(win);
+            queueMicrotask(() => n.onload && n.onload());
+          }
+        }
+        return res;
+      };
+    },
+  });
+  const flush = () => new Promise((r) => setTimeout(r, 15));
+  return {
+    dom,
+    posted,
+    loadedScripts,
+    scrollState,
+    wasReloaded: () => reloaded,
+    setDoc(nextMd, nextMtime) { currentMd = nextMd; currentMtime = String(nextMtime); },
+    setFailPageFetch(flag) { failPageFetch = flag; },
+    async poll() { await pollFn(); await flush(); },
+  };
+}
+
+test('in-place update (1): preserves scroll and drawn marks while updating table, diagram, chart and pointing', async () => {
+  const initial = [
+    '# Live Doc',
+    '',
+    'Old intro paragraph.',
+    '',
+    '```csv runs',
+    'day,runs',
+    '16 Nov,10',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  OldBox[Old box]',
+    '```',
+    '',
+    '```vega-lite',
+    '{"mark":"bar","data":{"values":[{"day":"16 Nov","runs":10}]}}',
+    '```',
+  ].join('\n');
+  const updated = [
+    '# Live Doc',
+    '',
+    'Updated intro paragraph.',
+    '',
+    '```csv runs',
+    'day,runs',
+    '17 Nov,42',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  NewBox[New box]',
+    '```',
+    '',
+    '```vega-lite',
+    '{"mark":"bar","data":{"values":[{"day":"17 Nov","runs":42}]}}',
+    '```',
+  ].join('\n');
+
+  const env = openLiveDocDom('discussions/x/notes.md', initial, { withMermaid: true, withVega: true });
+  try {
+    const win = env.dom.window;
+    await env.poll(); // baseline mtime
+
+    // Scroll down, choose Pen tool, and add a drawn mark into #ink.
+    env.scrollState.y = 240;
+    win.document.querySelector('#ink-tools [data-tool="pen"]').click();
+    const ink = win.document.getElementById('ink');
+    assert.ok(ink);
+    const mark = win.document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    mark.setAttribute('d', 'M10 10L50 50');
+    mark.id = 'test-mark';
+    ink.append(mark);
+
+    // File changes on disk.
+    env.setDoc(updated, 2000);
+    await env.poll();
+
+    assert.equal(env.wasReloaded(), false);
+    assert.equal(env.scrollState.y, 240);
+    assert.equal(win.document.getElementById('test-mark'), mark);
+    assert.equal(win.document.body.classList.contains('drawing'), true);
+    assert.match(win.document.querySelector('main p').textContent, /Updated intro paragraph/);
+
+    // Switch back to Point and verify clicking cell, diagram box, chart mark, and selecting prose still point.
+    win.document.querySelector('#ink-tools [data-tool="point"]').click();
+    win.document.querySelector('.sheet td[data-cell="B2"]').click();
+    win.document.querySelector('.mermaid-box g.node').dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+    win.document.querySelector('.vl-box')._view.triggerClick();
+    selectElement(win, win.document.querySelector('main p'));
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+
+    assert.equal(env.posted.length, 4);
+    assert.match(env.posted[0].data.text, /table cell runs!B2 in discussions\/x\/notes\.md = 42/);
+    assert.match(env.posted[1].data.text, /diagram box NewBox \("New box"\)/);
+    assert.match(env.posted[2].data.text, /chart point day: 17 Nov, runs: 42/);
+    assert.match(env.posted[3].data.text, /passage in discussions\/x\/notes\.md, under "Live Doc", paragraph 1: "Updated intro paragraph\."/);
+  } finally {
+    env.dom.window.close();
+  }
+});
+
+test('in-place update (2): prose-only reloads on first diagram; table-only loads diagram and chart in place keeping marks', async () => {
+  // Part A: prose-only document gets its first diagram -> reloads so toolbar + Mermaid load.
+  const proseEnv = openLiveDocDom('discussions/x/prose.md', '# Prose\n\nJust words.\n');
+  try {
+    await proseEnv.poll();
+    assert.equal(proseEnv.dom.window.document.getElementById('ink'), null);
+    proseEnv.setDoc('# Prose\n\n```mermaid\nflowchart LR\n  A[Start]\n```\n', 2000);
+    await proseEnv.poll();
+    assert.equal(proseEnv.wasReloaded(), true);
+  } finally {
+    proseEnv.dom.window.close();
+  }
+
+  // Part B: table-only document with a drawn mark gets its first diagram and chart -> updates in place, loads libs, keeps mark.
+  const tableOnly = '# Table\n\n```csv t\na,b\n1,2\n```\n';
+  const withFigures = [
+    '# Table',
+    '',
+    '```csv t',
+    'a,b',
+    '1,3',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  Worker[The worker]',
+    '```',
+    '',
+    '```vega-lite',
+    '{"mark":"bar","data":{"values":[{"day":"18 Nov","runs":7}]}}',
+    '```',
+  ].join('\n');
+  const tableEnv = openLiveDocDom('discussions/x/table.md', tableOnly);
+  try {
+    const win = tableEnv.dom.window;
+    await tableEnv.poll();
+    const ink = win.document.getElementById('ink');
+    assert.ok(ink);
+    const mark = win.document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+    mark.id = 'kept-mark';
+    ink.append(mark);
+
+    tableEnv.setDoc(withFigures, 2000);
+    await tableEnv.poll();
+
+    assert.equal(tableEnv.wasReloaded(), false);
+    assert.equal(win.document.getElementById('kept-mark'), mark);
+    assert.ok(tableEnv.loadedScripts.includes('mermaid.js'));
+    assert.ok(tableEnv.loadedScripts.includes('vega.js'));
+    assert.ok(tableEnv.loadedScripts.includes('vega-lite.js'));
+    assert.ok(tableEnv.loadedScripts.includes('vega-embed.js'));
+    assert.ok(win.document.querySelector('.mermaid-box g.node[data-id="Worker"]'));
+    assert.ok(win.document.querySelector('.vl-box svg'));
+  } finally {
+    tableEnv.dom.window.close();
+  }
+});
+
+test('in-place update (3): failed fetch keeps pane and marks intact, and next successful poll updates it', async () => {
+  const initial = '# Doc\n\nBefore change.\n\n```csv t\na\n1\n```\n';
+  const updated = '# Doc\n\nAfter change.\n\n```csv t\na\n2\n```\n';
+  const env = openLiveDocDom('discussions/x/retry.md', initial);
+  try {
+    const win = env.dom.window;
+    await env.poll();
+    const ink = win.document.getElementById('ink');
+    const mark = win.document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    mark.id = 'retry-mark';
+    ink.append(mark);
+
+    env.setDoc(updated, 2000);
+    env.setFailPageFetch(true);
+    await env.poll();
+
+    assert.equal(env.wasReloaded(), false);
+    assert.equal(win.document.getElementById('retry-mark'), mark);
+    assert.match(win.document.querySelector('main p').textContent, /Before change/);
+
+    // Next poll succeeds with the same mtime (2000) because last was not advanced on failure.
+    env.setFailPageFetch(false);
+    await env.poll();
+
+    assert.equal(env.wasReloaded(), false);
+    assert.equal(win.document.getElementById('retry-mark'), mark);
+    assert.match(win.document.querySelector('main p').textContent, /After change/);
+  } finally {
+    env.dom.window.close();
+  }
+});
+
+test('change tracking (1, 2, 5, 7): multi-edit diff, Mark reviewed saves shown version, survives restart, stale version refused, path/origin checked', async () => {
+  const dir = fixture();
+  const screen = { clients: new Set(), transcript: [] };
+  const notesPath = join(dir, 'plan.md');
+  const v1 = [
+    '# Plan',
+    '',
+    'First paragraph stays here.',
+    '',
+    'Second paragraph mentions draft.',
+    '',
+    'Third paragraph is quite wordy and really should be tightened up nicely.',
+  ].join('\n');
+  writeFileSync(notesPath, v1);
+
+  const s1 = await serve(dir, screen);
+  try {
+    // First open establishes first-opened baseline.
+    const html1 = await (await s1.get('/plan.md')).text();
+    assert.match(html1, /Tracking changes since you first opened this document/);
+    const hash1 = /data-doc-hash="([0-9a-f]+)"/.exec(html1)?.[1];
+    assert.equal(hash1, sourceHash(v1));
+
+    // Security checks on /__review: foreign origin -> 403, unservable path -> 404.
+    assert.equal((await postFrom(s1, '/__review', { file: 'plan.md', hash: hash1 }, { origin: 'https://evil.example' })).status, 403);
+    assert.equal((await postFrom(s1, '/__review', { file: '../secret.txt', hash: hash1 })).status, 404);
+
+    // (1) Two sequential edits to paragraph 3 plus an outside edit to paragraph 2.
+    const v2 = v1.replace('Third paragraph is quite wordy and really should be tightened up nicely.', 'Third paragraph is wordy and should be tightened.');
+    writeFileSync(notesPath, v2);
+    const v3 = v2
+      .replace('Second paragraph mentions draft.', 'Second paragraph mentions final draft.')
+      .replace('Third paragraph is wordy and should be tightened.', 'Third paragraph is tight.');
+    writeFileSync(notesPath, v3);
+
+    const html3 = await (await s1.get('/plan.md')).text();
+    assert.match(html3, /Tracking changes since you first opened this document · 2 changes/);
+    assert.match(html3, /<ins class="diff-ins">final<\/ins>/);
+    assert.match(html3, /<ins class="diff-ins">tight\.<\/ins>/);
+    assert.match(html3, /<del class="diff-del">quite wordy and really should be tightened up nicely\.<\/del>/);
+    const hash3 = /data-doc-hash="([0-9a-f]+)"/.exec(html3)?.[1];
+    assert.equal(hash3, sourceHash(v3));
+
+    // (2) Save v4 lands on disk BEFORE Mark reviewed is clicked for shown version v3.
+    const v4 = v3 + '\n\nFourth paragraph added during review.\n';
+    writeFileSync(notesPath, v4);
+    const revRes = await postFrom(s1, '/__review', { file: 'plan.md', hash: hash3 });
+    assert.equal(revRes.status, 200);
+    // Now fetching plan.md compares v4 against reviewed v3: v4 stays shown as unreviewed!
+    const html4 = await (await s1.get('/plan.md')).text();
+    assert.match(html4, /1 change since you reviewed/);
+    assert.match(html4, /<p class="diff-ins-block">Fourth paragraph added during review\.<\/p>/);
+
+    // (5) Restart: close server 1, clear in-memory recent versions, start server 2 -> reviewed version v3 persists.
+    s1.close();
+    globalThis.__agentRoomDocVersions?.clear();
+    const s2 = await serve(dir, screen);
+    try {
+      const htmlAfterRestart = await (await s2.get('/plan.md')).text();
+      assert.match(htmlAfterRestart, /1 change since you reviewed/);
+      assert.match(htmlAfterRestart, /Fourth paragraph added during review/);
+      assert.equal(readReviewed(dir, 'plan.md')?.hash, hash3);
+
+      // (7) Stale pane: render RECENT_VERSION_LIMIT + 2 newer versions so an older rendered version drops out.
+      const staleSource = '# Plan\n\nStale version that will be evicted.\n';
+      writeFileSync(notesPath, staleSource);
+      const staleHtml = await (await s2.get('/plan.md')).text();
+      const staleHash = /data-doc-hash="([0-9a-f]+)"/.exec(staleHtml)?.[1];
+      for (let i = 0; i < RECENT_VERSION_LIMIT + 2; i++) {
+        writeFileSync(notesPath, `# Plan\n\nNewer version ${i}.\n`);
+        await (await s2.get('/plan.md')).text();
+      }
+      const beforeStaleReview = readReviewed(dir, 'plan.md');
+      const staleRes = await postFrom(s2, '/__review', { file: 'plan.md', hash: staleHash });
+      assert.equal(staleRes.status, 409);
+      const staleJson = await staleRes.json();
+      assert.equal(staleJson.unavailable, true);
+      assert.match(staleJson.message, /This version is no longer available: the pane will show the latest/);
+      // Reviewed version on disk is unchanged.
+      assert.deepEqual(readReviewed(dir, 'plan.md'), beforeStaleReview);
+    } finally {
+      s2.close();
+    }
+  } finally {
+    s1.close();
+    rmSync(reviewedDir(dir), { recursive: true, force: true });
+  }
+});
+
+test('change tracking (3): save B before the first poll is caught because poll compares against rendered hash', async () => {
+  const dir = fixture();
+  const screen = { clients: new Set(), transcript: [] };
+  const notesPath = join(dir, 'plan.md');
+  writeFileSync(notesPath, '# Plan\n\nVersion A.\n');
+  const s = await serve(dir, screen);
+  try {
+    const htmlA = await (await s.get('/plan.md')).text();
+    // Save Version B on disk BEFORE the first poll runs in the page.
+    writeFileSync(notesPath, '# Plan\n\nVersion B.\n');
+    let pollFn = null;
+    const dom = new JSDOM(htmlA, {
+      url: `${s.base}/plan.md`,
+      runScripts: 'dangerously',
+      beforeParse(win) {
+        Object.defineProperty(win, 'parent', { value: { postMessage() {} } });
+        win.setInterval = (fn) => { pollFn = fn; return 1; };
+        win.scrollTo = () => {};
+        win.fetch = (u, opts) => fetch(new URL(String(u), `${s.base}/plan.md`), opts);
+      },
+    });
+    try {
+      await new Promise((r) => setTimeout(r, 80));
+      if (pollFn) await pollFn();
+      await new Promise((r) => setTimeout(r, 80));
+      const d = dom.window.document;
+      assert.match(d.querySelector('main p').textContent, /Version/);
+      assert.ok(d.querySelector('main ins.diff-ins'));
+      assert.match(d.querySelector('main ins.diff-ins').textContent, /B\./);
+      assert.match(d.querySelector('#review-bar .review-status').textContent, /1 change/);
+    } finally {
+      dom.window.close();
+    }
+  } finally {
+    s.close();
+    rmSync(reviewedDir(dir), { recursive: true, force: true });
+  }
+});
+
+test('change tracking (4, 6): changed cell, changed box, removed box, changed chart, and top paragraph insertion', () => {
+  // (4) Table cell changed, diagram box changed + removed, chart changed.
+  const oldDoc = [
+    '# Figures',
+    '',
+    '```csv runs',
+    'day,runs',
+    '16 Nov,10',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  Worker[Old worker] --> GoneBox[Will be removed]',
+    '```',
+    '',
+    '```vega-lite',
+    '{"mark":"bar","data":{"values":[{"day":"16 Nov","runs":10}]}}',
+    '```',
+  ].join('\n');
+  const newDoc = [
+    '# Figures',
+    '',
+    '```csv runs',
+    'day,runs',
+    '16 Nov,42',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  Worker[New worker] --> StayBox[Stays]',
+    '```',
+    '',
+    '```vega-lite',
+    '{"mark":"bar","data":{"values":[{"day":"16 Nov","runs":42}]}}',
+    '```',
+  ].join('\n');
+
+  const diff4 = renderMarkdownWithDiff(oldDoc, newDoc, md);
+  assert.match(diff4.html, /<td data-cell="B2" class="num diff-changed"/);
+  assert.doesNotMatch(diff4.html, /<td data-cell="A2"[^>]*diff-changed/);
+  assert.match(diff4.html, /data-changed-nodes="\[&quot;Worker&quot;,&quot;StayBox&quot;\]"/);
+  assert.ok(diff4.removed.includes('diagram box GoneBox'));
+  assert.match(diff4.html, /<div class="vl-box diff-changed"><div class="diff-chart-badge">Changed since review<\/div>/);
+
+  // (6) Insert a paragraph near the top: one insertion shown, paragraphs below untouched.
+  const base6 = '# Doc\n\nPara one.\n\nPara two.\n\nPara three.\n';
+  const ins6 = '# Doc\n\nInserted near top.\n\nPara one.\n\nPara two.\n\nPara three.\n';
+  const diff6 = renderMarkdownWithDiff(base6, ins6, md);
+  assert.equal(diff6.changeCount, 1);
+  assert.match(diff6.html, /<p class="diff-ins-block">Inserted near top\.<\/p>/);
+  assert.match(diff6.html, /<p>Para one\.<\/p>\n<p>Para two\.<\/p>\n<p>Para three\.<\/p>/);
+});
+
+test('change tracking (8): pointing at a paragraph with a deletion and one below a deleted paragraph uses only current text and current paragraph number', () => {
+  const oldDoc = [
+    '## Section',
+    '',
+    'Keep the old slow path clean.',
+    '',
+    'This entire second paragraph will be deleted.',
+    '',
+    'Final paragraph stays below.',
+  ].join('\n');
+  const newDoc = [
+    '## Section',
+    '',
+    'Keep the fast path clean.',
+    '',
+    'Final paragraph stays below.',
+  ].join('\n');
+  const diff = renderMarkdownWithDiff(oldDoc, newDoc, md);
+  const html = page('discussions/x/notes.md', diff.html, 'discussions/x/notes.md', '/', {
+    hash: sourceHash(newDoc),
+    reviewed: true,
+    changeCount: diff.changeCount,
+    removed: diff.removed,
+  });
+  const posted = [];
+  const dom = new JSDOM(html, {
+    url: 'http://127.0.0.1:5566/discussions/x/notes.md',
+    runScripts: 'dangerously',
+    beforeParse(win) {
+      Object.defineProperty(win, 'parent', {
+        value: { postMessage: (data, origin) => posted.push({ data, origin }) },
+      });
+    },
+  });
+  try {
+    const win = dom.window;
+    const ps = [...win.document.querySelectorAll('main p')];
+    assert.equal(ps.length, 3); // edited p1, deleted p2 (.diff-del-block), current p3
+    assert.ok(ps[0].querySelector('del.diff-del'));
+    assert.ok(ps[1].classList.contains('diff-del-block'));
+
+    // Select paragraph 1 (which contains <del class="diff-del">old slow</del>).
+    selectElement(win, ps[0]);
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 1);
+    assert.equal(
+      posted[0].data.text,
+      'passage in discussions/x/notes.md, under "Section", paragraph 1: "Keep the fast path clean."',
+    );
+
+    // Select paragraph below the deleted paragraph: must be paragraph 2 (matching current Markdown).
+    selectElement(win, ps[2]);
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 2);
+    assert.equal(
+      posted[1].data.text,
+      'passage in discussions/x/notes.md, under "Section", paragraph 2: "Final paragraph stays below."',
+    );
+  } finally {
+    dom.window.close();
+  }
+});
+
+test('change tracking fidelity: varied document renders identically to normal view and preserves ordered start, nested/task/loose lists and reference-style links across edits', () => {
+  const varied = [
+    '# Varied Document',
+    '',
+    'Opening paragraph to edit later.',
+    '',
+    'Paragraph with **bold**, an [inline link](https://example.com/inline), and a [reference link][spec].',
+    '',
+    '4. Fourth ordered item',
+    '5. Fifth item with nested list',
+    '   - Nested bullet one',
+    '   - Nested bullet two',
+    '',
+    '- [x] Completed task',
+    '- [ ] Pending task',
+    '',
+    '- Loose item one',
+    '',
+    '- Loose item two',
+    '',
+    '> Quoted wisdom with [reference link][spec].',
+    '',
+    '```js',
+    'const x = 1;',
+    '```',
+    '',
+    '```csv runs',
+    'day,runs',
+    '16 Nov,10',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  A[Alpha] --> B[Beta]',
+    '```',
+    '',
+    '```vega-lite',
+    '{"mark":"bar","data":{"values":[{"day":"16 Nov","runs":10}]}}',
+    '```',
+    '',
+    '[spec]: https://example.com/spec',
+    '',
+  ].join('\n');
+
+  const normalHtml = md.parse(varied);
+  // Unchanged version (both identical string and whitespace-only difference hitting the block diff path) renders identical HTML.
+  assert.equal(renderMarkdownWithDiff(varied, varied, md).html, normalHtml);
+  const diffWhitespace = renderMarkdownWithDiff(varied + '\n', varied, md);
+  assert.equal(diffWhitespace.changeCount, 0);
+  assert.equal(diffWhitespace.html, normalHtml);
+
+  // After editing a different paragraph, the unchanged paragraph with reference-style link, ordered start=4, nested, task, and loose lists all survive intact.
+  const edited = varied.replace('Opening paragraph to edit later.', 'Opening paragraph was edited.');
+  const diffEdited = renderMarkdownWithDiff(varied, edited, md);
+  assert.equal(diffEdited.changeCount, 1);
+  assert.match(diffEdited.html, /<a href="https:\/\/example\.com\/spec">reference link<\/a>/);
+  assert.match(diffEdited.html, /<ol start="4">/);
+  assert.match(diffEdited.html, /<ul>\n<li>Nested bullet one<\/li>/);
+  assert.match(diffEdited.html, /<input checked="" disabled="" type="checkbox"> Completed task/);
+  assert.match(diffEdited.html, /<li><p>Loose item one<\/p>\n<\/li>/);
+  assert.match(diffEdited.html, /<pre><code class="language-js">const x = 1;/);
+});
+
+test('change tracking: removing a table cell and changing only an arrow in a Mermaid diagram counts and flags both', () => {
+  const before = [
+    '# Combined',
+    '',
+    '```csv runs',
+    'day,runs',
+    '16 Nov,10',
+    '17 Nov,20',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  A[Alpha] --> B[Beta]',
+    '```',
+  ].join('\n');
+  const after = [
+    '# Combined',
+    '',
+    '```csv runs',
+    'day,runs',
+    '16 Nov,10',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  A[Alpha] -.-> B[Beta]',
+    '```',
+  ].join('\n');
+
+  const diff = renderMarkdownWithDiff(before, after, md);
+  assert.ok(diff.removed.includes('table cell runs!A3'));
+  assert.ok(diff.removed.includes('table cell runs!B3'));
+  // 2 removed table cells + 1 arrow-only diagram change = 3 changes.
+  assert.equal(diff.changeCount, 3);
+  assert.match(diff.html, /<div class="mermaid-box diff-changed" data-changed-nodes="\[\]"><div class="diff-chart-badge">Changed since review<\/div>/);
 });
