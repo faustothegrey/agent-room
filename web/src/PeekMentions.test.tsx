@@ -160,3 +160,98 @@ it('links Worker reports and offers live Worker mentions, including follow and u
   Source.current.send({ type: 'work', message: entry('User', '<p>hello</p>') });
   expect(screen.queryByLabelText('File mentions')).toBeNull();
 });
+
+it('shows the Boards Back to current button (expanded and collapsed) for chat peek, file peek, and received peek', async () => {
+  const replica = {
+    node: 'studio', addresses: ['192.168.1.5:8080'], roomId: 'r1',
+    own: {},
+    received: [{ board: 'd1', node: 'mini', commit: 'c1', round: 3, receivedAt: '2026-11-25T08:00:00Z', name: '2026-11-09-shared', title: 'Shared plan', local: null }],
+    peers: [],
+  };
+  fetchMock.mockImplementation(async (url: string) => ({
+    ok: true, status: 204, text: async () => '',
+    json: async () => url.startsWith('__rfiles') ? ['notes.md']
+      : url.includes('detail=1') ? { files: paths, unviewable: [], branch: null } : paths,
+  }));
+  setup();
+  const user = userEvent.setup();
+  const boards = screen.getByLabelText('Boards');
+  expect(within(boards).queryByRole('button', { name: 'Back to current' })).toBeNull();
+
+  // 1. Closed-board chat peek (expanded, then collapsed, then click to leave)
+  Source.current.send({ type: 'reset', input: true, room, peek, doc: null, messages: [entry('B', '<p>closed</p>')] });
+  const chatBack = within(boards).getByRole('button', { name: 'Back to current' });
+  expect(chatBack.getAttribute('title')).toBe('Back to current');
+  expect(chatBack.textContent).toBe('↩ Back to current');
+  expect(chatBack.previousElementSibling?.id).toBe('list-head');
+  await user.click(screen.getByRole('button', { name: 'Collapse boards list' }));
+  const chatBackCollapsed = within(boards).getByRole('button', { name: 'Back to current' });
+  expect(chatBackCollapsed.getAttribute('title')).toBe('Back to current');
+  expect(chatBackCollapsed.textContent).toBe('↩');
+  await user.click(chatBackCollapsed);
+  await waitFor(() => expect(within(boards).queryByRole('button', { name: 'Back to current' })).toBeNull());
+  expect(JSON.parse(fetchMock.mock.calls.find(([url]) => url === '__say')![1].body)).toEqual({ text: '/peek' });
+  await user.click(screen.getByRole('button', { name: 'Expand boards list' }));
+
+  // 2. File peek (Peek files from board row menu)
+  const sayCountBeforeFile = fetchMock.mock.calls.filter(([url]) => url === '__say').length;
+  Source.current.send({ type: 'reset', input: true, room: { ...room, closedBoards: ['2026-11-10-closed'] }, peek: null, doc: null, messages: [] });
+  await within(boards).findByRole('button', { name: 'closed' });
+  await user.click(within(boards).getByLabelText('Board actions for closed'));
+  await user.click(within(boards).getByRole('button', { name: 'Peek files' }));
+  const fileBack = within(boards).getByRole('button', { name: 'Back to current' });
+  expect(fileBack.getAttribute('title')).toBe('Back to current');
+  expect(fileBack.textContent).toBe('↩ Back to current');
+  expect(document.getElementById('disc-header')?.classList.contains('peeking')).toBe(false);
+  await user.click(screen.getByRole('button', { name: 'Collapse boards list' }));
+  const fileBackCollapsed = within(boards).getByRole('button', { name: 'Back to current' });
+  expect(fileBackCollapsed.textContent).toBe('↩');
+  await user.click(fileBackCollapsed);
+  expect(within(boards).queryByRole('button', { name: 'Back to current' })).toBeNull();
+  expect(screen.queryByLabelText('Explorer tab')).toBeNull();
+  expect(fetchMock.mock.calls.filter(([url]) => url === '__say')).toHaveLength(sayCountBeforeFile);
+  await user.click(screen.getByRole('button', { name: 'Expand boards list' }));
+
+  // 3. Received peek (peer's received files)
+  Source.current.send({ type: 'replica', replica });
+  const peerSection = within(boards).getByText('Received from peers (1)').closest('details')!;
+  await user.click(within(peerSection).getByText('Received from peers (1)'));
+  await user.click(within(peerSection).getByRole('button', { name: 'Shared plan' }));
+  const recvBack = within(boards).getByRole('button', { name: 'Back to current' });
+  expect(recvBack.getAttribute('title')).toBe('Back to current');
+  expect(recvBack.textContent).toBe('↩ Back to current');
+  expect(document.getElementById('disc-header')?.classList.contains('peeking')).toBe(false);
+  await user.click(screen.getByRole('button', { name: 'Collapse boards list' }));
+  const recvBackCollapsed = within(boards).getByRole('button', { name: 'Back to current' });
+  expect(recvBackCollapsed.textContent).toBe('↩');
+  await user.click(recvBackCollapsed);
+  expect(within(boards).queryByRole('button', { name: 'Back to current' })).toBeNull();
+  expect(screen.getByLabelText('Explorer files')).toBeTruthy();
+  expect(fetchMock.mock.calls.filter(([url]) => url === '__say')).toHaveLength(sayCountBeforeFile);
+});
+
+it('tints the discussion header and shows Peeking · read-only on both Discussion and Worker tabs while peeking', async () => {
+  setup();
+  const user = userEvent.setup();
+  const header = document.getElementById('disc-header')!;
+  const status = document.getElementById('disc-status')!;
+  expect(header.classList.contains('peeking')).toBe(false);
+
+  Source.current.send({ type: 'reset', input: true, room, peek, doc: null, messages: [entry('B', '<p>closed</p>')] });
+  expect(header.classList.contains('peeking')).toBe(true);
+  expect(status.textContent).toBe('Peeking · read-only');
+
+  // Switch to Worker tab: must still show Peeking · read-only, not idle or worker working
+  await user.click(screen.getByRole('tab', { name: 'Worker' }));
+  expect(header.classList.contains('peeking')).toBe(true);
+  expect(status.textContent).toBe('Peeking · read-only');
+  Source.current.send({ type: 'working', name: 'Worker' });
+  expect(status.textContent).toBe('Peeking · read-only');
+
+  // Leave peek: header tint clears and Worker tab shows worker state again
+  await user.click(within(screen.getByLabelText('Boards')).getByRole('button', { name: 'Back to current' }));
+  await waitFor(() => expect(header.classList.contains('peeking')).toBe(false));
+  expect(status.textContent).toBe('Worker is working');
+  Source.current.send({ type: 'working', name: null });
+  expect(status.textContent).toBe('idle');
+});
