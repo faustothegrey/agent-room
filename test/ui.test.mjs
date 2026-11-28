@@ -7001,16 +7001,26 @@ test('recurring research schedules a board and reuses its live session, skipping
     result.ctx.usage.checkQuotaFloor = () => ({ ok: true });
     return result;
   };
+  await handleLine('Our own topic', first);
+  const shown = first.screen.room.active;
+  const notices = (context) => context.events.filter((e) => e.type === 'note' && e.text.startsWith('Scheduled research '));
   const input = { kind: 'recurring', title: '', prompt: 'Named from prompt', time: '03:00', enabled: true };
   const id = saveSchedule(first, { action: 'add', ...input }).tasks[0].id;
   assert.deepEqual(await checkSchedule(first, new Date(2026, 10, 21, 3, 1)), []);
   assert.equal((await checkSchedule(first, new Date(2026, 10, 21, 3, 0)))[0].status, 'ran');
   const board = contexts().find((c) => c.state.research);
   const name = board.board.name;
+  const started = { type: 'note', text: 'Scheduled research started: Named from prompt', error: false };
+  assert.deepEqual(notices(first), [started]);
+  assert.deepEqual(notices(board), [started]);
+  assert.equal(first.screen.room.active, shown);
   assert.match(name, /named-from-prompt/);
   assert.equal(getSchedule(first).tasks[0].board, name);
   const state = board.state, agents = board.room.agents;
+  saveSchedule(first, { action: 'edit', id, ...input, title: 'Daily scan' });
+  const restarted = { ...started, text: 'Scheduled research started: Named from prompt (Daily scan)' };
   assert.equal((await checkSchedule(first, new Date(2026, 10, 22, 3, 0)))[0].status, 'ran');
+  assert.deepEqual(notices(first), [started, restarted]);
   assert.equal(board.state, state);
   assert.equal(board.room.agents, agents);
   assert.equal(board.state.transcript.filter((m) => m.speaker === 'Scheduler').length, 2);
@@ -7018,9 +7028,13 @@ test('recurring research schedules a board and reuses its live session, skipping
   const skipped = await checkSchedule(first, new Date(2026, 10, 23, 3, 0));
   assert.equal(skipped[0].status, 'skipped');
   assert.match(skipped[0].reason, /round or summary/);
+  assert.deepEqual(notices(first), [started, restarted, {
+    type: 'note', text: `Scheduled research did not start: Daily scan — ${getSchedule(first).tasks[0].lastRun.reason}`, error: true,
+  }]);
   board.busy = false;
   saveSchedule(first, { action: 'toggle', id, enabled: false });
   assert.deepEqual(await checkSchedule(first, new Date(2026, 10, 24, 3, 0)), []);
+  assert.equal(notices(first).length, 3);
   saveSchedule(first, { action: 'add', kind: 'research', title: '', prompt: 'One shot prompt title', date: '2026-11-24', time: '03:01' });
   assert.equal((await checkSchedule(first, new Date(2026, 10, 24, 3, 1)))[0].status, 'ran');
   assert.ok(contexts().some((c) => c.board?.name.endsWith('one-shot-prompt-title')));
