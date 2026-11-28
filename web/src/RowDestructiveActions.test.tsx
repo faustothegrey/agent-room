@@ -93,3 +93,36 @@ it('uses archived rollback references and does not permit confirming archive for
   await user.click(within(menu('old')).getByRole('button', { name: 'Click again: queue rollback of this sprint’s implementation' }));
   await waitFor(() => expect(says()).toContain('/rollback archive/' + archived));
 });
+
+it('shows Delete with the sprint/workbench warning for archived and deferred sprints and workbenches, and hides it for active sprints', async () => {
+  const deferred = '2026-10-02-later', bench = '2026-10-03-fix';
+  const extraFiles = [...files, `discussions/deferred/${deferred}/notes.md`, `discussions/archive/${bench}/notes.md`];
+  fetchMock.mockImplementation(async (url: string) => ({ ok: true, text: async () => '', json: async () => url.includes('detail=1') ? { files: extraFiles, unviewable: [], branch: null } : [] }));
+  setup({ workbenches: [bench], closedBoards: [closed, research, archived, deferred, bench] });
+  const user = userEvent.setup();
+
+  // Active sprints (both open and closed) stay without Delete.
+  await user.click(await screen.findByLabelText('Board actions for Live'));
+  expect(within(menu('Live')).queryByRole('button', { name: 'Delete' })).toBeNull();
+  await user.click(screen.getByLabelText('Board actions for closed'));
+  expect(within(menu('closed')).queryByRole('button', { name: 'Delete' })).toBeNull();
+
+  // Archived and deferred sprints + archived workbench show enabled Delete with the new two-click warning.
+  await user.click(screen.getByText('Archived · Deferred (3)'));
+  await user.click(screen.getByLabelText('Board actions for old'));
+  const oldDel = within(menu('old')).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
+  expect(oldDel.disabled).toBe(false);
+  await user.click(oldDel); expect(says()).toEqual([]);
+  await user.click(within(menu('old')).getByRole('button', { name: 'Delete this sprint from this room? Previous Git commits and copies already received by peers may still contain it.' }));
+  await waitFor(() => expect(says()).toContain('/delete archive/' + archived));
+
+  await user.click(screen.getByLabelText('Board actions for later'));
+  await user.click(within(menu('later')).getByRole('button', { name: 'Delete' }));
+  await user.click(within(menu('later')).getByRole('button', { name: 'Delete this sprint from this room? Previous Git commits and copies already received by peers may still contain it.' }));
+  await waitFor(() => expect(says()).toContain('/delete deferred/' + deferred));
+
+  await user.click(screen.getByLabelText('Board actions for fix'));
+  await user.click(within(menu('fix')).getByRole('button', { name: 'Delete' }));
+  await user.click(within(menu('fix')).getByRole('button', { name: 'Delete this workbench from this room? Previous Git commits and copies already received by peers may still contain it.' }));
+  await waitFor(() => expect(says()).toContain('/delete archive/' + bench));
+});

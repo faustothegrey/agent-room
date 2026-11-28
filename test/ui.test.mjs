@@ -7677,3 +7677,115 @@ test('Check now and header monitor never leak tokens from Claude JSON fields, Co
   assert.ok(!JSON.stringify(nonJson.view).includes(token));
   assert.ok(!JSON.stringify(nonJson.monitor).includes(token));
 });
+
+test('delete archived and deferred sprints/workbenches: succeeds, clears finished rollback, and refuses active or with worker state', async () => {
+  const { existsSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { WORKBENCH_MARKER, workerPlace } = await import('../src/ui.mjs');
+  const ctx = await freshSession([], async () => ({ title: 'Archive target' }));
+  const git = await gitRoom(ctx.cwd);
+  const events = [];
+  ctx.docs = { ...ctx.docs, broadcast: (_screen, event) => events.push(event) };
+  ctx.screen.clients = new Set([{}]);
+  const lastStatus = () => events.filter((e) => e.type === 'note').at(-1);
+
+  // Start and close a sprint so it has a real folder, checkpoint, and closed flag.
+  await handleLine('hello', ctx);
+  const name = ctx.board.name;
+  await handleLine('/close', ctx);
+  const activeDir = join(ctx.cwd, 'discussions', name);
+  assert.equal(existsSync(activeDir), true);
+
+  // 1. Active closed sprint is still refused.
+  await handleLine(`/delete ${name}`, ctx);
+  assert.equal(existsSync(activeDir), true);
+  assert.match(lastStatus().text, /active: archive or defer it before deleting/i);
+
+  // Move to archive/.
+  await handleLine(`/move ${name} archive`, ctx);
+  const archiveDir = join(ctx.cwd, 'discussions', 'archive', name);
+  assert.equal(existsSync(archiveDir), true);
+
+  // 2. Refusal: worker/<name> branch exists.
+  const place = await workerPlace(ctx.cwd, name);
+  git('branch', place.branch);
+  await handleLine(`/delete archive/${name}`, ctx);
+  assert.equal(existsSync(archiveDir), true);
+  assert.match(lastStatus().text, /worker branch .*Close and Merge or Close and Discard/i);
+  assert.match(lastStatus().text, /make it active/i);
+  git('branch', '-D', place.branch);
+
+  // 3. Refusal: worker/<name> worktree exists (even without branch ref).
+  git('worktree', 'add', '--detach', place.path, 'HEAD');
+  await handleLine(`/delete archive/${name}`, ctx);
+  assert.equal(existsSync(archiveDir), true);
+  assert.match(lastStatus().text, /worker worktree .*Close and Merge or Close and Discard/i);
+  git('worktree', 'remove', '--force', place.path);
+
+  // 4. Refusal: worker task running.
+  ctx.shop ??= { lanes: new Map(), rollbacks: new Map() };
+  ctx.shop.lanes ??= new Map();
+  ctx.shop.lanes.set(name, { name, running: { owner: name, lane: name, workName: name }, tasks: [] });
+  await handleLine(`/delete archive/${name}`, ctx);
+  assert.equal(existsSync(archiveDir), true);
+  assert.match(lastStatus().text, /worker task running or queued/i);
+
+  // 5. Refusal: worker task queued.
+  ctx.shop.lanes.set(name, { name, running: null, tasks: [{ owner: name, lane: name, workName: name }] });
+  await handleLine(`/delete archive/${name}`, ctx);
+  assert.equal(existsSync(archiveDir), true);
+  assert.match(lastStatus().text, /worker task running or queued/i);
+  ctx.shop.lanes.delete(name);
+
+  // 6. Refusal: rollback queued or running.
+  ctx.shop.rollbacks ??= new Map();
+  for (const status of ['queued', 'running']) {
+    ctx.shop.rollbacks.set(name, { name, status, report: null, commit: null });
+    await handleLine(`/delete archive/${name}`, ctx);
+    assert.equal(existsSync(archiveDir), true);
+    assert.match(lastStatus().text, new RegExp(`rollback ${status}`, 'i'));
+  }
+
+  // 6b. Refusal: rollback queued during the awaited Git check is caught by the synchronous recheck before rmSync.
+  ctx.shop.rollbacks.delete(name);
+  const deleteInFlight = handleLine(`/delete archive/${name}`, ctx);
+  ctx.shop.rollbacks.set(name, { name, status: 'queued', report: null, commit: null });
+  await deleteInFlight;
+  assert.equal(existsSync(archiveDir), true);
+  assert.match(lastStatus().text, /rollback queued/i);
+
+  // 7. Success: archived sprint deleted, finished rollback entry cleared, peek reset, moved event emitted.
+  ctx.shop.rollbacks.set(name, { name, status: 'ready', report: 'Done', commit: 'abc123' });
+  ctx.screen.peek = { path: `discussions/archive/${name}` };
+  await handleLine(`/delete archive/${name}`, ctx);
+  assert.equal(existsSync(archiveDir), false);
+  assert.equal(ctx.shop.rollbacks.has(name), false);
+  assert.equal(ctx.screen.peek, null);
+  assert.ok(events.some((e) => e.type === 'moved' && e.from === `discussions/archive/${name}` && e.to === null));
+  assert.match(lastStatus().text, new RegExp(`Deleted the sprint ${name}`));
+
+  // 8. Success: deferred sprint deleted.
+  ctx.suggestTitle = async () => ({ title: 'Deferred target' });
+  await handleLine('defer me', ctx);
+  const deferredName = ctx.board.name;
+  await handleLine('/close', ctx);
+  await handleLine(`/move ${deferredName} deferred`, ctx);
+  const deferredDir = join(ctx.cwd, 'discussions', 'deferred', deferredName);
+  assert.equal(existsSync(deferredDir), true);
+  await handleLine(`/delete deferred/${deferredName}`, ctx);
+  assert.equal(existsSync(deferredDir), false);
+  assert.match(lastStatus().text, new RegExp(`Deleted the sprint ${deferredName}`));
+
+  // 9. Success: archived workbench deleted (reported as workbench).
+  ctx.suggestTitle = async () => ({ title: 'Old bench' });
+  await handleLine('bench me', ctx);
+  const benchName = ctx.board.name;
+  writeFileSync(join(ctx.cwd, 'discussions', benchName, WORKBENCH_MARKER), 'workbench\n');
+  await handleLine('/close', ctx);
+  await handleLine(`/move ${benchName} archive`, ctx);
+  const benchDir = join(ctx.cwd, 'discussions', 'archive', benchName);
+  assert.equal(existsSync(benchDir), true);
+  await handleLine(`/delete archive/${benchName}`, ctx);
+  assert.equal(existsSync(benchDir), false);
+  assert.match(lastStatus().text, new RegExp(`Deleted the workbench ${benchName}`));
+});
