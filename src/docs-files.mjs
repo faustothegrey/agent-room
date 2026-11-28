@@ -278,6 +278,7 @@ body.drawing #ink { pointer-events: auto; cursor: crosshair; touch-action: none;
 #ink-tools { position: sticky; top: .5rem; margin: 0 0 .75rem auto; width: max-content; z-index: 10; display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: Canvas; border: 1px solid #8886; font: 12px system-ui, sans-serif; }
 #ink-tools button { font: inherit; border: 1px solid transparent; background: none; color: CanvasText; border-radius: 5px; padding: 2px 8px; cursor: pointer; }
 #ink-tools button[aria-pressed="true"] { border-color: #2f6fde; color: #2f6fde; background: #2f6fde1f; }
+#passage-note { position: fixed; top: .5rem; left: 50%; transform: translateX(-50%); z-index: 20; max-width: 90%; padding: .35rem .75rem; border-radius: 6px; background: #3b2416; color: #f6c177; border: 1px solid #e07a10; font: 12px/1.4 system-ui, sans-serif; box-shadow: 0 2px 8px #0006; }
 nav { font-size: .85rem; opacity: .7; margin-bottom: 1rem; }
 </style></head><body><nav>${home} · ${esc(title)}</nav><main>${body}</main>
 ${body.includes('<div class="mermaid-box">') ? `<script src="${esc(base)}__lib/mermaid.js"></script>` : ''}
@@ -443,6 +444,99 @@ document.addEventListener('click', (e) => {
     text: 'table cell ' + name + ' in ' + ${JSON.stringify(watch)} + ' = ' + td.textContent + ' (' + [rowLabel, colLabel].filter(Boolean).join(', ') + ')' + formula }, location.origin);
   td.classList.add('hl'); setTimeout(() => td.classList.remove('hl'), 1200);
 });
+// Shown in the room page: selecting prose in any Markdown document points at it on mouseup.
+const DOC_PATH = ${JSON.stringify(watch)};
+if (parent !== window && DOC_PATH) {
+  const PASSAGE_LIMIT = 4000;
+  const cleanText = (s) => String(s).replace(/\\s+/g, ' ').trim();
+  const passageLabel = (q) => {
+    const max = 56;
+    if (q.length <= max) return '↳ "' + q + '"';
+    const words = q.split(' ');
+    if (words.length === 1) return '↳ "' + q.slice(0, 26) + '…' + q.slice(-26) + '"';
+    const half = Math.floor((max - 3) / 2);
+    let head = words[0], i = 1;
+    while (i < words.length - 1 && head.length + 1 + words[i].length <= half) head += ' ' + words[i++];
+    let tail = words[words.length - 1], j = words.length - 2;
+    while (j >= i && tail.length + 1 + words[j].length <= half) tail = words[j--] + ' ' + tail;
+    if (head.length > half) head = head.slice(0, half);
+    if (tail.length > half) tail = tail.slice(-half);
+    return '↳ "' + head + ' … ' + tail + '"';
+  };
+  let noteTimer = null;
+  const clearNote = () => {
+    clearTimeout(noteTimer); noteTimer = null;
+    const el = document.getElementById('passage-note'); if (el) el.remove();
+  };
+  const showNote = (msg) => {
+    clearNote();
+    const el = document.createElement('div'); el.id = 'passage-note'; el.setAttribute('role', 'status'); el.textContent = msg;
+    document.body.append(el);
+    noteTimer = setTimeout(clearNote, 5000);
+  };
+  const passageLocation = (range, main) => {
+    let start = range.startContainer;
+    if (start === main && range.startOffset < main.childNodes.length) start = main.childNodes[range.startOffset];
+    const startEl = start.nodeType === 1 ? start : start.parentElement;
+    if (!startEl || !main.contains(startEl)) return 'passage in ' + DOC_PATH;
+    let heading = null, inHeading = null;
+    for (const h of main.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+      if (h.contains(startEl)) { inHeading = h; break; }
+      if (h.compareDocumentPosition(startEl) & Node.DOCUMENT_POSITION_FOLLOWING) heading = h;
+    }
+    if (inHeading) return 'passage in ' + DOC_PATH + ', heading "' + cleanText(inHeading.textContent) + '"';
+    let loc = 'passage in ' + DOC_PATH;
+    if (heading) loc += ', under "' + cleanText(heading.textContent) + '"';
+    let block = startEl.closest('p, li, pre');
+    if (block && block.tagName === 'LI' && [...block.children].some((c) => c.tagName === 'P')) {
+      block = [...block.children].find((c) => c.tagName === 'P') || block;
+    }
+    if (block && main.contains(block) && !block.closest('.mermaid-box, .vl-box')) {
+      const blocks = [...main.querySelectorAll('p, li, pre')].filter((el) =>
+        !(el.tagName === 'LI' && [...el.children].some((c) => c.tagName === 'P')) && !el.closest('.mermaid-box, .vl-box')
+      );
+      let n = 0, found = false;
+      for (const el of blocks) {
+        if (heading && !(heading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+        n++;
+        if (el === block) { found = true; break; }
+      }
+      if (found) loc += ', paragraph ' + n;
+    }
+    return loc;
+  };
+  let downPos = null;
+  document.addEventListener('mousedown', (e) => { downPos = { x: e.clientX, y: e.clientY }; });
+  document.addEventListener('mouseup', (e) => {
+    const prev = downPos; downPos = null;
+    if (document.body.classList.contains('drawing')) return;
+    if (e.target && e.target.closest && e.target.closest('#ink-tools, nav, #passage-note')) return;
+    if (prev && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 3 && e.detail < 2) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+    const main = document.querySelector('main');
+    if (!main) return;
+    const raw = sel.getRangeAt(0);
+    const insideMain = main.contains(raw.startContainer) && main.contains(raw.endContainer);
+    const touchesMain = insideMain || main.contains(raw.startContainer) || main.contains(raw.endContainer)
+      || (raw.commonAncestorContainer && raw.commonAncestorContainer.contains && raw.commonAncestorContainer.contains(main));
+    if (!touchesMain) return;
+    const commonEl = raw.commonAncestorContainer.nodeType === 1 ? raw.commonAncestorContainer : raw.commonAncestorContainer.parentElement;
+    if (commonEl && commonEl.closest('.sheet, .mermaid-box, .vl-box')) return;
+    const range = raw.cloneRange();
+    if (!main.contains(range.startContainer)) range.setStart(main, 0);
+    if (!main.contains(range.endContainer)) range.setEnd(main, main.childNodes.length);
+    const quote = cleanText(insideMain ? sel.toString() : range.toString());
+    if (!quote) return;
+    const text = passageLocation(range, main) + ': "' + quote + '"';
+    if (text.length > PASSAGE_LIMIT) {
+      showNote('Selection is too long to point at (over 4,000 characters with its location) — select a shorter passage.');
+      return;
+    }
+    clearNote();
+    parent.postMessage({ type: 'agent-room:point', kind: 'passage', label: passageLabel(quote), text }, location.origin);
+  });
+}
 </script></body></html>`;
 }
 

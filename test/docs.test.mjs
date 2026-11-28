@@ -6,7 +6,9 @@ import { createServer, request } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { JSDOM } from 'jsdom';
 import { ATTACH_LIMIT, broadcast, csvTable, docFiles, handle, isTextFile, isViewable, listFiles, messageView, pick, roomBranch, saveAttachments } from '../src/docs.mjs';
+import { md, page } from '../src/docs-files.mjs';
 
 // A proposal/ folder with a doc, a drawing, a hidden file, and a file just outside it.
 function fixture() {
@@ -825,4 +827,133 @@ test('Archived and deferred brainstorms appear in Archived · Deferred with read
   assert.ok(listed.includes('brainstorms/archive/2026-11-10-old-idea/transcripts/s.md'));
   assert.ok(listed.includes('brainstorms/deferred/2026-11-11-later-idea/transcripts/s.md'));
 
+});
+
+function openDocDom(rel, markdown) {
+  const html = page(rel, md.parse(markdown), rel);
+  const posted = [];
+  const dom = new JSDOM(html, {
+    url: `http://127.0.0.1:5566/${rel}`,
+    runScripts: 'dangerously',
+    beforeParse(win) {
+      Object.defineProperty(win, 'parent', {
+        value: { postMessage: (data, origin) => posted.push({ data, origin }) },
+      });
+    },
+  });
+  return { dom, posted };
+}
+
+function selectElement(win, el) {
+  const range = win.document.createRange();
+  range.selectNodeContents(el);
+  const sel = win.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+test('passage pointing: selecting the second copy of a sentence with bold and a link names the second heading with the full quote', () => {
+  const markdown = [
+    '# Notes',
+    '',
+    '## First section',
+    '',
+    'Intro paragraph.',
+    '',
+    'Keep the **shared draft** clean and see [the spec](https://example.com/spec) before merging.',
+    '',
+    '## Second section',
+    '',
+    'Lead-in paragraph.',
+    '',
+    'Keep the **shared draft** clean and see [the spec](https://example.com/spec) before merging.',
+  ].join('\n');
+  const { dom, posted } = openDocDom('discussions/x/notes.md', markdown);
+  try {
+    const win = dom.window;
+    const paragraphs = [...win.document.querySelectorAll('main p')];
+    assert.equal(paragraphs.length, 4);
+    selectElement(win, paragraphs[3]);
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].origin, 'http://127.0.0.1:5566');
+    assert.equal(posted[0].data.type, 'agent-room:point');
+    assert.equal(posted[0].data.kind, 'passage');
+    assert.equal(
+      posted[0].data.text,
+      'passage in discussions/x/notes.md, under "Second section", paragraph 2: "Keep the shared draft clean and see the spec before merging."',
+    );
+    assert.equal(posted[0].data.label, '↳ "Keep the shared draft … the spec before merging."');
+  } finally {
+    dom.window.close();
+  }
+});
+
+test('passage pointing: 4000-character limit counts location + quote, shows a note when over, and ignores empty clicks and drawing tools', () => {
+  const rel = 'discussions/2026-11-28-a-very-long-sprint-folder-name-for-testing-limits/sub/notes.md';
+  const heading = 'B. A long section heading that takes up plenty of characters in the location hint';
+  const prefix1 = `passage in ${rel}, under "${heading}", paragraph 1: "`;
+  const prefix2 = `passage in ${rel}, under "${heading}", paragraph 2: "`;
+  const exactQuote = 'w'.repeat(4000 - prefix1.length - 1);
+  const overQuote = 'z'.repeat(4001 - prefix2.length - 1);
+  const markdown = [
+    `## ${heading}`,
+    '',
+    exactQuote,
+    '',
+    overQuote,
+    '',
+    '```csv runs',
+    'a,b',
+    '1,2',
+    '```',
+  ].join('\n');
+  const { dom, posted } = openDocDom(rel, markdown);
+  try {
+    const win = dom.window;
+    const [p1, p2] = [...win.document.querySelectorAll('main p')];
+
+    // Empty selection points at nothing.
+    win.getSelection().removeAllRanges();
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 0);
+
+    // Click without drag points at nothing even if a selection exists.
+    selectElement(win, p1);
+    win.document.dispatchEvent(new win.MouseEvent('mousedown', { bubbles: true, clientX: 20, clientY: 20 }));
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true, clientX: 20, clientY: 20, detail: 1 }));
+    assert.equal(posted.length, 0);
+
+    // Exactly 4000 characters (location + quote) is sent with no note.
+    selectElement(win, p1);
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].data.text.length, 4000);
+    assert.equal(win.document.getElementById('passage-note'), null);
+
+    // 4001 characters (location + quote) is not sent and shows the note.
+    selectElement(win, p2);
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 1);
+    const note = win.document.getElementById('passage-note');
+    assert.ok(note);
+    assert.match(note.textContent, /shorter passage/i);
+
+    // Drawing tools (Pen, Circle, Arrow) never also point at a passage.
+    for (const tool of ['pen', 'circle', 'arrow']) {
+      win.document.querySelector(`#ink-tools [data-tool="${tool}"]`).click();
+      selectElement(win, p1);
+      win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+      assert.equal(posted.length, 1, `tool ${tool} should not point at a passage`);
+    }
+
+    // Returning to Point re-enables passage pointing and clears the note.
+    win.document.querySelector('#ink-tools [data-tool="point"]').click();
+    selectElement(win, p1);
+    win.document.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
+    assert.equal(posted.length, 2);
+    assert.equal(win.document.getElementById('passage-note'), null);
+  } finally {
+    dom.window.close();
+  }
 });

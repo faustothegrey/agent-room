@@ -86,6 +86,7 @@ This applies in sprints only (a brainstorm sends no work).
 - When the User corrects a document or drawing, change it in place. Don't create a new version
   or keep earlier versions in the notes; the transcripts and Git keep the history. Show
   alternatives side by side only when the User asks to compare them.
+- Edit the smallest passage that does the job; don't rewrite a file to change part of it.
 
 ## Project constraint (from agent-room's `AGENT.md`)
 When a discussion concerns agent-room itself: its goal is the one above, and it stays as simple as possible, but not simpler.

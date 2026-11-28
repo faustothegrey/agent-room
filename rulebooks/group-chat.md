@@ -44,6 +44,11 @@
   highlights the marks with that value.
   The User can also circle, draw over or point an arrow at these figures; you then receive a line
   such as `a mark: circled diagram box Worker`.
+- **Passages the User can point at:** in any Markdown document, the User can select a passage of
+  prose, and you then receive a `[pointing at: passage in …]` line with the document path, the
+  heading and paragraph number, and the full quoted text. Find the passage in the file by its
+  quote, with the heading and paragraph as hints; if two passages still fit, ask which one was
+  meant before editing.
 - **Naming figures:** give flowchart boxes one or two CamelCase words naming the thing, not its
   position (`Worker`, `AutoDev`; never `A`, `B`, `Step1`); name tables with one lowercase word for
   what they hold (`costs`, `options`); keep chart category labels short and unique, so `[[…]]`

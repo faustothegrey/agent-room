@@ -246,6 +246,11 @@ worker's, as their panels list them ("<provider> default" for CLI default).
     the message box, and your next message ends with one `[pointing at: …]` line naming the cell, its value,
     its row and column labels and its formula (✕ on a chip drops it; commands never carry it). A
     `[[D4]]` or `[[runs!D4]]` in the chat highlights that cell in the shown document while you hover it, and clicking it reopens the side pane to Document if closed.
+    In any Markdown document, selecting a passage of prose and releasing the mouse (with the Point tool,
+    or where there is no toolbar) points at it the same way: a short chip appears by the message box
+    (hover for the full text), and your next message carries `[pointing at: passage in …, under "…", paragraph N: "…"]`
+    with the location and the full quote (whitespace collapsed). Selections whose location and quote
+    exceed 4,000 characters are not sent; the pane asks for a shorter passage instead.
   - **Diagrams.** A ```` ```mermaid ```` block is drawn as a diagram (Mermaid, loaded only for documents
     that have one; a diagram with an error shows Mermaid's message). In a flowchart, click a box to point
     at it the same way (`[pointing at: diagram box Worker ("The worker") in …]`), and `[[Worker]]` in the
