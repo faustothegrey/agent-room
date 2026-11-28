@@ -261,7 +261,7 @@ process.stdin.on('end', () => {
     assert.equal((await fetch(origin + toB.url)).status, 200); // routed to its own page
     const b = await stream(baseB);
     const resetB = await b.next();
-    assert.equal(resetB.room.board, 'No sprint started');
+    assert.equal(resetB.room.board, 'New sprint');
     assert.deepEqual(resetB.room.open.map((o) => [o.title, o.current]), [['Alpha topic', false], ['New sprint (not started)', true]]);
     await say(baseB, 'about beta');
     await b.until((e) => e.type === 'turn');

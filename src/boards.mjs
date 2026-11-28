@@ -409,6 +409,8 @@ async function openBoard(ctx, line) {
     ctx.pendingLog = '';
     ctx.previous = null; // the "← back to …" link lasts until this discussion starts
   } catch (err) {
+    // If the folder was created, publish its title and path even when the transcript failed.
+    if (ctx.board) showHeader(ctx);
     note(ctx, `✗ Couldn't create the ${kind}'s folder or transcript: ${err.message}\nYour message was not sent${workbench ? ' to the worker' : ' to the agents'}. Here it is, to send again:\n\n${line}\n`, true);
     return false;
   }

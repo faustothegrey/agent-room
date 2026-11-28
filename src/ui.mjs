@@ -478,7 +478,7 @@ function header(ctx) {
   return { folder: ctx.cwd, ownCheckout: real(ctx.cwd) === real(dirname(dirname(fileURLToPath(import.meta.url)))), agents: ctx.room.agents.map((a) => a.name), worker: ctx.worker.name,
     workerModel: workerSpec ? modelLabel(workerSpec.provider, workerSpec.model) : null, // for the Worker tab's title
     cliSessions: sessionView(ctx),
-    board: d ? d.title : ctx.state.brainstorm ? 'New brainstorm' : ctx.state.workbench ? 'New workbench' : ctx.state.research ? 'New research board' : 'No sprint started',
+    board: d ? d.title : ctx.state.brainstorm ? 'New brainstorm' : ctx.state.workbench ? 'New workbench' : ctx.state.research ? 'New research board' : 'New sprint',
     active: folderOf(ctx), started: !!ctx.logPath || !!ctx.state.brainstorm || !!ctx.state.workbench || !!ctx.state.research,
     fresh: !settingsStarted(ctx) && !ctx.state.workbench, // its members can still be chosen: the page opens their panel
     brainstorm: !!ctx.state.brainstorm, // a brainstorm, in brainstorms/<name>/ once started (see newBrainstorm)

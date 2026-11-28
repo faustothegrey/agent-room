@@ -1097,8 +1097,11 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     else setFilePeek(null);
   };
   const closingNow = !peek && !remote && room && !room.brainstorm && room.active?.startsWith('discussions/') ? room.closingBoards?.[room.active.slice('discussions/'.length)] ?? null : null;
+  const waitingForFirstMessage = !!(room && !peek && !remote && !viewLayout && !room.active && !thinking);
+  const discussionKind = room?.brainstorm ? 'brainstorm' : room?.research ? 'research board' : 'sprint';
   const discStatus = closingNow === 'waiting' ? 'closing · waiting for worker' : closingNow === 'writing' ? 'closing · writing statement'
     : peek ? 'Peeking · read-only'
+    : waitingForFirstMessage ? `New · waiting for first ${room.workbench ? 'instruction' : 'message'}`
     : tab === 'worker' ? (working ? working + ' is working' : 'idle') : !room ? ''
     : remote || viewLayout ? 'read-only' : thinking ? thinking + ' is thinking' : room.autoDev?.status === 'running' ? '' : turnVisible ? 'your turn' : '';
   const lane = !room?.brainstorm && !room?.research && room?.active?.startsWith('discussions/') ? room.active.slice('discussions/'.length) : null;
@@ -1195,7 +1198,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     </aside>
     {!boardsClosed && <Splitter id="list-split" label="Resize Boards list" onStart={() => { listDragStart.current = listWidth; }} onMove={(x) => resizeList(x, false)} onEnd={(x) => finishListDrag(x)} onKeyDown={(event) => { if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return; event.preventDefault(); const left = listPanel.current?.getBoundingClientRect().left ?? 0; resizeList(left + listWidth + (event.key === 'ArrowLeft' ? -24 : 24) + 3, true); }} />}
     <div ref={panel} id="main-panel" className={'next-layout' + (layout.stacked ? ' stacked' : '') + (layout.sideClosed ? ' closed side-closed' : '')} style={{ '--left': layout.left ? layout.left + 'px' : '55%', '--top': layout.top ? layout.top + 'px' : '55%' } as React.CSSProperties}>
-    <div id="disc-header" className={peek ? 'peeking' : undefined} aria-label="Current discussion">
+    <div id="disc-header" className={peek ? 'peeking' : waitingForFirstMessage ? 'new-board' : undefined} aria-label="Current discussion">
     {(canSummary || canAct) && <details ref={actionsMenu} id="actions-menu" className="menu actions-menu" onToggle={(event) => { if (event.currentTarget.open) { setRowMenu(null); refreshWorker(); } }}>
       <summary aria-label="Discussion actions" title="Actions">Actions</summary>
       <div className="menu-items">
@@ -1264,6 +1267,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     {!peek && !viewLayout && !room?.workbench && <SettingsPanel scope="talk" room={room} post={(path, body) => post(path, body)} queue={settingsQueue} openSignal={membersOpen} />}
     <FailedAgents agents={room?.failedAgents} post={(path, body) => post(path, body)} status={(text) => addStatus(text, true)} />
     <ChatList id="chat" endLabel="Scroll to latest discussion messages" resetKey={chatReset}>
+    {waitingForFirstMessage && !room.workbench && messages.length === 0 && <p className="status">Describe what you want to work on. Sending your first message starts this {discussionKind} and gives it a title.</p>}
     <section aria-label="Conversation">{messages.map((message, index) => <article key={index} className={'msg' + (message.error ? ' error' : '') + (message.outcome ? ' summary' + (message.outcome === 'agreed' ? '' : ' not-agreed') : '')}>
       <strong>{message.speaker}{message.error ? ' — failed' : ''}{message.meta ? ` · ${String(message.meta)}` : ''}</strong><div onClick={(event) => { const element = event.target as Element; const target = element.closest<HTMLAnchorElement>('a.mention'); if (target?.dataset.file) { event.preventDefault(); void showFile(target.dataset.file); } if (element.closest('[data-auto-dev="start"]')) void boardCommand('/autodev'); }} dangerouslySetInnerHTML={{ __html: (() => { const html = peek ? message.html : linkFiles(message.html, knownFiles, room?.active ?? null).html; return autoDev && autoDev.status !== 'running' && autoDev.status !== 'paused' && autoDev.offer && index === summaryIndex ? autoOfferHtml(html, autoDev.offer, autoDev.max) : html; })() }} />
     </article>)}</section>
@@ -1275,7 +1279,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
     {autoDev?.status === 'paused' && autoDev.offer?.error && <div id="autodev" className="paused" role="status">The latest agreed instruction can’t be sent: {autoDev.offer.error}.</div>}
     {input && <>
       {!remote && <textarea className="box" id="box" aria-label="Message to the agents" value={text} disabled={ended} onChange={(event) => setText(event.target.value)}
-        placeholder={peek ? 'Peeking read-only — click Back to return to the active board.' : autoDev?.status === 'running' ? 'Auto dev is running — sending a message pauses it. (Enter sends, Shift+Enter for a new line)' : 'Message to the agents… (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown'}
+        placeholder={peek ? 'Peeking read-only — click Back to return to the active board.' : waitingForFirstMessage ? `Write your first message… (starts this ${discussionKind} and gives it a title)` : autoDev?.status === 'running' ? 'Auto dev is running — sending a message pauses it. (Enter sends, Shift+Enter for a new line)' : 'Message to the agents… (Enter sends, Shift+Enter for a new line). @name for one agent; /docs, /summary, /usage, /reload, /quit, /shutdown'}
         onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />}
       <div id="attach-row" hidden={!!remote}>{choosingKind && <div className="research-kind" role="group" aria-label="Research kind" title="Chosen once, with the first message: neither on is a Feasibility check">{(['deep', 'theoretical'] as const).map((key) => <button type="button" key={key} aria-pressed={researchKind[key]} disabled={ended} title={key === 'deep' ? 'Deep: question the premises, search the web, up to 30 laps per message (otherwise 6)' : 'Theoretical: end with what was understood, instead of a feasibility scorecard and verdict'} onClick={() => setResearchKind((kind) => ({ ...kind, [key]: !kind[key] }))}>{key === 'deep' ? 'Deep' : 'Theoretical'}</button>)}</div>}<button type="button" id="attach" title="Attach files to your next message: saved into the files/ folder when you send it (25 MB at most each)" disabled={sending || ended || !!peek || !room?.active} onClick={() => fileInput.current?.click()}>📎 Attach</button>
         <input ref={fileInput} type="file" aria-label="Attach files" multiple hidden onChange={(event) => { const chosen = Array.from(event.target.files ?? []); setFiles((previous) => [...previous, ...chosen]); event.target.value = ''; }} />

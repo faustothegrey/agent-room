@@ -78,6 +78,50 @@ it('sends the first message to name an unnamed discussion, brainstorm or researc
   }
 });
 
+it.each([
+  { kind: 'sprint', board: 'New sprint', started: false },
+  { kind: 'brainstorm', board: 'New brainstorm', brainstorm: true },
+  { kind: 'research board', board: 'New research board', research: true },
+])('highlights a new $kind and explains the first message', ({ kind, ...extra }) => {
+  setup({ active: null, ...extra });
+  expect(document.getElementById('disc-header')?.classList.contains('new-board')).toBe(true);
+  expect(screen.getByRole('heading', { name: extra.board })).toBeTruthy();
+  expect(document.getElementById('disc-status')?.textContent).toBe('New · waiting for first message');
+  expect(screen.getByText(`Describe what you want to work on. Sending your first message starts this ${kind} and gives it a title.`)).toBeTruthy();
+  expect(screen.getByPlaceholderText(`Write your first message… (starts this ${kind} and gives it a title)`)).toBeTruthy();
+});
+
+it('highlights a new workbench in the Worker tab', () => {
+  setup({ active: null, board: 'New workbench', workbench: true });
+  expect(document.getElementById('disc-header')?.classList.contains('new-board')).toBe(true);
+  expect(screen.getByRole('heading', { name: 'New workbench' })).toBeTruthy();
+  expect(document.getElementById('disc-status')?.textContent).toBe('New · waiting for first instruction');
+  expect(screen.getByText('Send your first instruction to name and start this workbench.')).toBeTruthy();
+});
+
+it('clears the new board cues while naming, after starting, and on reopening', () => {
+  setup({ active: null, board: 'New sprint', started: false });
+  const expectNoNewCues = () => {
+    expect(document.getElementById('disc-header')?.classList.contains('new-board')).toBe(false);
+    expect(screen.queryByText('New · waiting for first message')).toBeNull();
+    expect(screen.queryByText(/Describe what you want to work on/)).toBeNull();
+    expect(screen.queryByPlaceholderText(/^Write your first message/)).toBeNull();
+  };
+  const label = "Claude (choosing the sprint's title)";
+  Source.current.send({ type: 'thinking', name: label });
+  expect(document.getElementById('disc-status')?.textContent).toBe(label + ' is thinking');
+  expectNoNewCues();
+
+  // If creation failed before the folder existed, the room is still unnamed.
+  Source.current.send({ type: 'thinking', name: null });
+  expect(screen.getByText('New · waiting for first message')).toBeTruthy();
+
+  reset();
+  expectNoNewCues();
+  reset({ started: false });
+  expectNoNewCues();
+});
+
 it('offers Cancel only for an unnamed multi-room creation and sends /cancel', async () => {
   setup({ active: null, brainstorm: true }); const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: 'Cancel' })); await waitFor(() => expect(says()).toContain('/cancel'));
