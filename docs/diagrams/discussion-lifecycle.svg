@@ -5,19 +5,19 @@
     </marker>
   </defs>
   <rect width="1080" height="800" fill="#fff"/>
-  <text x="20" y="28" font-size="17" font-weight="bold">Discussion lifecycle: states, checkpoints, Resume, Start fresh, Archive &amp; Defer — src/ui.mjs (2026-11-20)</text>
-  <text x="20" y="46" font-size="12" fill="#555">On the browser screen, discussions, research boards (.research), workbenches (.workbench) and brainstorms can be open at once (#d1, #d2…).</text>
+  <text x="20" y="28" font-size="17" font-weight="bold">Sprint lifecycle: states, checkpoints, Resume, Start fresh, Archive &amp; Defer — src/ui.mjs (2026-11-20)</text>
+  <text x="20" y="46" font-size="12" fill="#555">On the browser screen, sprints, research boards (.research), workbenches (.workbench) and brainstorms can be open at once (#d1, #d2…).</text>
 
   <!-- Row 1 Left: Empty / New discussion (x=20..340, y=64..210) -->
   <rect x="20" y="64" width="320" height="146" rx="6" fill="#f3f7fb" stroke="#1168bd" stroke-width="1.5"/>
   <rect x="20" y="64" width="320" height="26" rx="6" fill="#1168bd"/>
   <text x="180" y="82" fill="#fff" text-anchor="middle" font-weight="bold">1. Unstarted context (/new or launch)</text>
   <text x="32" y="106" font-size="11">• No folder, transcript or checkpoint on disk yet</text>
-  <text x="32" y="122" font-size="11">• Screen <tspan font-family="monospace">/new</tspan>: opens beside open discussions</text>
+  <text x="32" y="122" font-size="11">• Screen <tspan font-family="monospace">/new</tspan>: opens beside open sprints</text>
   <text x="42" y="136" font-size="10.5" fill="#444">&amp; brainstorms (unstarted brainstorm becomes it)</text>
   <text x="32" y="152" font-size="11">• Settings changes apply directly before 1st message</text>
   <text x="32" y="168" font-size="11">• Worker tasks before 1st message use <tspan font-family="monospace">worker/main</tspan></text>
-  <text x="32" y="184" font-size="10.5" fill="#555">• Valid 1st message → <tspan font-family="monospace">openDiscussion()</tspan>:</text>
+  <text x="32" y="184" font-size="10.5" fill="#555">• Valid 1st message → <tspan font-family="monospace">openBoard()</tspan>:</text>
   <text x="42" y="198" font-size="10.5" fill="#555"><tspan font-family="monospace">claudeTitle()</tspan> (30s) → mkdir + <tspan font-family="monospace">session-*.md</tspan></text>
 
   <!-- Arrow 1 -> 3 (First message) -->
@@ -32,14 +32,14 @@
   <text x="762" y="120" font-size="10.5" fill="#444">(<tspan font-family="monospace">transcripts/</tspan>, <tspan font-family="monospace">drawings/</tspan>, <tspan font-family="monospace">files/</tspan> attachments)</text>
   <text x="752" y="136" font-size="11">• Checkpoint under <tspan font-family="monospace">brainstorms/&lt;name&gt;</tspan> (no worker)</text>
   <text x="752" y="152" font-size="11">• Resume, Close, Restart, Start fresh &amp; Delete work</text>
-  <text x="752" y="168" font-size="11">• <tspan font-family="monospace">/convert</tspan> → discussion or research (<tspan font-family="monospace">.research</tspan>, fresh)</text>
+  <text x="752" y="168" font-size="11">• <tspan font-family="monospace">/convert</tspan> → sprint or research (<tspan font-family="monospace">.research</tspan>, fresh)</text>
   <text x="752" y="184" font-size="11">• No worker, auto dev or automatic summary</text>
   <text x="752" y="200" font-size="10.5" fill="#b07a1f">• Agents write only drawings (may read root &amp; <tspan font-family="monospace">files/</tspan>)</text>
 
   <!-- Center Box: Active Open Discussion (x=390..710, y=64..274) -->
   <rect x="390" y="64" width="320" height="210" rx="6" fill="#e6f4ea" stroke="#2e7d32" stroke-width="2"/>
   <rect x="390" y="64" width="320" height="26" rx="6" fill="#2e7d32"/>
-  <text x="550" y="82" fill="#fff" text-anchor="middle" font-weight="bold">3. Open discussion (in use / open beside)</text>
+  <text x="550" y="82" fill="#fff" text-anchor="middle" font-weight="bold">3. Open sprint (in use / open beside)</text>
   <text x="402" y="104" font-size="11">• Folder: <tspan font-family="monospace">discussions/&lt;date-title&gt;/</tspan></text>
   <text x="402" y="118" font-size="11">• Session log: <tspan font-family="monospace">transcripts/session-*.md</tspan></text>
   <text x="402" y="132" font-size="11">• Own agent sessions + worker session (<tspan font-family="monospace">workerSeat</tspan>)</text>
@@ -81,9 +81,9 @@
   <rect x="555" y="308" width="505" height="26" rx="6" fill="#b07a1f"/>
   <text x="807" y="326" fill="#fff" text-anchor="middle" font-weight="bold">4b. Start fresh (/fresh), Resume closed, or without checkpoint</text>
   <text x="567" y="350" font-size="11">• <tspan font-family="monospace">/fresh &lt;name&gt;</tspan>: discards old CLI sessions &amp; chat; saves latest <tspan font-family="monospace">Summary</tspan> (<tspan font-family="monospace">fresh: true</tspan>)</text>
-  <text x="567" y="367" font-size="11">• <tspan font-family="monospace">/resume</tspan> on a closed discussion clears closed flag &amp; starts fresh (<tspan font-family="monospace">fromClosed: true</tspan>)</text>
+  <text x="567" y="367" font-size="11">• <tspan font-family="monospace">/resume</tspan> on a closed sprint clears closed flag &amp; starts fresh (<tspan font-family="monospace">fromClosed: true</tspan>)</text>
   <text x="567" y="384" font-size="11">• <tspan font-family="monospace">/resume &lt;name&gt;</tspan> with no full checkpoint also enters this state (<tspan font-family="monospace">continued: true</tspan>)</text>
-  <text x="567" y="401" font-size="11">• On the User's next message (<tspan font-family="monospace">openDiscussion()</tspan>, no new title requested):</text>
+  <text x="567" y="401" font-size="11">• On the User's next message (<tspan font-family="monospace">openBoard()</tspan>, no new title requested):</text>
   <text x="577" y="416" font-size="10.5" fill="#444">– Creates a new <tspan font-family="monospace">transcripts/session-YYYY-MM-DD-HHMM.md</tspan> file (older ones stay)</text>
   <text x="577" y="431" font-size="10.5" fill="#444">– Starts fresh agent &amp; worker CLI sessions</text>
   <text x="577" y="446" font-size="10.5" fill="#444">– <tspan font-family="monospace">briefing()</tspan> embeds <tspan font-family="monospace">closing-statement.md</tspan> (points to <tspan font-family="monospace">pending-instructions.md</tspan>),</text>
@@ -99,11 +99,11 @@
   <!-- Row 3: Archive, Defer & Rollback (x=20..1060, y=554..734) -->
   <rect x="20" y="554" width="1040" height="180" rx="6" fill="#fafafa" stroke="#888" stroke-width="1.5"/>
   <rect x="20" y="554" width="1040" height="26" rx="6" fill="#555"/>
-  <text x="540" y="572" fill="#fff" text-anchor="middle" font-weight="bold">5. Moving discussions: discussions/archive/&lt;name&gt;/ &amp; discussions/deferred/&lt;name&gt;/ (moveDiscussion in src/ui.mjs)</text>
+  <text x="540" y="572" fill="#fff" text-anchor="middle" font-weight="bold">5. Moving sprints: discussions/archive/&lt;name&gt;/ &amp; discussions/deferred/&lt;name&gt;/ (moveBoard in src/boards.mjs)</text>
 
   <!-- Left column inside Row 3 (x=34..530) -->
   <text x="34" y="596" font-weight="bold" fill="#1168bd">Common guards (enforced before any move):</text>
-  <text x="34" y="612" font-size="11">• Archive &amp; Defer require a closed discussion (refused if open, paused or closing)</text>
+  <text x="34" y="612" font-size="11">• Archive &amp; Defer require a closed sprint (refused if open, paused or closing)</text>
   <text x="34" y="628" font-size="11">• Refused if shown here (<tspan font-family="monospace">ctx.discussion.dir === from</tspan>), in a round (<tspan font-family="monospace">open.busy</tspan>),</text>
   <text x="44" y="642" font-size="10.5" fill="#444">a worker is writing to it, or it holds unresolved edits (<tspan font-family="monospace">workerHold</tspan>)</text>
   <text x="34" y="660" font-weight="bold" fill="#1168bd">Defer guard (<tspan font-family="monospace">/move &lt;name&gt; deferred</tspan>):</text>
@@ -129,6 +129,6 @@
   <!-- Footer -->
   <rect x="20" y="746" width="1040" height="36" fill="#fafafa" stroke="#ccc"/>
   <rect x="34" y="757" width="14" height="14" fill="#1168bd"/><text x="54" y="769" font-size="11">Harness-enforced state &amp; guards (<tspan font-family="monospace">src/ui.mjs</tspan>)</text>
-  <rect x="330" y="757" width="14" height="14" fill="#2e7d32"/><text x="350" y="769" font-size="11">Active discussion state</text>
+  <rect x="330" y="757" width="14" height="14" fill="#2e7d32"/><text x="350" y="769" font-size="11">Active sprint state</text>
   <text x="510" y="769" font-size="11" fill="#b07a1f">Amber = Agent convention from rulebook (asked, not enforced)</text>
 </svg>

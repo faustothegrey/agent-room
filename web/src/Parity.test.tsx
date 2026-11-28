@@ -10,7 +10,7 @@ class Source {
   close() {}
   send(data: object) { act(() => this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)); }
 }
-const room = { folder: '/room', discussion: 'Live', active: 'discussions/2026-11-25-live', started: true, multi: true, fresh: false, brainstorm: false, research: false, workbench: false, members: [], failedAgents: [], open: [] as object[], checkpoints: [], researches: [], closedDiscussions: [], closingDiscussions: {}, rollbacks: [], autoDev: { status: null } };
+const room = { folder: '/room', board: 'Live', active: 'discussions/2026-11-25-live', started: true, multi: true, fresh: false, brainstorm: false, research: false, workbench: false, members: [], failedAgents: [], open: [] as object[], checkpoints: [], researches: [], closedBoards: [], closingBoards: {}, rollbacks: [], autoDev: { status: null } };
 const ok = (body: unknown = {}) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
 let answer: (url: string, body: Record<string, unknown> | null) => unknown;
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => url === '__health' ? new Promise(() => {}) : answer(url, init?.body ? JSON.parse(String(init.body)) : null));
@@ -33,7 +33,7 @@ it('starts another request on a second Enter while a message is on its way, with
 });
 
 it('keeps the room chooser open when it loses focus, until a room is chosen', async () => {
-  answer = (url) => url === '__rooms' ? ok([{ id: 'a', path: '/r/a/__room', root: '/a', discussion: null, pages: 1, current: true }, { id: 'b', path: '/r/b/__room', root: '/b', discussion: null, pages: 0, current: false }]) : ok([]);
+  answer = (url) => url === '__rooms' ? ok([{ id: 'a', path: '/r/a/__room', root: '/a', board: null, pages: 1, current: true }, { id: 'b', path: '/r/b/__room', root: '/b', board: null, pages: 0, current: false }]) : ok([]);
   render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: 'Switch room…' }));
   const chooser = await screen.findByRole('combobox', { name: 'Running rooms' });
@@ -44,8 +44,8 @@ it('keeps the room chooser open when it loses focus, until a room is chosen', as
 it('opens the members panel after a Peek for a board that became fresh meanwhile', async () => {
   answer = (url) => url === '__settings' ? ok({ settings: { agents: [{ name: 'A', provider: 'claude', model: '' }, { name: 'B', provider: 'codex', model: '' }], worker: { name: 'W', provider: 'claude', model: '' } }, started: false, models: { claude: [], codex: [], agy: [] } }) : ok([]);
   render(<App version="one" refresh={() => {}} />);
-  reset({ peek: { name: 'old', kind: 'discussion', path: 'discussions/old', title: 'Old' } });
-  reset({ room: { ...room, fresh: true, active: null }, peek: { name: 'old', kind: 'discussion', path: 'discussions/old', title: 'Old' } }); // became fresh while peeking
+  reset({ peek: { name: 'old', kind: 'sprint', path: 'discussions/old', title: 'Old' } });
+  reset({ room: { ...room, fresh: true, active: null }, peek: { name: 'old', kind: 'sprint', path: 'discussions/old', title: 'Old' } }); // became fresh while peeking
   expect(screen.queryByRole('form', { name: 'Discussion members' })).toBeNull();
   reset({ room: { ...room, fresh: true, active: null } });
   expect(await screen.findByRole('form', { name: 'Discussion members' })).toBeTruthy();

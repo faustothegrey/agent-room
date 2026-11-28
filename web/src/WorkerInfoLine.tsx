@@ -4,7 +4,7 @@ import type { WorkerInfo, WorkerLane } from '../../src/contract';
 // The Worker tab's line, as showWorkerInfo / setWorkerInfo do on /__room: its lines (or one
 // collapsible section per lane), red when the worker is disabled or failed. A brainstorm sends no
 // work, whatever the worker's own state; a read-only page (Peek, a peer's view) shows the info as is.
-export const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a discussion to send work.';
+export const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a sprint to send work.';
 export function shownWorkerInfo(info: WorkerInfo | null, brainstorm: boolean, readOnly: boolean): WorkerInfo | null {
   return !readOnly && brainstorm ? { lines: [BRAINSTORM_NO_WORK], disabled: true } : info;
 }

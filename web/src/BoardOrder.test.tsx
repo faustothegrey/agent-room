@@ -12,7 +12,7 @@ class Source {
 }
 const folder = '/room', alpha = '2026-11-01-alpha', beta = '2026-11-02-beta', idea = '2026-11-03-idea', other = '2026-11-04-other';
 let paths: string[];
-const room = { folder, active: `discussions/${alpha}`, discussion: 'Alpha', started: true, workbenches: [], researches: [], closedDiscussions: [], checkpoints: [], open: [], autoDev: { status: null } };
+const room = { folder, active: `discussions/${alpha}`, board: 'Alpha', started: true, workbenches: [], researches: [], closedBoards: [], checkpoints: [], open: [], autoDev: { status: null } };
 const key = (kind: string, root = folder) => `agent-room.${kind}-order:${root}`;
 const setup = () => { render(<App version="one" refresh={() => {}} />); Source.current.send({ type: 'reset', room, messages: [], input: true, doc: null }); };
 const rowTitles = (section: string) => [...screen.getByText(section).closest('details')!.querySelectorAll('.board-row > .discussion-block > button.entry')].map((item) => item.textContent);
@@ -23,9 +23,9 @@ it('reads and saves separate room-specific discussion and brainstorm orders usin
   localStorage.setItem(key('discussion'), JSON.stringify([alpha, beta])); localStorage.setItem(key('brainstorm'), JSON.stringify([idea, other]));
   localStorage.setItem(key('discussion', '/other'), JSON.stringify([beta, alpha]));
   setup(); await screen.findByLabelText('Board actions for Alpha');
-  expect(rowTitles('Discussions (2)')).toEqual(['Alpha', 'beta']); expect(rowTitles('Brainstorms (2)')).toEqual(['idea', 'other']);
+  expect(rowTitles('Sprints (2)')).toEqual(['Alpha', 'beta']); expect(rowTitles('Brainstorms (2)')).toEqual(['idea', 'other']);
   const user = userEvent.setup(); await user.click(screen.getByLabelText('Board actions for Alpha')); await user.click(await screen.findByRole('button', { name: 'Move Alpha down' }));
-  expect(rowTitles('Discussions (2)')).toEqual(['beta', 'Alpha']); expect(JSON.parse(localStorage.getItem(key('discussion'))!)).toEqual([beta, alpha]);
+  expect(rowTitles('Sprints (2)')).toEqual(['beta', 'Alpha']); expect(JSON.parse(localStorage.getItem(key('discussion'))!)).toEqual([beta, alpha]);
   await user.click(screen.getByLabelText('Board actions for Alpha'));
   expect((screen.getByRole('button', { name: 'Move Alpha down' }) as HTMLButtonElement).disabled).toBe(true);
   await user.click(screen.getByRole('button', { name: 'Move Alpha up' }));
@@ -45,7 +45,7 @@ it('drags a row before or after another and maintains changes made in other tabs
   drag(handle, 'dragstart', 0); drag(target, 'dragover', 80); drag(target, 'drop', 80);
   expect(JSON.parse(localStorage.getItem(key('discussion'))!)).toEqual([beta, alpha]);
   localStorage.setItem(key('discussion'), JSON.stringify([alpha, beta])); fireEvent(window, new StorageEvent('storage', { key: key('discussion') }));
-  expect(rowTitles('Discussions (2)')).toEqual(['Alpha', 'beta']);
+  expect(rowTitles('Sprints (2)')).toEqual(['Alpha', 'beta']);
 });
 
 it('puts newly discovered boards first and forgets removed boards without disturbing saved order', async () => {

@@ -24,13 +24,13 @@ export async function readPointer(s,d,n) {
 }
 export async function snapshotDir(s,d,n) { return R.snapshotPath(s,d,n,(await R.readPointer(s,d,n)).commit); }
 export async function serve(s,{limits=R.LIMITS}={}) {
-  for(const l of await R.receivedLines(s)) await R.pin(s,l.discussion,l.node);
+  for(const l of await R.receivedLines(s)) await R.pin(s,l.board,l.node);
   let pending = Promise.resolve();
   const r = {s, peers:s.testPeers.map(name=>({name})),limits, activity:()=> 'idle'};
   const server = http.createServer((req,res) => {
     pending = R.handle(r,req,res).then(async () => {
       // B0 inspected every older snapshot. Pin them in this scenario; production retains latest + pins.
-      for(const l of await R.receivedLines(s)) if(!s.pins.has(`${l.discussion}/${l.node}/${l.commit}`)) await R.pin(s,l.discussion,l.node);
+      for(const l of await R.receivedLines(s)) if(!s.pins.has(`${l.board}/${l.node}/${l.commit}`)) await R.pin(s,l.board,l.node);
     });
   });
   await new Promise(ok=>server.listen(0,'127.0.0.1',ok));

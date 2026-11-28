@@ -85,7 +85,7 @@ function handleScreen(req, res, url, dir, screen) {
   // The heartbeat: the page and the Dock app ask every few seconds; a new pid means a new process.
   if (url.pathname === '/__health') {
     send(200, 'application/json', JSON.stringify({ app: 'agent-room', pid: process.pid, root: dir, host: shortHost(),
-      startedAt: screen.startedAt ?? null, discussion: screen.room?.active ?? null, pages: screen.clients.size }));
+      startedAt: screen.startedAt ?? null, board: screen.room?.active ?? null, pages: screen.clients.size }));
     return true;
   }
   if (url.pathname === '/__rooms') {
@@ -206,7 +206,7 @@ function handleScreen(req, res, url, dir, screen) {
         if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before discarding worker work.');
         if (!screen.discardPreview || !screen.closeAndDiscard) return send(409, 'text/plain; charset=utf-8', 'Close and Discard is unavailable.');
         const name = typeof body?.name === 'string' ? body.name.trim() : '';
-        if (!name) return send(400, 'text/plain; charset=utf-8', 'Discussion name is required.');
+        if (!name) return send(400, 'text/plain; charset=utf-8', 'Sprint name is required.');
         const act = body?.snapshot ? screen.closeAndDiscard(name, String(body.snapshot)) : screen.discardPreview(name);
         return Promise.resolve(act).then(
           (result) => send(200, 'application/json', JSON.stringify(result)),
@@ -216,7 +216,7 @@ function handleScreen(req, res, url, dir, screen) {
         if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before merging worker work.');
         if (!screen.mergePreviewClose || !screen.closeAndMerge) return send(409, 'text/plain; charset=utf-8', 'Close and Merge is unavailable.');
         const name = typeof body?.name === 'string' ? body.name.trim() : '';
-        if (!name) return send(400, 'text/plain; charset=utf-8', 'Discussion name is required.');
+        if (!name) return send(400, 'text/plain; charset=utf-8', 'Sprint name is required.');
         const act = body?.snapshot ? screen.closeAndMerge(name, String(body.snapshot)) : screen.mergePreviewClose(name);
         return Promise.resolve(act).then(
           (result) => send(200, 'application/json', JSON.stringify(result)),
@@ -226,7 +226,7 @@ function handleScreen(req, res, url, dir, screen) {
         if (screen.isViewing?.(req.headers['x-view-client'])) return send(409, 'text/plain', 'Read-only: return to this node before catching up.');
         if (!screen.catchUpMerge) return send(409, 'text/plain; charset=utf-8', 'Catch up is unavailable.');
         const name = typeof body?.name === 'string' ? body.name.trim() : '';
-        if (!name) return send(400, 'text/plain; charset=utf-8', 'Discussion name is required.');
+        if (!name) return send(400, 'text/plain; charset=utf-8', 'Sprint name is required.');
         return Promise.resolve(screen.catchUpMerge(name)).then(
           (result) => send(200, 'application/json', JSON.stringify(result)),
           (err) => send(409, 'text/plain; charset=utf-8', err.message));
@@ -247,7 +247,7 @@ function handleScreen(req, res, url, dir, screen) {
         return send(204, 'text/plain', '');
       }
       if (url.pathname === '/__work') {
-        if (screen.peek) return send(409, 'text/plain; charset=utf-8', 'Read-only: you are peeking at a closed board. Click Back to return to the active discussion first.');
+        if (screen.peek) return send(409, 'text/plain; charset=utf-8', 'Read-only: you are peeking at a closed board. Click Back to return to the active board first.');
         if (!screen.work) return send(409, 'text/plain; charset=utf-8', 'This room has no worker input; the page only watches.');
         if (typeof body?.text !== 'string' || !body.text.trim()) return send(400, 'text/plain; charset=utf-8', 'Nothing to send.');
         screen.work(body.text.trim());
@@ -257,7 +257,7 @@ function handleScreen(req, res, url, dir, screen) {
       const files = Array.isArray(body?.files) && body.files.length ? body.files : null;
       if (typeof body?.text !== 'string' || (!body.text.trim() && !files)) return send(400, 'text/plain; charset=utf-8', 'Nothing to send.');
       // While peeking at a closed board, non-command messages and attachments are refused so nothing can go to the wrong board.
-      if (screen.peek && (files || !body.text.trim().startsWith('/'))) return send(409, 'text/plain; charset=utf-8', 'Read-only: you are peeking at a closed board. Click Back to return to the active discussion first.');
+      if (screen.peek && (files || !body.text.trim().startsWith('/'))) return send(409, 'text/plain; charset=utf-8', 'Read-only: you are peeking at a closed board. Click Back to return to the active board first.');
       // While another node's line is open in View, it is read-only: only these commands pass.
       if (screen.isViewing?.(req.headers['x-view-client']) && !VIEW_COMMANDS.includes(body.text.trim())) return send(409, 'text/plain; charset=utf-8', `Read-only: you are viewing a received line. Go back to this node's line first.`);
       if (files) return sayWithFiles(body.text.trim(), files, body.confirmed === true);
@@ -272,7 +272,7 @@ function handleScreen(req, res, url, dir, screen) {
   function sayWithFiles(text, files, confirmed) {
     const fail = (status, message) => send(status, 'text/plain; charset=utf-8', message + ' Nothing was sent.');
     const active = screen.room?.active;
-    if (!active) return fail(409, 'Attachments need a started discussion or brainstorm.');
+    if (!active) return fail(409, 'Attachments need a started sprint or brainstorm.');
     if (text.startsWith('/')) return fail(400, 'Attachments go with a message, not a command.');
     const folder = join(dir, active, 'files');
     let saved;

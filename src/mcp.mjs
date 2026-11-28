@@ -17,7 +17,7 @@ export const roomsFilePath = (home = homedir()) => join(home, '.local', 'state',
 export const TOOLS = [
   {
     name: 'list_rooms',
-    description: 'List known agent-room rooms (saved in ~/.local/state/agent-room/rooms.json plus any open on the running local server), with running status and active discussion.',
+    description: 'List known agent-room rooms (saved in ~/.local/state/agent-room/rooms.json plus any open on the running local server), with running status and active board.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -26,8 +26,8 @@ export const TOOLS = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
-    name: 'list_discussions',
-    description: 'List open discussions (in discussions/) and brainstorms (in brainstorms/) for a room folder, excluding discussions/archive/ and discussions/deferred/, with running/active status from the local server.',
+    name: 'list_boards',
+    description: 'List open boards (in discussions/) and brainstorms (in brainstorms/) for a room folder, excluding discussions/archive/ and discussions/deferred/, with running/active status from the local server.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -88,7 +88,7 @@ export async function fetchRunningRooms(port, fetchImpl = fetch) {
     const rooms = await Promise.all(health.rooms.map(async (r) => {
       const room = await get(`/r/${encodeURIComponent(r.id)}/__health`);
       if (room.app !== 'agent-room' || room.root !== r.root) throw new Error('Invalid room health');
-      return { ...r, discussion: room.discussion };
+      return { ...r, board: room.board };
     }));
     return { reachable: true, rooms };
   } catch {
@@ -120,8 +120,8 @@ export async function listRoomsTool(opts = {}) {
       entry = { root, status: 'running', active: [] };
       byRoot.set(root, entry);
     }
-    if (r.discussion && !entry.active.includes(r.discussion)) {
-      entry.active.push(r.discussion);
+    if (r.board && !entry.active.includes(r.board)) {
+      entry.active.push(r.board);
     }
   }
 
@@ -172,7 +172,7 @@ function expandHome(p, home) {
   return p;
 }
 
-export async function listDiscussionsTool(args = {}, opts = {}) {
+export async function listBoardsTool(args = {}, opts = {}) {
   const rawRoot = args?.root;
   if (typeof rawRoot !== 'string' || !rawRoot.trim()) {
     return textResult('Missing required argument: root', true);
@@ -200,12 +200,12 @@ export async function listDiscussionsTool(args = {}, opts = {}) {
   const scan = (dir, prefix, kind) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.isDirectory() && DATED.test(entry.name)) {
-        const itemKind = kind === 'discussion' && existsSync(join(dir, entry.name, '.workbench')) ? 'workbench' : kind;
+        const itemKind = kind === 'sprint' && existsSync(join(dir, entry.name, '.workbench')) ? 'workbench' : kind;
         items.push({ name: entry.name, kind: itemKind, ref: `${prefix}/${entry.name}` });
       }
     }
   };
-  if (hasDisc) scan(discDir, 'discussions', 'discussion');
+  if (hasDisc) scan(discDir, 'discussions', 'sprint');
   if (hasBrain) scan(brainDir, 'brainstorms', 'brainstorm');
   items.sort((a, b) => b.name.localeCompare(a.name) || a.kind.localeCompare(b.kind));
 
@@ -219,16 +219,16 @@ export async function listDiscussionsTool(args = {}, opts = {}) {
     if (!matched.length) {
       statusLine = 'not running on this server';
     } else {
-      for (const r of matched) if (r.discussion) activeSet.add(r.discussion);
+      for (const r of matched) if (r.board) activeSet.add(r.board);
       statusLine = activeSet.size
         ? `running (active: ${[...activeSet].join(', ')})`
-        : 'running (no active discussion)';
+        : 'running (no active board)';
     }
   }
 
   const lines = [`Room: ${realRoot}`, `Status: ${statusLine}`];
   if (!items.length) {
-    lines.push('No open discussions or brainstorms.');
+    lines.push('No open boards or brainstorms.');
   } else {
     for (const item of items) {
       const mark = activeSet.has(item.ref) ? ' [active]' : '';
@@ -282,8 +282,8 @@ export async function handleMessage(msg, opts = {}) {
     if (name === 'list_rooms') {
       return { jsonrpc: '2.0', id, result: await listRoomsTool(opts) };
     }
-    if (name === 'list_discussions') {
-      return { jsonrpc: '2.0', id, result: await listDiscussionsTool(args, opts) };
+    if (name === 'list_boards') {
+      return { jsonrpc: '2.0', id, result: await listBoardsTool(args, opts) };
     }
     return { jsonrpc: '2.0', id, error: { code: -32602, message: `Unknown tool: ${name}` } };
   }

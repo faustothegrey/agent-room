@@ -18,7 +18,7 @@ test('prompt builders fill the displayed templates and retain their wording', ()
   add('researchIntroTheoretical', i.intro(agents[0], agents, { theoretical: true }), i.RESEARCH_INTRO, { ...introValues, kind: 'Theoretical', effort: 'Feasibility', output: 'Theoretical' });
   add('researchIntroDeepTheoretical', i.intro(agents[0], agents, { deep: true, theoretical: true }), i.RESEARCH_INTRO, { ...introValues, kind: 'Deep · Theoretical', effort: 'Deep', output: 'Theoretical' });
   for (const [brainstorm, kind] of [[true, 'Brainstorm'], [false, 'Discussion']]) {
-    const tail = brainstorm ? 'Quote its latest version word for word when it is the Next step.' : "Quote its latest version word for word when it is the Next step; under Later refer to it by name,\nwith its full text kept in the discussion's pending-instructions.md.";
+    const tail = brainstorm ? 'Quote its latest version word for word when it is the Next step.' : "Quote its latest version word for word when it is the Next step; under Later refer to it by name,\nwith its full text kept in the sprint's pending-instructions.md.";
     add(`summary${kind}`, i.summaryFormat(brainstorm), i.SUMMARY_FORMAT, { 'next-step-tail': tail });
     for (const extra of [undefined, 'Extra {name}']) {
       const values = { author: 'A', 'next-step-tail': tail, extra: extra ? `\n${extra}` : '' };
@@ -29,7 +29,7 @@ test('prompt builders fill the displayed templates and retain their wording', ()
   for (const reports of ['', 'Report']) add(reports ? 'closingReports' : 'closing', i.closingTask({ dir: '/dir', workerReports: reports }), i.CLOSING_TASK, { dir: '/dir', 'worker-reports': reports ? `Recent worker reports:\n${reports}\n\n` : '' });
   add('brief', i.workerBrief({ dir: '/dir' }, {}, place), i.WORKER_BRIEF, { dir: '/dir', cwd: '/tree' }, '\n\n');
   add('brainstorm', i.workerBrief(null, { brainstorm: true }, place), i.WORKER_BRAINSTORM, {}, '\n\n');
-  add('noDiscussion', i.workerBrief(null, { briefed: '/old' }, place), i.WORKER_NO_DISCUSSION, { dir: '/old' }, '\n\n');
+  add('noDiscussion', i.workerBrief(null, { briefed: '/old' }, place), i.WORKER_NO_SPRINT, { dir: '/old' }, '\n\n');
   const location = { cwd: '/tree', branch: 'worker/x', root: '/root', notes: '/tree/.worker-notes' };
   add('location', i.workerLocation({}, place, { cwd: '/root' }, '.worker-notes'), i.WORKER_LOCATION, location, '\n\n');
   add('moved', i.workerLocation({ tree: '/old' }, place, { cwd: '/root' }, '.worker-notes'), `${i.WORKER_MOVED} ${i.WORKER_LOCATION}`, { ...location, old: '/old' }, '\n\n');

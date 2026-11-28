@@ -11,7 +11,7 @@ class Source {
   send(data: object) { act(() => this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)); }
 }
 const name = '2026-11-01-live';
-const room = { folder: '/room', active: `discussions/${name}`, discussion: 'Live', started: true, multi: true, brainstorm: false, research: false, workbench: false, workbenches: [], researches: [], closedDiscussions: [], checkpoints: [], closingDiscussions: {}, open: [], autoDev: { status: null } };
+const room = { folder: '/room', active: `discussions/${name}`, board: 'Live', started: true, multi: true, brainstorm: false, research: false, workbench: false, workbenches: [], researches: [], closedBoards: [], checkpoints: [], closingBoards: {}, open: [], autoDev: { status: null } };
 const mergePreview = { name, branch: `worker/${name}`, targetBranch: 'main', title: `Merge worker/${name} into main`, path: '/fixture', commits: [{ hash: 'abc123', subject: 'change' }], untracked: ['local.txt'], activeNotice: 'Other branches may need catch-up.', snapshot: 's1' };
 const discardPreview = { name, branch: `worker/${name}`, path: '/fixture', worktreeExists: true, branchExists: true, commits: [{ hash: 'abc123', subject: 'change' }], tracked: [{ status: 'M', path: 'file' }], untracked: ['new.txt'], ignored: [{ label: 'cache/' }], snapshot: 'd1' };
 const fetchMock = vi.fn();
@@ -84,7 +84,7 @@ it('shows refusal and partial failure text and refreshes worker info for each fa
 });
 
 it('cancels waiting Close and reports refusal without modifying a checkout', async () => {
-  setup({ closingDiscussions: { [name]: 'waiting' } }); const user = userEvent.setup();
+  setup({ closingBoards: { [name]: 'waiting' } }); const user = userEvent.setup();
   await user.click(await screen.findByRole('button', { name: 'Cancel close' })); expect(calls('__cancelclose')).toEqual([{ name }]);
   fetchMock.mockImplementation(async (url: string) => url === '__cancelclose' ? respond('Close is no longer waiting for the worker.', false) : respond({}));
   await user.click(screen.getByRole('button', { name: 'Cancel close' })); expect(await screen.findByText('Close is no longer waiting for the worker.')).toBeTruthy();

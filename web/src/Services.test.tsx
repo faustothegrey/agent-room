@@ -9,7 +9,7 @@ class Source {
   close() {}
   send(data: object) { act(() => this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)); }
 }
-const room = { folder: '/room', discussion: 'Live', active: 'discussions/2026-11-25-live', started: true, open: [], members: [], failedAgents: [] };
+const room = { folder: '/room', board: 'Live', active: 'discussions/2026-11-25-live', started: true, open: [], members: [], failedAgents: [] };
 const ok = (body: unknown = {}) => ({ ok: true, status: 200, json: async () => body, text: async () => '' });
 const fail = (text: string) => ({ ok: false, status: 400, json: async () => ({}), text: async () => text });
 const tasks = [
@@ -133,9 +133,9 @@ const agents = [{ name: 'Claude', provider: 'claude', model: '' }, { name: 'Code
 const health = { cli: { claude: { path: '/bin/claude', version: '2.0', checked: '2026-11-25T08:00:00Z' }, codex: null, agy: null },
   login: { claude: { state: 'ok', checked: '2026-11-25T08:00:00Z' }, codex: null, agy: null }, errors: { cli: { codex: { path: '/bin/codex' } }, login: {}, leftovers: null },
   scheduledProviders: ['claude'], nextLogin: '2026-11-25T08:10:00Z', catalogs: { claude: { loaded: true, checked: null, models: [1, 2] }, codex: { loaded: false, checked: '2026-11-25T08:00:00Z', models: [] }, agy: { loaded: false, checked: null, models: [] } },
-  configured: [{ room: '/room', discussion: 'live', agents: [{ role: 'member', name: 'Claude', provider: 'claude', model: 'opus', alignment: 'as saved', enabled: true }, { role: 'worker', name: 'Worker', provider: 'claude', model: '', alignment: 'as saved' }] }],
+  configured: [{ room: '/room', board: 'live', agents: [{ role: 'member', name: 'Claude', provider: 'claude', model: 'opus', alignment: 'as saved', enabled: true }, { role: 'worker', name: 'Worker', provider: 'claude', model: '', alignment: 'as saved' }] }],
   defaults: null, promptRunning: [], promptResults: [{ provider: 'claude', model: 'opus', at: '2026-11-25T08:05:00Z', durationMs: 2400, outcome: 'answered', reply: 'OK' }],
-  sessions: [{ room: '/room', discussion: 'live', agents: [{ role: 'member', name: 'Claude', provider: 'claude', id: 's1', lastTurn: null }] }],
+  sessions: [{ room: '/room', board: 'live', agents: [{ role: 'member', name: 'Claude', provider: 'claude', id: 's1', lastTurn: null }] }],
   leftoversChecked: null, nextLeftovers: null, running: [], leftovers: [], quota: [{ room: '/room', reachable: true, measured: '2026-11-25 08:00', checked: null }] };
 
 it('shows each provider\'s permission mode, or that it was not checked yet', async () => {
@@ -157,9 +157,9 @@ it('saves the default providers through the shared queue, with the legacy texts'
   render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: '⚙ Providers' }));
   const form = await within(panel()).findByRole('form', { name: 'Default providers' });
-  expect(await within(form).findByText(/^Defaults for new discussions, in this room and every other\. This discussion has started/)).toBeTruthy();
+  expect(await within(form).findByText(/^Defaults for new boards, in this room and every other\. This board has started/)).toBeTruthy();
   await user.selectOptions(within(form).getByLabelText('Worker model'), 'opus');
-  await waitFor(() => expect(within(form).getByRole('status').textContent).toBe('Saved as the defaults for new discussions.'));
+  await waitFor(() => expect(within(form).getByRole('status').textContent).toBe('Saved as the defaults for new boards.'));
   expect(bodies('__settings')).toEqual([{ agents, worker: { ...worker, model: 'opus' }, scope: 'defaults' }]);
   await user.selectOptions(within(form).getByLabelText('Agent 1 model'), 'Custom…');
   expect(within(form).getByRole('status').textContent).toBe('Enter a custom model ID to save this choice.');
@@ -195,7 +195,7 @@ it('shows provider health, checks now, runs a prompt test, and opens from a prov
 it('describes ⚙ Providers with this board\'s CLI sessions, following room updates, or its usual text without them', async () => {
   render(<App version="one" refresh={() => {}} />); reset(); const user = userEvent.setup();
   const button = () => screen.getByRole('button', { name: '⚙ Providers' });
-  expect(button().getAttribute('title')).toBe('Default providers and models for new discussions, and provider health');
+  expect(button().getAttribute('title')).toBe('Default providers and models for new boards, and provider health');
   expect(document.getElementById('providers-tip')).toBeNull();
   const cliSessions = { agents: [{ name: 'Claude', provider: 'claude', id: null }, { name: 'Codex', provider: 'codex', id: null }], worker: { name: 'Worker', provider: 'claude', id: null } };
   Source.current.send({ type: 'room', room: { ...room, cliSessions } });

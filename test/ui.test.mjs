@@ -59,7 +59,7 @@ async function scriptedCtx(replies) {
   const { createRoom, closingStatement } = await import('../src/room.mjs');
   const docs = await import('../src/docs.mjs');
   const usage = await import('../src/usage.mjs');
-  const fake = (name) => ({ name, provider: 'claude', turn: async (prompt) => prompt.includes('The User is closing this discussion.') ? 'Statement: pending-instructions.md' : replies.shift() ?? 'PASS' });
+  const fake = (name) => ({ name, provider: 'claude', turn: async (prompt) => prompt.includes('The User is closing this sprint.') ? 'Statement: pending-instructions.md' : replies.shift() ?? 'PASS' });
   const state = { transcript: [], seen: new Map() };
   return {
     state, room: createRoom([fake('A'), fake('B')], state), worker: fake('W'), docs, totals: {},
@@ -105,14 +105,14 @@ const tmp = async (prefix) => {
 };
 
 test('discussion folders: date + title, date and time without a title, -2 when taken', async () => {
-  const { createDiscussionFolder, slug } = await import('../src/ui.mjs');
+  const { createBoardFolder, slug } = await import('../src/ui.mjs');
   const parent = `${await tmp('disc-test-')}/discussions`;
   const now = new Date(2026, 10, 2, 9, 5);
   assert.equal(slug('Organising discussions: É/è & more!'), 'organising-discussions-e-e-more');
-  assert.equal(createDiscussionFolder(parent, 'Organising discussions', now), '2026-11-02-organising-discussions');
-  assert.equal(createDiscussionFolder(parent, 'Organising discussions', now), '2026-11-02-organising-discussions-2');
-  assert.equal(createDiscussionFolder(parent, null, now), '2026-11-02-0905');
-  assert.equal(createDiscussionFolder(parent, '!!!', now), '2026-11-02-0905-2'); // nothing left of the title
+  assert.equal(createBoardFolder(parent, 'Organising discussions', now), '2026-11-02-organising-discussions');
+  assert.equal(createBoardFolder(parent, 'Organising discussions', now), '2026-11-02-organising-discussions-2');
+  assert.equal(createBoardFolder(parent, null, now), '2026-11-02-0905');
+  assert.equal(createBoardFolder(parent, '!!!', now), '2026-11-02-0905-2'); // nothing left of the title
 });
 
 test('session transcripts: session-<date>-<time>.md, -2 when taken, never overwritten', async () => {
@@ -158,8 +158,8 @@ test('the first message creates the discussion (titled by Claude) and its transc
   await handleLine('pendulums', ctx);
   const [name] = readdirSync(`${ctx.cwd}/discussions`);
   assert.match(name, /^\d{4}-\d{2}-\d{2}-about-pendulums$/);
-  assert.equal(ctx.discussion.title, 'About pendulums');
-  assert.match(prompts[0], new RegExp(`Its folder is ${ctx.cwd}/discussions/${name}: create, read and write this discussion's documents`));
+  assert.equal(ctx.board.title, 'About pendulums');
+  assert.match(prompts[0], new RegExp(`Its folder is ${ctx.cwd}/discussions/${name}: create, read and write this sprint's documents`));
   const text = readFileSync(ctx.logPath, 'utf8');
   assert.match(text, /^# About pendulums — session of/);
   assert.match(text, /title by Claude[\s\S]*\*\*User\*\*\n\npendulums/); // said before the folder existed: kept for the transcript
@@ -183,12 +183,12 @@ test('/resume without a checkpoint, before the first message: no title asked, th
   mkdirSync(`${ctx.cwd}/discussions/2026-11-01-old`, { recursive: true });
   await handleLine('/resume nosuch', ctx);
   await handleLine('/resume ../x', ctx);
-  assert.equal(ctx.discussion, undefined);
+  assert.equal(ctx.board, undefined);
   await handleLine('/resume 2026-11-01-old', ctx);
   await handleLine('where were we?', ctx);
   assert.deepEqual(readdirSync(`${ctx.cwd}/discussions`), ['2026-11-01-old']);
   assert.equal(readdirSync(`${ctx.cwd}/discussions/2026-11-01-old/transcripts`).length, 1);
-  assert.match(prompts[0], /continues the discussion in .*2026-11-01-old.*Start from its handoff/);
+  assert.match(prompts[0], /continues the sprint in .*2026-11-01-old.*Start from its handoff/);
 });
 
 test('/resume, after the session started, of a discussion without a checkpoint: a fresh session there, from its handoff', async () => {
@@ -206,26 +206,26 @@ test('/resume, after the session started, of a discussion without a checkpoint: 
 
   const worker = ctx.worker;
   await handleLine('/resume 2026-11-01-old', ctx);
-  assert.equal(ctx.discussion.name, '2026-11-01-old');
+  assert.equal(ctx.board.name, '2026-11-01-old');
   assert.deepEqual(resets, ['A', 'B']); // fresh CLI sessions for the agents
   assert.notEqual(ctx.worker, worker); // and a new worker, on a fresh session: the old one stays with its discussion
-  assert.equal(worker.seat.discussion.name, name);
+  assert.equal(worker.seat.board.name, name);
   assert.equal(ctx.logPath, null);
   assert.deepEqual(ctx.state.transcript, []); // the chat starts over (the same array, emptied)
   assert.equal(ctx.screen.transcript, ctx.state.transcript);
-  assert.match(readFileSync(first, 'utf8'), /session ended: resuming the discussion 2026-11-01-old/);
+  assert.match(readFileSync(first, 'utf8'), /session ended: resuming the sprint 2026-11-01-old/);
 
   await handleLine('back to it', ctx);
   assert.match(ctx.logPath, /discussions\/2026-11-01-old\/transcripts\/session-/);
   assert.equal(prompts.length, 2);
   assert.match(prompts[1], /You are A, one of several AI agents/); // introduced again, as in a new session
-  assert.match(prompts[1], /continues the discussion in .*2026-11-01-old.*Start from its handoff/);
+  assert.match(prompts[1], /continues the sprint in .*2026-11-01-old.*Start from its handoff/);
   assert.equal(readdirSync(`${ctx.cwd}/discussions/${name}/transcripts`).length, 1); // the first discussion keeps its transcript
 
   await handleLine('/resume ../x', ctx);
   mkdirSync(`${ctx.cwd}/discussions/archive`); // the room's own material, not a discussion
   await handleLine('/resume archive', ctx);
-  assert.equal(ctx.discussion.name, '2026-11-01-old');
+  assert.equal(ctx.board.name, '2026-11-01-old');
 });
 
 test('the worker is told the active discussion\'s folder with its first instruction there', async () => {
@@ -238,7 +238,7 @@ test('the worker is told the active discussion\'s folder with its first instruct
   queueWork(ctx, 'fix the bug'); // as the Worker tab sends it
   queueWork(ctx, 'and the test');
   await ctx.workQueue;
-  assert.match(got[0], new RegExp(`^\\[your reported usage this session: [^\\]]+\\]\\n\\nThe active discussion's folder is ${ctx.discussion.dir}: create, read and write this discussion's documents`));
+  assert.match(got[0], new RegExp(`^\\[your reported usage this session: [^\\]]+\\]\\n\\nThe active sprint's folder is ${ctx.board.dir}: create, read and write this sprint's documents`));
   assert.match(got[0], /fix the bug$/);
   assert.match(got[1], /^\[your reported usage this session: [^\]]+\]\n\nand the test$/);
 });
@@ -322,22 +322,22 @@ test('/move: a whole discussion into archive/ or deferred/ and back; never the o
   assert.ok(existsSync(`${root}/2026-11-01-old`));
 
   await handleLine('hello', ctx); // creates the discussion in use
-  await handleLine(`/move ${ctx.discussion.name} archive`, ctx);
-  assert.ok(existsSync(ctx.discussion.dir));
+  await handleLine(`/move ${ctx.board.name} archive`, ctx);
+  assert.ok(existsSync(ctx.board.dir));
 });
 
 test('/resume of an archived discussion makes it active first; new names skip archived ones', async () => {
   const { existsSync, mkdirSync } = await import('node:fs');
-  const { createDiscussionFolder } = await import('../src/ui.mjs');
+  const { createBoardFolder } = await import('../src/ui.mjs');
   const ctx = await freshSession([], async () => { throw new Error('no title should be asked'); });
   const root = `${ctx.cwd}/discussions`;
   mkdirSync(`${root}/archive/2026-11-01-old`, { recursive: true });
   await handleLine('/resume archive/2026-11-01-old', ctx);
-  assert.equal(ctx.discussion.dir, `${root}/2026-11-01-old`);
+  assert.equal(ctx.board.dir, `${root}/2026-11-01-old`);
   assert.ok(existsSync(`${root}/2026-11-01-old`) && !existsSync(`${root}/archive/2026-11-01-old`));
 
   mkdirSync(`${root}/deferred/2026-11-02-topic`, { recursive: true });
-  assert.equal(createDiscussionFolder(root, 'Topic', new Date(2026, 10, 2)), '2026-11-02-topic-2');
+  assert.equal(createBoardFolder(root, 'Topic', new Date(2026, 10, 2)), '2026-11-02-topic-2');
 });
 
 test('archive and defer require a closed discussion, and Make active keeps it closed', async () => {
@@ -347,7 +347,7 @@ test('archive and defer require a closed discussion, and Make active keeps it cl
   const notes = [];
   ctx.docs = { ...ctx.docs, broadcast: (screen, event) => { if (event.type === 'note') notes.push(event.text); } };
   await handleLine('hello', ctx);
-  const name = ctx.discussion.name, root = `${ctx.cwd}/discussions`;
+  const name = ctx.board.name, root = `${ctx.cwd}/discussions`;
   await handleLine(`/move ${name} archive`, ctx);
   assert.match(notes.at(-1), /must be closed before.*archive/);
   await handleLine('/new', ctx);
@@ -356,11 +356,11 @@ test('archive and defer require a closed discussion, and Make active keeps it cl
   assert.ok(existsSync(`${root}/${name}`));
   await handleLine(`/resume ${name}`, ctx);
   await handleLine('/close', ctx);
-  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+  assert.ok(ctx.screen.room.closedBoards.includes(name));
   await handleLine(`/move ${name} archive`, ctx);
   assert.ok(existsSync(`${root}/archive/${name}`));
   await handleLine(`/move archive/${name} active`, ctx);
-  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+  assert.ok(ctx.screen.room.closedBoards.includes(name));
   await handleLine(`/move ${name} deferred`, ctx);
   assert.ok(existsSync(`${root}/deferred/${name}`));
 });
@@ -386,7 +386,7 @@ test('/peek shows a closed discussion read-only, in place, without reopening it'
   assert.equal(ctx.screen.peek.title, 'Peek me');
   assert.equal(ctx.screen.peek.doc, 'discussions/2026-11-01-closed/notes.md');
   assert.deepEqual(ctx.screen.peek.messages.map((m) => m.speaker), ['User', 'A']);
-  assert.equal(ctx.discussion, undefined); // not resumed
+  assert.equal(ctx.board, undefined); // not resumed
   assert.ok(existsSync(await marker('2026-11-01-closed'))); // still closed
 
   await handleLine('/peek', ctx);
@@ -456,7 +456,7 @@ test('/peek shows a closed brainstorm read-only without starting sessions, and r
   assert.equal(ctx.screen.peek.kind, 'brainstorm');
   assert.equal(ctx.screen.peek.title, 'Closed idea');
   assert.deepEqual(ctx.screen.peek.messages.map((m) => m.speaker), ['User', 'A']);
-  assert.equal(ctx.discussion, undefined); // no session started
+  assert.equal(ctx.board, undefined); // no session started
   assert.ok(!ctx.agentsStarted);
 
   await handleLine('/peek', ctx);
@@ -465,20 +465,20 @@ test('/peek shows a closed brainstorm read-only without starting sessions, and r
   // An open brainstorm cannot be peeked.
   await handleLine('/brainstorm', ctx);
   await handleLine('hello brainstorm', ctx);
-  const openName = ctx.discussion.name;
+  const openName = ctx.board.name;
   await handleLine(`/peek brainstorms/${openName}`, ctx);
   assert.equal(ctx.screen.peek, null);
 });
 
 test('Restart keeps the launch flags that matter: the same port, agents, worker and dev mode, in the discussion in use', () => {
   // The agents and worker are the room's current ones (ctx), not the launch flags.
-  const ctx = { cwd: '/r', agentSpecs: 'claude:Ada', workerSpec: 'codex:W', discussion: { name: '2026-11-03-a-topic' } };
+  const ctx = { cwd: '/r', agentSpecs: 'claude:Ada', workerSpec: 'codex:W', board: { name: '2026-11-03-a-topic' } };
   const args = restartArgs([ctx], { agents: 'claude:Old', worker: 'codex:Old', dev: true, open: true }, 5566);
   assert.match(args[0], /src\/cli\.mjs$/);
   assert.deepEqual(args.slice(1), ['--cwd', '/r', '--port', '5566', '--agents', 'claude:Ada', '--worker', 'codex:W', '--dev', '--reopen', '2026-11-03-a-topic']);
-  assert.deepEqual(restartArgs([{ cwd: '/r', discussion: null }], {}, 5566).slice(1), ['--cwd', '/r', '--port', '5566']);
-  // Every other room of the server comes back too, with its own settings and discussion.
-  const other = { cwd: '/o', launch: false, agentSpecs: 'codex:Lin', workerSpec: 'claude:Wo', discussion: { name: '2026-11-04-b' } };
+  assert.deepEqual(restartArgs([{ cwd: '/r', board: null }], {}, 5566).slice(1), ['--cwd', '/r', '--port', '5566']);
+  // Every other room of the server comes back too, with its own settings and board.
+  const other = { cwd: '/o', launch: false, agentSpecs: 'codex:Lin', workerSpec: 'claude:Wo', board: { name: '2026-11-04-b' } };
   assert.deepEqual(restartArgs([ctx, other], {}, 5566).slice(-2),
     ['--room', JSON.stringify({ cwd: '/o', agents: 'codex:Lin', worker: 'claude:Wo', reopen: '2026-11-04-b' })]);
   // Replication flags only when the first room is the launch room.
@@ -494,20 +494,20 @@ test('/brainstorm: its first message names it in brainstorms/<date>-<title>/ wit
   const turn = ctx.room.agents[0].turn;
   ctx.room.agents[0].turn = async (p) => { prompts.push(p); return turn(p); };
   await handleLine('/brainstorm', ctx);
-  assert.deepEqual([ctx.screen.room.discussion, ctx.screen.room.brainstorm, ctx.screen.room.started, ctx.screen.room.active], ['New brainstorm', true, true, null]);
+  assert.deepEqual([ctx.screen.room.board, ctx.screen.room.brainstorm, ctx.screen.room.started, ctx.screen.room.active], ['New brainstorm', true, true, null]);
   assert.deepEqual(readdirSync(ctx.cwd), []); // nothing yet
   await handleLine('hello', ctx); // a round, with no automatic summary
   assert.deepEqual(titled, ['hello']);
   const [name] = readdirSync(`${ctx.cwd}/brainstorms`);
   assert.match(name, /^\d{4}-\d{2}-\d{2}-bright-idea$/);
   assert.deepEqual(readdirSync(ctx.cwd), ['brainstorms']); // no discussions/
-  assert.equal(ctx.discussion.title, 'Bright idea');
-  assert.deepEqual([ctx.screen.room.discussion, ctx.screen.room.active], ['Bright idea', `brainstorms/${name}`]);
+  assert.equal(ctx.board.title, 'Bright idea');
+  assert.deepEqual([ctx.screen.room.board, ctx.screen.room.active], ['Bright idea', `brainstorms/${name}`]);
   assert.match(ctx.logPath, new RegExp(`brainstorms/${name}/transcripts/session-`));
   assert.match(readFileSync(ctx.logPath, 'utf8'), /\*\*User\*\*\n\nhello[\s\S]*\*\*A\*\*/);
   assert.deepEqual(ctx.state.transcript.map((m) => m.speaker), ['User', 'A', 'B', 'A']);
   assert.equal(prompts.length, 2);
-  assert.match(prompts[0], /This is a brainstorm, not a discussion\. Its folder is .*brainstorms\/[^ ]*: write nothing except drawings, in .*\/drawings\//);
+  assert.match(prompts[0], /This is a brainstorm, not a sprint\. Its folder is .*brainstorms\/[^ ]*: write nothing except drawings, in .*\/drawings\//);
   assert.doesNotMatch(prompts[0], /discussions\//);
   await handleLine('/summary', ctx); // manual /summary still works in a brainstorm
   assert.deepEqual(ctx.state.transcript.filter((m) => !m.summary).map((m) => m.speaker), ['User', 'A', 'B', 'A', 'Summary']);
@@ -526,10 +526,10 @@ test('brainstorm and discussion names never clash: each skips the names the othe
   mkdirSync(`${ctx.cwd}/discussions/archive/${d}-same-topic`, { recursive: true });
   await handleLine('/brainstorm', ctx);
   await handleLine('one', ctx);
-  assert.equal(ctx.discussion.name, `${d}-same-topic-2`); // taken in discussions/archive/
+  assert.equal(ctx.board.name, `${d}-same-topic-2`); // taken in discussions/archive/
   await handleLine('/new', ctx);
   await handleLine('two', ctx);
-  assert.equal(ctx.discussion.name, `${d}-same-topic-3`); // -2 is the brainstorm's
+  assert.equal(ctx.board.name, `${d}-same-topic-3`); // -2 is the brainstorm's
   assert.deepEqual(readdirSync(`${ctx.cwd}/brainstorms`), [`${d}-same-topic-2`]);
   assert.deepEqual(readdirSync(`${ctx.cwd}/discussions`).sort(), [`${d}-same-topic-3`, 'archive']);
 });
@@ -545,13 +545,13 @@ test('terminal: New brainstorm ends the session in use (a discussion, or a brain
   const transcript = ctx.logPath;
   await handleLine('/brainstorm', ctx);
   assert.deepEqual(resets, ['A', 'B']); // the worker carries on
-  assert.equal(ctx.discussion, null);
+  assert.equal(ctx.board, null);
   assert.equal(ctx.logPath, null);
   assert.deepEqual(ctx.state.transcript, []);
   assert.match(readFileSync(transcript, 'utf8'), /session ended: starting a brainstorm/);
   await handleLine('idea one', ctx);
   assert.equal(ctx.state.transcript[0].text, 'idea one');
-  const first = ctx.discussion.name;
+  const first = ctx.board.name;
   await handleLine('/brainstorm', ctx); // the terminal has one at a time: the first one's session ends, its folder stays
   assert.deepEqual(resets, ['A', 'B', 'A', 'B']);
   assert.match(readFileSync(`${ctx.cwd}/brainstorms/${first}/transcripts/${readdirSync(`${ctx.cwd}/brainstorms/${first}/transcripts`)[0]}`, 'utf8'), /idea one[\s\S]*session ended: starting a brainstorm/);
@@ -571,9 +571,9 @@ test('terminal: New discussion or Resume ends the brainstorm session (its folder
   await handleLine('/brainstorm', ctx);
   await handleLine('just talking', ctx);
   await handleLine('/new', ctx);
-  assert.deepEqual([ctx.state.brainstorm, ctx.state.transcript.length, ctx.screen.room.discussion], [false, 0, 'No discussion started']);
+  assert.deepEqual([ctx.state.brainstorm, ctx.state.transcript.length, ctx.screen.room.board], [false, 0, 'No sprint started']);
   await handleLine('now for real', ctx);
-  assert.equal(ctx.discussion.title, 'Real topic');
+  assert.equal(ctx.board.title, 'Real topic');
   assert.match(ctx.logPath, /discussions\/[^/]*-real-topic-2\/transcripts\/session-/); // -1 is the brainstorm's
   assert.equal(readdirSync(`${ctx.cwd}/brainstorms`).length, 1);
 
@@ -581,7 +581,7 @@ test('terminal: New discussion or Resume ends the brainstorm session (its folder
   await handleLine('/brainstorm', ctx);
   await handleLine('more talk', ctx);
   await handleLine('/resume 2026-11-01-old', ctx);
-  assert.deepEqual([ctx.state.brainstorm, ctx.state.transcript.length, ctx.discussion.name], [false, 0, '2026-11-01-old']);
+  assert.deepEqual([ctx.state.brainstorm, ctx.state.transcript.length, ctx.board.name], [false, 0, '2026-11-01-old']);
   await handleLine('back to it', ctx);
   assert.match(ctx.logPath, /2026-11-01-old\/transcripts\/session-/);
   assert.equal(readdirSync(`${ctx.cwd}/discussions`).length, 2);
@@ -601,7 +601,7 @@ test('Reload keeps the brainstorm\'s messages and its mode: the next message goe
   await reloaded(ctx);
   assert.deepEqual(ctx.screen.transcript.map((m) => m.text), said); // a refreshed page gets them
   assert.equal(ctx.screen.room.brainstorm, true);
-  assert.match(ctx.screen.room.discussion, /^Brainstorm — /); // no title: named after the date and time
+  assert.match(ctx.screen.room.board, /^Brainstorm — /); // no title: named after the date and time
   await handleLine('another idea', ctx);
   assert.deepEqual(ctx.state.transcript.map((m) => m.text), [...said, 'another idea', 'PASS', 'PASS']);
   assert.deepEqual(readdirSync(ctx.cwd), ['brainstorms']);
@@ -612,7 +612,7 @@ test('/new: nothing to end before the first message; it creates nothing and chan
   const { readdirSync } = await import('node:fs');
   const ctx = await freshSession([], async () => ({ title: 'Topic' }));
   await handleLine('/new', ctx);
-  assert.equal(ctx.discussion, undefined);
+  assert.equal(ctx.board, undefined);
   assert.deepEqual(readdirSync(ctx.cwd), []);
 });
 
@@ -630,12 +630,12 @@ test('/new after a round: the session ends as with Resume; the next message star
 
   await handleLine('/new', ctx);
   assert.deepEqual(resets, ['A', 'B']); // fresh discussion sessions; the worker's is kept
-  assert.equal(ctx.discussion, null);
+  assert.equal(ctx.board, null);
   assert.equal(ctx.logPath, null);
   assert.deepEqual(ctx.state.transcript, []);
-  assert.equal(ctx.screen.room.discussion, 'No discussion started');
+  assert.equal(ctx.screen.room.board, 'No sprint started');
   assert.deepEqual(ctx.screen.room.back, { name, title: 'First topic' });
-  assert.match(readFileSync(first, 'utf8'), /session ended: starting a new discussion/);
+  assert.match(readFileSync(first, 'utf8'), /session ended: starting a new sprint/);
   assert.deepEqual(readdirSync(`${ctx.cwd}/discussions`), [name]); // nothing created yet
 
   // A failed folder creation sends nothing and keeps the way back.
@@ -645,17 +645,17 @@ test('/new after a round: the session ends as with Resume; the next message star
   assert.deepEqual(ctx.screen.room.back, { name, title: 'First topic' });
 
   await handleLine('second', ctx);
-  assert.equal(ctx.discussion.title, 'Second topic');
+  assert.equal(ctx.board.title, 'Second topic');
   assert.equal(ctx.screen.room.back, null); // the link lasts until the new discussion starts
   assert.match(ctx.logPath, /second-topic\/transcripts\/session-/);
   assert.match(prompts[1], /You are A, one of several AI agents/); // introduced again
-  assert.match(prompts[1], /This is a new discussion/);
+  assert.match(prompts[1], /This is a new sprint/);
   assert.equal(readdirSync(`${ctx.cwd}/discussions/${name}/transcripts`).length, 1);
 
   // Going back: Resume the first one (it remembers this one in turn).
   mkdirSync(`${ctx.cwd}/discussions/x`, { recursive: true });
   await handleLine(`/resume ${name}`, ctx);
-  assert.equal(ctx.discussion.name, name);
+  assert.equal(ctx.board.name, name);
   assert.equal(ctx.screen.room.back.title, 'Second topic');
 });
 
@@ -672,7 +672,7 @@ test('/new in the terminal doesn\'t wait: a running task finishes in the old dis
   let finish;
   ctx.worker.turn = async (p) => { got.push(p); return got.length === 2 ? new Promise((done) => { finish = done; }) : 'ok'; };
   await handleLine('hello', ctx);
-  const first = ctx.logPath, firstDir = ctx.discussion.dir;
+  const first = ctx.logPath, firstDir = ctx.board.dir;
   queueWork(ctx, 'one');
   await ctx.workQueue;
   queueWork(ctx, 'long task');
@@ -698,7 +698,7 @@ test('/new in the terminal doesn\'t wait: a running task finishes in the old dis
   await handleLine('second', ctx);
   queueWork(ctx, 'after');
   await ctx.workQueue;
-  assert.match(got[3], new RegExp(`^\\[your reported usage this session: [^\\]]+\\]\\n\\nThe active discussion's folder is ${ctx.discussion.dir}: `));
+  assert.match(got[3], new RegExp(`^\\[your reported usage this session: [^\\]]+\\]\\n\\nThe active discussion's folder is ${ctx.board.dir}: `));
   assert.ok(!readFileSync(ctx.logPath, 'utf8').includes('long done'));
 });
 
@@ -711,7 +711,7 @@ test('after New discussion, the previous one can\'t move while its worker task r
   await gitRoom(ctx.cwd);
   ctx.worker.turn = () => new Promise((done) => { finish = done; });
   await handleLine('hello', ctx);
-  const name = ctx.discussion.name, first = ctx.logPath;
+  const name = ctx.board.name, first = ctx.logPath;
   queueWork(ctx, 'long task');
   await until(() => finish);
   await handleLine('/new', ctx);
@@ -744,7 +744,7 @@ test('a transcript that can\'t be written keeps the worker\'s reply visible, rep
   await handleLine('hello', ctx);
   queueWork(ctx, 'task');
   await until(() => finish);
-  rmSync(ctx.discussion.dir, { recursive: true }); // the transcript's folder is gone
+  rmSync(ctx.board.dir, { recursive: true }); // the transcript's folder is gone
 
   finish('the reply');
   await ctx.workQueue;
@@ -946,7 +946,7 @@ test('each discussion works in its own lane, <repo>.workers/<name>/ on worker/<n
   let resets = 0;
   ctx.worker.reset = () => { resets++; };
   await handleLine('hello', ctx);
-  const name = ctx.discussion.name;
+  const name = ctx.board.name;
   await work(ctx, 'in the discussion');
   assert.equal(ctx.workerDir.path, `${root}.workers/${name}`);
   assert.equal(git('-C', ctx.workerDir.path, 'rev-parse', '--abbrev-ref', 'HEAD'), `worker/${name}`);
@@ -980,7 +980,7 @@ test('a task queued before the discussion\'s first message stays on worker/main,
   queueWork(ctx, 'after the message');
   finish('done');
   await ctx.workQueue;
-  assert.deepEqual(dirs, [`${root}.worker`, `${root}.worker`, `${root}.workers/${ctx.discussion.name}`]);
+  assert.deepEqual(dirs, [`${root}.worker`, `${root}.worker`, `${root}.workers/${ctx.board.name}`]);
 });
 
 test('migration: a discussion\'s lane waits while worker/main has uncommitted edits or that discussion\'s commits not in main, which are left where they are; Defer counts those commits too', async () => {
@@ -1025,7 +1025,7 @@ test('the Worker tab checks each branch with work not in main: whether it contai
   const [major, minor] = execFileSync('git', ['version']).toString().match(/(\d+)\.(\d+)/).slice(1).map(Number);
   const preview = major > 2 || (major === 2 && minor >= 38); // merge-tree --write-tree
   await handleLine('hello', ctx);
-  const name = ctx.discussion.name, branch = `worker/${name}`;
+  const name = ctx.board.name, branch = `worker/${name}`;
   const lines = () => ctx.screen.workerInfo.lines;
   let reply;
   ctx.worker.turn = async (p) => { got.push(p); return typeof reply === 'function' ? reply() : reply; };
@@ -1278,11 +1278,11 @@ test('a worker task keeps the discussion it started in, even if New discussion c
   let finish;
   ctx.worker.turn = (p) => { got.push(p); return new Promise((done) => { finish = done; }); };
   await handleLine('hello', ctx);
-  const first = ctx.discussion, transcript = ctx.logPath;
+  const first = ctx.board, transcript = ctx.logPath;
   queueWork(ctx, 'the task');
   await until(() => ctx.screen.working); // started: now preparing its worktree (Git calls)
   await handleLine('/new', ctx); // the room's discussion changes before the task's first turn
-  assert.equal(ctx.discussion, null);
+  assert.equal(ctx.board, null);
   await until(() => finish);
   assert.match(got[0], new RegExp(`^\\[your reported usage this session: [^\\]]+\\]\\n\\nThe active discussion's folder is ${first.dir}: `)); // its own, not "no discussion"
   await markClosed(ctx.cwd, first.name);
@@ -1375,8 +1375,8 @@ test('Switch room lists this server\'s rooms, with the pages open on each and wh
   const hub = { rooms: new Map([['/tmp/b-room', a], ['/tmp/a-room', b]]) };
   a.hub = b.hub = hub;
   assert.deepEqual(listRooms(b), [
-    { id: 'a-room-222222', path: '/r/a-room-222222/__room', root: '/tmp/a-room', discussion: null, pages: 0, current: true },
-    { id: 'b-room-111111', path: '/r/b-room-111111/__room', root: '/tmp/b-room', discussion: null, pages: 2, current: false },
+    { id: 'a-room-222222', path: '/r/a-room-222222/__room', root: '/tmp/a-room', board: null, pages: 0, current: true },
+    { id: 'b-room-111111', path: '/r/b-room-111111/__room', root: '/tmp/b-room', board: null, pages: 2, current: false },
   ]);
 });
 
@@ -1426,19 +1426,19 @@ test('terminal: /new while a worker task runs, a task in the new discussion, the
   const codex = (id) => Object.assign(ctx.sessions.get('B'), { threadId: id }); // a real Codex turn sets it
   codex('codex-a');
   await handleLine('first topic', ctx);
-  const a = ctx.discussion, aLog = ctx.logPath;
+  const a = ctx.board, aLog = ctx.logPath;
   Object.assign(ctx.sessions.get(key), { id: 'worker-a', started: true });
   stub('A', true);
   queueWork(ctx, 'task in A');
   await until(() => release);
 
   await handleLine('/new', ctx); // returns at once: A's task goes on in A's session
-  assert.equal(ctx.discussion, null);
+  assert.equal(ctx.board, null);
   assert.notEqual(ctx.sessions.get(key).id, 'worker-a');
   stub('B');
   codex('codex-b');
   await handleLine('second topic', ctx);
-  const b = ctx.discussion, bLog = ctx.logPath;
+  const b = ctx.board, bLog = ctx.logPath;
   Object.assign(ctx.sessions.get(key), { id: 'worker-b', started: true });
   queueWork(ctx, 'task in B'); // waits behind A's: one context's worker tasks run one at a time
   release();
@@ -1487,7 +1487,7 @@ test('terminal: a task that leaves edits after the room switched holds its own d
   };
   Object.assign(ctx.sessions.get('B'), { threadId: 'codex-a' });
   await handleLine('first topic', ctx);
-  const a = ctx.discussion.name;
+  const a = ctx.board.name;
   stub('A', true);
   queueWork(ctx, 'edit things in A');
   await until(() => release);
@@ -1495,7 +1495,7 @@ test('terminal: a task that leaves edits after the room switched holds its own d
   Object.assign(ctx.sessions.get('B'), { threadId: 'codex-b' });
   stub('B');
   await handleLine('second topic', ctx);
-  const b = ctx.discussion.name;
+  const b = ctx.board.name;
   ctx.totals.W = { input: 1, cached: 0, output: 1 }; // B's own
   queueWork(ctx, 'task in B'); // queued behind A's (one context, one task at a time)
   release();
@@ -1543,7 +1543,7 @@ test('no worker sends from a brainstorm, before or after its first message, on t
   ctx.state.transcript.push({ speaker: 'Summary', text: '**Next step**\n- Send to the Worker: "go"', outcome: 'agreed', by: 'A' });
   await handleLine('/autodev', ctx);
   assert.equal(ctx.autoDev, undefined);
-  const name = ctx.discussion.name;
+  const name = ctx.board.name;
   await handleLine(`/convert brainstorms/${name}`, ctx);
   await work(ctx, 'now as a discussion');
   assert.equal(got.length, 1);
@@ -1581,7 +1581,7 @@ test('terminal: Start fresh while the discussion\'s old worker task still runs: 
   const saved = () => checkpointPath(cwd, name).then((f) => JSON.parse(readFileSync(f, 'utf8')));
   Object.assign(ctx.sessions.get('B'), { threadId: 'codex-old' }); // a real Codex turn sets it
   await handleLine('the topic', ctx);
-  const name = ctx.discussion.name, oldLog = ctx.logPath;
+  const name = ctx.board.name, oldLog = ctx.logPath;
   Object.assign(ctx.sessions.get(key), { id: 'worker-old', started: true });
   stub('old', true);
   queueWork(ctx, 'old task');
@@ -1618,15 +1618,15 @@ test('Close writes a statement and drops saved provider IDs only after the agent
   Object.assign(ctx.sessions.get('worker:W'), { id: 'prior-worker', started: true });
   const sessions = [...ctx.sessions.values()];
   await handleLine('decide', ctx);
-  const { name, dir } = ctx.discussion;
+  const { name, dir } = ctx.board;
   for (const a of ctx.room.agents) a.turn = async () => 'Decisions and pending-instructions.md';
   await handleLine('/close', ctx);
   assert.match(readFileSync(`${dir}/closing-statement.md`, 'utf8'), /pending-instructions\.md/);
-  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+  assert.ok(ctx.screen.room.closedBoards.includes(name));
   assert.deepEqual(JSON.parse(readFileSync(await checkpointPath(cwd, name), 'utf8')).sessions, []);
   assert.ok(sessions.every((session) => !['prior-agent', 'prior-thread', 'prior-worker'].includes(session.id ?? session.threadId ?? session.conversationId)));
   await handleLine('/resume ' + name, ctx);
-  assert.ok(!ctx.screen.room.closedDiscussions.includes(name));
+  assert.ok(!ctx.screen.room.closedBoards.includes(name));
   assert.notEqual(ctx.sessions.get('A').id, 'prior-agent');
   assert.notEqual(ctx.sessions.get('B').threadId, 'prior-thread');
   assert.notEqual(ctx.sessions.get('worker:W').id, 'prior-worker');
@@ -1641,7 +1641,7 @@ test('Close asks one agent with the worker\'s settings for the statement, never 
   const { readFileSync } = await import('node:fs');
   const ctx = await savedRoom(await tmp('close-writer-'), 'close-writer');
   await handleLine('decide', ctx);
-  const { name, dir } = ctx.discussion;
+  const { name, dir } = ctx.board;
   for (const agent of ctx.room.agents) agent.turn = async () => { throw new Error('a discussion agent was asked'); };
   const prompts = [];
   ctx.closingAgent = () => ({ name: 'W', turn: async (p) => { prompts.push(p); return 'Statement: pending-instructions.md'; } });
@@ -1652,8 +1652,8 @@ test('Close asks one agent with the worker\'s settings for the statement, never 
   assert.ok(notes.includes(`Closing ${name}: Claude (Claude default) is writing the closing statement…`));
   assert.equal(notes.at(-1), `Closed ${name}. Closing statement written by Claude (Claude default).`);
   assert.equal(prompts.length, 1);
-  assert.match(prompts[0], /The User is closing this discussion\./);
-  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+  assert.match(prompts[0], /The User is closing this sprint\./);
+  assert.ok(ctx.screen.room.closedBoards.includes(name));
   assert.equal(readFileSync(`${dir}/closing-statement.md`, 'utf8'), 'Statement: pending-instructions.md\n');
 });
 
@@ -1661,26 +1661,26 @@ test('Close waits for queued work, refuses instructions and can be cancelled', a
   const { cancelClose, queueWork } = await import('../src/ui.mjs');
   const ctx = await savedRoom(await tmp('close-wait-'), 'close-wait');
   await handleLine('decide', ctx);
-  const name = ctx.discussion.name, lane = workerLane(ctx, name);
+  const name = ctx.board.name, lane = workerLane(ctx, name);
   const queued = { owner: name, origin: ctx };
   lane.tasks.push(queued);
   const closing = handleLine('/close', ctx);
-  assert.deepEqual(ctx.screen.room.closingDiscussions, { [name]: 'waiting' });
+  assert.deepEqual(ctx.screen.room.closingBoards, { [name]: 'waiting' });
   queueWork(ctx, 'not accepted');
   assert.deepEqual(lane.tasks, [queued]);
   assert.equal(cancelClose(ctx, name), true);
   await closing;
-  assert.deepEqual(ctx.screen.room.closingDiscussions, {});
-  assert.equal(ctx.discussion.name, name);
-  assert.deepEqual(ctx.screen.room.closedDiscussions, []);
+  assert.deepEqual(ctx.screen.room.closingBoards, {});
+  assert.equal(ctx.board.name, name);
+  assert.deepEqual(ctx.screen.room.closedBoards, []);
   lane.tasks.length = 0;
 });
 
-test('Close reports waiting then writing phases in room.closingDiscussions, and cancelClose works only while waiting', async () => {
+test('Close reports waiting then writing phases in room.closingBoards, and cancelClose works only while waiting', async () => {
   const { cancelClose } = await import('../src/ui.mjs');
   const ctx = await savedRoom(await tmp('close-phases-'), 'close-phases');
   await handleLine('decide', ctx);
-  const name = ctx.discussion.name, lane = workerLane(ctx, name);
+  const name = ctx.board.name, lane = workerLane(ctx, name);
   let finishTask, startWriting, finishWriting;
   const writingStarted = new Promise((r) => { startWriting = r; });
   const writingDone = new Promise((r) => { finishWriting = r; });
@@ -1696,16 +1696,16 @@ test('Close reports waiting then writing phases in room.closingDiscussions, and 
     },
   });
   const closing = handleLine('/close', ctx);
-  assert.deepEqual(ctx.screen.room.closingDiscussions, { [name]: 'waiting' });
+  assert.deepEqual(ctx.screen.room.closingBoards, { [name]: 'waiting' });
   lane.tasks.length = 0;
   finishTask();
   await writingStarted;
-  assert.deepEqual(ctx.screen.room.closingDiscussions, { [name]: 'writing' });
+  assert.deepEqual(ctx.screen.room.closingBoards, { [name]: 'writing' });
   assert.equal(cancelClose(ctx, name), false);
   finishWriting();
   await closing;
-  assert.deepEqual(ctx.screen.room.closingDiscussions, {});
-  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+  assert.deepEqual(ctx.screen.room.closingBoards, {});
+  assert.ok(ctx.screen.room.closedBoards.includes(name));
 });
 
 test('a reopened discussion retains its statement briefing across restart before its first message', async () => {
@@ -1713,7 +1713,7 @@ test('a reopened discussion retains its statement briefing across restart before
   const ctx = await savedRoom(cwd, 'reopen-restart-1');
   ctx.sessions.get('B').threadId = 'before-close';
   await handleLine('decide', ctx);
-  const name = ctx.discussion.name;
+  const name = ctx.board.name;
   for (const agent of ctx.room.agents) agent.turn = async () => 'reopen context: pending-instructions.md';
   await handleLine('/close', ctx);
   await handleLine('/resume ' + name, ctx);
@@ -1731,7 +1731,7 @@ test('a reopened discussion without a closing statement starts from its pending 
   const ctx = await savedRoom(await tmp('reopen-handoff-'), 'reopen-handoff');
   ctx.sessions.get('B').threadId = 'before-close';
   await handleLine('decide', ctx);
-  const { name, dir } = ctx.discussion;
+  const { name, dir } = ctx.board;
   for (const agent of ctx.room.agents) agent.turn = async () => 'statement: pending-instructions.md';
   await handleLine('/close', ctx);
   unlinkSync(`${dir}/closing-statement.md`);
@@ -1764,7 +1764,7 @@ test('Close waits for running and queued worker reports before asking the agents
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /first report/);
   assert.match(prompts[0], /second report/);
-  assert.ok(ctx.screen.room.closedDiscussions.length);
+  assert.ok(ctx.screen.room.closedBoards.length);
 });
 
 test('closing a discussion does not stop an earlier discussion\'s detached worker', async () => {
@@ -1781,7 +1781,7 @@ test('closing a discussion does not stop an earlier discussion\'s detached worke
   await handleLine('second', ctx);
   for (const agent of ctx.room.agents) agent.turn = async () => 'statement pending-instructions.md';
   await handleLine('/close', ctx);
-  assert.equal(ctx.discussion, null);
+  assert.equal(ctx.board, null);
   finish('finished first');
   await ctx.workQueue;
   assert.ok(ctx.screen.worker.some((m) => m.html?.includes('finished first')));
@@ -1791,18 +1791,18 @@ test('a failed statement leaves the previous file and discussion intact for a re
   const { readFileSync, writeFileSync } = await import('node:fs');
   const ctx = await savedRoom(await tmp('close-retry-'), 'close-retry');
   await handleLine('decide', ctx);
-  const { name, dir } = ctx.discussion, file = `${dir}/closing-statement.md`;
+  const { name, dir } = ctx.board, file = `${dir}/closing-statement.md`;
   writeFileSync(file, 'previous statement\n');
   ctx.room.agents[0].turn = async () => 'partial: pending-instructions.md';
   ctx.room.agents[1].turn = async () => { throw new Error('agent failed'); };
   await handleLine('/close', ctx);
   assert.equal(readFileSync(file, 'utf8'), 'previous statement\n');
-  assert.equal(ctx.discussion.name, name);
-  assert.deepEqual(ctx.screen.room.closedDiscussions, []);
+  assert.equal(ctx.board.name, name);
+  assert.deepEqual(ctx.screen.room.closedBoards, []);
   ctx.room.agents[1].turn = async () => 'complete: pending-instructions.md';
   await handleLine('/close', ctx);
   assert.equal(readFileSync(file, 'utf8'), 'complete: pending-instructions.md\n');
-  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+  assert.ok(ctx.screen.room.closedBoards.includes(name));
 });
 
 test('a failure persisting Close restores the statement, checkpoint and provider IDs', async () => {
@@ -1813,17 +1813,17 @@ test('a failure persisting Close restores the statement, checkpoint and provider
   Object.assign(ctx.sessions.get('B'), { threadId: 'keep-thread' });
   Object.assign(ctx.sessions.get('worker:W'), { id: 'keep-worker', started: true });
   await handleLine('decide', ctx);
-  const { name, dir } = ctx.discussion, checkpoint = await checkpointPath(ctx.cwd, name);
+  const { name, dir } = ctx.board, checkpoint = await checkpointPath(ctx.cwd, name);
   const before = readFileSync(checkpoint, 'utf8');
   writeFileSync(`${dir}/closing-statement.md`, 'previous statement\n');
   mkdirSync(join(dirname(checkpoint), 'closed', basename(checkpoint, '.json')), { recursive: true });
   for (const agent of ctx.room.agents) agent.turn = async () => 'replacement: pending-instructions.md';
   await handleLine('/close', ctx);
-  assert.equal(ctx.discussion.name, name);
+  assert.equal(ctx.board.name, name);
   assert.equal(readFileSync(`${dir}/closing-statement.md`, 'utf8'), 'previous statement\n');
   assert.deepEqual(JSON.parse(readFileSync(checkpoint, 'utf8')), JSON.parse(before));
   assert.deepEqual([ctx.sessions.get('A').id, ctx.sessions.get('B').threadId, ctx.sessions.get('worker:W').id], ['keep-agent', 'keep-thread', 'keep-worker']);
-  assert.deepEqual(ctx.screen.room.closedDiscussions, []);
+  assert.deepEqual(ctx.screen.room.closedBoards, []);
 });
 
 test('a paused discussion can be closed without replacing the current discussion', async () => {
@@ -1835,16 +1835,16 @@ test('a paused discussion can be closed without replacing the current discussion
   delete ctx.closingAgent;
   Object.assign(ctx.sessions.get('B'), { threadId: 'prior-thread' });
   await handleLine('decide', ctx);
-  const { name, dir } = ctx.discussion;
+  const { name, dir } = ctx.board;
   await handleLine('/new', ctx);
   await handleLine('second', ctx);
-  const current = ctx.discussion.name;
+  const current = ctx.board.name;
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path}`;
   try { await handleLine(`/close ${name}`, ctx); }
   finally { process.env.PATH = path; }
-  assert.equal(ctx.discussion.name, current);
-  assert.ok(ctx.screen.room.closedDiscussions.includes(name));
+  assert.equal(ctx.board.name, current);
+  assert.ok(ctx.screen.room.closedBoards.includes(name));
   assert.match(readFileSync(`${dir}/closing-statement.md`, 'utf8'), /Claude draft pending-instructions\.md/);
 });
 
@@ -1855,22 +1855,22 @@ test('closed state persists independently of checkpoints, and Resume clears it',
   ctx.sessions.get('B').threadId = 'saved-thread';
   mkdirSync(`${cwd}/discussions/2026-01-01-old`, { recursive: true });
   await handleLine('hello', ctx);
-  const name = ctx.discussion.name;
-  assert.deepEqual(ctx.screen.room.closedDiscussions, []); // old and open discussions have no marker
+  const name = ctx.board.name;
+  assert.deepEqual(ctx.screen.room.closedBoards, []); // old and open discussions have no marker
   const restarted = await savedRoom(cwd, 'closed-state-2');
   await handleLine('/resume 2026-01-01-old', restarted);
-  assert.deepEqual(restarted.screen.room.closedDiscussions, []); // an open discussion left behind is paused
+  assert.deepEqual(restarted.screen.room.closedBoards, []); // an open discussion left behind is paused
   for (const agent of ctx.room.agents) agent.turn = async () => 'Statement: pending-instructions.md';
   await handleLine('/close', ctx);
-  assert.deepEqual(ctx.screen.room.closedDiscussions, [name]);
+  assert.deepEqual(ctx.screen.room.closedBoards, [name]);
   const after = await savedRoom(cwd, 'closed-state-3');
   await handleLine('/resume 2026-01-01-old', after);
-  assert.deepEqual(after.screen.room.closedDiscussions, [name]);
+  assert.deepEqual(after.screen.room.closedBoards, [name]);
   await handleLine('/resume ' + name, after);
-  assert.deepEqual(after.screen.room.closedDiscussions, []);
+  assert.deepEqual(after.screen.room.closedBoards, []);
   const again = await savedRoom(cwd, 'closed-state-4');
   await handleLine('/resume 2026-01-01-old', again);
-  assert.deepEqual(again.screen.room.closedDiscussions, []);
+  assert.deepEqual(again.screen.room.closedBoards, []);
 });
 
 test('every round saves a checkpoint; a corrupt or missing-session checkpoint leaves the file and room intact; Resume continues the same sessions', async () => {
@@ -1882,7 +1882,7 @@ test('every round saves a checkpoint; a corrupt or missing-session checkpoint le
   ctx.totals.A = { input: 42, output: 10 };
   ctx.state.summaries = 3;
   await handleLine('Remember this', ctx);
-  const name = ctx.discussion.name, file = await checkpointPath(ctx.cwd, name);
+  const name = ctx.board.name, file = await checkpointPath(ctx.cwd, name);
   const first = JSON.parse(readFileSync(file, 'utf8')); // written by the round, which had no summary
   assert.equal(new Map(first.sessions).get('A').id, 'claude-original');
   assert.equal(new Map(first.sessions).get('worker:W').id, 'worker-original');
@@ -1894,14 +1894,14 @@ test('every round saves a checkpoint; a corrupt or missing-session checkpoint le
   assert.equal(saved.state.transcript.length, 6);
 
   await handleLine('/new', ctx);
-  assert.equal(ctx.discussion, null);
+  assert.equal(ctx.board, null);
   assert.equal(readFileSync(file, 'utf8').length > 0 && JSON.parse(readFileSync(file, 'utf8')).state.transcript.length, 6); // kept
   assert.notEqual(ctx.sessions.get('A').id, 'claude-original'); // fresh agent sessions here
   const emptyState = ctx.state;
   writeFileSync(file, JSON.stringify({ ...saved, version: 999 }));
   await assert.rejects(handleLine('/resume ' + name, ctx), /checkpoint of .* is invalid/);
   assert.equal(ctx.state, emptyState);
-  assert.equal(ctx.discussion, null);
+  assert.equal(ctx.board, null);
   assert.equal(existsSync(file), true);
   writeFileSync(file, JSON.stringify({ ...saved, sessions: [] }));
   await assert.rejects(handleLine('/resume ' + name, ctx), /provider session.*missing/);
@@ -1928,18 +1928,18 @@ test('Resume replaces a brainstorm only with a valid checkpoint; on the discussi
   Object.assign(ctx.sessions.get('A'), { id: 'claude-original', started: true });
   Object.assign(ctx.sessions.get('B'), { threadId: 'codex-original' }); // a real Codex turn sets it
   await handleLine('Remember this', ctx);
-  const name = ctx.discussion.name, file = await checkpointPath(ctx.cwd, name);
+  const name = ctx.board.name, file = await checkpointPath(ctx.cwd, name);
   const snapshot = readFileSync(file, 'utf8'), saved = JSON.parse(snapshot);
   await handleLine('/brainstorm', ctx);
   await handleLine('a brainstorm idea', ctx);
-  const brainstorm = ctx.state, brainFolder = ctx.discussion;
+  const brainstorm = ctx.state, brainFolder = ctx.board;
   const said = ctx.state.transcript.map((m) => m.text);
   const intact = () => {
     assert.equal(ctx.state, brainstorm);
     assert.equal(ctx.state.brainstorm, true);
     assert.deepEqual(ctx.state.transcript.map((m) => m.text), said);
     assert.equal(ctx.screen.room.brainstorm, true);
-    assert.equal(ctx.discussion, brainFolder);
+    assert.equal(ctx.board, brainFolder);
   };
   // An invalid checkpoint: the error, and the brainstorm as it was.
   writeFileSync(file, JSON.stringify({ ...saved, version: 999 }));
@@ -1950,7 +1950,7 @@ test('Resume replaces a brainstorm only with a valid checkpoint; on the discussi
   await handleLine('/resume ' + name, ctx);
   assert.equal(ctx.state.brainstorm, undefined);
   assert.equal(ctx.screen.room.brainstorm, false);
-  assert.equal(ctx.discussion.name, name);
+  assert.equal(ctx.board.name, name);
   assert.deepEqual(ctx.state.transcript, saved.state.transcript);
   assert.equal(ctx.sessions.get('A').id, 'claude-original');
   assert.equal(ctx.logPath, saved.logPath);
@@ -1959,11 +1959,11 @@ test('Resume replaces a brainstorm only with a valid checkpoint; on the discussi
   await handleLine('carry on', ctx);
   const length = ctx.state.transcript.length;
   await handleLine('/resume ' + name, ctx);
-  assert.deepEqual([ctx.discussion.name, ctx.state.transcript.length, ctx.sessions.get('A').id], [name, length, 'claude-original']);
+  assert.deepEqual([ctx.board.name, ctx.state.transcript.length, ctx.sessions.get('A').id], [name, length, 'claude-original']);
 
   // The page's confirmation is covered by the React test.
   await handleLine('/fresh ' + name, ctx);
-  assert.deepEqual([ctx.discussion.name, ctx.logPath, ctx.state.transcript.length], [name, null, 0]);
+  assert.deepEqual([ctx.board.name, ctx.logPath, ctx.state.transcript.length], [name, null, 0]);
   assert.notEqual(ctx.sessions.get('A').id, 'claude-original');
   const left = JSON.parse(readFileSync(file, 'utf8'));
   assert.deepEqual([left.fresh, left.summary, left.sessions, left.state], [true, null, undefined, undefined]); // no summary was agreed here
@@ -1977,7 +1977,7 @@ test('Start fresh briefs with the latest summary, marked if not agreed, or none;
   const script = ['an idea', 'PASS', '- the idea'];
   ctx.room.agents[0].turn = async () => script.shift() ?? 'PASS';
   await handleLine('hello', ctx); // A speaks, so the round is summarized: agreed, by A
-  const name = ctx.discussion.name, file = await checkpointPath(cwd, name);
+  const name = ctx.board.name, file = await checkpointPath(cwd, name);
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).state.transcript.at(-1), { speaker: 'Summary', text: '- the idea', outcome: 'agreed', by: 'A' });
   await handleLine('/fresh ' + name, ctx);
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).summary, { text: '- the idea', outcome: 'agreed', by: 'A' });
@@ -2006,7 +2006,7 @@ test('Start fresh briefs with the latest summary, marked if not agreed, or none;
   mkdirSync(`${cwd}/discussions/2026-11-01-none`);
   await handleLine('/fresh 2026-11-01-none', after);
   await handleLine('hi', after);
-  assert.match(prompts.at(-1), /continues the discussion in .*2026-11-01-none.*Start from its handoff/);
+  assert.match(prompts.at(-1), /continues the sprint in .*2026-11-01-none.*Start from its handoff/);
   assert.doesNotMatch(prompts.at(-1), /latest summary/);
 });
 
@@ -2019,7 +2019,7 @@ test('removed commands answer with a hint and reach no agent', async () => {
   for (const line of ['/pause', '/reopen 2026-11-01-x', '/continue', '/autosummary off']) await handleLine(line, ctx);
   assert.equal(turns, 0);
   assert.deepEqual(ctx.state.transcript, []);
-  assert.match(notes[0], /^Pause is gone: every discussion saves itself after each round/);
+  assert.match(notes[0], /^Pause is gone: every sprint saves itself after each round/);
   assert.match(notes[1], /^\/reopen is now \/resume 2026-11-01-x .* or \/fresh 2026-11-01-x/);
   assert.match(notes[2], /^\/continue is now \/resume <name>/);
   assert.match(notes[3], /^Auto-summarize is always on now/);
@@ -2184,7 +2184,7 @@ test('auto dev: Start relays the instruction; the report starts a round; one SEN
   const draft = prompts.filter((p) => /asked for a summary of the discussion/.test(p)).at(-1);
   assert.match(draft, /Passing on a version accepts its quoted instruction for the worker exactly as it stands/);
   assert.match(draft, /End the summary with one last line: Outcome: SEND, Outcome: FINISH or Outcome: WAIT FOR USER/);
-  assert.equal(ctx.notes.at(-1), `Auto dev finished. Review and merge worker/${ctx.discussion.name} yourself.`); // its own lane's branch
+  assert.equal(ctx.notes.at(-1), `Auto dev finished. Review and merge worker/${ctx.board.name} yourself.`); // its own lane's branch
 });
 
 test('auto dev: at most 5 worker cycles per start; the 5th report is still reviewed; Restart grants 5 more', async () => {
@@ -2275,7 +2275,7 @@ test('auto dev: while paused, any agreed summary ending in Outcome: FINISH finis
   await handleLine('is it done?', ctx);
   await settle();
   assert.deepEqual([ctx.autoDev.status, ctx.autoDev.reason, ctx.autoDev.cycle, got.length], ['finished', null, 1, 1]);
-  assert.equal(ctx.notes.at(-1), `Auto dev finished. Review and merge worker/${ctx.discussion.name} yourself.`); // its own lane's branch
+  assert.equal(ctx.notes.at(-1), `Auto dev finished. Review and merge worker/${ctx.board.name} yourself.`); // its own lane's branch
   assert.match(readFileSync(ctx.logPath, 'utf8'), /_\(auto dev finished\)_/);
   assert.equal(ctx.screen.room.autoDev.status, 'finished');
   // With the run finished, summaries are as before.
@@ -2369,16 +2369,16 @@ test('on the screen, New discussion keeps the discussion open with its sessions;
   const { readFileSync } = await import('node:fs');
   const { hub, first, settle, gotoOf, pageOf, contexts } = await multiRoom();
   await handleLine('topic-a', first);
-  const a = first.discussion, transcript = first.logPath;
+  const a = first.board, transcript = first.logPath;
   await handleLine('/new', first);
   const [, second] = contexts();
   assert.equal(contexts().length, 2);
   assert.equal(gotoOf(first), pageOf(second)); // this window shows the new one
-  assert.deepEqual([first.discussion, first.logPath, first.resets], [a, transcript, 0]); // kept as it was
+  assert.deepEqual([first.board, first.logPath, first.resets], [a, transcript, 0]); // kept as it was
   assert.deepEqual(first.state.transcript.map((m) => m.text), ['topic-a', 'PASS', 'PASS']);
   assert.doesNotMatch(readFileSync(transcript, 'utf8'), /session ended/);
   await handleLine('topic-b', second);
-  assert.equal(second.discussion.title, 'topic-b');
+  assert.equal(second.board.title, 'topic-b');
   assert.deepEqual(first.screen.room.open.map((o) => [o.title, o.current]), [['topic-a', true], ['topic-b', false]]);
 
   await handleLine(`/resume ${a.name}`, second); // open already: shown as it is
@@ -2389,7 +2389,7 @@ test('on the screen, New discussion keeps the discussion open with its sessions;
   await handleLine('/brainstorm', second); // beside, in a context of its own
   await settle();
   const brain = contexts().find((c) => c.state.brainstorm);
-  assert.ok(brain && brain !== second && second.discussion);
+  assert.ok(brain && brain !== second && second.board);
   assert.equal(gotoOf(second), pageOf(brain));
   await handleLine('idea one', brain);
   await handleLine('/new', first); // the brainstorm stays open, as discussions do
@@ -2402,7 +2402,7 @@ test('on the screen, New discussion keeps the discussion open with its sessions;
   assert.equal(brains.length, 2);
   await handleLine('idea two', brains[1]);
   assert.deepEqual(first.screen.room.open.filter((o) => o.brainstorm).map((o) => [o.title, o.active]),
-    [['idea one', `brainstorms/${brains[0].discussion.name}`], ['idea two', `brainstorms/${brains[1].discussion.name}`]]);
+    [['idea one', `brainstorms/${brains[0].board.name}`], ['idea two', `brainstorms/${brains[1].board.name}`]]);
   assert.equal(hub.rooms.size, 5);
 });
 
@@ -2444,7 +2444,7 @@ test('screen Cancel leaves an initially empty room empty for brainstorm and work
     await handleLine('/cancel', first);
     assert.ok(!first.state.brainstorm);
     assert.ok(!first.state.workbench);
-    assert.equal(first.discussion, null);
+    assert.equal(first.board, null);
   }
 });
 
@@ -2454,7 +2454,7 @@ test('one workshop per folder: tasks labelled by origin, one worker session, lan
   const commit = (msg) => (ctx) => { const g = (...a) => require('node:child_process').execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]); g('commit', '-q', '--allow-empty', '-m', msg); return 'committed\nDocs: none needed, because test.'; };
   const { createRequire } = await import('node:module');
   const require = createRequire(import.meta.url);
-  const { first, gotoOf, pageOf, contexts } = await multiRoom({ worker: (ctx, p) => commit(ctx === contexts()[0] ? `[${ctx.discussion.name}] done` : 'no label')(ctx) });
+  const { first, gotoOf, pageOf, contexts } = await multiRoom({ worker: (ctx, p) => commit(ctx === contexts()[0] ? `[${ctx.board.name}] done` : 'no label')(ctx) });
   await handleLine('topic-a', first);
   await handleLine('/new', first);
   const second = contexts()[1];
@@ -2464,22 +2464,22 @@ test('one workshop per folder: tasks labelled by origin, one worker session, lan
   await Promise.all([first.workQueue, second.workQueue]);
   assert.equal(first.shop, second.shop); // one workshop, one Worker tab
   assert.notEqual(workerLane(first), workerLane(second)); // a queue each
-  assert.match(first.prompts[0], new RegExp(`These instructions come from \\[${first.discussion.name}\\]\\. When a task is complete, commit it on worker/${first.discussion.name} with a message starting "\\[${first.discussion.name}\\]" and give the commit ID in your reply`));
-  assert.match(second.prompts[0], new RegExp(`come from \\[${second.discussion.name}\\]`));
-  assert.match(first.prompts[0], new RegExp(`The active discussion's folder is ${first.discussion.dir}:`)); // its own folder, its own session
-  assert.match(second.prompts[0], new RegExp(`The active discussion's folder is ${second.discussion.dir}:`));
+  assert.match(first.prompts[0], new RegExp(`These instructions come from \\[${first.board.name}\\]\\. When a task is complete, commit it on worker/${first.board.name} with a message starting "\\[${first.board.name}\\]" and give the commit ID in your reply`));
+  assert.match(second.prompts[0], new RegExp(`come from \\[${second.board.name}\\]`));
+  assert.match(first.prompts[0], new RegExp(`The active discussion's folder is ${first.board.dir}:`)); // its own folder, its own session
+  assert.match(second.prompts[0], new RegExp(`The active discussion's folder is ${second.board.dir}:`));
   // The two tasks run at once (two lanes), so their entries may come in either order.
-  assert.deepEqual(first.shop.log.filter((m) => m.speaker === 'User').map((m) => m.origin).sort(), [first.discussion.name, second.discussion.name].sort());
+  assert.deepEqual(first.shop.log.filter((m) => m.speaker === 'User').map((m) => m.origin).sort(), [first.board.name, second.board.name].sort());
   assert.match(readFileSync(first.logPath, 'utf8'), /task for a[\s\S]*committed/); // each report goes back to its origin
   assert.doesNotMatch(readFileSync(first.logPath, 'utf8'), /task for b/);
   assert.match(readFileSync(second.logPath, 'utf8'), /task for b/);
-  assert.ok(first.shop.log.some((m) => m.note && new RegExp(`Commits without the \\[${second.discussion.name}\\] label: [0-9a-f]+ no label`).test(m.note)));
-  assert.ok(!first.shop.log.some((m) => m.note?.includes(`[${first.discussion.name}] label`)));
+  assert.ok(first.shop.log.some((m) => m.note && new RegExp(`Commits without the \\[${second.board.name}\\] label: [0-9a-f]+ no label`).test(m.note)));
+  assert.ok(!first.shop.log.some((m) => m.note?.includes(`[${first.board.name}] label`)));
   // Each discussion's task ran in its own lane, and committed on its own branch.
   assert.deepEqual([realpathSync(first.workerDir.path), realpathSync(second.workerDir.path)],
-    [`${realpathSync(first.cwd)}.workers/${first.discussion.name}`, `${realpathSync(first.cwd)}.workers/${second.discussion.name}`]);
+    [`${realpathSync(first.cwd)}.workers/${first.board.name}`, `${realpathSync(first.cwd)}.workers/${second.board.name}`]);
   const subject = (branch) => require('node:child_process').execFileSync('git', ['-C', first.cwd, 'log', '-1', '--format=%s', branch]).toString().trim();
-  assert.deepEqual([subject(`worker/${first.discussion.name}`), subject(`worker/${second.discussion.name}`)], [`[${first.discussion.name}] done`, 'no label']);
+  assert.deepEqual([subject(`worker/${first.board.name}`), subject(`worker/${second.board.name}`)], [`[${first.board.name}] done`, 'no label']);
 
   await handleLine('/close', second); // the others stay open
   assert.deepEqual(second.queued, ['/quit']);
@@ -2513,7 +2513,7 @@ test('lanes run at the same time: two discussions\' tasks overlap with separate 
   assert.deepEqual([la.running?.text, lb.running?.text, la.tasks.length, lb.tasks.map((t) => t.text)], ['a: leave edits', 'b: one', 0, ['b: two']]);
   // (The two lanes start together: either turn may begin first.)
   const byText = Object.fromEntries(started.map(([t, dir, w]) => [t, { dir, w }]));
-  assert.deepEqual([byText['a: leave edits'].dir, byText['b: one'].dir], [`${root}.workers/${first.discussion.name}`, `${root}.workers/${second.discussion.name}`]);
+  assert.deepEqual([byText['a: leave edits'].dir, byText['b: one'].dir], [`${root}.workers/${first.board.name}`, `${root}.workers/${second.board.name}`]);
   assert.deepEqual([byText['a: leave edits'].w, byText['b: one'].w], [first.worker, second.worker]); // two worker agents, each with its own session
   assert.notEqual(first.worker, second.worker);
   assert.deepEqual([first, second, third].map((c) => c.screen.working ?? null), [first.worker.name, second.worker.name, null]);
@@ -2521,7 +2521,7 @@ test('lanes run at the same time: two discussions\' tasks overlap with separate 
 
   // A third discussion's task waits for a free place, and says so in the Worker tab.
   queueWork(third, 'c: waits');
-  await until(() => first.shop.log.some((m) => m.note === `[${third.discussion.name}] "c: waits" waits for a free place: 2 worker tasks running, at most 2 at once.`));
+  await until(() => first.shop.log.some((m) => m.note === `[${third.board.name}] "c: waits" waits for a free place: 2 worker tasks running, at most 2 at once.`));
   assert.deepEqual([gates.has('c: waits'), lc.tasks.map((t) => t.text)], [false, ['c: waits']]);
 
   // a's task ends with edits left: its lane holds; the free place goes to c; b's lane goes on.
@@ -2552,7 +2552,7 @@ test('a queued task starting after its context switches does not mark the new di
   queueWork(first, 'queued in A');
   await handleLine('/new', first);
   await handleLine('topic-b', first);
-  const pathB = `discussions/${first.discussion.name}`;
+  const pathB = `discussions/${first.board.name}`;
   assert.equal(first.screen.working, null);
   gates.get('first in A')('done');
   await until(() => gates.has('queued in A'));
@@ -2575,12 +2575,12 @@ test('switching discussion while one waits for its worker task: the message type
   const { first, contexts, gotoOf, pageOf } = await multiRoom({ worker: () => new Promise((done) => { finish = done; }) });
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
-  await handleLine(`/resume ${first.discussion.name}`, second); // the window shows a again
+  await handleLine(`/resume ${first.board.name}`, second); // the window shows a again
   assert.equal(gotoOf(second), pageOf(first));
   queueWork(first, 'a long task');
   await until(() => finish);
   assert.deepEqual([first, second].map((c) => c.screen.working ?? null), [first.worker.name, null]);
-  await handleLine(`/resume ${second.discussion.name}`, first); // switch to b while a's task runs: nothing blocks it
+  await handleLine(`/resume ${second.board.name}`, first); // switch to b while a's task runs: nothing blocks it
   assert.equal(gotoOf(first), pageOf(second));
   await handleLine('a message in b', second); // typed in the window, which now shows b
   assert.ok(second.state.transcript.some((m) => m.text === 'a message in b'));
@@ -2592,7 +2592,7 @@ test('switching discussion while one waits for its worker task: the message type
   assert.doesNotMatch(a, /a message in b/);
   assert.match(b, /a message in b/);
   assert.doesNotMatch(b, /a long task|the long task's report/);
-  assert.deepEqual(first.shop.log.filter((m) => m.speaker).map((m) => [m.origin, m.speaker]), [[first.discussion.name, 'User'], [first.discussion.name, first.worker.name]]);
+  assert.deepEqual(first.shop.log.filter((m) => m.speaker).map((m) => [m.origin, m.speaker]), [[first.board.name, 'User'], [first.board.name, first.worker.name]]);
   assert.deepEqual([first, second].map((c) => c.screen.working ?? null), [null, null]);
 });
 
@@ -2603,7 +2603,7 @@ test('leftover edits hold their own lane for their origin, which can recover the
   const inTree = (ctx, ...a) => execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]);
   const { first, git, contexts } = await multiRoom({ worker: (ctx, p) => {
     if (p.endsWith('make wip')) writeFileSync(`${ctx.workerDir.path}/wip.txt`, 'half done\n');
-    if (p.endsWith('finish it')) { inTree(ctx, 'add', 'wip.txt'); inTree(ctx, 'commit', '-q', '-m', `[${ctx.discussion.name}] finished`); }
+    if (p.endsWith('finish it')) { inTree(ctx, 'add', 'wip.txt'); inTree(ctx, 'commit', '-q', '-m', `[${ctx.board.name}] finished`); }
     return 'ok\nDocs: none needed, because test.';
   } });
   await handleLine('topic-a', first);
@@ -2613,21 +2613,21 @@ test('leftover edits hold their own lane for their origin, which can recover the
   queueWork(first, 'make wip');
   await first.workQueue;
   assert.equal(workerLane(first).blockedBy.origin, first);
-  assert.match(first.notes.at(-1), new RegExp(`The worker left uncommitted edits from "make wip": the worker lane of \\[${first.discussion.name}\\] holds them until they are resolved \\(other discussions' tasks go on\\)`));
+  assert.match(first.notes.at(-1), new RegExp(`The worker left uncommitted edits from "make wip": the worker lane of \\[${first.board.name}\\] holds them until they are resolved \\(other discussions' tasks go on\\)`));
   queueWork(second, 'other work'); // another lane: not held
   await second.workQueue;
   assert.deepEqual([second.prompts.length, workerLane(second).blockedBy, workerLane(first).blockedBy.origin], [1, null, first]);
 
   assert.match(workerHold(first), /its worker edits from "make wip" are unresolved/);
-  await markClosed(first.cwd, first.discussion.name);
-  await handleLine(`/move ${first.discussion.name} archive`, second);
+  await markClosed(first.cwd, first.board.name);
+  await handleLine(`/move ${first.board.name} archive`, second);
   assert.match(second.notes.at(-1), /can't move: its worker edits from "make wip" are unresolved/);
-  await handleLine(`/move ${first.discussion.name} deferred`, second);
-  assert.ok(existsSync(first.discussion.dir));
+  await handleLine(`/move ${first.board.name} deferred`, second);
+  assert.ok(existsSync(first.board.dir));
 
   queueWork(first, 'finish it'); // its origin's recovery goes through, with the first task's details
   await first.workQueue;
-  assert.match(first.prompts[1], new RegExp(`Uncommitted edits are left in your worktree from the earlier task from \\[${first.discussion.name}\\] "make wip" \\(worker/${first.discussion.name} was at [0-9a-f]{7} when it started\\)`));
+  assert.match(first.prompts[1], new RegExp(`Uncommitted edits are left in your worktree from the earlier task from \\[${first.board.name}\\] "make wip" \\(worker/${first.board.name} was at [0-9a-f]{7} when it started\\)`));
   assert.match(first.prompts[1], /first list exactly the edits you would remove and wait for the User's explicit approval/);
   assert.equal(workerLane(first).blockedBy, null);
   assert.ok(first.shop.log.some((m) => m.note === `The worker's folder ${first.workerDir.path} is clean again: its queue resumes.`));
@@ -2654,11 +2654,11 @@ test('leftover edits hold their own lane for their origin, which can recover the
   const restarted = await workerRoom();
   Object.assign(restarted.ctx, { cwd: first.cwd, noScreen: true, refreshQuota: () => {} });
   await start(restarted.ctx);
-  assert.equal(workerLane(restarted.ctx, first.discussion.name).blockedBy.origin, null);
+  assert.equal(workerLane(restarted.ctx, first.board.name).blockedBy.origin, null);
   queueWork(restarted.ctx, 'do it');
   await restarted.ctx.workQueue;
   assert.equal(restarted.got.length, 1);
-  assert.equal(workerLane(restarted.ctx, first.discussion.name).blockedBy.origin, null); // still held
+  assert.equal(workerLane(restarted.ctx, first.board.name).blockedBy.origin, null); // still held
   void git;
 });
 
@@ -2678,7 +2678,7 @@ test('worker changes stay in their discussion and only unstarted changes update 
   const oldSession = first.sessions.get('worker:W');
   const oldSessionData = JSON.stringify(oldSession);
   // A shared Worker-tab log must not make the new discussion count as started.
-  second.screen.worker.push({ speaker: 'W', origin: first.discussion.name, html: 'old work' });
+  second.screen.worker.push({ speaker: 'W', origin: first.board.name, html: 'old work' });
   const beforeStart = { provider: 'codex', name: 'W', model: 'model-one' };
   await saveSettings(second, { agents, worker: beforeStart, scope: 'work' }, file);
   assert.deepEqual(readDefaults(file).worker, beforeStart);
@@ -2700,7 +2700,7 @@ test('worker changes stay in their discussion and only unstarted changes update 
   assert.equal(first.worker, oldWorker);
   assert.equal(first.workerSpec, oldSpec);
   assert.equal(first.sessions.get('worker:W'), oldSession);
-  const name = second.discussion.name;
+  const name = second.board.name;
   const checkpoint = JSON.parse(readFileSync(await checkpointPath(second.cwd, name), 'utf8'));
   assert.equal(checkpoint.workerSpec, 'claude:A2:sonnet');
   // Pausing and resuming restores that worker, rather than the saved default.
@@ -2714,10 +2714,10 @@ test('worker changes stay in their discussion and only unstarted changes update 
 });
 
 test('Restart brings back every open discussion and started brainstorm of a folder, each in its own context', () => {
-  const rooms = [{ cwd: '/r', discussion: { name: '2026-11-09-a' }, agentSpecs: 'claude:A', workerSpec: 'claude:W' },
-    { cwd: '/r', context: 'd1', discussion: { name: '2026-11-09-b' }, agentSpecs: 'claude:A', workerSpec: 'claude:W' },
+  const rooms = [{ cwd: '/r', board: { name: '2026-11-09-a' }, agentSpecs: 'claude:A', workerSpec: 'claude:W' },
+    { cwd: '/r', context: 'd1', board: { name: '2026-11-09-b' }, agentSpecs: 'claude:A', workerSpec: 'claude:W' },
     { cwd: '/r', context: 'd2', state: { brainstorm: true } },
-    { cwd: '/r', context: 'd3', state: { brainstorm: true }, discussion: { name: '2026-11-09-idea' }, agentSpecs: 'claude:A', workerSpec: 'claude:W' }];
+    { cwd: '/r', context: 'd3', state: { brainstorm: true }, board: { name: '2026-11-09-idea' }, agentSpecs: 'claude:A', workerSpec: 'claude:W' }];
   const args = restartArgs(rooms, {}, 5566);
   assert.deepEqual(args.slice(1, 9), ['--cwd', '/r', '--port', '5566', '--agents', 'claude:A', '--worker', 'claude:W']);
   assert.equal(args[args.indexOf('--reopen') + 1], '2026-11-09-a');
@@ -2816,14 +2816,14 @@ test('Stage 2: completed work is reported once before a round, including Worker 
     const tree = c.workerDir.path;
     const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
     writeFileSync(`${tree}/changed.txt`, String(commits.length));
-    g('add', 'changed.txt'); g('commit', '-qm', `[${c.discussion.name}] completed`);
+    g('add', 'changed.txt'); g('commit', '-qm', `[${c.board.name}] completed`);
     const head = g('rev-parse', 'HEAD'); commits.push(head); return `done\nDocs: none needed, because test.\nTested: ${head} with main ${g('rev-parse', 'main')}: tests passed`;
   } });
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
   const notices = (c) => c.state.transcript.filter((m) => m.text.startsWith('Work finished elsewhere:'));
   queueWork(second, 'work b'); queueWork(second, 'more work b'); await second.workQueue;
-  await handleLine(`/resume ${first.discussion.name}`, second);
+  await handleLine(`/resume ${first.board.name}`, second);
   assert.equal(notices(first).length, 0); // viewing starts no round
   let prompt = '';
   first.room.agents[0].turn = async (p) => { prompt += p; return 'PASS'; };
@@ -2853,12 +2853,12 @@ test('Stage 2: Defer refuses labelled commits absent from main and permits them 
   const { execFileSync } = await import('node:child_process');
   const { existsSync } = await import('node:fs');
   const { first, contexts, git } = await multiRoom({ worker: (c) => {
-    execFileSync('git', ['-C', c.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', `[${c.discussion.name}] done`]); return 'done\nDocs: none needed, because test.';
+    execFileSync('git', ['-C', c.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', `[${c.board.name}] done`]); return 'done\nDocs: none needed, because test.';
   } });
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
   queueWork(first, 'work'); await first.workQueue;
-  const name = first.discussion.name;
+  const name = first.board.name;
   await markClosed(first.cwd, name);
   await handleLine(`/move ${name} deferred`, second);
   assert.match(second.notes.at(-1), new RegExp(`can't be deferred: commits on worker/${name} are not merged into main: [0-9a-f]+`)); // its own lane's branch
@@ -2885,16 +2885,16 @@ test('Stage 2: private owner records survive restart and recovery, invalid recor
       writeFileSync(`${tree}/wip`, c.state.brainstorm ? 'brainstorm unfinished' : 'unfinished');
     } else {
       assert.equal(readFileSync(record, 'utf8'), original); // recovery doesn't replace ownership
-      g('add', 'wip'); g('commit', '-qm', `[${c.state.brainstorm ? 'brainstorm' : c.discussion.name}] recovered`);
+      g('add', 'wip'); g('commit', '-qm', `[${c.state.brainstorm ? 'brainstorm' : c.board.name}] recovered`);
     }
     return 'ok\nDocs: none needed, because test.';
   } });
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
   queueWork(first, 'leave edits'); await first.workQueue;
-  assert.equal(JSON.parse(original).label, first.discussion.name);
+  assert.equal(JSON.parse(original).label, first.board.name);
   const resetShop = () => { for (const c of contexts()) { for (const l of c.shop?.lanes?.values() ?? []) clearTimeout(l.recheck); delete c.shop; } };
-  const heldA = () => workerLane(second, first.discussion.name).blockedBy; // first's lane, seen from second
+  const heldA = () => workerLane(second, first.board.name).blockedBy; // first's lane, seen from second
   resetShop(); await recoverWorkerOwner(second);
   assert.equal(heldA().origin, first);
   assert.match(first.notes.at(-1), /worker left uncommitted edits/);
@@ -2929,7 +2929,7 @@ test('Stage 2: cleaning held edits by hand clears the private record and hold wi
   const tree = first.workerDir.path;
   const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
   const record = `${g('rev-parse', '--absolute-git-dir')}/agent-room-task.json`;
-  g('add', 'wip'); g('commit', '-qm', `[${first.discussion.name}] completed by hand`);
+  g('add', 'wip'); g('commit', '-qm', `[${first.board.name}] completed by hand`);
   for (let n = 0; n < 100 && workerLane(first).blockedBy; n++) await new Promise((r) => setTimeout(r, 50));
   assert.equal(workerLane(first).blockedBy, null);
   assert.equal(existsSync(record), false);
@@ -2943,10 +2943,10 @@ test('Stage 3: a diverged clean worker is instructed to merge main normally befo
   const { writeFileSync } = await import('node:fs');
   const { first, git } = await multiRoom({ worker: (c, p) => {
     if (p.endsWith('catch up task')) {
-      assert.match(p, new RegExp(`first merge main into worker/${c.discussion.name} with a normal merge`));
+      assert.match(p, new RegExp(`first merge main into worker/${c.board.name} with a normal merge`));
       assert.match(p, /If it clashes, do not force it or do the requested task/);
-      assert.match(p, new RegExp(`After a successful merge, run the project's tests \\(npm test, if it has them\\) and report their real output, then end your reply with the line "Tested: <full commit ID of worker/${c.discussion.name}> with main <full commit ID of main>: tests passed"`));
-      execFileSync('git', ['-C', c.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', 'main', '-m', `[${c.discussion.name}] catch up with main`]);
+      assert.match(p, new RegExp(`After a successful merge, run the project's tests \\(npm test, if it has them\\) and report their real output, then end your reply with the line "Tested: <full commit ID of worker/${c.board.name}> with main <full commit ID of main>: tests passed"`));
+      execFileSync('git', ['-C', c.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', 'main', '-m', `[${c.board.name}] catch up with main`]);
       const head = execFileSync('git', ['-C', c.workerDir.path, 'rev-parse', 'HEAD']).toString().trim();
       return `done\nTested: ${head} with main ${git('rev-parse', 'main')}: tests passed`;
     }
@@ -2955,7 +2955,7 @@ test('Stage 3: a diverged clean worker is instructed to merge main normally befo
   await handleLine('topic-a', first);
   queueWork(first, 'prepare'); await first.workQueue;
   const tree = first.workerDir.path;
-  git('-C', tree, 'commit', '--allow-empty', '-qm', `[${first.discussion.name}] own work`);
+  git('-C', tree, 'commit', '--allow-empty', '-qm', `[${first.board.name}] own work`);
   writeFileSync(`${first.cwd}/main-file`, 'new on main'); git('add', 'main-file'); git('commit', '-qm', 'main advances');
   const main = git('rev-parse', 'main');
   queueWork(first, 'catch up task'); await first.workQueue;
@@ -2983,7 +2983,7 @@ test('Stage 3: a worker merge conflict holds its own lane, not other discussions
     if (p.endsWith('recover conflict')) {
       assert.equal(readFileSync(record, 'utf8'), saved);
       assert.match(p, /earlier task[\s\S]*conflicting task/);
-      writeFileSync(`${tree}/shared.txt`, 'resolved\n'); g('add', 'shared.txt'); g('commit', '-qm', `[${c.discussion.name}] resolve catch up`);
+      writeFileSync(`${tree}/shared.txt`, 'resolved\n'); g('add', 'shared.txt'); g('commit', '-qm', `[${c.board.name}] resolve catch up`);
     }
     if (p.endsWith('other task')) otherRan = true;
     return 'done';
@@ -2993,7 +2993,7 @@ test('Stage 3: a worker merge conflict holds its own lane, not other discussions
   const second = contexts()[1]; await handleLine('topic-b', second);
   queueWork(first, 'prepare'); await first.workQueue;
   const tree = first.workerDir.path;
-  writeFileSync(`${tree}/shared.txt`, 'worker\n'); git('-C', tree, 'add', 'shared.txt'); git('-C', tree, 'commit', '-qm', `[${first.discussion.name}] own change`);
+  writeFileSync(`${tree}/shared.txt`, 'worker\n'); git('-C', tree, 'add', 'shared.txt'); git('-C', tree, 'commit', '-qm', `[${first.board.name}] own change`);
   writeFileSync(`${first.cwd}/shared.txt`, 'main\n'); git('add', 'shared.txt'); git('commit', '-qm', 'main change');
   queueWork(first, 'conflicting task'); await first.workQueue;
   assert.equal(workerLane(first).blockedBy.origin, first);
@@ -3028,10 +3028,10 @@ test('Stage 3: clean merge, revert and sequencer states hold their lane\'s dispa
     queueWork(first, 'leave operation'); await first.workQueue;
     const tree = first.workerDir.path;
     assert.equal(git('-C', tree, 'status', '--porcelain'), ''); // operation alone must hold
-    assert.equal((await worktreeStatus(await workerPlace(first.cwd, first.discussion.name))).treeDirty, true); // its own lane
+    assert.equal((await worktreeStatus(await workerPlace(first.cwd, first.board.name))).treeDirty, true); // its own lane
     for (const c of contexts()) { for (const l of c.shop?.lanes?.values() ?? []) clearTimeout(l.recheck); delete c.shop; }
     await recoverWorkerOwner(second);
-    assert.equal(workerLane(second, first.discussion.name).blockedBy.origin, first); // first's lane, seen from second
+    assert.equal(workerLane(second, first.board.name).blockedBy.origin, first); // first's lane, seen from second
     queueWork(second, 'later'); await second.workQueue; // another lane goes on
     assert.equal(second.prompts.length, 1);
     queueWork(first, 'resolve operation'); await first.workQueue;
@@ -3048,7 +3048,7 @@ test('Stage 3: rollback includes merged implementation, never restores prior rol
     const tree = c.workerDir.path;
     const g = (...a) => execFileSync('git', ['-C', tree, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'pipe' }).toString().trim();
     if (p.endsWith('implement')) {
-      writeFileSync(`${tree}/feature.txt`, 'feature\n'); g('add', 'feature.txt'); g('commit', '-qm', `[${c.discussion.name}] implement`);
+      writeFileSync(`${tree}/feature.txt`, 'feature\n'); g('add', 'feature.txt'); g('commit', '-qm', `[${c.board.name}] implement`);
       implementation = g('rev-parse', 'HEAD'); return 'implemented\nDocs: none needed, because test.';
     }
     assert.match(p, /INCLUDING those already merged into main/);
@@ -3061,12 +3061,12 @@ test('Stage 3: rollback includes merged implementation, never restores prior rol
     // This scripted worker executes the requested strategy against a real disposable Git history.
     // Already-reverted targets are read from history, not selected again on a repeated request.
     if (!g('log', '--format=%B').includes(`Agent-Room-Reverted: ${implementation}`)) {
-      g('merge', 'main', '-m', `[${c.discussion.name}] catch up with main`);
+      g('merge', 'main', '-m', `[${c.board.name}] catch up with main`);
       g('revert', '--no-commit', implementation);
-      g('commit', '-qm', `[${c.discussion.name}] rollback\n\nAgent-Room-Rollback-Origin: ${c.discussion.name}\nAgent-Room-Reverted: ${implementation}`);
+      g('commit', '-qm', `[${c.board.name}] rollback\n\nAgent-Room-Rollback-Origin: ${c.board.name}\nAgent-Room-Reverted: ${implementation}`);
     } else {
       assert.equal(existsSync(`${tree}/feature.txt`), false);
-      g('commit', '--allow-empty', '-qm', `[${c.discussion.name}] rollback already undone\n\nAgent-Room-Rollback-Origin: ${c.discussion.name}`);
+      g('commit', '--allow-empty', '-qm', `[${c.board.name}] rollback already undone\n\nAgent-Room-Rollback-Origin: ${c.board.name}`);
     }
     const output = execFileSync('npm', ['test'], { cwd: tree, encoding: 'utf8' });
     attempts++;
@@ -3076,7 +3076,7 @@ test('Stage 3: rollback includes merged implementation, never restores prior rol
   git('add', 'package.json'); git('commit', '-qm', 'fixture test script');
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
-  const name = first.discussion.name;
+  const name = first.board.name;
   queueWork(first, 'implement'); await first.workQueue;
   git('merge', '--no-ff', `worker/${name}`, '-m', 'User merges implementation'); // its own lane's branch
   assert.equal(existsSync(`${first.cwd}/feature.txt`), true);
@@ -3109,10 +3109,10 @@ test('Stage 3: rollback includes merged implementation, never restores prior rol
 });
 
 test('Stage 3: an ambiguous or failed rollback report cannot authorize archiving', async () => {
-  const { first, contexts, git } = await multiRoom({ worker: (c) => `Ambiguous earlier revert: no files changed.\nRollback ready: ${git('rev-parse', `worker/${c.discussion.name}`)}` }); // its own lane's branch
+  const { first, contexts, git } = await multiRoom({ worker: (c) => `Ambiguous earlier revert: no files changed.\nRollback ready: ${git('rev-parse', `worker/${c.board.name}`)}` }); // its own lane's branch
   await handleLine('topic-a', first); await handleLine('/new', first);
   const second = contexts()[1]; await handleLine('topic-b', second);
-  const name = first.discussion.name;
+  const name = first.board.name;
   await handleLine(`/rollback ${name}`, second); await first.workQueue;
   assert.equal(first.shop.rollbacks.get(name).status, 'needs review'); // marker alone isn't sufficient
   await handleLine(`/archive-rollback ${name}`, second);
@@ -3131,7 +3131,7 @@ test('failed worktree inspection blocks even the holding origin recovery in its 
     if (p.endsWith('leave edits')) writeFileSync(`${tree}/wip`, 'unfinished');
     if (p.endsWith('repair')) {
       recovered = true;
-      git('-C', tree, 'add', 'wip'); git('-C', tree, 'commit', '-qm', `[${c.discussion.name}] repaired`);
+      git('-C', tree, 'add', 'wip'); git('-C', tree, 'commit', '-qm', `[${c.board.name}] repaired`);
     }
     if (p.endsWith('other work')) otherRan = true;
     return 'done\nDocs: none needed, because test.';
@@ -3183,7 +3183,7 @@ test('a worker task cut off with a clean worktree: Resume reports it and the tas
   const ctx = await savedRoom(cwd, 'work-1');
   Object.assign(ctx.sessions.get('B'), { threadId: 'codex-thread' }); // a real Codex turn sets it
   await handleLine('plan it', ctx);
-  const name = ctx.discussion.name, file = await checkpointPath(cwd, name);
+  const name = ctx.board.name, file = await checkpointPath(cwd, name);
   ctx.worker.turn = () => new Promise(() => {}); // the process "crashes" during this turn
   queueWork(ctx, 'first task\nwith details');
   queueWork(ctx, 'second task');
@@ -3232,7 +3232,7 @@ test('a worker task cut off after an edit: Resume reports the uncommitted edits,
   const ctx = await savedRoom(cwd, 'edit-1');
   Object.assign(ctx.sessions.get('B'), { threadId: 'codex-thread' }); // a real Codex turn sets it
   await handleLine('plan it', ctx);
-  const name = ctx.discussion.name, file = await checkpointPath(cwd, name);
+  const name = ctx.board.name, file = await checkpointPath(cwd, name);
   let edited = null;
   ctx.worker.turn = () => { edited = join(ctx.workerDir.path, 'half.txt'); writeFileSync(edited, 'half done'); return new Promise(() => {}); };
   queueWork(ctx, 'edit things');
@@ -3254,7 +3254,7 @@ test('an interrupted round: Resume says the transcript grew after the checkpoint
   Object.assign(ctx.sessions.get('B'), { threadId: 'codex-thread' });
   Object.assign(ctx.sessions.get('worker:W'), { id: 'worker-session', started: true });
   await handleLine('first', ctx);
-  const name = ctx.discussion.name, transcript = ctx.logPath;
+  const name = ctx.board.name, transcript = ctx.logPath;
   ctx.room.agents[0].turn = () => new Promise(() => {});
   handleLine('cut off', ctx); // the process "crashes" during this round
   await eventually(() => readFileSync(transcript, 'utf8').includes('cut off'));
@@ -3275,7 +3275,7 @@ test('an interrupted round: Resume says the transcript grew after the checkpoint
   const prompts = [];
   for (const a of after.room.agents) a.turn = async (p) => { prompts.push([a.name, p]); return 'PASS'; };
   await handleLine('again', after);
-  const restored = /^agent-room restored this discussion from its checkpoint of .*\. If you remember turns after that, they are not in the room's record\.$/m;
+  const restored = /^agent-room restored this sprint from its checkpoint of .*\. If you remember turns after that, they are not in the room's record\.$/m;
   assert.deepEqual(prompts.filter(([, p]) => restored.test(p)).map(([n]) => n), ['A', 'B']); // each agent's next prompt
   prompts.length = 0;
   await handleLine('later', after);
@@ -3305,7 +3305,7 @@ test('Quit room during a worker task: the stopped task is kept as interrupted, t
   const ctx = await savedRoom(cwd, 'quit-1');
   Object.assign(ctx.sessions.get('B'), { threadId: 'codex-thread' }); // a real Codex turn sets it
   await handleLine('plan it', ctx);
-  const name = ctx.discussion.name, file = await checkpointPath(cwd, name);
+  const name = ctx.board.name, file = await checkpointPath(cwd, name);
   let stop;
   ctx.worker.turn = () => new Promise((_, fail) => { stop = fail; });
   queueWork(ctx, 'long task');
@@ -3344,7 +3344,7 @@ test('a worker task from a discussion with no full checkpoint yet is recorded to
 
   const after = await savedRoom(cwd, 'unsaved-2');
   await handleLine('/resume 2026-11-01-old', after);
-  assert.equal(after.discussion.name, '2026-11-01-old');
+  assert.equal(after.board.name, '2026-11-01-old');
   assert.ok(!after.logPath); // still from its handoff
   assert.match(after.screen.worker.find((m) => m.note).note,
     /^✗ Interrupted: \[2026-11-01-old\] "early task" \(started \d\d:\d\d\) left no commits or edits in the worktree\./);
@@ -3356,8 +3356,8 @@ test('worker notes follow their captured owner, including brainstorms and room-w
   const docs = await import('../src/docs.mjs');
   const eventsA = [], eventsB = [];
   const screen = (events) => ({ transcript: [], worker: [], clients: new Set([{ write: (s) => events.push(JSON.parse(s.slice(6))) }]) });
-  const a = { cwd: '/tmp/routing', id: 'a', state: { transcript: [] }, discussion: { name: 'alpha' }, screen: screen(eventsA), docs };
-  const b = { cwd: a.cwd, id: 'b', state: { transcript: [] }, discussion: { name: 'beta' }, screen: screen(eventsB), docs };
+  const a = { cwd: '/tmp/routing', id: 'a', state: { transcript: [] }, board: { name: 'alpha' }, screen: screen(eventsA), docs };
+  const b = { cwd: a.cwd, id: 'b', state: { transcript: [] }, board: { name: 'beta' }, screen: screen(eventsB), docs };
   const hub = { rooms: new Map([['a', a], ['b', b]]) }; a.hub = b.hub = hub;
   workNote(a, 'alpha note');
   workNote(b, 'beta note');
@@ -3365,15 +3365,15 @@ test('worker notes follow their captured owner, including brainstorms and room-w
   assert.deepEqual(eventsB.map((e) => e.message.note), ['beta note']);
   assert.deepEqual(docs.resetEvent(a.screen).worker.map((m) => m.note), ['alpha note']);
   assert.deepEqual(docs.resetEvent(b.screen).worker.map((m) => m.note), ['beta note']);
-  a.discussion = { name: 'gamma' };
+  a.board = { name: 'gamma' };
   workNote(a, 'late note', true, null, 'alpha');
   assert.deepEqual(docs.resetEvent(a.screen).worker, []);
-  a.discussion = { name: 'alpha' };
+  a.board = { name: 'alpha' };
   assert.equal(docs.resetEvent(a.screen).worker.at(-1).note, 'late note');
   workNote(a, 'all workers', true, null, 'alpha', true);
   assert.equal(eventsA.at(-1).message.note, 'all workers');
   assert.equal(eventsB.at(-1).message.note, 'all workers');
-  a.discussion = null; a.state.brainstorm = true; a.state.brainstormId = 'one';
+  a.board = null; a.state.brainstorm = true; a.state.brainstormId = 'one';
   workNote(a, 'first brainstorm');
   a.state.brainstormId = 'two';
   assert.deepEqual(docs.resetEvent(a.screen).worker, []);
@@ -3423,7 +3423,7 @@ test('agy rulebook delivery state survives a saved checkpoint for both roles', a
   Object.assign(ctx.sessions.get('worker:W'), { conversationId: 'work-id', receivedInstructions: 'work-rules' });
   ctx.state.summaries = 3;
   await handleLine('hello', ctx);
-  const name = ctx.discussion.name;
+  const name = ctx.board.name;
   const saved = JSON.parse(readFileSync(await checkpointPath(cwd, name), 'utf8'));
   assert.deepEqual(new Map(saved.sessions).get('A'), { conversationId: 'talk-id', receivedInstructions: 'talk-rules' });
   assert.deepEqual(new Map(saved.sessions).get('worker:W'), { conversationId: 'work-id', receivedInstructions: 'work-rules' });
@@ -3550,7 +3550,7 @@ test('open discussions keep their members and sessions; new and resumed discussi
     const second = [...hub.rooms.values()].find((c) => c !== first);
     assert.deepEqual(second.room.agents.map((a) => a.name), ['C', 'D', 'E']);
     await handleLine('second topic', second);
-    const name = second.discussion.name, checkpoint = JSON.parse(readFileSync(await checkpointPath(cwd, name), 'utf8'));
+    const name = second.board.name, checkpoint = JSON.parse(readFileSync(await checkpointPath(cwd, name), 'utf8'));
     assert.equal(checkpoint.agentSpecs, 'claude:C:,claude:D:,claude:E:');
     assert.deepEqual(first.room.agents.map((a) => a.name), ['A', 'B']);
     assert.deepEqual([first.sessions.get('A'), first.sessions.get('B')], firstIds);
@@ -3699,7 +3699,7 @@ test('retry runs before later queued instructions and reports commits made since
   queueWork(ctx, 'in progress');
   await until(() => release);
   queueWork(ctx, 'later');
-  git('-C', ctx.workerDir.path, 'commit', '-q', '--allow-empty', '-m', `[${ctx.discussion.name}] later work`);
+  git('-C', ctx.workerDir.path, 'commit', '-q', '--allow-empty', '-m', `[${ctx.board.name}] later work`);
   await retryWork(ctx, failure.id);
   release(`done\nDocs: none needed, because test.\nTested: ${git('-C', ctx.workerDir.path, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`);
   await ctx.workQueue;
@@ -3795,7 +3795,7 @@ test('a failed discussion agent can be disabled across Reload and Resume, and en
   ctx.room.agents[0].turn = async () => { a++; throw new Error('quota'); };
   ctx.room.agents[1].turn = async () => { b++; return 'PASS'; };
   await handleLine('start', ctx);
-  const name = ctx.discussion.name;
+  const name = ctx.board.name;
   assert.equal(a, 1);
   assert.throws(() => setAgentEnabled(ctx, 'B', false), /Only a failed agent/);
   setAgentEnabled(ctx, 'A', false);
@@ -3849,7 +3849,7 @@ test('a brainstorm saves its checkpoint under brainstorms/<name>, without a work
   const ctx = await brainstormRoom(cwd, 'brain-save');
   await handleLine('/brainstorm', ctx);
   await handleLine('first idea', ctx);
-  const name = ctx.discussion.name, ref = `brainstorms/${name}`;
+  const name = ctx.board.name, ref = `brainstorms/${name}`;
   assert.equal(existsSync(await checkpointPath(cwd, name)), false); // not under a discussion's key
   const saved = JSON.parse(readFileSync(await checkpointPath(cwd, ref), 'utf8'));
   assert.equal(saved.brainstorm, true);
@@ -3864,7 +3864,7 @@ test('a brainstorm saves its checkpoint under brainstorms/<name>, without a work
   for (const agent of again.room.agents) agent.turn = async (p) => { again.prompts.push([agent.name, p]); return 'PASS'; };
   await handleLine(`/resume ${ref}`, again);
   stubTurns(again);
-  assert.deepEqual([again.state.brainstorm, again.discussion.name, again.discussion.title, again.screen.room.active], [true, name, 'An idea', ref]);
+  assert.deepEqual([again.state.brainstorm, again.board.name, again.board.title, again.screen.room.active], [true, name, 'An idea', ref]);
   assert.deepEqual(sessionIds(again), ['claude-1', 'codex-1', 'agy-1']);
   assert.deepEqual(again.state.transcript.map((m) => m.text), ['first idea', 'PASS', 'PASS', 'PASS']);
   await handleLine('second idea', again);
@@ -3872,7 +3872,7 @@ test('a brainstorm saves its checkpoint under brainstorms/<name>, without a work
   assert.match(readFileSync(again.logPath, 'utf8'), /first idea[\s\S]*second idea/);
   // Close, then Resume from Brainstorms: the same again.
   await handleLine('/close', again);
-  assert.equal(again.discussion, null);
+  assert.equal(again.board, null);
   await handleLine(`/resume ${ref}`, again);
   assert.deepEqual([again.state.brainstorm, again.state.transcript.length], [true, 8]);
 });
@@ -3893,7 +3893,7 @@ test('an existing discussion checkpoint, saved before brainstorms had their own,
     logPath: `${dir}/transcripts/session-2026-11-01-1000.md`, totals: {}, doc: null, worker: [], workerSeat: 'seat' }));
   const ctx = await savedRoom(cwd, 'old-checkpoint');
   await handleLine(`/resume ${name}`, ctx);
-  assert.deepEqual([ctx.discussion.name, ctx.state.brainstorm, ctx.sessions.get('A').id, ctx.sessions.get('B').threadId, ctx.sessions.get('worker:W').id],
+  assert.deepEqual([ctx.board.name, ctx.state.brainstorm, ctx.sessions.get('A').id, ctx.sessions.get('B').threadId, ctx.sessions.get('worker:W').id],
     [name, undefined, 'claude-old', 'codex-old', 'w-old']);
   assert.deepEqual(ctx.state.transcript.map((m) => m.text), ['old words']);
   assert.deepEqual(ctx.screen.room.checkpoints.map((c) => c.name), [name]);
@@ -3905,7 +3905,7 @@ test('Turn into a discussion, closed: the folder and checkpoint move, never over
   const ctx = await brainstormRoom(cwd, 'convert-closed');
   await handleLine('/brainstorm', ctx);
   await handleLine('an idea', ctx);
-  const name = ctx.discussion.name, ref = `brainstorms/${name}`;
+  const name = ctx.board.name, ref = `brainstorms/${name}`;
   mkdirSync(`${cwd}/brainstorms/${name}/drawings`); // agents drew
   await handleLine('/new', ctx); // closes it (terminal)
   // A discussion folder of that name already exists: nothing moves.
@@ -3913,7 +3913,7 @@ test('Turn into a discussion, closed: the folder and checkpoint move, never over
   ctx.notes = [];
   ctx.docs = { ...ctx.docs, broadcast: (screen, ev) => { if (ev.type === 'note') ctx.notes.push(ev.text); } };
   await handleLine(`/convert ${ref}`, ctx);
-  assert.match(ctx.notes.at(-1), /can't become a discussion: discussions\/.* already exists\. Nothing was moved/);
+  assert.match(ctx.notes.at(-1), /can't become a sprint: discussions\/.* already exists\. Nothing was moved/);
   assert.ok(existsSync(`${cwd}/brainstorms/${name}/transcripts`));
   assert.ok(existsSync(await checkpointPath(cwd, ref)));
   rmdirSync(`${cwd}/discussions/${name}`);
@@ -3927,15 +3927,15 @@ test('Turn into a discussion, closed: the folder and checkpoint move, never over
   ctx.prompts.length = 0;
   await handleLine(`/resume ${name}`, ctx);
   stubTurns(ctx);
-  assert.deepEqual([ctx.state.brainstorm, ctx.discussion.name, ctx.discussion.dir.endsWith(`discussions/${name}`)], [false, name, true]);
+  assert.deepEqual([ctx.state.brainstorm, ctx.board.name, ctx.board.dir.endsWith(`discussions/${name}`)], [false, name, true]);
   assert.deepEqual(sessionIds(ctx), ['claude-1', 'codex-1', 'agy-1']); // Claude, Codex and agy sessions kept
   assert.notEqual(ctx.sessions.get('worker:W').started, true); // the worker starts fresh
   await handleLine('carry on', ctx);
   await handleLine('and again', ctx);
-  const told = (agent) => ctx.prompts.filter(([a, p]) => a === agent && p.includes('turned this brainstorm into a discussion')).length;
+  const told = (agent) => ctx.prompts.filter(([a, p]) => a === agent && p.includes('turned this brainstorm into a sprint')).length;
   for (const agent of ['A', 'B', 'C']) {
     assert.equal(told(agent), 1);
-    assert.ok(ctx.prompts.find(([a]) => a === agent)[1].includes(`Its folder is now ${ctx.discussion.dir}`));
+    assert.ok(ctx.prompts.find(([a]) => a === agent)[1].includes(`Its folder is now ${ctx.board.dir}`));
   }
   assert.match(ctx.logPath, new RegExp(`discussions/${name}/transcripts/`));
 });
@@ -3946,7 +3946,7 @@ test('Turn into a discussion, open: its session goes on in discussions/<name>/ w
   const ctx = await brainstormRoom(cwd, 'convert-open');
   await handleLine('/brainstorm', ctx);
   await handleLine('an idea', ctx);
-  const name = ctx.discussion.name, ids = sessionIds(ctx), said = ctx.state.transcript.length;
+  const name = ctx.board.name, ids = sessionIds(ctx), said = ctx.state.transcript.length;
   await handleLine(`/convert brainstorms/${name}`, ctx);
   assert.deepEqual([ctx.state.brainstorm, ctx.screen.room.brainstorm, ctx.screen.room.active], [false, false, `discussions/${name}`]);
   assert.equal(existsSync(`${cwd}/brainstorms/${name}`), false);
@@ -3956,8 +3956,8 @@ test('Turn into a discussion, open: its session goes on in discussions/<name>/ w
   ctx.prompts.length = 0;
   await handleLine('next', ctx);
   await handleLine('more', ctx);
-  for (const agent of ['A', 'B', 'C']) assert.equal(ctx.prompts.filter(([a, p]) => a === agent && p.includes(`turned this brainstorm into a discussion. Its folder is now ${ctx.discussion.dir}`)).length, 1);
-  assert.match(readFileSync(ctx.logPath, 'utf8'), /an idea[\s\S]*turned into a discussion[\s\S]*more/);
+  for (const agent of ['A', 'B', 'C']) assert.equal(ctx.prompts.filter(([a, p]) => a === agent && p.includes(`turned this brainstorm into a sprint. Its folder is now ${ctx.board.dir}`)).length, 1);
+  assert.match(readFileSync(ctx.logPath, 'utf8'), /an idea[\s\S]*turned into a sprint[\s\S]*more/);
   assert.equal(JSON.parse(readFileSync(await checkpointPath(cwd, name), 'utf8')).state.brainstorm, false);
 });
 
@@ -3966,7 +3966,7 @@ test('Delete: refused while the brainstorm is open (here or beside), otherwise i
   const { first, contexts, settle } = await multiRoom();
   await handleLine('/brainstorm', first);
   await handleLine('idea', first);
-  const name = first.discussion.name, ref = `brainstorms/${name}`;
+  const name = first.board.name, ref = `brainstorms/${name}`;
   await handleLine('/new', first); await settle();
   const other = contexts().at(-1);
   await handleLine(`/delete ${ref}`, other);
@@ -3983,7 +3983,7 @@ test('Delete: refused while the brainstorm is open (here or beside), otherwise i
 test('the members panel leaves any agent of a started discussion out, from its next round, and brings it back', async () => {
   const { setAgentEnabled } = await import('../src/ui.mjs');
   const ctx = await savedRoom(await tmp('member-off-'), 'member-off');
-  assert.throws(() => setAgentEnabled(ctx, 'B', false, { member: true }), /Before the discussion starts/);
+  assert.throws(() => setAgentEnabled(ctx, 'B', false, { member: true }), /Before the board starts/);
   let a = 0, b = 0;
   ctx.room.agents[0].turn = async () => { a++; return 'PASS'; };
   ctx.room.agents[1].turn = async () => { b++; return 'PASS'; };
@@ -4028,7 +4028,7 @@ test('Stop now: only this task\'s programs are killed, queued instructions are c
   const ctx = await savedRoom(cwd, 'stop-now');
   Object.assign(ctx.sessions.get('B'), { threadId: 'codex-thread' });
   await handleLine('plan it', ctx);
-  const name = ctx.discussion.name;
+  const name = ctx.board.name;
   let proc = null;
   ctx.worker.turn = stoppableTurn(ctx, (p) => { writeFileSync(join(ctx.workerDir.path, 'half.txt'), 'half'); proc = p; });
   // An agent's program of the same room: Stop now leaves it alone.
@@ -4081,7 +4081,7 @@ test('Stop now while the worktree is prepared: the worker never starts, and the 
   await gitRoom(cwd);
   const ctx = await savedRoom(cwd, 'stop-early');
   await handleLine('plan it', ctx);
-  const name = ctx.discussion.name;
+  const name = ctx.board.name;
   let started = false;
   ctx.worker.turn = async () => { started = true; return 'ran'; };
   // Stopped the moment it is taken from the queue, before its worktree is prepared.
@@ -4401,7 +4401,7 @@ test('branchDiagram: behind main, diverged, main merged into branch twice, and h
     const g = await gitRoom(ctx.cwd);
     const base = g('rev-parse', '--short=7', 'HEAD');
     await handleLine('hello', ctx);
-    const name = ctx.discussion.name;
+    const name = ctx.board.name;
     const place = await workerPlace(ctx.cwd, name);
     await ensureWorktree(place);
     writeFileSync(`${ctx.cwd}/m.txt`, 'm\n'); g('add', 'm.txt'); g('commit', '-q', '-m', 'main diverged');
@@ -4593,13 +4593,13 @@ test('Close with pending work: allowed with unresolved edits (hold and files kep
     if (p.endsWith('make pending')) {
       writeFileSync(`${ctx.workerDir.path}/committed.txt`, 'c\n');
       inTree(ctx, 'add', 'committed.txt');
-      inTree(ctx, 'commit', '-q', '-m', `[${ctx.discussion.name}] committed step`);
+      inTree(ctx, 'commit', '-q', '-m', `[${ctx.board.name}] committed step`);
       writeFileSync(`${ctx.workerDir.path}/wip.txt`, 'uncommitted\n');
     }
     return 'ok\nDocs: none needed, because test.';
   } });
   await handleLine('pending-topic', first);
-  const { name, dir } = first.discussion;
+  const { name, dir } = first.board;
   queueWork(first, 'make pending');
   await first.workQueue;
   const worktreePath = first.workerDir.path;
@@ -4617,7 +4617,7 @@ test('Close with pending work: allowed with unresolved edits (hold and files kep
 
   // Resume later finds the edits and hold still there.
   await handleLine(`/resume ${name}`, first);
-  const resumed = contexts().find((c) => c.discussion?.name === name);
+  const resumed = contexts().find((c) => c.board?.name === name);
   assert.ok(resumed);
   resumed.docs = { ...resumed.docs, broadcast: (s, ev) => { if (ev.type === 'note') resumed.notes.push(ev.text); } };
   assert.ok(existsSync(`${worktreePath}/wip.txt`));
@@ -4638,7 +4638,7 @@ test('Close with pending work: allowed with unresolved edits (hold and files kep
   // Without a replication node name, the pending-work line falls back to hostname(); without pending work, no line is written.
   const { first: clean } = await multiRoom();
   await handleLine('clean-topic', clean);
-  const { dir: cleanDir } = clean.discussion;
+  const { dir: cleanDir } = clean.board;
   await handleLine('/close', clean);
   assert.doesNotMatch(readFileSync(`${cleanDir}/closing-statement.md`, 'utf8'), /Worker work pending on/);
   assert.ok(hostname().length > 0);
@@ -4656,7 +4656,7 @@ test('Close and Discard: refuses with a queued task or mid-operation, previews c
     if (p.endsWith('slow task')) {
       writeFileSync(`${ctx.workerDir.path}/a.txt`, 'v1\n');
       inTree(ctx.workerDir.path, 'add', 'a.txt');
-      inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.discussion.name}] add a.txt`);
+      inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.board.name}] add a.txt`);
       await runningGate;
     }
     return 'ok\nDocs: none needed, because test.';
@@ -4665,7 +4665,7 @@ test('Close and Discard: refuses with a queued task or mid-operation, previews c
   git('add', '.gitignore'); git('commit', '-q', '-m', 'add gitignore');
 
   await handleLine('discard-topic', first);
-  const { name, dir } = first.discussion;
+  const { name, dir } = first.board;
 
   // 1. Refusal while a task is running or queued (names them).
   queueWork(first, 'slow task');
@@ -4727,7 +4727,7 @@ test('Close and Discard: refuses with a queued task or mid-operation, previews c
   assert.equal(existsSync(tree), false, 'worktree removed');
   assert.throws(() => git('rev-parse', '--verify', `refs/heads/worker/${name}`), 'branch deleted');
   assert.equal(workerLane(first, name).blockedBy, null);
-  assert.ok(first.screen.room.closedDiscussions.includes(name));
+  assert.ok(first.screen.room.closedBoards.includes(name));
   const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
   assert.ok(stmt.includes(`Worker work discarded: 1 commit kept at \`${done.savedRef}\`.`));
 });
@@ -4747,7 +4747,7 @@ test('Close and Merge: greyed-out reasons, Catch up when main moved, change betw
     if (replyMode === 'commit-untested') {
       writeFileSync(`${tree}/shared.txt`, 'worker-v1\n');
       inTree(tree, 'add', 'shared.txt');
-      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] add shared`);
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.board.name}] add shared`);
       return 'committed without tested line\nDocs: none needed, because test.';
     }
     if (replyMode === 'test-fail') {
@@ -4767,7 +4767,7 @@ test('Close and Merge: greyed-out reasons, Catch up when main moved, change betw
   git('add', '.gitignore', 'base.txt'); git('commit', '-q', '-m', 'init files');
 
   await handleLine('merge-topic', first);
-  const { name, dir } = first.discussion;
+  const { name, dir } = first.board;
   queueWork(first, 'make change');
   await first.workQueue;
   const tree = first.workerDir.path;
@@ -4882,7 +4882,7 @@ test('Close and Merge: greyed-out reasons, Catch up when main moved, change betw
   assert.equal(existsSync(`${roomGitDir}/MERGE_HEAD`), false, 'MERGE_HEAD must be aborted');
   assert.equal(git('status', '--porcelain', '--', '.', ':(exclude)discussions'), '');
   assert.equal(existsSync(tree), true, 'worktree kept open on conflict');
-  assert.ok(!first.screen.room.closedDiscussions.includes(name), 'discussion left open on conflict');
+  assert.ok(!first.screen.room.closedBoards.includes(name), 'discussion left open on conflict');
 
   // Reset main back to mainAfterMove (undo the injected conflict commit) so we can test a clean merge!
   git('reset', '--hard', '-q', mainAfterMove);
@@ -4898,7 +4898,7 @@ test('Close and Merge: greyed-out reasons, Catch up when main moved, change betw
   assert.equal(git('show', '-s', '--format=%s', 'main'), `[${name}] Merge worker/${name}`);
   assert.equal(existsSync(tree), false, 'worktree removed after merge');
   assert.throws(() => git('rev-parse', '--verify', `refs/heads/worker/${name}`), 'branch deleted after merge');
-  assert.ok(first.screen.room.closedDiscussions.includes(name));
+  assert.ok(first.screen.room.closedBoards.includes(name));
   const stmt = readFileSync(`${dir}/closing-statement.md`, 'utf8');
   assert.ok(stmt.includes(`Worker work merged into \`main\` as \`${merged.mergeCommit}\`.`));
   assert.deepEqual(merged.restart, [], 'a merge touching no restart-only module asks for no Restart');
@@ -4924,13 +4924,13 @@ test('Close and Merge active-work notice and shared room lock with Close and Dis
     if (p.endsWith('commit a')) {
       writeFileSync(`${tree}/a.txt`, 'a\n');
       inTree(tree, 'add', 'a.txt');
-      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] a`);
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.board.name}] a`);
       return `Docs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
     }
     if (p.endsWith('commit b')) {
       writeFileSync(`${tree}/b.txt`, 'b\n');
       inTree(tree, 'add', 'b.txt');
-      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] b`);
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.board.name}] b`);
       return 'ok\nDocs: none needed, because test.';
     }
     if (p.endsWith('run b')) { await otherGate; return 'ok'; }
@@ -4938,7 +4938,7 @@ test('Close and Merge active-work notice and shared room lock with Close and Dis
   } });
 
   await handleLine('disc-a', first);
-  const nameA = first.discussion.name;
+  const nameA = first.board.name;
   queueWork(first, 'commit a');
   await first.workQueue;
 
@@ -4952,7 +4952,7 @@ test('Close and Merge active-work notice and shared room lock with Close and Dis
   await handleLine('/new', first);
   const second = contexts()[1];
   await handleLine('disc-b', second);
-  const nameB = second.discussion.name;
+  const nameB = second.board.name;
   queueWork(second, 'commit b');
   await second.workQueue;
 
@@ -5009,13 +5009,13 @@ test('plain Close implicitly cleans up an already-merged clean branch (removing 
     const { first, git } = await multiRoom({ worker: (ctx) => {
       writeFileSync(`${ctx.workerDir.path}/done.txt`, 'ok\n');
       inTree(ctx.workerDir.path, 'add', 'done.txt');
-      inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.discussion.name}] done`);
+      inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.board.name}] done`);
       return 'ok\nDocs: none needed, because test.';
     } });
     writeFileSync(`${first.cwd}/.gitignore`, 'node_modules/\n');
     git('add', '.gitignore'); git('commit', '-q', '-m', 'ignore node_modules');
     await handleLine('merged-clean', first);
-    const { name, dir } = first.discussion;
+    const { name, dir } = first.board;
     queueWork(first, 'do work');
     await first.workQueue;
     const tree = first.workerDir.path;
@@ -5048,11 +5048,11 @@ test('plain Close implicitly cleans up an already-merged clean branch (removing 
     const { first, git } = await multiRoom({ worker: (ctx) => {
       writeFileSync(`${ctx.workerDir.path}/done.txt`, 'ok\n');
       inTree(ctx.workerDir.path, 'add', 'done.txt');
-      inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.discussion.name}] done`);
+      inTree(ctx.workerDir.path, 'commit', '-q', '-m', `[${ctx.board.name}] done`);
       return 'ok\nDocs: none needed, because test.';
     } });
     await handleLine('merged-untracked', first);
-    const { name, dir } = first.discussion;
+    const { name, dir } = first.board;
     queueWork(first, 'do work');
     await first.workQueue;
     const tree = first.workerDir.path;
@@ -5073,7 +5073,7 @@ test('plain Close implicitly cleans up an already-merged clean branch (removing 
   {
     const { first, git } = await multiRoom({ worker: () => 'ok' });
     await handleLine('locked-clean', first);
-    const { name, dir } = first.discussion;
+    const { name, dir } = first.board;
     queueWork(first, 'create worktree');
     await first.workQueue;
     const tree = first.workerDir.path;
@@ -5084,7 +5084,7 @@ test('plain Close implicitly cleans up an already-merged clean branch (removing 
     } finally {
       first.shop.merging = null;
     }
-    assert.ok(first.screen.room.closedDiscussions.includes(name), 'discussion still closes when lock is held');
+    assert.ok(first.screen.room.closedBoards.includes(name), 'discussion still closes when lock is held');
     assert.equal(existsSync(tree), true, 'worktree left untouched when lock is held');
     assert.ok(git('rev-parse', '--verify', `refs/heads/worker/${name}`), 'branch left untouched when lock is held');
     assert.ok(first.notes.some((n) => /not removed.*Close and Merge for other-disc was in progress/.test(n)));
@@ -5105,7 +5105,7 @@ test('after a worker task ends, refreshed workerInfo clears the finished task so
     if (mode === 'clean-pass') {
       writeFileSync(`${tree}/feat.txt`, 'ok\n');
       inTree(tree, 'add', 'feat.txt');
-      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] add feat`);
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.board.name}] add feat`);
       return `Docs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
     }
     if (mode === 'leave-dirty') {
@@ -5116,7 +5116,7 @@ test('after a worker task ends, refreshed workerInfo clears the finished task so
   } });
 
   await handleLine('post-task-refresh', first);
-  const { name } = first.discussion;
+  const { name } = first.board;
 
   // 1. Clean task with passing Tested: line -> without clicking Worker tab or calling refreshWorker,
   // the last workerinfo event sent to the page shows canMerge: true (not greyed out for running/queued).
@@ -5274,7 +5274,7 @@ test('closing one of two open discussions removes it from the other page\'s open
   await handleLine('/new', first);
   const [, second] = contexts();
   await handleLine('topic-b', second);
-  const closedName = second.discussion.name;
+  const closedName = second.board.name;
   second.closingAgent = () => ({ name: 'W', turn: async () => 'Closing statement: pending-instructions.md' });
 
   await handleLine('/close', second);
@@ -5285,11 +5285,11 @@ test('closing one of two open discussions removes it from the other page\'s open
   await ended(second, false);
   hub.rooms.delete(second.key);
 
-  assert.deepEqual(first.screen.room.open.map((o) => o.active), [`discussions/${first.discussion.name}`]);
-  assert.ok(first.screen.room.closedDiscussions.includes(closedName));
+  assert.deepEqual(first.screen.room.open.map((o) => o.active), [`discussions/${first.board.name}`]);
+  assert.ok(first.screen.room.closedBoards.includes(closedName));
   const lastRoomEvent = first.events.filter((e) => e.type === 'room').at(-1)?.room;
-  assert.deepEqual(lastRoomEvent.open.map((o) => o.active), [`discussions/${first.discussion.name}`]);
-  assert.ok(lastRoomEvent.closedDiscussions.includes(closedName));
+  assert.deepEqual(lastRoomEvent.open.map((o) => o.active), [`discussions/${first.board.name}`]);
+  assert.ok(lastRoomEvent.closedBoards.includes(closedName));
 });
 
 test('checkWorkerReport and formattedTurn: good reports, Tested/Docs rules, conflict stop, pure catch-up, and generic one-retry helper', async () => {
@@ -5366,7 +5366,7 @@ test('worker report format retry flow: fixed on retry and still wrong after one 
   const git = await gitRoom(ctx.cwd);
   writeFileSync(`${ctx.cwd}/a.txt`, 'base\n'); git('add', 'a.txt'); git('commit', '-q', '-m', 'base');
   await handleLine('hello', ctx);
-  const name = ctx.discussion.name;
+  const name = ctx.board.name;
   const inTree = (...a) => execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
 
   // Case 1: Fixed on retry (first reply has short Tested: IDs and no Docs:; retry fixes both).
@@ -5449,7 +5449,7 @@ test('worker report format retry flow: retry that changes HEAD keeps changes, lo
   const git = await gitRoom(ctx.cwd);
   writeFileSync(`${ctx.cwd}/f.txt`, 'base\n'); git('add', 'f.txt'); git('commit', '-q', '-m', 'base');
   await handleLine('hello', ctx);
-  const name = ctx.discussion.name;
+  const name = ctx.board.name;
   const inTree = (...a) => execFileSync('git', ['-C', ctx.workerDir.path, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a]).toString().trim();
 
   ctx.autoDev = { status: 'running', cycle: 1, limit: 5, waiting: true };
@@ -5518,7 +5518,7 @@ test('checkSummary: inline-form rule, Outcome and Steps left rules while running
 
   // 4. In auto dev, a summary whose multi-line inline instruction is not fixed on retry pauses the run and is never sent.
   const ctx = await scriptedCtx(['spoke', 'PASS', 'PASS', summaryWith('Line 1\nLine 2', 'SEND'), 'PASS', 'PASS']);
-  ctx.discussion = { name: 'test-disc' };
+  ctx.board = { name: 'test-disc' };
   ctx.autoDev = { status: 'running', cycle: 1, limit: 5, waiting: false };
   ctx.notes = [];
   ctx.docs = { ...ctx.docs, broadcast: (s, ev) => { if (ev.type === 'note') ctx.notes.push(ev.text); } };
@@ -5742,7 +5742,7 @@ test('/move for brainstorms: archive, deferred, active, never overwrites existin
   // Refuse while open on screen (current context) or open in a sibling context.
   await handleLine('/brainstorm', ctx);
   await handleLine('start idea', ctx);
-  const openName = ctx.discussion.name;
+  const openName = ctx.board.name;
   await handleLine(`/move brainstorms/${openName} archive`, ctx);
   assert.ok(existsSync(`${root}/${openName}`));
   assert.ok(!existsSync(`${root}/archive/${openName}`));
@@ -5811,7 +5811,7 @@ test('archived and deferred brainstorms: /peek in place, /resume and /fresh make
   const root2 = `${cwd2}/brainstorms`;
   await handleLine('/brainstorm', ctx2);
   await handleLine('earlier idea', ctx2);
-  const resName = ctx2.discussion.name;
+  const resName = ctx2.board.name;
   const cpRes = await checkpointPath(cwd2, `brainstorms/${resName}`);
   await handleLine('/close', ctx2);
   await handleLine(`/move brainstorms/${resName} archive`, ctx2);
@@ -5820,7 +5820,7 @@ test('archived and deferred brainstorms: /peek in place, /resume and /fresh make
   await handleLine(`/resume brainstorms/archive/${resName}`, ctx2);
   assert.ok(existsSync(`${root2}/${resName}`));
   assert.ok(!existsSync(`${root2}/archive/${resName}`));
-  assert.equal(ctx2.discussion.dir, `${root2}/${resName}`);
+  assert.equal(ctx2.board.dir, `${root2}/${resName}`);
   assert.equal(ctx2.state.brainstorm, true);
   assert.ok(ctx2.state.transcript.some((m) => m.text === 'earlier idea'));
 
@@ -5831,7 +5831,7 @@ test('archived and deferred brainstorms: /peek in place, /resume and /fresh make
   await handleLine(`/fresh brainstorms/deferred/${resName}`, ctx2);
   assert.ok(existsSync(`${root2}/${resName}`));
   assert.ok(!existsSync(`${root2}/deferred/${resName}`));
-  assert.equal(ctx2.discussion.dir, `${root2}/${resName}`);
+  assert.equal(ctx2.board.dir, `${root2}/${resName}`);
   assert.equal(ctx2.state.brainstorm, true);
   assert.ok(existsSync(cpRes));
 });
@@ -5851,12 +5851,12 @@ test('name reservation: names in brainstorms/archive/ and brainstorms/deferred/ 
   // New brainstorm skips both archived and deferred brainstorm names.
   await handleLine('/brainstorm', ctx);
   await handleLine('idea 1', ctx);
-  assert.equal(ctx.discussion.name, `${base}-3`);
+  assert.equal(ctx.board.name, `${base}-3`);
 
   // New discussion skips archived, deferred, and active brainstorm names.
   await handleLine('/new', ctx);
   await handleLine('disc 1', ctx);
-  assert.equal(ctx.discussion.name, `${base}-4`);
+  assert.equal(ctx.board.name, `${base}-4`);
 
   // /convert refuses when target name exists in discussions/archive/ or brainstorms/archive/.
   mkdirSync(`${ctx.cwd}/brainstorms/2026-11-05-clash`, { recursive: true });
@@ -5876,12 +5876,12 @@ test('overlapping refreshWorker calls cannot leave an older result shown last', 
     const tree = ctx.workerDir.path;
     writeFileSync(`${tree}/feat.txt`, 'ok\n');
     inTree(tree, 'add', 'feat.txt');
-    inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] add feat`);
+    inTree(tree, 'commit', '-q', '-m', `[${ctx.board.name}] add feat`);
     return `Docs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
   } });
 
   await handleLine('overlap-refresh', first);
-  const { name } = first.discussion;
+  const { name } = first.board;
   queueWork(first, 'make commit');
   await first.workQueue;
   assert.equal(first.screen.workerInfo.mergeable[name]?.canMerge, true);
@@ -5927,20 +5927,20 @@ test('workbench: /workbench creates discussions/<date>-<title>/ with .workbench 
 
   await handleLine('/workbench', ctx);
   assert.equal(ctx.state.workbench, true);
-  assert.equal(ctx.discussion, null);
+  assert.equal(ctx.board, null);
   assert.equal(ctx.screen.room.workbench, true);
-  assert.equal(ctx.screen.room.discussion, 'New workbench');
+  assert.equal(ctx.screen.room.board, 'New workbench');
   assert.equal(ctx.screen.room.fresh, false);
 
   // First message (via Worker box screen.work) names it, creates discussions/<date>-<title>/ with .workbench, and goes to worker.
   await ctx.screen.work('Adjust the padding on the close button');
   await ctx.workQueue;
   assert.equal(agentTurns, 0);
-  assert.ok(ctx.discussion?.name.endsWith('-fix-button-padding'));
-  assert.ok(existsSync(`${cwd}/discussions/${ctx.discussion.name}/${WORKBENCH_MARKER}`));
+  assert.ok(ctx.board?.name.endsWith('-fix-button-padding'));
+  assert.ok(existsSync(`${cwd}/discussions/${ctx.board.name}/${WORKBENCH_MARKER}`));
   assert.equal(workerGot.length, 1);
   assert.match(workerGot[0], /Adjust the padding on the close button/);
-  assert.ok(ctx.screen.room.workbenches.includes(ctx.discussion.name));
+  assert.ok(ctx.screen.room.workbenches.includes(ctx.board.name));
 
   // Later message (via handleLine too) goes straight to worker, never as a discussion round.
   await handleLine('Also align the icon', ctx);
@@ -5975,10 +5975,10 @@ test('workbench: Close skips closing-statement agent, waits for running worker t
   ctx.worker.turn = async () => {
     taskStarted();
     await new Promise((r) => { releaseTask = r; });
-    const place = await workerPlace(cwd, ctx.discussion.name);
+    const place = await workerPlace(cwd, ctx.board.name);
     writeFileSync(`${place.path}/fix.txt`, 'pending change\n');
     execFileSync('git', ['-C', place.path, 'add', 'fix.txt']);
-    execFileSync('git', ['-C', place.path, 'commit', '-m', `[${ctx.discussion.name}] quick fix`]);
+    execFileSync('git', ['-C', place.path, 'commit', '-m', `[${ctx.board.name}] quick fix`]);
     const head = execFileSync('git', ['-C', place.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const main = execFileSync('git', ['-C', place.path, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
     return `Committed the quick fix.\nDocs: none needed, because test commit.\nTested: ${head} with main ${main}: tests passed`;
@@ -5987,14 +5987,14 @@ test('workbench: Close skips closing-statement agent, waits for running worker t
   await handleLine('/workbench', ctx);
   const firstSend = ctx.screen.work('Make the quick fix');
   await startedP;
-  const wbName = ctx.discussion.name;
+  const wbName = ctx.board.name;
   const wbDir = `${cwd}/discussions/${wbName}`;
   assert.ok(existsSync(`${wbDir}/${WORKBENCH_MARKER}`));
 
   // Close while the worker task is running: must wait for it.
   const closeP = handleLine('/close', ctx);
-  await until(() => ctx.screen.room.closingDiscussions?.[wbName] === 'waiting');
-  assert.equal(ctx.screen.room.closedDiscussions.includes(wbName), false);
+  await until(() => ctx.screen.room.closingBoards?.[wbName] === 'waiting');
+  assert.equal(ctx.screen.room.closedBoards.includes(wbName), false);
 
   // Finish the worker task; Close now completes without calling closing-statement agent.
   releaseTask();
@@ -6002,7 +6002,7 @@ test('workbench: Close skips closing-statement agent, waits for running worker t
   await ctx.workQueue;
   await closeP;
 
-  assert.equal(ctx.screen.room.closedDiscussions.includes(wbName), true);
+  assert.equal(ctx.screen.room.closedBoards.includes(wbName), true);
   assert.equal(existsSync(`${wbDir}/closing-statement.md`), false);
   // Worktree with pending work was kept.
   const place = await workerPlace(cwd, wbName);
@@ -6017,9 +6017,9 @@ test('workbench: Close skips closing-statement agent, waits for running worker t
   ctx.shop.log.length = 0;
   await handleLine(`/resume archive/${wbName}`, ctx);
   assert.equal(ctx.state.workbench, true);
-  assert.equal(ctx.discussion?.name, wbName);
+  assert.equal(ctx.board?.name, wbName);
   assert.equal(ctx.screen.room.workbench, true);
-  assert.equal(ctx.screen.room.closedDiscussions.includes(wbName), false);
+  assert.equal(ctx.screen.room.closedBoards.includes(wbName), false);
   const restored = ctx.screen.workerForPage();
   assert.ok(restored.some((m) => m.speaker === 'User' && /Make the quick fix/.test(m.text ?? m.html)));
   assert.ok(restored.some((m) => m.speaker === 'Worker' && /Committed the quick fix/.test(m.text ?? m.html)));
@@ -6037,9 +6037,9 @@ test('workbench: excluded from Schedule (list and save reject workbenches)', asy
 
   const ctx = { cwd, scheduleFile: `${cwd}/schedule.json`, state: { transcript: [], seen: new Map() }, sessions: new Map(), screen: { clients: new Set(), transcript: [], worker: [] } };
   const sched = getSchedule(ctx);
-  assert.deepEqual(sched.discussions.map((d) => d.name), ['2026-11-20-normal-disc']);
-  assert.throws(() => saveSchedule(ctx, { action: 'add', discussion: '2026-11-21-a-workbench', prompt: 'run', time: '09:00' }), /Workbenches cannot be scheduled/);
-  assert.throws(() => saveSchedule(ctx, { action: 'add', discussion: 'archive/2026-11-19-old-workbench', prompt: 'run', time: '09:00' }), /Workbenches cannot be scheduled/);
+  assert.deepEqual(sched.boards.map((d) => d.name), ['2026-11-20-normal-disc']);
+  assert.throws(() => saveSchedule(ctx, { action: 'add', board: '2026-11-21-a-workbench', prompt: 'run', time: '09:00' }), /Workbenches cannot be scheduled/);
+  assert.throws(() => saveSchedule(ctx, { action: 'add', board: 'archive/2026-11-19-old-workbench', prompt: 'run', time: '09:00' }), /Workbenches cannot be scheduled/);
 });
 
 test('workbench: Close and Merge and Close and Discard close without closing-statement.md and handle worktree/branch as for a discussion', async () => {
@@ -6057,10 +6057,10 @@ test('workbench: Close and Merge and Close and Discard close without closing-sta
   // 1. Close and Merge on a workbench: merges into main, removes worktree & branch, closes with no closing-statement.md.
   ctx.suggestTitle = async () => ({ title: 'Merge Me' });
   ctx.worker.turn = async () => {
-    const place = await workerPlace(cwd, ctx.discussion.name);
+    const place = await workerPlace(cwd, ctx.board.name);
     writeFileSync(`${place.path}/merged.txt`, 'merged fix\n');
     execFileSync('git', ['-C', place.path, 'add', 'merged.txt']);
-    execFileSync('git', ['-C', place.path, 'commit', '-m', `[${ctx.discussion.name}] merged fix`]);
+    execFileSync('git', ['-C', place.path, 'commit', '-m', `[${ctx.board.name}] merged fix`]);
     const head = execFileSync('git', ['-C', place.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const main = execFileSync('git', ['-C', place.path, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
     return `Fixed.\nDocs: none needed, because test.\nTested: ${head} with main ${main}: tests passed`;
@@ -6068,14 +6068,14 @@ test('workbench: Close and Merge and Close and Discard close without closing-sta
   await handleLine('/workbench', ctx);
   await ctx.screen.work('Apply mergeable fix');
   await ctx.workQueue;
-  const mergeName = ctx.discussion.name;
+  const mergeName = ctx.board.name;
   const mergePlace = await workerPlace(cwd, mergeName);
   const preview = await closeMergePreview(ctx, mergeName);
   assert.equal(preview.ok, true);
   const mergeRes = await closeAndMerge(ctx, mergeName, preview.preview.snapshot);
   assert.equal(mergeRes.ok, true);
   assert.equal(existsSync(`${cwd}/discussions/${mergeName}/closing-statement.md`), false);
-  assert.equal(ctx.screen.room.closedDiscussions.includes(mergeName), true);
+  assert.equal(ctx.screen.room.closedBoards.includes(mergeName), true);
   assert.equal(readFileSync(`${cwd}/merged.txt`, 'utf8'), 'merged fix\n');
   assert.equal(existsSync(mergePlace.path), false);
   assert.equal(execFileSync('git', ['-C', cwd, 'branch', '--list', mergePlace.branch], { encoding: 'utf8' }).trim(), '');
@@ -6083,10 +6083,10 @@ test('workbench: Close and Merge and Close and Discard close without closing-sta
   // 2. Close and Discard on a workbench: saves refs/discarded/..., removes worktree & branch, closes with no closing-statement.md.
   ctx.suggestTitle = async () => ({ title: 'Discard Me' });
   ctx.worker.turn = async () => {
-    const place = await workerPlace(cwd, ctx.discussion.name);
+    const place = await workerPlace(cwd, ctx.board.name);
     writeFileSync(`${place.path}/dropped.txt`, 'drop this\n');
     execFileSync('git', ['-C', place.path, 'add', 'dropped.txt']);
-    execFileSync('git', ['-C', place.path, 'commit', '-m', `[${ctx.discussion.name}] dropped fix`]);
+    execFileSync('git', ['-C', place.path, 'commit', '-m', `[${ctx.board.name}] dropped fix`]);
     const head = execFileSync('git', ['-C', place.path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const main = execFileSync('git', ['-C', place.path, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
     return `Tried.\nDocs: none needed, because test.\nTested: ${head} with main ${main}: tests passed`;
@@ -6094,14 +6094,14 @@ test('workbench: Close and Merge and Close and Discard close without closing-sta
   await handleLine('/workbench', ctx);
   await ctx.screen.work('Try discardable fix');
   await ctx.workQueue;
-  const discardName = ctx.discussion.name;
+  const discardName = ctx.board.name;
   const discardPlace = await workerPlace(cwd, discardName);
   const dPrev = await ctx.screen.discardPreview(discardName);
   const dRes = await closeAndDiscard(ctx, discardName, dPrev.preview.snapshot);
   assert.equal(dRes.ok, true);
   assert.match(dRes.savedRef, new RegExp(`^refs/discarded/${discardName}/`));
   assert.equal(existsSync(`${cwd}/discussions/${discardName}/closing-statement.md`), false);
-  assert.equal(ctx.screen.room.closedDiscussions.includes(discardName), true);
+  assert.equal(ctx.screen.room.closedBoards.includes(discardName), true);
   assert.equal(existsSync(`${cwd}/dropped.txt`), false);
   assert.equal(existsSync(discardPlace.path), false);
   assert.equal(execFileSync('git', ['-C', cwd, 'branch', '--list', discardPlace.branch], { encoding: 'utf8' }).trim(), '');
@@ -6154,14 +6154,14 @@ test('catchUpWithBranch: allows resolving purely additive conflicts, avoids dupl
     if (step === 'work') {
       writeFileSync(`${tree}/list.txt`, 'base\nworker-line\n');
       inTree(tree, 'add', 'list.txt');
-      inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] append worker line`);
+      inTree(tree, 'commit', '-q', '-m', `[${ctx.board.name}] append worker line`);
       return `Added worker-line.\nDocs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
     }
     catchUpPrompt = p;
     assert.throws(() => inTree(tree, 'merge', 'main'), 'expected additive conflict on list.txt');
     writeFileSync(`${tree}/list.txt`, 'base\nmain-line\nworker-line\n');
     inTree(tree, 'add', 'list.txt');
-    inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] catch up with main`);
+    inTree(tree, 'commit', '-q', '-m', `[${ctx.board.name}] catch up with main`);
     return `Resolved purely additive conflict in list.txt.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
   } });
 
@@ -6169,7 +6169,7 @@ test('catchUpWithBranch: allows resolving purely additive conflicts, avoids dupl
   git('add', 'list.txt'); git('commit', '-q', '-m', 'add list');
 
   await handleLine('additive-catch-up', first);
-  const { name } = first.discussion;
+  const { name } = first.board;
   queueWork(first, 'append line');
   await first.workQueue;
 
@@ -6234,7 +6234,7 @@ test('worktreeStatus and workerInfo report unquoted conflict paths and clear the
     mkdirSync(`${tree}/my dir`, { recursive: true });
     writeFileSync(`${tree}/${special}`, 'worker version\n');
     inTree(tree, 'add', special);
-    inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] edit special file`);
+    inTree(tree, 'commit', '-q', '-m', `[${ctx.board.name}] edit special file`);
     return `Edited.\nDocs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
   } });
 
@@ -6243,7 +6243,7 @@ test('worktreeStatus and workerInfo report unquoted conflict paths and clear the
   git('add', special); git('commit', '-q', '-m', 'add special file');
 
   await handleLine('conflict-status', first);
-  const { name } = first.discussion;
+  const { name } = first.board;
   queueWork(first, 'edit special file');
   await first.workQueue;
 
@@ -6303,7 +6303,7 @@ test('workReady: set on finishAutoDev, kept across catchUpWithBranch, cleared by
       if (step === 'impl') {
         writeFileSync(`${tree}/feat.txt`, 'feature v1\n');
         inTree(tree, 'add', 'feat.txt');
-        inTree(tree, 'commit', '-q', '-m', `[${ctx.discussion.name}] implement feature`);
+        inTree(tree, 'commit', '-q', '-m', `[${ctx.board.name}] implement feature`);
         return `Implemented.\nDocs: none needed, because test.\nTested: ${inTree(tree, 'rev-parse', 'HEAD')} with main ${git('rev-parse', 'main')}: tests passed`;
       }
       if (step === 'catchup') {
@@ -6339,7 +6339,7 @@ test('workReady: set on finishAutoDev, kept across catchUpWithBranch, cleared by
 
   // Without auto dev, workReady is false.
   await handleLine('build feat', first);
-  const { name } = first.discussion;
+  const { name } = first.board;
   assert.equal(entry().workReady, false);
   assert.equal(entry().readyForAutoDev, true);
 
@@ -6430,7 +6430,7 @@ test('layered rulebooks: joined system instructions, Instructions panel, and Rel
     '## Purpose', '## Shared rules', '## Seeing files',
     '## Turns and messages', '## Rules of the conversation',
     '## Where you are', '## Rules of the discussion', '## Sending work to the worker in steps',
-    '## How to write discussion documents', '## Project constraint', '## Where to start reading',
+    '## How to write sprint documents', '## Project constraint', '## Where to start reading',
   ];
   let prev = -1;
   for (const heading of dSections) {
@@ -6466,7 +6466,7 @@ test('layered rulebooks: joined system instructions, Instructions panel, and Rel
 
   // 2. The Instructions panel shows each layer file for each agent kind.
   const sets = ctx.screen.instructions();
-  const discussingSet = sets.find((s) => s.type === 'Discussion & brainstorming agents');
+  const discussingSet = sets.find((s) => s.type === 'Sprint & brainstorming agents');
   const workerSet = sets.find((s) => s.type === 'Worker');
   assert.deepEqual(
     discussingSet.pieces.slice(0, 3).map((p) => p.id),
@@ -6536,7 +6536,7 @@ async function researchKindsCheck(combos) {
     const prompts = reply('still looking');
     ctx.screen.say('What should we look at?', false, kind); // as /__say does with the toggles' choice
     await handleLine('What should we look at?', ctx);
-    const { dir, name } = ctx.discussion;
+    const { dir, name } = ctx.board;
     assert.equal(readFileSync(join(dir, RESEARCH_MARKER), 'utf8'), `${marker}\n`, label);
     assert.equal(prompts.length, laps, `${label}: lap cap`);
     assert.match(prompts[0], new RegExp(`This research board's kind is ${label}, chosen when it was created: in rulebooks/researching\\.md, follow the ${effort} section for the effort and the ${output} section for the output\\.`));
@@ -6621,8 +6621,8 @@ test('research board: .research marker, briefing, researching instructions on cr
   ctx.room.agents[1].turn = async () => { Object.assign(ctx.sessions.get('B'), { threadId: 't-b' }); return 'PASS'; };
   await handleLine('Should we adopt a framework?', ctx);
 
-  const name = ctx.discussion.name;
-  const dir = ctx.discussion.dir;
+  const name = ctx.board.name;
+  const dir = ctx.board.dir;
   assert.ok(dir.includes('discussions/'));
   assert.equal(existsSync(join(dir, RESEARCH_MARKER)), true);
   assert.equal(isResearchDir(dir), true);
@@ -6706,7 +6706,7 @@ test('convert brainstorm to research: move, .research marker, fresh sessions wit
   ctx.room.agents[1].turn = async () => { Object.assign(ctx.sessions.get('B'), { threadId: 'old-b-thread' }); return 'PASS'; };
   await handleLine('What if we rethink storage?', ctx);
 
-  const name = ctx.discussion.name;
+  const name = ctx.board.name;
   const fromDir = join(cwd, 'brainstorms', name);
   const destDir = join(cwd, 'discussions', name);
   mkdirSync(join(fromDir, 'drawings'), { recursive: true });
@@ -6787,7 +6787,7 @@ test('convert brainstorm to research: move, .research marker, fresh sessions wit
   ctx.room.agents[0].turn = async () => 'PASS';
   ctx.room.agents[1].turn = async () => 'PASS';
   await handleLine('Closed brainstorm start.', ctx);
-  const closedName = ctx.discussion.name;
+  const closedName = ctx.board.name;
   await handleLine('/close', ctx);
   await handleLine(`/convert brainstorms/${closedName} research`, ctx);
   assert.equal(existsSync(join(cwd, 'brainstorms', closedName)), false);
@@ -6840,17 +6840,17 @@ test('scheduler: one-shot research creates an open board, respects quota and nev
   mkdirSync(join(cwd, 'discussions'), { recursive: true });
   const result = await checkSchedule(ctx, new Date(2026, 10, 21, 3, 1), { loadRoom });
   assert.equal(result[0].status, 'ran');
-  assert.ok(loaded.discussion && existsSync(join(loaded.discussion.dir, '.research')));
-  assert.equal(existsSync(join(loaded.discussion.dir, 'closing-statement.md')), false);
+  assert.ok(loaded.board && existsSync(join(loaded.board.dir, '.research')));
+  assert.equal(existsSync(join(loaded.board.dir, 'closing-statement.md')), false);
   assert.match(prompts[0], /\[Scheduler\]: Investigate this/);
   assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'ran');
-  const firstName = loaded.discussion.name;
+  const firstName = loaded.board.name;
   saveSchedule(ctx, { action: 'edit', id, ...input, time: '03:02' });
   drop = true;
   const stopped = await checkSchedule(ctx, new Date(2026, 10, 21, 3, 2), { loadRoom });
   assert.equal(stopped[0].status, 'stopped');
-  assert.notEqual(loaded.discussion.name, firstName);
-  const transcript = readFileSync(join(loaded.discussion.dir, 'transcripts', readdirSync(join(loaded.discussion.dir, 'transcripts'))[0]), 'utf8');
+  assert.notEqual(loaded.board.name, firstName);
+  const transcript = readFileSync(join(loaded.board.dir, 'transcripts', readdirSync(join(loaded.board.dir, 'transcripts'))[0]), 'utf8');
   assert.match(transcript, /quota guard before lap 2/);
   assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'stopped');
 });
@@ -6871,7 +6871,7 @@ test('recurring research schedules a board and reuses its live session, skipping
   assert.deepEqual(await checkSchedule(first, new Date(2026, 10, 21, 3, 1)), []);
   assert.equal((await checkSchedule(first, new Date(2026, 10, 21, 3, 0)))[0].status, 'ran');
   const board = contexts().find((c) => c.state.research);
-  const name = board.discussion.name;
+  const name = board.board.name;
   assert.match(name, /named-from-prompt/);
   assert.equal(getSchedule(first).tasks[0].board, name);
   const state = board.state, agents = board.room.agents;
@@ -6888,7 +6888,7 @@ test('recurring research schedules a board and reuses its live session, skipping
   assert.deepEqual(await checkSchedule(first, new Date(2026, 10, 24, 3, 0)), []);
   saveSchedule(first, { action: 'add', kind: 'research', title: '', prompt: 'One shot prompt title', date: '2026-11-24', time: '03:01' });
   assert.equal((await checkSchedule(first, new Date(2026, 10, 24, 3, 1)))[0].status, 'ran');
-  assert.ok(contexts().some((c) => c.discussion?.name.endsWith('one-shot-prompt-title')));
+  assert.ok(contexts().some((c) => c.board?.name.endsWith('one-shot-prompt-title')));
 });
 
 // A multi-context room whose page shows its own started discussion, with scheduled boards that run one
@@ -6912,10 +6912,10 @@ async function scheduledKindsRoom() {
   assert.match(shown, /^discussions\/.*our-own-topic$/);
   const run = async (id) => {
     assert.equal((await runScheduledTask(first, id)).status, 'ran');
-    const board = contexts().filter((c) => c.state.research).find((c) => c.discussion?.name === getSchedule(first).tasks.find((t) => t.id === id).board)
+    const board = contexts().filter((c) => c.state.research).find((c) => c.board?.name === getSchedule(first).tasks.find((t) => t.id === id).board)
       ?? contexts().filter((c) => c.state.research).at(-1); // a one-shot task's new board
     const t = board.state.transcript, start = t.findLastIndex((m) => m.speaker === 'Scheduler');
-    return { board, turns: t.length - start - 1, marker: readFileSync(`${board.discussion.dir}/.research`, 'utf8') };
+    return { board, turns: t.length - start - 1, marker: readFileSync(`${board.board.dir}/.research`, 'utf8') };
   };
   // Through every first and later run, the User's page kept showing its own board: never sent elsewhere.
   const pageKept = () => {
@@ -6947,7 +6947,7 @@ test('scheduled research kinds with the Feasibility effort: saved on the task, a
   }
   // A later run reuses the daily board.
   const again = await run('old-task');
-  assert.equal(again.board.discussion.name, getSchedule(first).tasks[2].board);
+  assert.equal(again.board.board.name, getSchedule(first).tasks[2].board);
   assert.equal(again.turns, 6);
   // A one-shot task has no board of its own: editing it changes the kind its next board gets.
   saveSchedule(first, { action: 'edit', id: tasks[1].id, kind: 'research', title: '', prompt: 'One-shot theory', date: '2026-11-28', time: '23:58', researchKind: { deep: true, theoretical: true } });
@@ -6972,7 +6972,7 @@ test('scheduled research kinds with the Deep effort: applied at the first run (3
   saveSchedule(first, { action: 'edit', id: deep.id, kind: 'recurring', title: '', prompt: deep.prompt, time: deep.time, enabled: true, researchKind: { deep: false, theoretical: true } });
   assert.deepEqual(getSchedule(first).tasks[0].researchKind, { deep: true, theoretical: false });
   const later = await run(deep.id);
-  assert.equal(later.board.discussion.name, deep.board);
+  assert.equal(later.board.board.name, deep.board);
   assert.equal(later.marker, 'research deep\n');
   assert.equal(later.turns, 30);
   pageKept();
@@ -7063,8 +7063,8 @@ test('research scheduler applies the real quota guard before creating a board an
   assert.match(stopped.reason, /quota guard before lap 2/);
   assert.equal(turns, 1);
   assert.equal(getSchedule(ctx).tasks[0].lastRun.status, 'stopped');
-  assert.equal(existsSync(`${board.discussion.dir}/closing-statement.md`), false);
-  const transcript = readFileSync(`${board.discussion.dir}/transcripts/${readdirSync(`${board.discussion.dir}/transcripts`)[0]}`, 'utf8');
+  assert.equal(existsSync(`${board.board.dir}/closing-statement.md`), false);
+  const transcript = readFileSync(`${board.board.dir}/transcripts/${readdirSync(`${board.board.dir}/transcripts`)[0]}`, 'utf8');
   assert.match(transcript, /quota guard before lap 2/);
 });
 
@@ -7083,7 +7083,7 @@ test('research lap totals include manual and scheduled rounds and survive a boar
   const task = saveSchedule(first, { action: 'add', kind: 'recurring', title: 'Lap Quest', prompt: 'Investigate', time: '23:59' }).tasks[0];
   assert.equal((await runScheduledTask(first, task.id)).status, 'ran');
   const board = contexts().find((c) => c.state.research);
-  const name = board.discussion.name;
+  const name = board.board.name;
   assert.equal(first.screen.room.researchStats[name].laps, 1);
   assert.ok(first.screen.room.researchStats[name].lastRun);
   assert.ok(first.screen.room.researchStats[name].nextRun);
@@ -7093,7 +7093,7 @@ test('research lap totals include manual and scheduled rounds and survive a boar
   board.room.agents[1].turn = async () => 'PASS';
   await handleLine('Follow up', board);
   assert.equal(first.screen.room.researchStats[name].laps, 3);
-  assert.equal(JSON.parse(readFileSync(`${board.discussion.dir}/.research-stats.json`, 'utf8')).laps, 3);
+  assert.equal(JSON.parse(readFileSync(`${board.board.dir}/.research-stats.json`, 'utf8')).laps, 3);
   saveSchedule(first, { action: 'toggle', id: task.id, enabled: false });
   assert.equal(getSchedule(first).tasks[0].enabled, false);
   assert.equal(first.screen.room.researchStats[name].nextRun, null);
@@ -7120,7 +7120,7 @@ test('turn research into discussion preserves its folder, starts fresh agents an
   let first = true;
   ctx.room.agents[0].turn = async () => { Object.assign(ctx.sessions.get('A'), { started: true }); if (first) { first = false; return 'Finding'; } return 'PASS'; };
   await handleLine('Research this', ctx);
-  const name = ctx.discussion.name, dir = ctx.discussion.dir, oldA = ctx.sessions.get('A');
+  const name = ctx.board.name, dir = ctx.board.dir, oldA = ctx.sessions.get('A');
   writeFileSync(join(dir, 'quest.md'), 'Original quest');
   ctx.state.transcript.push({ speaker: 'Summary', text: 'Disputed finding', outcome: 'not agreed', by: 'A' });
   const task = saveSchedule(ctx, { action: 'add', kind: 'recurring', title: 'Task', prompt: 'Again', time: '03:00' }).tasks[0];
@@ -7142,7 +7142,7 @@ test('turn research into discussion preserves its folder, starts fresh agents an
   await handleLine(`/convert discussions/${name}`, ctx);
   assert.equal(existsSync(join(dir, '.research')), false);
   assert.equal(readFileSync(join(dir, 'quest.md'), 'utf8'), 'Original quest');
-  assert.equal(ctx.discussion.dir, dir);
+  assert.equal(ctx.board.dir, dir);
   assert.equal(ctx.state.research, undefined);
   assert.notEqual(ctx.sessions.get('A'), oldA);
   assert.equal(getSchedule(ctx).tasks.find((t) => t.id === task.id).enabled, false);
@@ -7158,7 +7158,7 @@ test('turn research into discussion preserves its folder, starts fresh agents an
   await handleLine('/research', ctx);
   for (const agent of ctx.room.agents) agent.turn = async () => 'PASS';
   await handleLine('A closed research board', ctx);
-  const closedName = ctx.discussion.name;
+  const closedName = ctx.board.name;
   ctx.closingAgent = () => ({ name: 'W', turn: async () => 'Closed research. See pending-instructions.md.' });
   await handleLine('/close', ctx);
   await handleLine(`/convert discussions/${closedName}`, ctx);
@@ -7279,13 +7279,13 @@ test('Reload retains an open board and resumes a paused board from its checkpoin
     Object.assign(ctx.sessions.get('A'), { id: 'paused-session', started: true });
     Object.assign(ctx.sessions.get('B'), { threadId: 'paused-codex' });
     await ui.handleLine('paused message', ctx);
-    const paused = ctx.discussion.name, pausedFile = await checkpointPath(cwd, paused);
+    const paused = ctx.board.name, pausedFile = await checkpointPath(cwd, paused);
     assert.ok(existsSync(pausedFile));
     const pausedSnapshot = JSON.parse(readFileSync(pausedFile, 'utf8'));
     assert.equal(new Map(pausedSnapshot.sessions).get('A').id, 'paused-session');
     await ui.handleLine('/new', ctx);
     await ui.handleLine('open message', ctx);
-    const open = ctx.discussion, activeState = ctx.state, openFile = await checkpointPath(cwd, open.name);
+    const open = ctx.board, activeState = ctx.state, openFile = await checkpointPath(cwd, open.name);
     assert.ok(existsSync(openFile));
     const boardsFile = join(root, 'src/boards.mjs'), boardText = readFileSync(boardsFile, 'utf8');
     assert.ok(boardText.includes('function readCheckpoint(ctx, name) {'));
@@ -7298,11 +7298,11 @@ test('Reload retains an open board and resumes a paused board from its checkpoin
     Object.assign(ctx, await nextUi.load(ctx, '?v=second'));
     await nextUi.reloaded(ctx);
     assert.notEqual(ctx.boardsModule, firstBoards);
-    assert.equal(ctx.discussion, open); assert.equal(ctx.state, activeState);
+    assert.equal(ctx.board, open); assert.equal(ctx.state, activeState);
     assert.ok(ctx.state.transcript.some((m) => m.text === 'open message'));
     assert.ok(existsSync(openFile));
     await nextUi.handleLine('/resume ' + paused, ctx);
-    assert.equal(ctx.boardReadVersion, 'new'); assert.equal(ctx.discussion.name, paused);
+    assert.equal(ctx.boardReadVersion, 'new'); assert.equal(ctx.board.name, paused);
     assert.equal(ctx.sessions.get('A').id, 'paused-session');
     assert.deepEqual(ctx.state.transcript, pausedSnapshot.state.transcript);
     await ctx.refreshQuota();

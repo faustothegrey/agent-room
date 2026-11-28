@@ -69,17 +69,17 @@ export function SettingsPanel({ scope, room, post, queue, openSignal }: { scope:
       if (scope === 'talk' && data.started && room?.members) {
         setPanel({ models: data.models, members: true, plan: null, workerName: data.settings.worker.name, note: null,
           rows: room.members.map((m) => ({ provider: m.provider, name: m.name, model: m.model, custom: !!m.model && !data.models[m.provider]?.some((x) => x.id === m.model), active: m.enabled, automatic: false })),
-          hint: 'This discussion’s members. Untick one to leave it out of this discussion from its next round; tick it to bring it back. Their provider and model stay as they started: choose those for a new discussion before its first message.' });
+          hint: 'This board’s members. Untick one to leave it out of this discussion from its next round; tick it to bring it back. Their provider and model stay as they started: choose those for a new board before its first message.' });
         return;
       }
-      const hint = scope === 'work' ? (data.started ? 'Changes apply to this discussion only' : 'Changes apply to this discussion, and the default for new ones') + ', starting with the next instruction. A running instruction finishes with its current settings. Switching provider carries the Worker conversation into a fresh session.'
+      const hint = scope === 'work' ? (data.started ? 'Changes apply to this sprint only' : 'Changes apply to this sprint, and the default for new ones') + ', starting with the next instruction. A running instruction finishes with its current settings. Switching provider carries the Worker conversation into a fresh session.'
         : data.started ? 'Changes save automatically for future rooms. Active sessions keep their settings.' : 'Changes save automatically and apply to this room before any agent starts.';
       const agents = scope === 'talk' ? memberPanelAgents(data) : [data.settings.worker];
       if (scope === 'talk' && agents.length >= 2 && agents.length <= 3) {
         const plan = memberPlan(agents, selected.worker, data.models, data.settings.worker);
         setPanel({ models: data.models, rows: plan.rows, plan, members: false, hint, note: 'At least two members. To swap one, tick the new row first, then untick the old one.', workerName: data.settings.worker.name });
       } else setPanel({ models: data.models, rows: agents.map((a) => toRow(a, data.models)), plan: null, members: false, hint, workerName: data.settings.worker.name,
-        note: scope === 'talk' ? 'This discussion has ' + agents.length + ' agents, set outside this panel; members can be chosen here only for 2 or 3.' : null });
+        note: scope === 'talk' ? 'This board has ' + agents.length + ' agents, set outside this panel; members can be chosen here only for 2 or 3.' : null });
     } catch (err) { setResult('Could not load settings: ' + (err instanceof Error ? err.message : String(err))); }
   };
   // A new discussion or brainstorm (or a page on one) opens the members panel: its members are chosen first.

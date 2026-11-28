@@ -10,7 +10,7 @@ class Source {
   close() {}
   send(data: object) { act(() => this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)); }
 }
-const room = { discussion: 'Live', active: 'discussions/live', started: true, brainstorm: false, research: false, workbench: false, retryId: 'retry-1' };
+const room = { board: 'Live', active: 'discussions/live', started: true, brainstorm: false, research: false, workbench: false, retryId: 'retry-1' };
 const message = (id: string, html = '<p>Failed report</p>') => ({ speaker: 'Worker report', html, error: true, retryId: id });
 const models = { claude: [{ id: 'sonnet', label: 'Sonnet' }], codex: [{ id: 'codex-one', label: 'Codex One' }], agy: [] };
 const settings = { settings: { agents: [], worker: { name: 'Worker', provider: 'claude', model: 'sonnet' } }, started: true, launchDefaults: { agents: [{ name: 'Latest', provider: 'codex', model: '' }], worker: { name: 'Previous', provider: 'agy', model: '' } }, models };

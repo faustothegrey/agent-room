@@ -10,7 +10,7 @@ class Source {
   close() {}
   send(data: object) { act(() => this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)); }
 }
-const room = { folder: '/room', active: 'discussions/2026-11-01-live', discussion: 'Live', started: true, multi: true, brainstorm: false, research: false, workbench: false, workbenches: [], researches: [], closedDiscussions: [], checkpoints: [], open: [], autoDev: { status: null } };
+const room = { folder: '/room', active: 'discussions/2026-11-01-live', board: 'Live', started: true, multi: true, brainstorm: false, research: false, workbench: false, workbenches: [], researches: [], closedBoards: [], checkpoints: [], open: [], autoDev: { status: null } };
 const fetchMock = vi.fn();
 const reset = (extra: object = {}, event: object = {}) => Source.current.send({ type: 'reset', room: { ...room, ...extra }, messages: [], input: true, peek: null, doc: null, ...event });
 const setup = (extra: object = {}) => { render(<App version="one" refresh={() => {}} />); reset(extra); };
@@ -30,7 +30,7 @@ it('refreshes worker information on opening Actions and sends Summarize and New 
 
 it('requires two clicks to convert a brainstorm to a discussion or research', async () => {
   setup({ active: 'brainstorms/2026-11-01-idea', brainstorm: true }); const user = userEvent.setup();
-  await user.click(screen.getByLabelText('Discussion actions')); await user.click(screen.getByRole('button', { name: 'Turn into a discussion' }));
+  await user.click(screen.getByLabelText('Discussion actions')); await user.click(screen.getByRole('button', { name: 'Turn into a sprint' }));
   expect(says()).toEqual([]); await user.click(screen.getByRole('button', { name: 'Click again: it moves to discussions/' }));
   await waitFor(() => expect(says()).toEqual(['/convert brainstorms/2026-11-01-idea']));
   await user.click(screen.getByLabelText('Discussion actions')); await user.click(screen.getByRole('button', { name: 'Turn into research' }));
@@ -42,15 +42,15 @@ it('shows pending-work Close and confirms before sending the existing command', 
   setup(); Source.current.send({ type: 'workerinfo', info: { lines: [], pending: [{ lane: '2026-11-01-live', branch: 'worker/live', ahead: 1, dirty: false, conflicts: [] }] } });
   const user = userEvent.setup(); await user.click(screen.getByLabelText('Discussion actions'));
   await user.click(screen.getByRole('button', { name: 'Close with pending work' })); expect(says()).toEqual([]);
-  await user.click(screen.getByRole('button', { name: 'Click again: this discussion closes (its agents stop)' }));
+  await user.click(screen.getByRole('button', { name: 'Click again: this sprint closes (its agents stop)' }));
   await waitFor(() => expect(says()).toEqual(['/close']));
 });
 
 it('uses research-specific conversion warning, hides actions in read-only views, and expires confirmation', async () => {
   setup({ research: true }); const user = userEvent.setup(); await user.click(screen.getByLabelText('Discussion actions'));
-  vi.useFakeTimers(); fireEvent.click(screen.getByRole('button', { name: 'Turn into a discussion' }));
+  vi.useFakeTimers(); fireEvent.click(screen.getByRole('button', { name: 'Turn into a sprint' }));
   expect(screen.getByRole('button', { name: 'Click again: research sessions end and scheduled tasks turn off' })).toBeTruthy();
-  await act(async () => { await vi.advanceTimersByTimeAsync(4000); }); expect(screen.getByRole('button', { name: 'Turn into a discussion' })).toBeTruthy();
+  await act(async () => { await vi.advanceTimersByTimeAsync(4000); }); expect(screen.getByRole('button', { name: 'Turn into a sprint' })).toBeTruthy();
   vi.useRealTimers(); reset({}, { peek: { name: 'old', title: 'Old', path: 'discussions/old' } });
   expect(screen.queryByLabelText('Discussion actions')).toBeNull();
 });

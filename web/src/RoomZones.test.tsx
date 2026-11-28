@@ -9,9 +9,9 @@ class Source {
   close() {}
   send(data: object) { act(() => this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)); }
 }
-const room = { folder: '/Users/me/projects/my-room/', discussion: 'Live', active: 'discussions/2026-11-25-live', started: true, brainstorm: false, research: false, workbench: false, open: [] as object[], code: null as object | null };
+const room = { folder: '/Users/me/projects/my-room/', board: 'Live', active: 'discussions/2026-11-25-live', started: true, brainstorm: false, research: false, workbench: false, open: [] as object[], code: null as object | null };
 const reply = (status: number, text = '') => ({ ok: status >= 200 && status < 300, status, text: async () => text, json: async () => ({}) });
-const health = (pid: number) => ({ ok: true, status: 200, json: async () => ({ app: 'agent-room', pid, root: '/r', host: 'machiste', startedAt: new Date(Date.now() - 65 * 60000).toISOString(), discussion: null, pages: 1 }) });
+const health = (pid: number) => ({ ok: true, status: 200, json: async () => ({ app: 'agent-room', pid, root: '/r', host: 'machiste', startedAt: new Date(Date.now() - 65 * 60000).toISOString(), board: null, pages: 1 }) });
 let answer: (url: string, init?: RequestInit) => unknown;
 const fetchMock = vi.fn(async (url: string, init?: RequestInit) => answer(url, init));
 const posts = (path: string) => fetchMock.mock.calls.filter(([url]) => url === path).map(([, init]) => JSON.parse(String(init?.body)));

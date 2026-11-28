@@ -481,7 +481,7 @@ test('the heartbeat: /__health says it is agent-room, with its process, root and
   const res = await s.get('/__health');
   assert.equal(res.status, 200);
   const { host, ...rest } = await res.json();
-  assert.deepEqual(rest, { app: 'agent-room', pid: process.pid, root: dir, startedAt: '2026-11-03T10:00:00.000Z', discussion: 'discussions/2026-11-03-x', pages: 0 });
+  assert.deepEqual(rest, { app: 'agent-room', pid: process.pid, root: dir, startedAt: '2026-11-03T10:00:00.000Z', board: 'discussions/2026-11-03-x', pages: 0 });
   // The machine's short name: its hostname cut at the first dot, unless that is an IPv4 address.
   const { hostname } = await import('node:os');
   const name = hostname().trim();
@@ -515,7 +515,7 @@ test('a page learns its code version, so it can refresh after a reload that chan
 });
 
 test('running rooms can be listed without changing the current conversation', async () => {
-  const rooms = [{ id: 'other-0a1b2c', path: '/r/other-0a1b2c/__room', root: '/tmp/other', discussion: 'discussions/example', pages: 1, current: false }];
+  const rooms = [{ id: 'other-0a1b2c', path: '/r/other-0a1b2c/__room', root: '/tmp/other', board: 'discussions/example', pages: 1, current: false }];
   const screen = { clients: new Set(), transcript: [], listRooms: async () => rooms };
   const s = await serve(fixture(), screen);
   try {
@@ -657,7 +657,7 @@ test('a brainstorm message with attachments saves into brainstorms/<name>/files/
     screen.room = { active: null, brainstorm: true };
     const refused = await postFrom(s, '/__say', { text: 'early', files: [{ name: 'a.txt', data: b64('A') }] });
     assert.equal(refused.status, 409);
-    assert.match(await refused.text(), /started discussion or brainstorm.*Nothing was sent/);
+    assert.match(await refused.text(), /started sprint or brainstorm.*Nothing was sent/);
   } finally {
     s.close();
   }
@@ -756,7 +756,7 @@ test('while peeking a closed board, /__say (messages/attachments) and /__work ar
   const screen = {
     clients: new Set(), transcript: [],
     room: { active: 'discussions/2026-11-20-live' },
-    peek: { name: '2026-11-01-closed', ref: '2026-11-01-closed', path: 'discussions/2026-11-01-closed', kind: 'discussion', title: 'Closed', messages: [], doc: null },
+    peek: { name: '2026-11-01-closed', ref: '2026-11-01-closed', path: 'discussions/2026-11-01-closed', kind: 'sprint', title: 'Closed', messages: [], doc: null },
     say: (t) => { said.push(t); },
     work: (t) => { worked.push(t); },
   };

@@ -18,12 +18,12 @@
   <text x="32" y="212" font-size="11" fill="#1168bd">• <tspan font-family="monospace">files/&lt;name&gt;</tspan>: attachments saved by <tspan font-family="monospace">ui.mjs</tspan> (≤25 MB each, ≤250 MB/msg)</text>
 
   <text x="32" y="236" font-weight="bold" fill="#b07a1f">Written inside discussions/&lt;date-title&gt;/ by agents (role instructions):</text>
-  <text x="32" y="252" font-size="11" fill="#b07a1f">• <tspan font-family="monospace">notes.md</tspan>, <tspan font-family="monospace">drawings/*.svg</tspan>: discussion notes, diagrams &amp; worker plans</text>
+  <text x="32" y="252" font-size="11" fill="#b07a1f">• <tspan font-family="monospace">notes.md</tspan>, <tspan font-family="monospace">drawings/*.svg</tspan>: sprint notes, diagrams &amp; worker plans</text>
   <text x="32" y="268" font-size="11" fill="#b07a1f">• <tspan font-family="monospace">handoff.md</tspan> → renamed to <tspan font-family="monospace">handoff-read-YYYYMMDD-HHMMSS.md</tspan></text>
   <text x="32" y="284" font-size="11" fill="#b07a1f">• <tspan font-family="monospace">pending-instructions.md</tspan>: unsent worker instructions word for word</text>
 
   <text x="32" y="308" font-weight="bold" fill="#1168bd">discussions/archive/ &amp; discussions/deferred/</text>
-  <text x="32" y="324" font-size="11">• Whole discussion folder moved by <tspan font-family="monospace">ui.mjs</tspan> (<tspan font-family="monospace">/move</tspan>, Archive, Defer, Resume)</text>
+  <text x="32" y="324" font-size="11">• Whole sprint folder moved by <tspan font-family="monospace">ui.mjs</tspan> (<tspan font-family="monospace">/move</tspan>, Archive, Defer, Resume)</text>
   <text x="32" y="344" font-size="10.5" fill="#555">Note: a Brainstorm has no folder, transcript or files here (lives in RAM only).</text>
   <text x="32" y="362" font-size="10.5" fill="#555">Agent-room checkout also holds <tspan font-family="monospace">rulebooks/*.md</tspan>, read on load/Reload.</text>
 
@@ -33,7 +33,7 @@
   <text x="790" y="83" fill="#fff" text-anchor="middle" font-weight="bold" font-size="13">2. Worker Git worktrees &amp; repository metadata</text>
 
   <text x="552" y="110" font-weight="bold" fill="#1168bd">Sibling worktree folders (created by ui.mjs on 1st worker task)</text>
-  <text x="552" y="126" font-size="11">• <tspan font-family="monospace">&lt;repo&gt;.workers/&lt;name&gt;/</tspan> on branch <tspan font-family="monospace">worker/&lt;name&gt;</tspan> (one per discussion)</text>
+  <text x="552" y="126" font-size="11">• <tspan font-family="monospace">&lt;repo&gt;.workers/&lt;name&gt;/</tspan> on branch <tspan font-family="monospace">worker/&lt;name&gt;</tspan> (one per sprint)</text>
   <text x="552" y="142" font-size="11">• <tspan font-family="monospace">&lt;repo&gt;.worker/</tspan> on branch <tspan font-family="monospace">worker/main</tspan> (brainstorm, pre-title, or legacy)</text>
   <text x="552" y="158" font-size="10.5" fill="#444">Fast-forwarded to <tspan font-family="monospace">main</tspan> before a task by <tspan font-family="monospace">ui.mjs</tspan> when clean &amp; strictly behind.</text>
 
@@ -59,7 +59,7 @@
   <text x="32" y="461" font-size="10.5" fill="#444">Saved provider, agent name &amp; model defaults across folders and launches.</text>
 
   <text x="32" y="483" font-weight="bold" fill="#1168bd">~/.local/state/agent-room/paused/&lt;sha256(root)&gt;/&lt;sha256(name)&gt;.json</text>
-  <text x="32" y="498" font-size="10.5" fill="#444">Per-discussion checkpoint (<tspan font-family="monospace">ui.mjs</tspan>): session IDs, chat, <tspan font-family="monospace">seen</tspan> map, worker log &amp;</text>
+  <text x="32" y="498" font-size="10.5" fill="#444">Per-sprint checkpoint (<tspan font-family="monospace">ui.mjs</tspan>): session IDs, chat, <tspan font-family="monospace">seen</tspan> map, worker log &amp;</text>
   <text x="32" y="512" font-size="10.5" fill="#444">tasks, token totals; or <tspan font-family="monospace">fresh: true</tspan> holding only the previous session's summary.</text>
 
   <text x="32" y="534" font-weight="bold" fill="#1168bd">~/.local/state/agent-room/programs/&lt;pid&gt;.json (agents.mjs)</text>
@@ -91,7 +91,7 @@
   <text x="552" y="588" font-size="11">• <tspan font-family="monospace">tmp/</tspan>: temporary bundles and atomic-write staging files</text>
 
   <text x="552" y="612" font-weight="bold" fill="#1168bd">received/&lt;discId&gt;/&lt;node&gt;/ (read-only peer views)</text>
-  <text x="552" y="628" font-size="11">• <tspan font-family="monospace">snapshots/&lt;commit&gt;/</tspan>: unpacked peer discussion files (mode <tspan font-family="monospace">0444</tspan>)</text>
+  <text x="552" y="628" font-size="11">• <tspan font-family="monospace">snapshots/&lt;commit&gt;/</tspan>: unpacked peer sprint files (mode <tspan font-family="monospace">0444</tspan>)</text>
   <text x="552" y="644" font-size="11">• <tspan font-family="monospace">published.json</tspan>: atomic pointer to latest snapshot; leased snapshots</text>
   <text x="562" y="658" font-size="10.5" fill="#444">stay while viewed in a browser (2-min lease), older unleased ones are pruned.</text>
 

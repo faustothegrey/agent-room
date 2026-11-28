@@ -10,8 +10,8 @@ class Source {
   close() {}
   send(event: object) { act(() => this.onmessage?.({ data: JSON.stringify(event) } as MessageEvent)); }
 }
-const room = { discussion: 'Live', active: 'discussions/live', started: true };
-const peek = { name: 'closed', title: 'Closed', path: 'discussions/closed', kind: 'discussion' };
+const room = { board: 'Live', active: 'discussions/live', started: true };
+const peek = { name: 'closed', title: 'Closed', path: 'discussions/closed', kind: 'sprint' };
 const fetchMock = vi.fn();
 const reset = (extra: object = {}) => Source.current.send({ type: 'reset', input: true, room, messages: [], doc: null, peek: null, ...extra });
 const frame = () => screen.getByTitle('Document viewer') as HTMLIFrameElement;

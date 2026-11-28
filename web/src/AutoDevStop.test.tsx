@@ -8,7 +8,7 @@ class Source {
   send(data: object) { act(() => this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)); }
 }
 const auto = { status: null, cycle: 0, max: 5, reason: null, waiting: false, offer: null };
-const room = { discussion: 'Live', active: 'discussions/live', started: true, brainstorm: false, research: false, workbench: false, autoDev: auto, workerStop: null };
+const room = { board: 'Live', active: 'discussions/live', started: true, brainstorm: false, research: false, workbench: false, autoDev: auto, workerStop: null };
 const summary = { speaker: 'Ada', html: '<p>Next step: do it</p><p>Outcome: agreed</p>', outcome: 'agreed', error: false, pass: false };
 const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, text: async () => '', json: async () => [] }));
 const setup = (extra: object = {}, messages: object[] = []) => { render(<App version="one" refresh={() => {}} />); Source.current.send({ type: 'reset', room: { ...room, ...extra }, messages, worker: [], input: true, workInput: true }); };
@@ -46,13 +46,13 @@ it('requires two clicks to stop, respects after/now states, and hides controls w
   expect((screen.getByRole('button', { name: /stop after this task/i }) as HTMLButtonElement).disabled).toBe(true);
   await user.click(screen.getByRole('button', { name: 'Stop now' })); await user.click(screen.getByRole('button', { name: 'Click again: stop now; partial edits may be left' }));
   expect(JSON.parse(String(fetchMock.mock.calls.filter(([url]) => url === '__stopworker')[1][1]?.body))).toEqual({ mode: 'now' });
-  Source.current.send({ type: 'reset', room: { ...room, workerStop: { after: false, now: false } }, messages: [], worker: [], input: true, workInput: true, peek: { name: 'old', kind: 'discussion', path: 'discussions/old', title: 'Old' } });
+  Source.current.send({ type: 'reset', room: { ...room, workerStop: { after: false, now: false } }, messages: [], worker: [], input: true, workInput: true, peek: { name: 'old', kind: 'sprint', path: 'discussions/old', title: 'Old' } });
   expect(screen.queryByRole('button', { name: 'Stop now' })).toBeNull();
 });
 
 it('shows an unsendable offer beside the summary and hides auto dev in read-only mode', () => {
   setup({ autoDev: { ...auto, offer: { error: 'missing quotes' } } }, [summary]);
   expect(screen.getByText('Auto dev can’t send this instruction: missing quotes.')).toBeTruthy();
-  Source.current.send({ type: 'reset', room: { ...room, autoDev: { ...auto, status: 'running', cycle: 1 } }, messages: [summary], worker: [], input: true, workInput: true, peek: { name: 'old', kind: 'discussion', path: 'discussions/old', title: 'Old' } });
+  Source.current.send({ type: 'reset', room: { ...room, autoDev: { ...auto, status: 'running', cycle: 1 } }, messages: [summary], worker: [], input: true, workInput: true, peek: { name: 'old', kind: 'sprint', path: 'discussions/old', title: 'Old' } });
   expect(screen.queryByText(/Auto dev running/)).toBeNull();
 });

@@ -297,7 +297,7 @@ button { font: inherit; font-size: .85rem; padding: .2rem .6rem; border-radius: 
 #files .entry.unviewable { opacity: .5; cursor: default; }
 #files .entry.unviewable:hover { background: none; }
 #files .entry::before, #board-list .entry::before { display: inline-block; width: 1.4em; }
-#files .entry.folder::before, #board-list .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.discussion::before, #board-list .entry.discussion::before { content: '💬'; } #board-list .entry.brainstorm::before { content: '💡'; } #board-list .entry.workbench::before { content: '🔧'; } #board-list .entry.research::before { content: '🔬'; }
+#files .entry.folder::before, #board-list .entry.folder::before { content: '📁'; } #files .entry.file::before { content: '📄'; } #files .entry.sprint::before, #board-list .entry.sprint::before { content: '🏃'; } #board-list .entry.brainstorm::before { content: '💡'; } #board-list .entry.workbench::before { content: '🔧'; } #board-list .entry.research::before { content: '🔬'; }
 #files .entry .tag, #board-list .entry .tag { color: var(--dim); font-size: .75rem; margin-left: .5rem; }
 #files .back, #board-list .back { border: 0; background: none; padding: 0; color: var(--dim); font-size: .80rem; margin: 0 0 .4rem; }
 #files .back:hover, #board-list .back:hover { color: CanvasText; text-decoration: underline; }

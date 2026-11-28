@@ -10,8 +10,8 @@ class Source {
   close() {}
   send(event: object) { act(() => this.onmessage?.({ data: JSON.stringify(event) } as MessageEvent)); }
 }
-const room = { discussion: 'Live', active: 'discussions/2026-11-23-live', started: true, autoDev: { status: null } };
-const peek = { name: '2026-11-10-closed', title: 'Closed', path: 'discussions/2026-11-10-closed', ref: '2026-11-10-closed', kind: 'discussion', messages: [], doc: null };
+const room = { board: 'Live', active: 'discussions/2026-11-23-live', started: true, autoDev: { status: null } };
+const peek = { name: '2026-11-10-closed', title: 'Closed', path: 'discussions/2026-11-10-closed', ref: '2026-11-10-closed', kind: 'sprint', messages: [], doc: null };
 const paths = ['README.md', 'discussions/2026-11-23-live/notes.md', 'discussions/2026-11-23-live/drawings/flow.svg', 'discussions/2026-11-10-closed/notes.md', 'discussions/2026-11-10-closed/archive.zip'];
 const entry = (speaker: string, html: string, extra: object = {}) => ({ speaker, html, pass: false, hidden: false, error: false, ...extra });
 const fetchMock = vi.fn();
@@ -105,7 +105,7 @@ it('clears a peek when the active discussion changes and keeps file selection ou
   Source.current.send({ type: 'reset', input: true, room, peek, doc: paths[3], messages: [entry('B', '<p>closed chat</p>')] });
   await userEvent.setup().click(screen.getByLabelText('Explorer tab'));
   await screen.findByRole('button', { name: 'notes.md' });
-  Source.current.send({ type: 'room', room: { ...room, active: 'discussions/new', discussion: 'New' } });
+  Source.current.send({ type: 'room', room: { ...room, active: 'discussions/new', board: 'New' } });
   expect(screen.queryByLabelText('Explorer tab')).toBeNull(); expect(screen.queryByText('closed chat')).toBeNull();
   Source.current.send({ type: 'doc', file: paths[3] });
   expect(screen.queryByLabelText('Explorer tab')).toBeNull(); expect(screen.getByTitle(paths[3])).toBeTruthy();

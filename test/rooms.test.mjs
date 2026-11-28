@@ -103,7 +103,7 @@ process.stdin.on('end', () => {
     const live = await fetchRunningRooms(Number(new URL(server).port));
     assert.equal(live.reachable, true);
     assert.deepEqual(live.rooms.map((r) => r.root), [alpha, beta]);
-    assert.deepEqual(live.rooms.map((r) => r.discussion), [resetA.room.active ?? null, resetB.room.active ?? null]);
+    assert.deepEqual(live.rooms.map((r) => r.board), [resetA.room.active ?? null, resetB.room.active ?? null]);
     const first = await fetch(server + '/__room', { redirect: 'manual' });
     assert.equal(first.status, 302);
     assert.equal(new URL(first.headers.get('location'), server).href, baseA + '__room');
@@ -261,8 +261,8 @@ process.stdin.on('end', () => {
     assert.equal((await fetch(origin + toB.url)).status, 200); // routed to its own page
     const b = await stream(baseB);
     const resetB = await b.next();
-    assert.equal(resetB.room.discussion, 'No discussion started');
-    assert.deepEqual(resetB.room.open.map((o) => [o.title, o.current]), [['Alpha topic', false], ['New discussion (not started)', true]]);
+    assert.equal(resetB.room.board, 'No sprint started');
+    assert.deepEqual(resetB.room.open.map((o) => [o.title, o.current]), [['Alpha topic', false], ['New sprint (not started)', true]]);
     await say(baseB, 'about beta');
     await b.until((e) => e.type === 'turn');
     // Resume the first from the second: it is open, so the window only goes back to it, as it was.
@@ -367,7 +367,7 @@ test('Restart with two rooms: both come back at the same addresses, with their c
     await say(baseB, '/resume 2026-11-08-topic');
     const before = await until(async () => {
       const [a, b] = [await json(baseA + '__health'), await json(baseB + '__health')];
-      return a?.discussion && b?.discussion && [a, b];
+      return a?.board && b?.board && [a, b];
     });
 
     await say(baseB, '/restart');
@@ -377,12 +377,12 @@ test('Restart with two rooms: both come back at the same addresses, with their c
     // just after it starts answering: open pages get a reset then).
     const [a, b] = await until(async () => {
       const [x, y] = [await json(baseA + '__health'), await json(baseB + '__health')];
-      return x && y && x.pid !== before[0].pid && x.discussion && y.discussion && [x, y];
+      return x && y && x.pid !== before[0].pid && x.board && y.board && [x, y];
     });
     newPid = a.pid;
     assert.equal(b.pid, a.pid);
-    assert.deepEqual([a.root, a.discussion], [one, 'discussions/2026-11-08-topic']);
-    assert.deepEqual([b.root, b.discussion], [two, 'discussions/2026-11-08-topic']);
+    assert.deepEqual([a.root, a.board], [one, 'discussions/2026-11-08-topic']);
+    assert.deepEqual([b.root, b.board], [two, 'discussions/2026-11-08-topic']);
     const [sa, sb] = [await json(baseA + '__settings'), await json(baseB + '__settings')];
     assert.deepEqual(sa.settings, { agents: [{ provider: 'claude', name: 'Ada', model: '' }], worker: { provider: 'claude', name: 'Wa', model: '' } });
     assert.deepEqual(sb.settings, changed);

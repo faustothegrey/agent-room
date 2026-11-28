@@ -10,7 +10,7 @@ class Source {
   close() {}
   send(data: object) { act(() => this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent)); }
 }
-const room = { folder: '/room', active: 'discussions/2026-11-20-live', discussion: 'Live', started: true };
+const room = { folder: '/room', active: 'discussions/2026-11-20-live', board: 'Live', started: true };
 const closed = { path: 'discussions/archive/2026-10-01-old', name: '2026-10-01-old', title: 'Old' };
 const files = ['README.md', 'discussions/README.md', 'discussions/2026-11-20-live/notes.md', 'discussions/2026-11-20-live/drawings/a.svg', 'discussions/2026-11-20-live/archive.zip', 'discussions/archive/2026-10-01-old/folder/old.md', ...Array.from({ length: 11 }, (_, n) => `src/file${n}.js`)];
 const fetchMock = vi.fn();

@@ -29,7 +29,7 @@ const fake: Ghostty = {
     onData(cb: (d: string) => void) { this.t.data = cb; } onResize(cb: (s: { cols: number; rows: number }) => void) { this.t.resize = cb; } } as unknown as Ghostty['Terminal'],
   FitAddon: class { f = { fit: vi.fn() }; constructor() { fits.push(this.f); } fit() { this.f.fit(); } observeResize() {} } as unknown as Ghostty['FitAddon'],
 };
-const room = { folder: '/room', discussion: 'Live', active: 'discussions/2026-11-25-live', started: true, open: [], members: [], failedAgents: [] };
+const room = { folder: '/room', board: 'Live', active: 'discussions/2026-11-25-live', started: true, open: [], members: [], failedAgents: [] };
 let token: () => unknown;
 const fetchMock = vi.fn(async (url: string) => url === '__health' ? new Promise(() => {}) : url === '__shell/token' ? token() : { ok: true, status: 200, json: async () => [], text: async () => '' });
 const terminalButton = () => screen.getByRole('button', { name: '⌨ Terminal' });

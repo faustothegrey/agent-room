@@ -247,7 +247,7 @@ export async function workerPlace(roomRoot, lane = null) {
     if (real(own) !== real(common)) return { disabled: `${top} is itself a linked Git worktree (such as a worker's): open the room in the main checkout instead.` };
     usableTops.set(root, top);
   }
-  if (lane && !branchSafe(lane)) return { disabled: `The discussion's folder name "${lane}" can't be a Git branch name (worker/${lane}), so its worker has no worktree. Rename the folder (letters, digits, ".", "_" and "-").` };
+  if (lane && !branchSafe(lane)) return { disabled: `The sprint's folder name "${lane}" can't be a Git branch name (worker/${lane}), so its worker has no worktree. Rename the folder (letters, digits, ".", "_" and "-").` };
   const path = lane ? join(dirname(top), `${basename(top)}.workers`, lane) : join(dirname(top), `${basename(top)}.worker`);
   return { root, top, path, cwd: join(path, relative(top, root)), branch: lane ? `worker/${lane}` : WORKER_BRANCH, lane };
 }
@@ -310,7 +310,7 @@ async function migrationCheck(place, list) {
   const base = await workerPlace(place.root);
   const shared = list.find((w) => w.path === real(base.path) && w.branch === WORKER_BRANCH);
   if (shared && existsSync(base.path) && (await worktreeStatus(base)).treeDirty)
-    throw new Error(`${base.path} (${WORKER_BRANCH}) has uncommitted edits: this discussion's own worktree is not created until they are committed or resolved there. Nothing was changed.`);
+    throw new Error(`${base.path} (${WORKER_BRANCH}) has uncommitted edits: this sprint's own worktree is not created until they are committed or resolved there. Nothing was changed.`);
   if (await gitOk(place.top, 'rev-parse', '--verify', '-q', `refs/heads/${WORKER_BRANCH}`)) {
     const main = await mainRef(place.top);
     const mine = (await labelledCommits(place.top, `${main}..${WORKER_BRANCH}`)).filter((c) => c.origin === place.lane);
@@ -537,9 +537,9 @@ export async function mergePreview(place, main) {
 
 // Callbacks belong to the current ui version; this factory stores no shared room state.
 export function createLaneActions({
-  shopOf, laneState, siblings, isDiscussion, parseSpec, readCheckpoint, writeCheckpoint,
-  note, discussionRef, closedDiscussions, runningTasks, queuedTasks, firstLine,
-  closeNamedDiscussion, queueWork, toScreen, workNote,
+  shopOf, laneState, siblings, isBoard, parseSpec, readCheckpoint, writeCheckpoint,
+  note, boardRef, closedBoards, runningTasks, queuedTasks, firstLine,
+  closeNamedBoard, queueWork, toScreen, workNote,
 }) {
 async function checkLaneCleanMerged(place) {
   const worktreeExists = existsSync(place.path) && (await worktrees(place.top)).some((w) => w.path === real(place.path));
@@ -729,7 +729,7 @@ function clearLaneAndWorkerSession(ctx, name) {
   lane.holdContext = null;
   lane.inspectionError = null;
   if (lane.recheck) { clearTimeout(lane.recheck); lane.recheck = null; }
-  const opened = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, name));
+  const opened = siblings(ctx).find((c) => !c.stopped && isBoard(c, name));
   if (opened) {
     const wName = parseSpec(opened.workerSpec ?? 'claude', true).name;
     const ws = opened.sessions?.get(`worker:${wName}`);
@@ -746,17 +746,17 @@ function clearLaneAndWorkerSession(ctx, name) {
 }
 
 function failActionReport(ctx, action, name, step, err, done, notDone, extra = '') {
-  const summary = `${action} for ${name} stopped at "${step}": ${err.message}. Done: ${done.length ? done.join('; ') : 'nothing'}. Not done: ${notDone.join('; ')}.${extra ? ` ${extra}` : ''} The discussion was left open.`;
+  const summary = `${action} for ${name} stopped at "${step}": ${err.message}. Done: ${done.length ? done.join('; ') : 'nothing'}. Not done: ${notDone.join('; ')}.${extra ? ` ${extra}` : ''} The sprint was left open.`;
   note(ctx, `✗ ${summary}`, true);
   throw new Error(summary);
 }
 
 async function inspectDiscard(ctx, name, { selfLock = null } = {}) {
-  const d = discussionRef(join(ctx.cwd, 'discussions'), name);
-  if (!d) throw new Error(`No discussion "${name}".`);
+  const d = boardRef(join(ctx.cwd, 'discussions'), name);
+  if (!d) throw new Error(`No sprint "${name}".`);
   const shop = shopOf(ctx), closing = shop.closing ??= new Map();
   if (closing.has(d.name)) throw new Error(`${d.name} is already closing.`);
-  if (closedDiscussions(ctx).includes(d.name)) throw new Error(`${d.name} is already closed.`);
+  if (closedBoards(ctx).includes(d.name)) throw new Error(`${d.name} is already closed.`);
   if (shop.merging && shop.merging !== selfLock) throw new Error(`Cannot Close and Discard ${d.name}: ${shop.merging} is already in progress in this room.`);
   const tasks = [...runningTasks(shop), ...queuedTasks(shop)].filter((t) => t.owner === d.name);
   if (tasks.length) {
@@ -843,7 +843,7 @@ async function closeAndDiscard(ctx, name, snapshot) {
           ...(worktreeExists ? [`worktree ${place.path} not removed`] : []),
           `branch ${place.branch} not deleted`,
           'lane hold and worker session not cleared',
-          'discussion not closed',
+          'sprint not closed',
         ]);
       }
     }
@@ -855,7 +855,7 @@ async function closeAndDiscard(ctx, name, snapshot) {
         failReport('remove worktree', err, [
           ...(branchExists ? [`branch ${place.branch} not deleted`] : []),
           'lane hold and worker session not cleared',
-          'discussion not closed',
+          'sprint not closed',
         ]);
       }
     }
@@ -866,7 +866,7 @@ async function closeAndDiscard(ctx, name, snapshot) {
       } catch (err) {
         failReport('delete branch', err, [
           'lane hold and worker session not cleared',
-          'discussion not closed',
+          'sprint not closed',
         ]);
       }
     }
@@ -878,9 +878,9 @@ async function closeAndDiscard(ctx, name, snapshot) {
       ? `Worker work discarded: ${plural(preview.commits.length, 'commit')} kept at \`${savedRef}\`.`
       : 'Worker work discarded: nothing committed.';
     try {
-      await closeNamedDiscussion(ctx, d.name, { extraLine: discardLine, rethrow: true });
+      await closeNamedBoard(ctx, d.name, { extraLine: discardLine, rethrow: true });
     } catch (err) {
-      failReport('close discussion', err, ['discussion not closed']);
+      failReport('close sprint', err, ['sprint not closed']);
     }
     return { ok: true, savedRef };
   } finally {
@@ -958,7 +958,7 @@ async function mergeReadiness(ctx, place) {
 
 async function activeWorkNotice(ctx, name, place, targetBranch) {
   const shop = shopOf(ctx);
-  const otherRounds = siblings(ctx).filter((c) => !c.stopped && c.discussion?.name !== name && !!c.screen?.thinking).length;
+  const otherRounds = siblings(ctx).filter((c) => !c.stopped && c.board?.name !== name && !!c.screen?.thinking).length;
   const otherRunning = runningTasks(shop).filter((t) => t.owner !== name);
   const otherQueued = queuedTasks(shop).filter((t) => t.owner !== name);
   const taskBranch = (t) => (t.lane ? `worker/${t.lane}` : WORKER_BRANCH);
@@ -972,7 +972,7 @@ async function activeWorkNotice(ctx, name, place, targetBranch) {
   }
 
   const activeParts = [];
-  if (otherRounds) activeParts.push(`${plural(otherRounds, 'discussion')} in a round`);
+  if (otherRounds) activeParts.push(`${plural(otherRounds, 'sprint')} in a round`);
   if (otherRunning.length) {
     const branches = [...new Set(otherRunning.map(taskBranch))].join(', ');
     activeParts.push(`${plural(otherRunning.length, 'worker task')} running (${branches})`);
@@ -988,11 +988,11 @@ async function activeWorkNotice(ctx, name, place, targetBranch) {
 }
 
 async function inspectCloseMerge(ctx, name, { selfLock = null } = {}) {
-  const d = discussionRef(join(ctx.cwd, 'discussions'), name);
-  if (!d) throw new Error(`No discussion "${name}".`);
+  const d = boardRef(join(ctx.cwd, 'discussions'), name);
+  if (!d) throw new Error(`No sprint "${name}".`);
   const shop = shopOf(ctx), closing = shop.closing ??= new Map();
   if (closing.has(d.name)) throw new Error(`${d.name} is already closing.`);
-  if (closedDiscussions(ctx).includes(d.name)) throw new Error(`${d.name} is already closed.`);
+  if (closedBoards(ctx).includes(d.name)) throw new Error(`${d.name} is already closed.`);
   if (shop.merging && shop.merging !== selfLock) throw new Error(`Cannot Close and Merge ${d.name}: ${shop.merging} is already in progress in this room.`);
   const place = await lanePlace(ctx, d.name);
   if (place.disabled) throw new Error(place.disabled);
@@ -1039,9 +1039,9 @@ async function closeMergePreview(ctx, name) {
 }
 
 async function catchUpWithBranch(ctx, name) {
-  const d = discussionRef(join(ctx.cwd, 'discussions'), name);
-  if (!d) throw new Error(`No discussion "${name}".`);
-  const opened = siblings(ctx).find((c) => !c.stopped && isDiscussion(c, d.name));
+  const d = boardRef(join(ctx.cwd, 'discussions'), name);
+  if (!d) throw new Error(`No sprint "${name}".`);
+  const opened = siblings(ctx).find((c) => !c.stopped && isBoard(c, d.name));
   if (!opened) throw new Error(`Continue ${d.name} first so its worker can catch up.`);
   const place = await lanePlace(opened, d.name);
   if (place.disabled) throw new Error(place.disabled);
@@ -1086,12 +1086,12 @@ async function closeAndMerge(ctx, name, snapshot, { _beforeMerge = null } = {}) 
       if (hasMergeHead) {
         try {
           await git(place.top, 'merge', '--abort');
-          report = `Merge of ${place.branch} into ${targetBranch} failed (${err.message}). Aborted the merge; the room's checkout is back as it was. The branch, worktree and discussion were left open.`;
+          report = `Merge of ${place.branch} into ${targetBranch} failed (${err.message}). Aborted the merge; the room's checkout is back as it was. The branch, worktree and sprint were left open.`;
         } catch (abortErr) {
-          report = `Merge of ${place.branch} into ${targetBranch} failed (${err.message}), and git merge --abort also failed (${abortErr.message}). The room's checkout may still be mid-merge: inspect git status and git diff in ${place.top}, then run git merge --abort or git reset --merge as appropriate. The branch, worktree and discussion were left open.`;
+          report = `Merge of ${place.branch} into ${targetBranch} failed (${err.message}), and git merge --abort also failed (${abortErr.message}). The room's checkout may still be mid-merge: inspect git status and git diff in ${place.top}, then run git merge --abort or git reset --merge as appropriate. The branch, worktree and sprint were left open.`;
         }
       } else {
-        report = `Merge of ${place.branch} into ${targetBranch} failed (${err.message}). No merge was left in progress; the branch, worktree and discussion were left open.`;
+        report = `Merge of ${place.branch} into ${targetBranch} failed (${err.message}). No merge was left in progress; the branch, worktree and sprint were left open.`;
       }
       note(ctx, `✗ ${report}`, true);
       throw new Error(report);
@@ -1110,7 +1110,7 @@ async function closeAndMerge(ctx, name, snapshot, { _beforeMerge = null } = {}) 
         failAfterMerge('remove worktree', err, [
           `branch ${place.branch} not deleted`,
           'lane hold and worker session not cleared',
-          'discussion not closed',
+          'sprint not closed',
         ]);
       }
     }
@@ -1122,7 +1122,7 @@ async function closeAndMerge(ctx, name, snapshot, { _beforeMerge = null } = {}) 
     } catch (err) {
       failAfterMerge('delete branch', err, [
         'lane hold and worker session not cleared',
-        'discussion not closed',
+        'sprint not closed',
       ]);
     }
 
@@ -1134,9 +1134,9 @@ async function closeAndMerge(ctx, name, snapshot, { _beforeMerge = null } = {}) 
     // 5. Close discussion with closing-statement line.
     const mergeLine = `Worker work merged into \`${targetBranch}\` as \`${mergeCommit}\`.`;
     try {
-      await closeNamedDiscussion(ctx, d.name, { extraLine: mergeLine, rethrow: true });
+      await closeNamedBoard(ctx, d.name, { extraLine: mergeLine, rethrow: true });
     } catch (err) {
-      failAfterMerge('close discussion', err, ['discussion not closed']);
+      failAfterMerge('close sprint', err, ['sprint not closed']);
     }
     if (restart.length) note(ctx, `This merge changes ${restart.join(', ')}: Restart to apply it (Reload can't).`, true);
     return { ok: true, mergeCommit, targetBranch, restart };
@@ -1190,7 +1190,7 @@ async function refreshWorker(ctx, { prepare = false, fastForward = true, place =
   return place;
 }
 // A context's lane: its discussion's, or worker/main's for a brainstorm or before the first message.
-const laneOf = (ctx) => (ctx.discussion && !ctx.state?.brainstorm ? ctx.discussion.name : null);
+const laneOf = (ctx) => (ctx.board && !ctx.state?.brainstorm ? ctx.board.name : null);
 async function workerInfo(ctx, seen = new Map(), own = null) {
   own ??= await lanePlace(ctx, laneOf(ctx));
   if (own.disabled) return { lines: [own.disabled], disabled: true };

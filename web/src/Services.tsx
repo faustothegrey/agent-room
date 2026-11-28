@@ -167,7 +167,7 @@ function Health({ open, post }: { open: boolean; post: ProvidersPost }) {
     }
     line("Claude's list is agent-room's own; being in that list proves little about availability.");
     heading('Configured models');
-    for (const group of data.configured) { line('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started')); for (const a of group.agents) line(a.role + ' ' + a.name + ' · ' + a.provider + ' · ' + (a.model || 'CLI default') + ' · ' + a.alignment); }
+    for (const group of data.configured) { line('Room ' + group.room + ' · ' + (group.board || 'no sprint started')); for (const a of group.agents) line(a.role + ' ' + a.name + ' · ' + a.provider + ' · ' + (a.model || 'CLI default') + ' · ' + a.alignment); }
     if (data.defaults) { line('Saved defaults'); for (const a of data.defaults) line(a.role + ' ' + a.name + ' · ' + a.provider + ' · ' + (a.model || 'CLI default') + ' · ' + a.alignment); }
     else line('Saved defaults: none available');
     heading('Prompt tests');
@@ -185,19 +185,19 @@ function Health({ open, post }: { open: boolean; post: ProvidersPost }) {
     heading('Operations');
     line('Operations · provider and model used now');
     for (const group of data.configured) {
-      line('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started'));
+      line('Room ' + group.room + ' · ' + (group.board || 'no sprint started'));
       const members = group.agents.filter((a) => a.role === 'member'), worker = group.agents.find((a) => a.role === 'worker');
       const model = (a: { model: string } | undefined) => a?.model || 'CLI default';
       const rows = members.map((a) => ['Discussion turn · ' + a.name + (a.enabled ? '' : ' (disabled)'), a.provider, model(a)]);
       rows.push(...members.filter((a) => a.enabled).map((a) => ['Summary · ' + a.name, a.provider, model(a)]));
-      rows.push(['Worker tasks · ' + worker?.name, worker?.provider ?? '', model(worker)], ['Closing statement · new session', worker?.provider ?? '', model(worker)], ['Discussion title', 'Claude', 'CLI default'],
+      rows.push(['Worker tasks · ' + worker?.name, worker?.provider ?? '', model(worker)], ['Closing statement · new session', worker?.provider ?? '', model(worker)], ['Board title', 'Claude', 'CLI default'],
         ['Login check · claude auth status', 'Claude', 'not applicable'], ['Login check · codex login status', 'Codex', 'not applicable'], ['Login check', 'Agy', 'not monitored'], ['Quota meter', 'quota meter', 'not applicable']);
       table(['Operation', 'Provider', 'Model'], rows);
     }
     heading('Sessions');
     line('Sessions are memory between turns, not running programs. This list covers only sessions known to agent-room.');
     for (const group of data.sessions) {
-      line('Room ' + group.room + ' · ' + (group.discussion || 'no discussion started'));
+      line('Room ' + group.room + ' · ' + (group.board || 'no sprint started'));
       table(['Agent', 'Provider', 'Session ID', 'Last turn', 'Latest error'], group.agents.map((a) => [a.role + ' ' + a.name, a.provider, a.id || 'none yet',
         a.lastTurn ? when(a.lastTurn.ended) + ' · ' + a.lastTurn.outcome : 'none yet', a.lastTurn?.error ? when(a.lastTurn.error.at) + ' · ' + a.lastTurn.error.message : 'none']));
     }
@@ -245,7 +245,7 @@ export function ProvidersPanel({ open, healthOpen, setHealthOpen, warning, post,
     setStatus('Saving…');
     queue.current = queue.current.then(async () => {
       const res = await post('__settings', value); if (!res.ok) throw new Error(await res.text());
-      setStatus((await res.json() as SettingsSaveReply).applied ? 'Saved: the defaults, and this discussion.' : 'Saved as the defaults for new discussions.');
+      setStatus((await res.json() as SettingsSaveReply).applied ? 'Saved: the defaults, and this board.' : 'Saved as the defaults for new boards.');
     }).catch((err: unknown) => setStatus('Could not save: ' + message(err)));
   };
   const change = (row: Row, i: number | null) => (edit: Partial<Row> | 'provider' | 'toggle', value?: string | boolean) => {
@@ -260,7 +260,7 @@ export function ProvidersPanel({ open, healthOpen, setHealthOpen, warning, post,
   };
   return <div className="providers">
     <form className="providers-panel" id="providers-form" aria-label="Default providers" onSubmit={(e) => { e.preventDefault(); save(); }}>
-      {panel && <p className="settings-hint">{panel.started ? 'Defaults for new discussions, in this room and every other. This discussion has started: it keeps its agents and worker (change those in its own tabs).' : 'Defaults for new discussions, in this room and every other. This discussion hasn’t started, so they apply to it too.'}</p>}
+      {panel && <p className="settings-hint">{panel.started ? 'Defaults for new boards, in this room and every other. This board has started: it keeps its agents and worker (change those in its own tabs).' : 'Defaults for new boards, in this room and every other. This board hasn’t started, so they apply to it too.'}</p>}
       <h3 className="providers-heading">Discussion members</h3>
       {panel?.agents.map((row, i) => <AgentRow key={i} row={row} models={panel.models} title={'Agent ' + (i + 1)} member={!!panel.plan} locked={!!panel.plan?.locked(i)} disabled={false} change={change(row, i)} commit={save} />)}
       {panel?.plan && panel.agents.some((_, i) => panel.plan!.locked(i)) && <p className="settings-hint member-note">At least two members. To swap one, tick the new row first, then untick the old one.</p>}

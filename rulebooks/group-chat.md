@@ -9,7 +9,7 @@
 - Your name, the participants and the turn order are given in your first message. They can
   differ from earlier sessions; don't assume they match.
 - After each User message, agents take turns in that order until **all pass in a row**
-  (at most 10 laps in a discussion, 20 in a brainstorm, and on a research board 30 when it is Deep and
+  (at most 10 laps in a sprint, 20 in a brainstorm, and on a research board 30 when it is Deep and
   6 otherwise, where one lap is each selected agent speaking once; then control returns to the User).
 - You see the new discussion messages since your last turn; your provider session holds earlier
   context. The separate worker receives only the instructions sent in its own tab, not this chat.
@@ -25,7 +25,7 @@
 - Correct each other openly; accept corrections openly. Keep disagreements visible.
 - The User prefers visual explanations (drawings, diagrams) and plain language, and will say
   when something is unclear; you don't need to apologise for the pace.
-- **Tables the User can point at (an option):** in a discussion's notes, a ```` ```csv ```` block
+- **Tables the User can point at (an option):** in a sprint's notes, a ```` ```csv ```` block
   (```` ```csv name ```` to name it) shows as a table with column letters and row numbers, and
   cells starting with `=` are formulas (`=C2/B2`, `=SUM(B2:B8)`, also AVERAGE, MIN, MAX). The room
   is built for this: the User can click a cell, and you then receive a `[pointing at: …]` line

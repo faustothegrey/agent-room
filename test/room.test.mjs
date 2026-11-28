@@ -23,7 +23,7 @@ test('the closing statement is one turn of the given agent, with the worker repo
   const result = await closingStatement(writer, { dir: '/project/discussions/topic', workerReports: 'worker finished' });
   assert.equal(result, 'Final: pending-instructions.md');
   assert.equal(writer.prompts.length, 1);
-  assert.match(writer.prompts[0], /The User is closing this discussion\./);
+  assert.match(writer.prompts[0], /The User is closing this sprint\./);
   assert.match(writer.prompts[0], /\/project\/discussions\/topic\/closing-statement\.md/);
   assert.match(writer.prompts[0], /worker finished/);
 });
@@ -266,7 +266,7 @@ test('summary: the draft is agreed when the other agent passes on it', async () 
     assert.match(p, /Next step contains exactly one action for the User, labelled Answer, Send to the Worker or Do as appropriate/);
     assert.match(p, /\*\*Later\*\*\n- the remaining actions in order, one short line each, each saying what it waits for/);
     assert.match(p, /Keep each instruction for the worker until the User confirms it was sent, replaced or withdrawn/);
-    assert.match(p, /Quote its latest version word for word when it is the Next step; under Later refer to it by name,\nwith its full text kept in the discussion's pending-instructions\.md/);
+    assert.match(p, /Quote its latest version word for word when it is the Next step; under Later refer to it by name,\nwith its full text kept in the sprint's pending-instructions\.md/);
     assert.match(p, /At most 8 points in all under Agreed, Disputed and Open/);
     assert.doesNotMatch(p, /\*\*Questions for the User\*\*|\*\*Instructions for the Worker\*\*/);
   }

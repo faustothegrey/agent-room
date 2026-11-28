@@ -6,9 +6,9 @@ import { dirname, join } from 'node:path';
 
 export const SCHEDULE_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 export function createScheduler({ siblings, toScreen, showHeader, checkpoints, DATED, isWorkbenchDir,
-  SECTIONS, shopOf, discussionRef, day, pad, load, isResearchDir, isDiscussion, readCheckpoint,
-  roomDefaults, parseSpec, refreshQuota, openBeside, resumeDiscussion, newResearch, wire,
-  openDiscussion, runRound, saveCheckpoint, fresh, closeContext, chooseResearchKind }) {
+  SECTIONS, shopOf, boardRef, day, pad, load, isResearchDir, isBoard, readCheckpoint,
+  roomDefaults, parseSpec, refreshQuota, openBeside, resumeBoard, newResearch, wire,
+  openBoard, runRound, saveCheckpoint, fresh, closeContext, chooseResearchKind }) {
 // ── Scheduler (research tasks) ─────────────────────────────────
 // Per-room schedule stored in agent-room's local state, outside the project's working tree:
 // ~/.local/state/agent-room/schedules/<sha256 of realpath(room folder)>.json
@@ -54,7 +54,7 @@ function broadcastSchedule(ctx) {
   showHeader(ctx);
 }
 
-function listScheduleDiscussions(ctx) {
+function listScheduleBoards(ctx) {
   const parent = join(ctx.cwd, 'discussions');
   if (!existsSync(parent)) return [];
   const savedTitles = new Map(checkpoints(ctx).map((c) => [c.name, c.title]));
@@ -77,7 +77,7 @@ function getSchedule(ctx) {
   const running = shopOf(ctx).schedulerRunningTasks ?? new Set();
   return {
     quotaFloor: data.quotaFloor,
-    discussions: listScheduleDiscussions(ctx),
+    boards: listScheduleBoards(ctx),
     tasks: data.tasks.map((t) => ({
       id: t.id,
       kind: t.kind,
@@ -98,7 +98,7 @@ const taskKind = (t) => ({ deep: t?.researchKind?.deep === true, theoretical: t?
 function validateTaskInput(ctx, body) {
   const kind = body?.kind;
   if (kind !== 'research' && kind !== 'recurring') {
-    const d = body?.discussion && discussionRef(join(ctx.cwd, 'discussions'), body.discussion);
+    const d = body?.board && boardRef(join(ctx.cwd, 'discussions'), body.board);
     if (d && isWorkbenchDir(join(ctx.cwd, 'discussions', d.section ?? '', d.name))) throw new Error('Workbenches cannot be scheduled.');
     throw new Error('Choose a research task type.');
   }
@@ -186,9 +186,9 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
   try {
     const parent = join(ctx.cwd, 'discussions');
     const ref = task.board && [task.board, ...SECTIONS.map((section) => `${section}/${task.board}`)]
-      .find((candidate) => discussionRef(parent, candidate));
+      .find((candidate) => boardRef(parent, candidate));
     if (task.board && (!ref || !isResearchDir(join(parent, ref)))) throw new Error(`Research board ${task.board} was not found.`);
-    let open = task.board && siblings(ctx).find((c) => !c.stopped && isDiscussion(c, task.board));
+    let open = task.board && siblings(ctx).find((c) => !c.stopped && isBoard(c, task.board));
     if (open?.busy) {
       const reason = `${task.board} has a round or summary in progress`;
       recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
@@ -208,7 +208,7 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
     }
     if (task.board && !isResearchDir(join(parent, ref))) throw new Error(`Research board ${task.board} is no longer research.`);
     // Another round may have started while quota was being fetched.
-    open = task.board && siblings(ctx).find((c) => !c.stopped && isDiscussion(c, task.board));
+    open = task.board && siblings(ctx).find((c) => !c.stopped && isBoard(c, task.board));
     if (open?.busy) {
       const reason = `${task.board} has a round or summary in progress`;
       recordTaskRun(ctx, task.id, 'skipped', reason, at, task.lastTriggerKey);
@@ -220,19 +220,19 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
       runCtx = await openBeside(ctx);
       createdBeside = true;
       if (task.board) {
-        await resumeDiscussion(runCtx, ref, { loadRoom });
-        if (!isDiscussion(runCtx, task.board)) throw new Error(`Could not resume research board ${task.board}.`);
+        await resumeBoard(runCtx, ref, { loadRoom });
+        if (!isBoard(runCtx, task.board)) throw new Error(`Could not resume research board ${task.board}.`);
       } else await newResearch(runCtx);
     } else {
       const state = { transcript: [], seen: new Map(), research: true }, sessions = new Map();
-      runCtx = { ...ctx, state, sessions, discussion: null, programs: { running: new Set(), stopping: false },
+      runCtx = { ...ctx, state, sessions, board: null, programs: { running: new Set(), stopping: false },
         screen: { clients: new Set(), transcript: state.transcript, worker: shop.log }, lastRound: null, logPath: null,
         checkpointError: null, hub: null, noScreen: true };
       Object.assign(runCtx, await loadRoom(runCtx, `?sched=${Date.now()}`), { state, sessions, usage: ctx.usage });
       wire(runCtx);
       if (task.board) {
-        await resumeDiscussion(runCtx, ref, { loadRoom });
-        if (!isDiscussion(runCtx, task.board)) throw new Error(`Could not resume research board ${task.board}.`);
+        await resumeBoard(runCtx, ref, { loadRoom });
+        if (!isBoard(runCtx, task.board)) throw new Error(`Could not resume research board ${task.board}.`);
       }
     }
     if (runCtx.busy) {
@@ -246,12 +246,12 @@ async function runScheduledResearch(ctx, task, data, { now, loadRoom }) {
       // A new board is created with the task's kind (ignored when the board already exists).
       chooseResearchKind(runCtx, taskKind(task));
       let opened;
-      try { opened = await openDiscussion(runCtx, task.prompt); } finally { runCtx.suggestTitle = suggestTitle; }
+      try { opened = await openBoard(runCtx, task.prompt); } finally { runCtx.suggestTitle = suggestTitle; }
       if (!opened) throw new Error('Could not create the research board or transcript.');
     }
     if (task.kind === 'recurring' && !task.board) {
       const current = readSchedule(ctx), stored = current.tasks.find((t) => t.id === task.id);
-      if (stored) { stored.board = runCtx.discussion.name; writeSchedule(ctx, current); broadcastSchedule(ctx); }
+      if (stored) { stored.board = runCtx.board.name; writeSchedule(ctx, current); broadcastSchedule(ctx); }
     }
     const result = await runRound(task.prompt, runCtx, {
       speaker: 'Scheduler',

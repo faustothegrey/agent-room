@@ -5,8 +5,8 @@ import { join } from 'node:path';
 
 export function createWorkshop({
   siblings, ownerOf, originLabel, toScreen, out, red, bold, dim, note, showHeader,
-  workOf, persistWork, discussionRef, firstLine, clock, log, runRound, saveSettings,
-  openDiscussion, leftBehind, rollbackReport, saveCheckpoint, saveLeftWorker, refreshQuota,
+  workOf, persistWork, boardRef, firstLine, clock, log, runRound, saveSettings,
+  openBoard, leftBehind, rollbackReport, saveCheckpoint, saveLeftWorker, refreshQuota,
   isWorkbenchDir, defaultInstructions, defaultFormattedTurn, real, git, gitOk, labelledCommits,
   lanePlace, existingLanes, worktreeStatus, workerGitFacts, checkWorkerReport, NOTES, WORKER_BRANCH,
   plural, laneOf, refreshWorker, worktreeFingerprint, recordTested,
@@ -108,9 +108,9 @@ async function recordedOwner(ctx, place) {
         typeof r.task !== 'string' || !r.task.trim() || typeof r.before !== 'string' ||
         !/^[0-9a-f]{40,64}$/.test(r.before) || !await gitOk(place.path, 'cat-file', '-e', `${r.before}^{commit}`)) return { origin: null };
     const origin = siblings(ctx).find((c) => !c.stopped && (r.label === 'brainstorm'
-      ? c.state.brainstorm && typeof r.brainstormId === 'string' && c.state.brainstormId === r.brainstormId : c.discussion?.name === r.label && existsSync(c.discussion.dir)));
+      ? c.state.brainstorm && typeof r.brainstormId === 'string' && c.state.brainstormId === r.brainstormId : c.board?.name === r.label && existsSync(c.board.dir)));
     const exists = r.label !== 'brainstorm' && [r.label, `archive/${r.label}`, `deferred/${r.label}`]
-      .some((ref) => discussionRef(join(ctx.cwd, 'discussions'), ref));
+      .some((ref) => boardRef(join(ctx.cwd, 'discussions'), ref));
     const owner = r.label === 'brainstorm' ? (typeof r.brainstormId === 'string' ? `brainstorm:${r.brainstormId}` : null) : r.label;
     return origin || exists ? { origin: origin ?? null, owner, label: r.label, task: r.task, before: r.before } : { origin: null };
   } catch { return { origin: null }; }
@@ -148,7 +148,7 @@ function rememberCommits(shop, commits) {
   for (const c of commits) if (!ids.has(c.id)) { completed.push(c); ids.add(c.id); }
 }
 function workNotice(ctx) {
-  if (!ctx.discussion || ctx.state.brainstorm) return; // a brainstorm sends no work
+  if (!ctx.board || ctx.state.brainstorm) return; // a brainstorm sends no work
   const shop = shopOf(ctx), reported = shop.reported ??= new Map();
   if (!reported.has(originLabel(ctx))) reported.set(originLabel(ctx), new Set());
   const seen = reported.get(originLabel(ctx));
@@ -168,7 +168,7 @@ function hold(ctx, blockedBy) {
   lane.holdContext = ctx;
   const where = blockedBy.label ? `[${blockedBy.label}]` : 'an unknown origin';
   workNote(ctx, `✗ The worker's folder ${blockedBy.place.path} (${blockedBy.place.branch}) has uncommitted edits from ${where}${blockedBy.task ? ` ("${blockedBy.task}")` : ''}: its queue holds${blockedBy.label ? ` until [${blockedBy.label}] resolves them (its own instructions still go through)` : ' until the folder is clean (commit or remove those edits yourself)'}; other lanes go on.`, true, null, blockedBy.owner ?? (blockedBy.place.lane || ownerOf(ctx)));
-  if (blockedBy.origin) note(blockedBy.origin, `✗ The worker left uncommitted edits from "${blockedBy.task}": the worker lane of [${blockedBy.label}] holds them until they are resolved (other discussions' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).`, true);
+  if (blockedBy.origin) note(blockedBy.origin, `✗ The worker left uncommitted edits from "${blockedBy.task}": the worker lane of [${blockedBy.label}] holds them until they are resolved (other sprints' tasks go on). Ask the worker to finish and commit them, or to abandon the attempt (it lists the edits and waits for your approval).`, true);
   showHeader(ctx);
   if (!lane.pumping) watchLane(shop, lane);
 }
@@ -176,7 +176,7 @@ function release(ctx, lane) {
   const was = lane.blockedBy;
   lane.blockedBy = null;
   workNote(ctx, `The worker's folder ${was.place.path} is clean again: its queue resumes.`, false, null, was.owner ?? (was.place.lane || ownerOf(ctx)));
-  if (was?.origin) note(was.origin, 'The worker\'s folder is clean again: this discussion\'s worker tasks resume.');
+  if (was?.origin) note(was.origin, 'The worker\'s folder is clean again: this sprint\'s worker tasks resume.');
   showHeader(ctx);
 }
 // Starts every lane that has work and may run. A lane that can't start for lack of a free place
@@ -285,7 +285,7 @@ function stopWorker(ctx, mode) {
   const label = t?.label ?? originLabel(ctx);
   workNote(ctx, !t ? `No instruction from [${label}] was running.${cancelled.length ? '' : ' Nothing was stopped.'}`
     : mode === 'now' ? `Stop now: [${label}] "${firstLine(t.text)}" is being stopped; what it left follows.`
-      : `Stop after this task: [${label}] "${firstLine(t.text)}" finishes and is reported as usual; nothing more from this discussion runs after it.`, false, label, owner);
+      : `Stop after this task: [${label}] "${firstLine(t.text)}" finishes and is reported as usual; nothing more from this sprint runs after it.`, false, label, owner);
   for (const x of cancelled) {
     const view = { ...ctx.docs.messageView({ speaker: 'agent-room', text: `Not started, cancelled by the stop: [${x.label}] instruction sent ${x.record ? clock(x.record.at) : 'earlier'}. Its full text, to send again if still wanted:\n\n${x.retry?.text ?? x.text}` }), origin: x.label, owner };
     shop.log.push(view);
@@ -490,10 +490,10 @@ function autoDevView(ctx) {
 // /autodev: Start or Restart from the latest agreed summary.
 function startAutoDev(ctx) {
   const s = latestAgreed(ctx);
-  const why = ctx.state.brainstorm ? 'auto dev is for discussions; a brainstorm keeps no saved record'
+  const why = ctx.state.brainstorm ? 'auto dev is for sprints; a brainstorm keeps no saved record'
     : ctx.state.workbench ? 'auto dev is not used on a workbench'
     : ctx.state.research ? 'auto dev is not used on a research board'
-    : !ctx.logPath ? 'it needs a started discussion'
+    : !ctx.logPath ? 'it needs a started sprint'
     : !ctx.say ? 'it works from the browser screen'
     : ctx.autoDev?.status === 'running' ? 'it is already running'
     : ctx.screen.workerInfo?.disabled ? ctx.screen.workerInfo.lines[0]
@@ -630,14 +630,14 @@ async function retryWork(ctx, id, settings = null) {
   }
 }
 
-const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a discussion to send work.';
+const BRAINSTORM_NO_WORK = 'Turn this brainstorm into a sprint to send work.';
 async function sendWorkbenchInstruction(ctx, text) {
   if (ctx.stopped) return note(ctx, 'This room is ending: the instruction was not sent.', true);
-  if (ctx.discussion && shopOf(ctx).closing?.has(ctx.discussion.name)) return note(ctx, '✗ This workbench is closing; the instruction was not sent.', true);
+  if (ctx.board && shopOf(ctx).closing?.has(ctx.board.name)) return note(ctx, '✗ This workbench is closing; the instruction was not sent.', true);
   if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
   if (!ctx.logPath) {
     if (!ctx.openingWorkbench) {
-      ctx.openingWorkbench = openDiscussion(ctx, text).finally(() => { ctx.openingWorkbench = null; });
+      ctx.openingWorkbench = openBoard(ctx, text).finally(() => { ctx.openingWorkbench = null; });
     }
     const ok = await ctx.openingWorkbench;
     if (!ok || !ctx.logPath) return;
@@ -646,8 +646,8 @@ async function sendWorkbenchInstruction(ctx, text) {
 }
 function queueWork(ctx, text, run = null, rollback = null, retry = null, { catchUp = false } = {}) {
   if (ctx.state.brainstorm) return note(ctx, `✗ ${BRAINSTORM_NO_WORK} The instruction was not sent.`, true);
-  if (ctx.state.research) return note(ctx, '✗ A research board has no worker. Open a discussion to send work. The instruction was not sent.', true);
-  if (ctx.discussion && shopOf(ctx).closing?.has(ctx.discussion.name)) return note(ctx, '✗ This discussion is closing; the instruction was not sent.', true);
+  if (ctx.state.research) return note(ctx, '✗ A research board has no worker. Open a sprint to send work. The instruction was not sent.', true);
+  if (ctx.board && shopOf(ctx).closing?.has(ctx.board.name)) return note(ctx, '✗ This sprint is closing; the instruction was not sent.', true);
   if (ctx.screen.workerInfo?.disabled) return note(ctx, `✗ ${ctx.screen.workerInfo.lines[0]} The instruction was not sent.`, true);
   if (ctx.stopped) return note(ctx, 'This room is ending: the instruction was not sent.', true);
   ctx.agentsStarted = true;
@@ -656,7 +656,7 @@ function queueWork(ctx, text, run = null, rollback = null, retry = null, { catch
   let done;
   const finished = new Promise((r) => { done = r; });
   // Recorded in its discussion's checkpoint (see "Work in flight"); a brainstorm sends none (see BRAINSTORM_NO_WORK).
-  const workName = ctx.discussion && !ctx.state.brainstorm ? ctx.discussion.name : null;
+  const workName = ctx.board && !ctx.state.brainstorm ? ctx.board.name : null;
   const record = workName ? { id: randomBytes(6).toString('hex'), task: text, at: new Date().toISOString() } : null;
   shop.sent = (shop.sent ?? 0) + 1; // the order sent, across lanes: one worker session's tasks keep it
   const task = { origin: ctx, text, run, cycle: retry?.cycle ?? run?.cycle, done, finished, rollback, retry, catchUp: !!catchUp, record, workName, lane: workName, sent: retry?.sent ?? shop.sent, worker: ctx.worker, owner: ownerOf(ctx), label: originLabel(ctx) };
@@ -702,7 +702,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   // The task's context, read once, here, before anything awaits: its discussion (for the briefing
   // and the /move lock) and its transcript. If New discussion or Resume changes the room's
   // meanwhile, the task keeps its own; the reply still goes into its transcript.
-  const task = seat ? { discussion: seat.discussion, logPath: seat.logPath } : { discussion: ctx.discussion ?? null, logPath: ctx.logPath ?? null };
+  const task = seat ? { board: seat.board, logPath: seat.logPath } : { board: ctx.board ?? null, logPath: ctx.logPath ?? null };
   const started = task.logPath;
   // A transcript that can't be written to doesn't lose the reply: it is still shown, with the error.
   // A left brainstorm's task has no transcript: its reply stays in the Worker tab only.
@@ -719,7 +719,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
   // Its own discussion's window shows its worker working: other discussions' tasks run alongside.
   const working = (name) => { if (ownerOf(ctx) === owner) { ctx.screen.working = name; toScreen(ctx, { type: 'working', name }); } showHeader(ctx); };
   // The discussion this task writes to (transcript, notes): /move refuses it until the task ends.
-  ctx.workingIn = task.discussion?.dir ?? null;
+  ctx.workingIn = task.board?.dir ?? null;
   if (ctx.workingIn) shop.writing.add(ctx.workingIn);
   try {
     const from = run ? 'Relayed from discussion' : 'User';
@@ -749,7 +749,7 @@ async function runWork(ctx, text, run = null, cycle = 0, recovery = null, rollba
       // The worker learns the active discussion's folder (for its notes) with its first instruction there.
       // After New discussion, until the next one exists, it learns only that the old one is closed.
       const instr = ctx.instructions ?? defaultInstructions;
-      const d = task.discussion;
+      const d = task.board;
       // The worker learns the active discussion's folder, where it works, its commit label, and what
       // to do before the instruction (merge, leftover edits, interruptions). These pieces come from
       // instructions.mjs, the same catalog the Instructions tab shows.
