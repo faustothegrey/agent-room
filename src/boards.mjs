@@ -377,46 +377,54 @@ async function openBoard(ctx, line) {
   const brainstorm = !!ctx.state.brainstorm, workbench = !!ctx.state.workbench, research = !!ctx.state.research;
   const kind = brainstorm ? 'brainstorm' : workbench ? 'workbench' : research ? 'research board' : 'sprint';
   const kindCap = kind[0].toUpperCase() + kind.slice(1);
+  const wasBusy = ctx.busy;
+  ctx.busy = true;
+  showHeader(ctx);
   try {
-    if (!ctx.board) {
-      const label = `Claude (choosing the ${kind}'s title)`;
-      startThinking(ctx, label);
-      setScreenThinking(ctx, label);
-      const t0 = Date.now();
-      let title = null;
-      let how;
-      try {
-        const got = await ctx.suggestTitle(line, { cwd: tmpdir() });
-        title = got.title;
-        how = `_(title by Claude, ${Math.round((Date.now() - t0) / 1000)}s${got.usage ? ` · ${ctx.usage.formatUsage(got.usage)}` : ''}: ${title})_\n\n`;
-      } catch (err) {
-        how = `_(no title, so the folder is named after the date and time: ${err.message})_\n\n`;
-      } finally {
-        stopThinking(ctx);
-        setScreenThinking(ctx, null);
+    try {
+      if (!ctx.board) {
+        const label = `Claude (choosing the ${kind}'s title)`;
+        startThinking(ctx, label);
+        setScreenThinking(ctx, label);
+        const t0 = Date.now();
+        let title = null;
+        let how;
+        try {
+          const got = await ctx.suggestTitle(line, { cwd: tmpdir() });
+          title = got.title;
+          how = `_(title by Claude, ${Math.round((Date.now() - t0) / 1000)}s${got.usage ? ` · ${ctx.usage.formatUsage(got.usage)}` : ''}: ${title})_\n\n`;
+        } catch (err) {
+          how = `_(no title, so the folder is named after the date and time: ${err.message})_\n\n`;
+        } finally {
+          stopThinking(ctx);
+          setScreenThinking(ctx, null);
+        }
+        const parent = join(ctx.cwd, brainstorm ? BRAINSTORMS : 'discussions');
+        const name = createBoardFolder(parent, title, now, takenElsewhere(ctx.cwd, brainstorm));
+        const dir = join(parent, name);
+        if (workbench) writeFileSync(join(dir, WORKBENCH_MARKER), 'workbench\n');
+        if (research) writeFileSync(join(dir, RESEARCH_MARKER), researchMarker(ctx.state.researchKind));
+        ctx.board = { name, dir, title: title ?? `${kindCap} — ${when(now)}`, continued: false };
+        log(ctx, how);
       }
-      const parent = join(ctx.cwd, brainstorm ? BRAINSTORMS : 'discussions');
-      const name = createBoardFolder(parent, title, now, takenElsewhere(ctx.cwd, brainstorm));
-      const dir = join(parent, name);
-      if (workbench) writeFileSync(join(dir, WORKBENCH_MARKER), 'workbench\n');
-      if (research) writeFileSync(join(dir, RESEARCH_MARKER), researchMarker(ctx.state.researchKind));
-      ctx.board = { name, dir, title: title ?? `${kindCap} — ${when(now)}`, continued: false };
-      log(ctx, how);
+      const { title, dir } = ctx.board;
+      const head = `# ${title} — session of ${when(now)}\n\nRoom: ${describe(ctx.room)} · worker ${ctx.worker.name}\n\nRoot: ${ctx.cwd}\n\n`;
+      ctx.logPath = createSessionFile(join(dir, 'transcripts'), head + (ctx.pendingLog ?? ''), now);
+      ctx.pendingLog = '';
+      ctx.previous = null; // the "← back to …" link lasts until this discussion starts
+    } catch (err) {
+      note(ctx, `✗ Couldn't create the ${kind}'s folder or transcript: ${err.message}\nYour message was not sent${workbench ? ' to the worker' : ' to the agents'}. Here it is, to send again:\n\n${line}\n`, true);
+      return false;
     }
-    const { title, dir } = ctx.board;
-    const head = `# ${title} — session of ${when(now)}\n\nRoom: ${describe(ctx.room)} · worker ${ctx.worker.name}\n\nRoot: ${ctx.cwd}\n\n`;
-    ctx.logPath = createSessionFile(join(dir, 'transcripts'), head + (ctx.pendingLog ?? ''), now);
-    ctx.pendingLog = '';
-    ctx.previous = null; // the "← back to …" link lasts until this discussion starts
-  } catch (err) {
-    note(ctx, `✗ Couldn't create the ${kind}'s folder or transcript: ${err.message}\nYour message was not sent${workbench ? ' to the worker' : ' to the agents'}. Here it is, to send again:\n\n${line}\n`, true);
-    return false;
+    ctx.state.briefing = workbench ? null : briefing(ctx);
+    out(ctx, `${kindCap}: ${ctx.board.dir}\nTranscript: ${ctx.logPath}`);
+    if (workbench) captureRound(ctx);
+    else showHeader(ctx);
+    return true;
+  } finally {
+    ctx.busy = wasBusy;
+    if (!ctx.board) showHeader(ctx);
   }
-  ctx.state.briefing = workbench ? null : briefing(ctx);
-  out(ctx, `${kindCap}: ${ctx.board.dir}\nTranscript: ${ctx.logPath}`);
-  if (workbench) captureRound(ctx);
-  else showHeader(ctx);
-  return true;
 }
 
 // Given to each agent with its first prompt.
@@ -1584,39 +1592,39 @@ function closeContext(c, to) {
 }
 
 // /new on the screen: the discussion (or brainstorm) in use stays open. A new brainstorm not
-// started yet becomes the new discussion instead.
+// started yet becomes the new discussion instead (unless this board is busy).
 async function newSprintBeside(ctx) {
-  if ((ctx.state.brainstorm || ctx.state.workbench || ctx.state.research) && fresh(ctx)) {
+  if (!ctx.busy && (ctx.state.brainstorm || ctx.state.workbench || ctx.state.research) && fresh(ctx)) {
     const wasRes = !!ctx.state.research;
     endSession(ctx, 'starting a new sprint');
     await defaultsForNew(ctx, { reloadAgents: wasRes });
     switchTo(ctx, null);
     return note(ctx, 'New sprint: your next message names it and starts it.');
   }
-  if (fresh(ctx)) return note(ctx, 'No sprint started yet: your next message starts a new one.');
+  if (!ctx.busy && fresh(ctx)) return note(ctx, 'No sprint started yet: your next message starts a new one.');
   const next = await openBeside(ctx);
   goto(ctx, next);
   note(ctx, `New sprint: ${ctx.board?.name ?? 'this one'} stays open (${ctx.state.brainstorm ? 'Brainstorms: Go to' : 'Sprints: Continue'} shows it again).`);
 }
-// /brainstorm on the screen: beside the open discussions and brainstorms (in this context if it is empty).
+// /brainstorm on the screen: beside the open discussions and brainstorms (in this context if it is empty and not busy).
 async function newBrainstormBeside(ctx) {
-  if (fresh(ctx)) return newBrainstorm(ctx);
+  if (!ctx.busy && fresh(ctx)) return newBrainstorm(ctx);
   const next = await openBeside(ctx);
-  next.say?.('/brainstorm');
+  await newBrainstorm(next);
   goto(ctx, next);
 }
-// /workbench on the screen: beside the open boards (in this context if it is empty).
+// /workbench on the screen: beside the open boards (in this context if it is empty and not busy).
 async function newWorkbenchBeside(ctx) {
-  if (fresh(ctx)) return newWorkbench(ctx);
+  if (!ctx.busy && fresh(ctx)) return newWorkbench(ctx);
   const next = await openBeside(ctx);
-  next.say?.('/workbench');
+  await newWorkbench(next);
   goto(ctx, next);
 }
-// /research on the screen: beside the open boards (in this context if it is empty).
+// /research on the screen: beside the open boards (in this context if it is empty and not busy).
 async function newResearchBeside(ctx) {
-  if (fresh(ctx)) return newResearch(ctx);
+  if (!ctx.busy && fresh(ctx)) return newResearch(ctx);
   const next = await openBeside(ctx);
-  next.say?.('/research');
+  await newResearch(next);
   goto(ctx, next);
 }
 // /close (Close discussion): this discussion (or brainstorm or workbench or research board) closes; the others stay open. The last

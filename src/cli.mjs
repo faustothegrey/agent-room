@@ -102,6 +102,7 @@ if (!values.dev) {
 }
 
 const END = Symbol('end'); // pushed into a room's input when the whole server ends
+const IMMEDIATE_COMMANDS = new Set(['/new', '/brainstorm', '/workbench', '/research']);
 // The server: its rooms by real path, in the order they opened (the first is the launch room, the
 // only one that replicates with --node). The HTTP server itself is created by ui.mjs, in hub.server.
 const noScreen = !!values['no-screen'];
@@ -153,12 +154,21 @@ async function addRoom(folder, { launch = false, agents, worker, reopen, context
       ctx.prompt = () => {};
       ctx.input = lineQueue();
       // Seen as they arrive, not when their turn comes: Restart and Shutdown start at once (every
-      // room then ends after its round in progress), and Quit room can't wait indefinitely.
+      // room then ends after its round in progress), Quit room can't wait indefinitely, and creating
+      // a board doesn't wait for the round in progress on this one.
       ctx.say = (line, confirmed = false) => {
         const command = line.trim();
         if (command === '/restart' || command === '/shutdown') return endServer(command.slice(1), confirmed);
         if (command === '/quit') ctx.ui.quitRequested(ctx);
         if (command.startsWith('/')) { ctx.commands = (ctx.commands ?? 0) + 1; setTimeout(() => showBusy(ctx), BUSY_AFTER_MS).unref(); }
+        if (IMMEDIATE_COMMANDS.has(command)) {
+          (async () => {
+            try { await ctx.ui.handleLine(command, ctx); }
+            catch (err) { report(ctx, `✗ ${err.stack}\n`); }
+            finally { if (ctx.commands) { ctx.commands--; showBusy(ctx); } }
+          })();
+          return;
+        }
         ctx.input.push(line);
       };
     }

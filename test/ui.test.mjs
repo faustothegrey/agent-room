@@ -2474,6 +2474,32 @@ test('screen Cancel leaves an initially empty room empty for brainstorm and work
   }
 });
 
+test('on the screen, /new, /brainstorm, /workbench and /research open beside while ctx.busy is true even when fresh', async () => {
+  const { first, gotoOf, pageOf, contexts } = await multiRoom();
+  first.busy = true;
+  for (const [command, flag] of [['/new', null], ['/brainstorm', 'brainstorm'], ['/workbench', 'workbench'], ['/research', 'research']]) {
+    const before = contexts().length;
+    await handleLine(command, first);
+    assert.equal(contexts().length, before + 1, `${command} should open beside while busy`);
+    const created = contexts().at(-1);
+    assert.equal(gotoOf(first), pageOf(created));
+    if (flag) assert.equal(created.state[flag], true);
+    assert.equal(first.state.brainstorm, undefined);
+    assert.equal(first.state.workbench, undefined);
+    assert.equal(first.state.research, undefined);
+    assert.equal(first.resets, 0);
+  }
+  // A fresh brainstorm that is busy must not be converted in place by /new either.
+  const brain = contexts()[2];
+  assert.equal(brain.state.brainstorm, true);
+  brain.busy = true;
+  const before = contexts().length;
+  await handleLine('/new', brain);
+  assert.equal(contexts().length, before + 1);
+  assert.equal(brain.state.brainstorm, true);
+  assert.equal(gotoOf(brain), pageOf(contexts().at(-1)));
+});
+
 test('one workshop per folder: tasks labelled by origin, one worker session, lane and queue each, reports back there; Close discussion; Quit room closes them all', async () => {
   const { readFileSync, realpathSync } = await import('node:fs');
   const { queueWork, reloaded } = await import('../src/ui.mjs');
