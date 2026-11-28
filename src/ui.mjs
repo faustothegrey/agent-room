@@ -367,10 +367,12 @@ export async function load(ctx, v) {
     gauges: ctx.screen?.quota,
     measured: ctx.screen?.quotaAt?.providers ?? ctx.screen?.quotaAt?.measured,
   });
+  const testPrompt = (room, provider, model, options) =>
+    runPromptTest(room, provider, model, runner, { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM }, options);
   return { room: createRoom(agents, ctx.state, instr, usageLine), worker, docs, lanes, workshopModule, boardsModule, monitorModule, schedulerModule, usage, replicate, totals: ctx.totals ?? {}, screen, findLeftovers, recordedPids,
     permissions: { read: readPermissionConfig, report: permissionReport },
     shop: roomShop,
-    testPrompt: (room, provider, model) => runPromptTest(room, provider, model, runner, { parseCodexEvents, parseAgyOutput, parseClaudeStream, CLAUDE_STREAM }),
+    testPrompt,
     // A new worker agent on `session` (detachWorker), as this load made ctx.worker.
     makeWorker,
     // Close's closing statement, written by a one-off agent with the worker's provider and model, in
@@ -1093,7 +1095,7 @@ async function runSummary(ctx, auto = false, extra) {
 // `speaker`: who the opening message is from (the User, auto dev's "Worker report", or "Scheduler").
 // `run`: the auto dev run this round belongs to: it is always summarized, and the summary decides what's next.
 // `beforeLap`: optional async hook checked before each lap after the first; returning a reason stops the round early.
-async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = null } = {}) {
+async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = null, onFirstTurn = null } = {}) {
   let started = 0;
   const roundStart = Date.now();
   let turns = 0;
@@ -1111,6 +1113,7 @@ async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = n
     const roundRes = await ctx.room.round(line, { speaker, beforeLap,
       onLapStart(lap) { if (ctx.state.research && ctx.board) recordResearchLap(ctx, lap); },
       onTurnStart(agent) {
+        if (!started) onFirstTurn?.();
         started = Date.now();
         startThinking(ctx, agent.name);
         setScreenThinking(ctx, agent.name);
@@ -1171,7 +1174,8 @@ async function runRound(line, ctx, { speaker = 'User', run = null, beforeLap = n
   } catch (err) {
     // An unknown @name: nothing was sent or recorded.
     showHeader(ctx);
-    note(ctx, `✗ ${err.message}`, true);
+    if (onFirstTurn && !started) out(ctx, red(`✗ ${err.message}`));
+    else note(ctx, `✗ ${err.message}`, true);
     return { ending: 'failed', stoppedReason: null, failedError: err.message, turns, spoke };
   }
 }
@@ -1520,7 +1524,7 @@ const boards = boardsModule.createBoards({
   writeSchedule: (...args) => writeSchedule(...args), broadcastSchedule: (...args) => broadcastSchedule(...args), pageOf,
   mainRef, modelLabel, currentSettings, saveClosed,
 });
-export const { WORKBENCH_MARKER, isWorkbenchDir, RESEARCH_MARKER, isResearchDir, createBoardFolder, createSessionFile, cancelClose } = boards;
+export const { WORKBENCH_MARKER, isWorkbenchDir, RESEARCH_MARKER, isResearchDir, createBoardFolder, createSessionFile, cancelClose, opensBeside, runsAtOnce } = boards;
 const { SECTIONS, DATED, BRAINSTORMS, isWorkbenchName, workbenchNames, syncResearchKind, chooseResearchKind, researchNames, recordResearchLap, researchStats, isBoard, folderOf, boardRef, moveBoard, requestRollback, confirmRollbackArchive, rollbackReport, openBoard, briefing, closedEntries, closedBoards, checkpoints, writeCheckpoint, readCheckpoint, captureRound, saveCheckpoint, workOf, persistWork, clock, firstLine, leftBehind, detachWorker, saveLeftWorker, peekBoard, resumeBoard, refOf, startFresh, convertBrainstormToResearch, convertResearchToSprint, convertBrainstorm, deleteBrainstorm, deleteResearch, newSprint, newBrainstorm, newWorkbench, newResearch, goto, openBeside, closeContext, newSprintBeside, newBrainstormBeside, newWorkbenchBeside, newResearchBeside, closeBoard, cancelCreation, closeNamedBoard } = boards;
 
 // Workshop callbacks refer to the current room code; lane operations are resolved when called.
@@ -1555,6 +1559,6 @@ const { laneOf, cleanupMergedOnClose, worktreeFingerprint, recordTested } = lane
 const scheduler = schedulerModule.createScheduler({ siblings, toScreen, showHeader, checkpoints, DATED, isWorkbenchDir,
   SECTIONS, shopOf, boardRef, day, pad, load, isResearchDir, isBoard, readCheckpoint,
   roomDefaults, parseSpec, refreshQuota, openBeside, resumeBoard, newResearch, wire,
-  openBoard, runRound, saveCheckpoint, fresh, closeContext, chooseResearchKind });
+  openBoard, runRound, saveCheckpoint, fresh, closeContext, chooseResearchKind, firstLine });
 export const { scheduleFile, readSchedule, getSchedule, saveSchedule, runScheduledTask, checkSchedule } = scheduler;
 const { writeSchedule, broadcastSchedule, startScheduler, stopSchedulerIfLast } = scheduler;

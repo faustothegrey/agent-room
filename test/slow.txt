@@ -108,3 +108,5 @@ overlapping refreshWorker calls cannot leave an older result shown last
 catchUpWithBranch: allows resolving purely additive conflicts, avoids duplicate merge prefix, and reaches canMerge
 worktreeStatus and workerInfo report unquoted conflict paths and clear them once resolved
 workReady: set on finishAutoDev, kept across catchUpWithBranch, cleared by new message or other worker task, never on workbench
+creating a board during a round switches the screen at once, routes new messages there, and finishes the old round and summary on the old board
+background agy probes run detached without a controlling terminal (/dev/tty)
