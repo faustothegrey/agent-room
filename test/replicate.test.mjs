@@ -89,7 +89,7 @@ async function receiverState(n) {
     receivedRef: await R.revParse(n.store, `refs/received/${D}/${A_ID}`),
   };
 }
-const offerFor = (commit, base, over = {}) => ({ protocol: R.PROTOCOL, room: ROOM, discussion: D, node: A_ID, commit, base, ...over });
+const offerFor = (commit, base, over = {}) => ({ protocol: R.PROTOCOL, room: ROOM, board: D, node: A_ID, commit, base, ...over });
 function rawPost(url, offer, body, { cutAfter, length = body.length } = {}) { // a hand-made request: for interruption and rejection checks
   return new Promise((ok) => {
     const req = http.request(`${url}/replica/bundle`, { method: 'POST', headers: { ...R.offerHeader(offer), 'content-type': R.BUNDLE_TYPE, 'content-length': length } }, (res) => {
@@ -285,7 +285,7 @@ try {
     console.log(`         (detail: ${String(r.detail).split('\n').slice(-1)[0]})`);
   }
   await R.git(evil.store, ['update-ref', R.lineRef(D, A_ID), tip]);
-  for (const [name, over, status] of [['offer from another room', { room: 'room-zz' }, 403], ['offer claiming to be node 2 itself', { node: B_ID }, 403], ['offer from an unpaired node', { node: 'node-9' }, 403], ['offer with an unsafe discussion ID', { discussion: '../x' }, 400], ['offer with protocol 2', { protocol: 2 }, 400]]) {
+  for (const [name, over, status] of [['offer from another room', { room: 'room-zz' }, 403], ['offer claiming to be node 2 itself', { node: B_ID }, 403], ['offer from an unpaired node', { node: 'node-9' }, 403], ['offer with an unsafe board ID', { board: '../x' }, 400], ['offer with protocol 2', { protocol: 2 }, 400]]) {
     const r = await postJson(server.url, '/offer', offerFor(tip, pub, over));
     check(`${name}: refused`, status, r.status);
   }

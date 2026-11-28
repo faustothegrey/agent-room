@@ -48,7 +48,7 @@ export function checkClosingStatement(text) {
 }
 
 // The closing statement of a discussion: one turn of `agent`, a one-off session with the worker's
-// provider and model (see closeNamedDiscussion in ui.mjs), which reads the discussion's folder. The
+// provider and model (see closeNamedBoard in boards.mjs), which reads the discussion's folder. The
 // caller installs it only when this succeeds, so a failed attempt can't replace the previous one.
 export async function closingStatement(agent, { dir, workerReports = '', onFormatNote } = {}, instr = defaultInstructions) {
   const task = instr.closingTask({ dir, workerReports });

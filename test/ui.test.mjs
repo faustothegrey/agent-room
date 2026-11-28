@@ -3356,8 +3356,8 @@ test('worker notes follow their captured owner, including brainstorms and room-w
   const docs = await import('../src/docs.mjs');
   const eventsA = [], eventsB = [];
   const screen = (events) => ({ transcript: [], worker: [], clients: new Set([{ write: (s) => events.push(JSON.parse(s.slice(6))) }]) });
-  const a = { cwd: '/tmp/routing', id: 'a', state: { transcript: [] }, discussion: { name: 'alpha' }, screen: screen(eventsA), docs };
-  const b = { cwd: a.cwd, id: 'b', state: { transcript: [] }, discussion: { name: 'beta' }, screen: screen(eventsB), docs };
+  const a = { cwd: '/tmp/routing', id: 'a', state: { transcript: [] }, board: { name: 'alpha' }, screen: screen(eventsA), docs };
+  const b = { cwd: a.cwd, id: 'b', state: { transcript: [] }, board: { name: 'beta' }, screen: screen(eventsB), docs };
   const hub = { rooms: new Map([['a', a], ['b', b]]) }; a.hub = b.hub = hub;
   workNote(a, 'alpha note');
   workNote(b, 'beta note');
