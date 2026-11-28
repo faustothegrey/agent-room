@@ -261,12 +261,25 @@ export async function saveSettings(ctx, value, file = defaultsFile()) {
 // Imports fresh copies of the modules and the rulebook layers and builds a room on ctx.state, and the worker. Returns
 // the parts to put into ctx; if anything fails it throws, leaving ctx as it was (at most an
 // unused empty session added).
+function migrateReloadedContext(ctx) {
+  if (ctx.discussion && !ctx.board) { ctx.board = ctx.discussion; delete ctx.discussion; }
+  if (ctx.worker?.seat?.discussion && !ctx.worker.seat.board) { ctx.worker.seat.board = ctx.worker.seat.discussion; delete ctx.worker.seat.discussion; }
+  if (ctx.screen?.peek?.kind === 'discussion') ctx.screen.peek.kind = 'sprint';
+  const shop = ctx.shop;
+  if (shop?.lanes) {
+    for (const t of [...runningTasks(shop), ...queuedTasks(shop)]) {
+      if (t.worker?.seat?.discussion && !t.worker.seat.board) { t.worker.seat.board = t.worker.seat.discussion; delete t.worker.seat.discussion; }
+    }
+  }
+}
+
 export async function load(ctx, v) {
   // A workshop built by the code before each discussion had its own queue (slice 1a) can't be taken
   // over by this code: Reload (and --dev's) is refused, in every room, before anything changes, and
   // so is a discussion opened beside the others meanwhile; Restart starts this code afresh.
   const existing = ctx.shop ?? siblings(ctx).find((r) => r !== ctx && r.shop)?.shop;
   if (existing && !existing.lanes) throw new Error(UPDATE_NEEDS_RESTART);
+  migrateReloadedContext(ctx);
   if (!ctx.agentSpecs || !ctx.workerSpec) {
     const saved = readDefaults();
     ctx.agentSpecs ??= saved ? saved.agents.map(specFor).join(',') : 'claude,codex';
@@ -785,8 +798,10 @@ export function note(ctx, text, error = false) {
 }
 
 export async function reloaded(ctx) {
+  migrateReloadedContext(ctx);
   if (ctx.node) await setupReplica(ctx).catch((err) => note(ctx, `✗ Replication: ${err.message}`, true));
   wire(ctx);
+  showHeader(ctx);
   if (ctx.hub) { ctx.hub.route = route; ctx.hub.upgrade = upgrade; } // the server's routing runs the new code too
   ctx.refreshQuota = () => refreshQuota(ctx).catch(() => {});
   watchMonitor(ctx);
