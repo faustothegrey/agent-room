@@ -29,6 +29,17 @@ it('shows worker notes and errors in System messages with the Worker prefix, kee
   expect(within(log()).getByText('Room note')).toBeTruthy(); // Activity stays visible on the Worker tab
 });
 
+it('shows scheduled research notices in Activity while viewing another board', () => {
+  render(<App version="one" refresh={() => {}} />);
+  Source.current.send({ type: 'reset', room, messages: [], worker: [], input: true });
+  const started = 'Scheduled research started: Daily scan';
+  const skipped = 'Scheduled research did not start: Nightly scan — quota below the floor';
+  Source.current.send({ type: 'note', text: started, error: false });
+  Source.current.send({ type: 'note', text: skipped, error: true });
+  expect(within(log()).getAllByText(started)).toHaveLength(1);
+  expect(within(log()).getByText(skipped).className).toBe('status error');
+});
+
 it('keeps the worker hint after a reset that had only notes hidden, and shows it on an empty one', () => {
   render(<App version="one" refresh={() => {}} />);
   Source.current.send({ type: 'reset', room, messages: [], worker: [], input: true });
