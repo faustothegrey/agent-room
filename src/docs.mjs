@@ -21,4 +21,4 @@ const next = createNextRoutes(broadcast, { createHash, lstatSync, readdirSync, r
 export const { nextVersion, notifyNext } = next;
 const routes = createRoutes({ broadcast, resetEvent, handleNext: next.handleNext, files });
 export const { fromOwnPage, ATTACH_LIMIT, ATTACH_TOTAL, saveAttachments } = routes;
-export const { handle, pick } = createFileRoutes({ handleScreen: routes.handleScreen, ownHost: routes.ownHost, files });
+export const { handle, pick } = createFileRoutes({ handleScreen: routes.handleScreen, ownHost: routes.ownHost, fromOwnPage: routes.fromOwnPage, files });

@@ -1,6 +1,8 @@
 // Document rendering and room file helpers, loaded with the current Reload version.
 import { execFileSync } from 'node:child_process';
-import { closeSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { extname, join, relative, resolve, sep } from 'node:path';
 import { Marked } from 'marked';
 
@@ -135,7 +137,7 @@ function arithmetic(src) { // numbers, + - * / and parentheses, by recursive des
   const sum = () => { let v = product(); while (s[i] === '+' || s[i] === '-') { const op = s[i++], w = product(); v = op === '+' ? v + w : v - w; } return v; };
   const v = sum(); if (i !== s.length) throw new Error('#VALUE'); return v;
 }
-export function csvTable(text, name = 'table') {
+export function csvTable(text, name = 'table', changedCells = null) {
   const grid = parseCsv(text), cols = Math.max(0, ...grid.map((r) => r.length));
   const shown = (ref) => {
     try { const v = sheetValue(grid, ref); return typeof v === 'number' ? String(Math.round(v * 100) / 100) : v; }
@@ -144,7 +146,7 @@ export function csvTable(text, name = 'table') {
   const head = '<tr><th></th>' + Array.from({ length: cols }, (_, c) => `<th>${colName(c)}</th>`).join('') + '</tr>';
   const body = grid.map((row, r) => `<tr><th>${r + 1}</th>` + Array.from({ length: cols }, (_, c) => {
     const ref = colName(c) + (r + 1), raw = row[c] ?? '', value = raw === '' ? '' : shown(ref);
-    const cls = [raw.startsWith('=') && 'formula', value !== '' && !isNaN(value) && 'num'].filter(Boolean).join(' ');
+    const cls = [raw.startsWith('=') && 'formula', value !== '' && !isNaN(value) && 'num', changedCells?.has(ref) && 'diff-changed'].filter(Boolean).join(' ');
     return `<td data-cell="${ref}"${cls ? ` class="${cls}"` : ''} title="${esc(ref + (raw.startsWith('=') ? ': ' + raw : ''))}">${esc(value)}</td>`;
   }).join('') + '</tr>').join('');
   return `<div class="sheet-box"><table class="sheet" data-sheet="${esc(name)}"><thead>${head}</thead><tbody>${body}</tbody></table></div>\n`;
@@ -241,16 +243,480 @@ function boardDirs(dir) {
   return found.sort();
 }
 
+// ── Reviewed versions & Markdown change tracking ──
+// One baseline per room and document, stored in ~/.local/state/agent-room/reviewed/<room-hash>/<doc-hash>.json
+// (keyed by room realpath like checkpointDirectory in src/boards.mjs), plus an in-memory LRU of the
+// most recently rendered versions per document so Mark reviewed always saves the exact shown version.
+export const RECENT_VERSION_LIMIT = 12;
+export const sourceHash = (text) => createHash('sha256').update(String(text)).digest('hex');
+const roomReal = (dir) => { try { return realpathSync(dir); } catch { return resolve(dir); } };
+export const reviewedDir = (dir) => join(homedir(), '.local', 'state', 'agent-room', 'reviewed', createHash('sha256').update(roomReal(dir)).digest('hex'));
+export const reviewedFile = (dir, rel) => join(reviewedDir(dir), createHash('sha256').update(rel).digest('hex') + '.json');
+
+const recentVersionsStore = (globalThis.__agentRoomDocVersions ??= new Map());
+const recentKey = (dir, rel) => `${roomReal(dir)}\0${rel}`;
+
+export function recordRenderedVersion(dir, rel, hash, source) {
+  const key = recentKey(dir, rel);
+  let versions = recentVersionsStore.get(key);
+  if (!versions) { versions = new Map(); recentVersionsStore.set(key, versions); }
+  if (versions.has(hash)) versions.delete(hash);
+  versions.set(hash, source);
+  while (versions.size > RECENT_VERSION_LIMIT) versions.delete(versions.keys().next().value);
+}
+
+export function readReviewed(dir, rel) {
+  try {
+    const file = reviewedFile(dir, rel);
+    if (!existsSync(file)) return null;
+    const data = JSON.parse(readFileSync(file, 'utf8'));
+    return typeof data?.source === 'string' && typeof data?.hash === 'string' ? data : null;
+  } catch { return null; }
+}
+
+export function writeReviewed(dir, rel, entry) {
+  mkdirSync(reviewedDir(dir), { recursive: true });
+  writeFileSync(reviewedFile(dir, rel), JSON.stringify(entry), 'utf8');
+}
+
+export function ensureBaseline(dir, rel, hash, source) {
+  let saved = readReviewed(dir, rel);
+  if (!saved) {
+    saved = { rel, hash, source, reviewed: false, updatedAt: new Date().toISOString() };
+    writeReviewed(dir, rel, saved);
+  }
+  return saved;
+}
+
+export function markReviewed(dir, rel, hash, currentDiskSource = null) {
+  if (typeof hash !== 'string' || !hash) {
+    return { ok: false, unavailable: true, message: 'This version is no longer available: the pane will show the latest' };
+  }
+  const versions = recentVersionsStore.get(recentKey(dir, rel));
+  let source = versions?.get(hash);
+  if (source === undefined && typeof currentDiskSource === 'string' && sourceHash(currentDiskSource) === hash) {
+    source = currentDiskSource;
+  }
+  if (source === undefined) {
+    const existing = readReviewed(dir, rel);
+    if (existing && existing.hash === hash) source = existing.source;
+  }
+  if (source === undefined) {
+    return { ok: false, unavailable: true, message: 'This version is no longer available: the pane will show the latest' };
+  }
+  writeReviewed(dir, rel, { rel, hash, source, reviewed: true, updatedAt: new Date().toISOString() });
+  return { ok: true };
+}
+
+function diffSeq(a, b, eq = (x, y) => x === y) {
+  let start = 0;
+  while (start < a.length && start < b.length && eq(a[start], b[start])) start++;
+  let endA = a.length, endB = b.length;
+  while (endA > start && endB > start && eq(a[endA - 1], b[endB - 1])) { endA--; endB--; }
+  const out = [];
+  for (let i = 0; i < start; i++) out.push({ op: 'eq', a: a[i], b: b[i] });
+  const subA = a.slice(start, endA), subB = b.slice(start, endB);
+  const m = subA.length, n = subB.length;
+  if (m * n > 250000) {
+    for (const x of subA) out.push({ op: 'del', a: x });
+    for (const y of subB) out.push({ op: 'ins', b: y });
+  } else {
+    const dp = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
+    for (let i = m - 1; i >= 0; i--) {
+      for (let j = n - 1; j >= 0; j--) {
+        dp[i][j] = eq(subA[i], subB[j]) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    let i = 0, j = 0;
+    while (i < m && j < n) {
+      if (eq(subA[i], subB[j])) out.push({ op: 'eq', a: subA[i++], b: subB[j++] });
+      else if (dp[i + 1][j] >= dp[i][j + 1]) out.push({ op: 'del', a: subA[i++] });
+      else out.push({ op: 'ins', b: subB[j++] });
+    }
+    while (i < m) out.push({ op: 'del', a: subA[i++] });
+    while (j < n) out.push({ op: 'ins', b: subB[j++] });
+  }
+  for (let i = endA, j = endB; i < a.length; i++, j++) out.push({ op: 'eq', a: a[i], b: b[j] });
+  return out;
+}
+
+const decodeEntities = (s) => s
+  .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+const stripTags = (html) => decodeEntities(html.replace(/<[^>]+>/g, ''));
+
+function tokenizeNewHtml(html) {
+  const pieces = [], words = [];
+  const re = /(<[^>]+>|[^<]+)/g;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const part = m[0];
+    if (part.startsWith('<')) pieces.push({ kind: 'tag', html: part });
+    else {
+      const sub = /(\S+|\s+)/g;
+      let sm;
+      while ((sm = sub.exec(part)) !== null) {
+        const seg = sm[0];
+        if (/^\s+$/.test(seg)) pieces.push({ kind: 'space', html: seg });
+        else {
+          const word = decodeEntities(seg);
+          pieces.push({ kind: 'word', html: seg, word });
+          words.push(word);
+        }
+      }
+    }
+  }
+  return { pieces, words };
+}
+
+function diffHtmlWords(oldHtml, newHtml) {
+  const oldWords = stripTags(oldHtml).trim().split(/\s+/).filter(Boolean);
+  const { pieces, words: newWords } = tokenizeNewHtml(newHtml);
+  const ops = diffSeq(oldWords, newWords);
+  const inserted = new Array(newWords.length).fill(false);
+  const deletedBefore = Array.from({ length: newWords.length + 1 }, () => []);
+  let ni = 0;
+  for (const op of ops) {
+    if (op.op === 'eq') ni++;
+    else if (op.op === 'ins') inserted[ni++] = true;
+    else if (op.op === 'del') deletedBefore[ni].push(op.a);
+  }
+  let out = '', wi = 0;
+  for (const piece of pieces) {
+    if (piece.kind !== 'word') { out += piece.html; continue; }
+    if (deletedBefore[wi].length) out += `<del class="diff-del">${esc(deletedBefore[wi].join(' '))}</del> `;
+    out += inserted[wi] ? `<ins class="diff-ins">${piece.html}</ins>` : piece.html;
+    wi++;
+  }
+  if (deletedBefore[newWords.length].length) {
+    out += `${newWords.length ? ' ' : ''}<del class="diff-del">${esc(deletedBefore[newWords.length].join(' '))}</del>`;
+  }
+  return out.replace(/<\/ins>(\s+)<ins class="diff-ins">/g, '$1');
+}
+
+function mermaidBoxes(src) {
+  const boxes = new Map();
+  for (const rawLine of String(src).split('\n')) {
+    const line = rawLine.trim();
+    if (!line || /^(flowchart|graph|subgraph|end|classDef|class|style|linkStyle|click|direction|%%)\b/i.test(line)) continue;
+    const defRe = /\b([A-Za-z_][\w-]*)\s*(\[\[[^\]]*\]\]|\[\([^\)]*\)\]|\(\[[^\]]*\]\)|\(\([^\)]*\)\)|\{\{[^\}]*\}\}|\[[^\]]*\]|\([^\)]*\)|\{[^\}]*\})/g;
+    let m;
+    while ((m = defRe.exec(line)) !== null) boxes.set(m[1], m[2].trim());
+    // Bare node ids connected by arrows (e.g. "A --> B").
+    const cleaned = line.replace(defRe, '$1').replace(/\|[^|]*\|/g, ' ');
+    if (/-->|---|-\.-|==>|<--/.test(cleaned)) {
+      for (const seg of cleaned.split(/\s*(?:<-->|-->|---|-\.->|-\.-|==>|<--)\s*/)) {
+        const id = /^([A-Za-z_][\w-]*)$/.exec(seg.trim());
+        if (id && !boxes.has(id[1])) boxes.set(id[1], id[1]);
+      }
+    }
+  }
+  return boxes;
+}
+
+function csvCellMap(text) {
+  const grid = parseCsv(text);
+  const map = new Map();
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < grid[r].length; c++) {
+      const ref = colName(c) + (r + 1);
+      const raw = grid[r][c] ?? '';
+      let shown = '';
+      if (raw !== '') {
+        try { const v = sheetValue(grid, ref); shown = typeof v === 'number' ? String(Math.round(v * 100) / 100) : String(v); }
+        catch (err) { shown = err.message; }
+      }
+      map.set(ref, { raw, shown });
+    }
+  }
+  return map;
+}
+
+const renderToken = (tok, links, parser) => parser.parser(Object.assign([tok], { links }));
+
+const addRootClass = (html, cls) => {
+  if (/^<[a-z][a-z0-9]*\b[^>]*\bclass="/i.test(html)) {
+    return html.replace(/^(<[a-z][a-z0-9]*\b[^>]*\bclass=")/i, `$1${cls} `);
+  }
+  if (/^<[a-z][a-z0-9]*\b/i.test(html)) {
+    return html.replace(/^(<[a-z][a-z0-9]*\b)/i, `$1 class="${cls}"`);
+  }
+  return `<div class="${cls}">${html}</div>\n`;
+};
+
+const stripOuterTag = (html) => {
+  const m = /^(<([a-z][a-z0-9]*)\b[^>]*>)([\s\S]*)(<\/\2>\s*)$/i.exec(html);
+  return m ? { open: m[1], inner: m[3], close: m[4] } : null;
+};
+
+const renderListItemHtml = (item, listTok, links, parser) => {
+  const single = { ...listTok, items: [item] };
+  return renderToken(single, links, parser)
+    .replace(/^<(?:ul|ol)[^>]*>\n?/, '')
+    .replace(/<\/(?:ul|ol)>\n?$/, '');
+};
+
+function extractBlocks(source, parser) {
+  const tokens = parser.lexer(source);
+  const links = tokens.links;
+  const blocks = [];
+  for (const tok of tokens) {
+    if (tok.type === 'space' || tok.type === 'def') continue;
+    const html = renderToken(tok, links, parser);
+    if (tok.type === 'heading') {
+      blocks.push({ kind: 'heading', depth: tok.depth, text: tok.text, raw: tok.raw, tok, links, html, key: `h${tok.depth}:${html}` });
+    } else if (tok.type === 'paragraph') {
+      blocks.push({ kind: 'paragraph', text: tok.text, raw: tok.raw, tok, links, html, key: `p:${html}` });
+    } else if (tok.type === 'list') {
+      blocks.push({ kind: 'list', ordered: !!tok.ordered, start: tok.start, text: tok.raw, raw: tok.raw, tok, links, html, key: `list:${html}` });
+    } else if (tok.type === 'blockquote') {
+      blocks.push({ kind: 'blockquote', text: tok.text, raw: tok.raw, tok, links, html, key: `bq:${html}` });
+    } else if (tok.type === 'code') {
+      const [langKind, name] = String(tok.lang ?? '').trim().split(/\s+/);
+      if (langKind === 'csv') blocks.push({ kind: 'csv', name: name || 'table', text: tok.text, raw: tok.raw, tok, links, html, key: `csv:${name || 'table'}:${tok.text}` });
+      else if (langKind === 'mermaid') blocks.push({ kind: 'mermaid', text: tok.text, raw: tok.raw, tok, links, html, key: `mermaid:${tok.text}` });
+      else if (langKind === 'vega-lite') blocks.push({ kind: 'vega-lite', text: tok.text, raw: tok.raw, tok, links, html, key: `vl:${tok.text}` });
+      else blocks.push({ kind: 'code', lang: tok.lang ?? '', text: tok.text, raw: tok.raw, tok, links, html, key: `code:${html}` });
+    } else {
+      blocks.push({ kind: 'other', raw: tok.raw, tok, links, html, key: `other:${html}` });
+    }
+  }
+  return blocks;
+}
+
+const wordOverlap = (a, b) => {
+  const wa = new Set(String(a).toLowerCase().split(/\W+/).filter(Boolean));
+  const wb = new Set(String(b).toLowerCase().split(/\W+/).filter(Boolean));
+  if (!wa.size && !wb.size) return 1;
+  let shared = 0;
+  for (const w of wa) if (wb.has(w)) shared++;
+  return shared / Math.max(wa.size, wb.size, 1);
+};
+
+function pairHunk(dels, inss) {
+  const usedIns = new Set();
+  const matched = new Map(); // delIndex -> insIndex
+  for (let di = 0; di < dels.length; di++) {
+    const d = dels[di];
+    let bestIdx = -1, bestScore = -1;
+    for (let ii = 0; ii < inss.length; ii++) {
+      if (usedIns.has(ii) || inss[ii].kind !== d.kind) continue;
+      if (d.kind === 'csv') {
+        if (d.name === inss[ii].name) { bestIdx = ii; bestScore = 1; break; }
+        continue;
+      }
+      if (d.kind === 'mermaid' || d.kind === 'vega-lite' || d.kind === 'code') {
+        bestIdx = ii; bestScore = 1; break;
+      }
+      if (d.kind === 'list') {
+        if (d.ordered === inss[ii].ordered) {
+          const score = wordOverlap(d.text ?? d.raw, inss[ii].text ?? inss[ii].raw);
+          if (score > bestScore) { bestIdx = ii; bestScore = score; }
+        }
+        continue;
+      }
+      const score = wordOverlap(d.text ?? d.raw, inss[ii].text ?? inss[ii].raw);
+      if (score >= 0.25 && score > bestScore) { bestIdx = ii; bestScore = score; }
+    }
+    if (bestIdx >= 0) { matched.set(di, bestIdx); usedIns.add(bestIdx); }
+  }
+  // Emit in document order: unmatched ins before paired mod, paired mod, unmatched del.
+  const out = [];
+  const pairedIns = new Map([...matched.entries()].map(([di, ii]) => [ii, di]));
+  let nextDel = 0;
+  for (let ii = 0; ii < inss.length; ii++) {
+    if (pairedIns.has(ii)) {
+      const di = pairedIns.get(ii);
+      while (nextDel < di) {
+        if (!matched.has(nextDel)) out.push({ op: 'del', a: dels[nextDel] });
+        nextDel++;
+      }
+      out.push({ op: 'mod', a: dels[di], b: inss[ii] });
+      nextDel = di + 1;
+    } else {
+      out.push({ op: 'ins', b: inss[ii] });
+    }
+  }
+  while (nextDel < dels.length) {
+    if (!matched.has(nextDel)) out.push({ op: 'del', a: dels[nextDel] });
+    nextDel++;
+  }
+  return out;
+}
+
+function diffBlockList(oldArr, newArr) {
+  const rawOps = diffSeq(oldArr, newArr, (x, y) => x.key === y.key);
+  const ops = [];
+  let dels = [], inss = [];
+  const flushHunk = () => {
+    if (!dels.length && !inss.length) return;
+    if (dels.length && inss.length) ops.push(...pairHunk(dels, inss));
+    else {
+      for (const a of dels) ops.push({ op: 'del', a });
+      for (const b of inss) ops.push({ op: 'ins', b });
+    }
+    dels = []; inss = [];
+  };
+  for (const op of rawOps) {
+    if (op.op === 'eq') { flushHunk(); ops.push(op); }
+    else if (op.op === 'del') dels.push(op.a);
+    else inss.push(op.b);
+  }
+  flushHunk();
+  return ops;
+}
+
+function renderListDiff(oldBlock, newBlock, parser) {
+  const oldItems = oldBlock.tok.items.map((item) => {
+    const html = renderListItemHtml(item, oldBlock.tok, oldBlock.links, parser);
+    return { kind: 'list_item', text: item.text, raw: item.raw, html, key: html };
+  });
+  const newItems = newBlock.tok.items.map((item) => {
+    const html = renderListItemHtml(item, newBlock.tok, newBlock.links, parser);
+    return { kind: 'list_item', text: item.text, raw: item.raw, html, key: html };
+  });
+  const ops = diffBlockList(oldItems, newItems);
+  const tag = newBlock.tok.ordered ? 'ol' : 'ul';
+  const startAttr = newBlock.tok.ordered && newBlock.tok.start !== 1 && newBlock.tok.start !== '' ? ` start="${newBlock.tok.start}"` : '';
+  let out = `<${tag}${startAttr}>\n`;
+  let changes = 0;
+  for (const op of ops) {
+    if (op.op === 'eq') out += op.b.html;
+    else if (op.op === 'ins') { changes++; out += addRootClass(op.b.html, 'diff-ins-block'); }
+    else if (op.op === 'del') { changes++; out += addRootClass(op.a.html, 'diff-del-block'); }
+    else if (op.op === 'mod') {
+      changes++;
+      const oldParts = stripOuterTag(op.a.html), newParts = stripOuterTag(op.b.html);
+      out += oldParts && newParts
+        ? `${newParts.open}${diffHtmlWords(oldParts.inner, newParts.inner)}${newParts.close}`
+        : addRootClass(op.b.html, 'diff-ins-block');
+    }
+  }
+  if (changes === 0 && oldBlock.html !== newBlock.html) changes = 1; // e.g. start number changed
+  out += `</${tag}>\n`;
+  return { html: out, changes };
+}
+
+export function renderMarkdownWithDiff(oldSource, newSource, parser = md) {
+  if (oldSource === newSource) return { html: parser.parse(newSource), changeCount: 0, removed: [] };
+  const oldBlocks = extractBlocks(oldSource, parser);
+  const newBlocks = extractBlocks(newSource, parser);
+  const ops = diffBlockList(oldBlocks, newBlocks);
+
+  let html = '', changeCount = 0;
+  const removed = [];
+
+  for (const op of ops) {
+    const blk = op.b ?? op.a;
+    if (op.op === 'eq') {
+      html += blk.html;
+    } else if (op.op === 'ins') {
+      changeCount++;
+      if (blk.kind === 'csv') {
+        const cells = csvCellMap(blk.text);
+        const changed = new Set([...cells.entries()].filter(([, v]) => v.raw !== '').map(([k]) => k));
+        html += csvTable(blk.text, blk.name, changed);
+      } else if (blk.kind === 'mermaid') {
+        const ids = [...mermaidBoxes(blk.text).keys()];
+        html += `<div class="mermaid-box" data-changed-nodes="${esc(JSON.stringify(ids))}"><pre class="mermaid-src">${esc(blk.text)}</pre></div>\n`;
+      } else if (blk.kind === 'vega-lite') {
+        html += `<div class="vl-box diff-changed"><div class="diff-chart-badge">Changed since review</div><pre class="vl-src">${esc(blk.text)}</pre></div>\n`;
+      } else {
+        html += addRootClass(blk.html, 'diff-ins-block');
+      }
+    } else if (op.op === 'del') {
+      changeCount++;
+      if (blk.kind === 'csv') {
+        const prefix = blk.name === 'table' ? '' : `${blk.name}!`;
+        for (const [ref, v] of csvCellMap(blk.text)) {
+          if (v.raw !== '') removed.push(`table cell ${prefix}${ref}`);
+        }
+      } else if (blk.kind === 'mermaid') {
+        const boxes = mermaidBoxes(blk.text);
+        if (boxes.size) { for (const id of boxes.keys()) removed.push(`diagram box ${id}`); }
+        else removed.push('diagram');
+      } else if (blk.kind === 'vega-lite') {
+        removed.push('chart');
+      } else {
+        html += addRootClass(blk.html, 'diff-del-block');
+      }
+    } else if (op.op === 'mod') {
+      const a = op.a, b = op.b;
+      if (b.kind === 'heading' || b.kind === 'paragraph' || b.kind === 'blockquote') {
+        changeCount++;
+        const oldParts = stripOuterTag(a.html), newParts = stripOuterTag(b.html);
+        html += oldParts && newParts
+          ? `${newParts.open}${diffHtmlWords(oldParts.inner, newParts.inner)}${newParts.close}`
+          : addRootClass(b.html, 'diff-ins-block');
+      } else if (b.kind === 'list') {
+        const res = renderListDiff(a, b, parser);
+        changeCount += res.changes;
+        html += res.html;
+      } else if (b.kind === 'csv') {
+        const oldCells = csvCellMap(a.text), newCells = csvCellMap(b.text);
+        const changed = new Set();
+        const prefix = b.name === 'table' ? '' : `${b.name}!`;
+        for (const [ref, nv] of newCells) {
+          const ov = oldCells.get(ref);
+          if (!ov || ov.raw !== nv.raw || ov.shown !== nv.shown) {
+            if (nv.raw !== '' || (ov && ov.raw !== '')) { changed.add(ref); changeCount++; }
+          }
+        }
+        for (const [ref, ov] of oldCells) {
+          if (ov.raw !== '' && !newCells.has(ref)) { removed.push(`table cell ${prefix}${ref}`); changeCount++; }
+        }
+        html += csvTable(b.text, b.name, changed);
+      } else if (b.kind === 'mermaid') {
+        const oldBoxes = mermaidBoxes(a.text), newBoxes = mermaidBoxes(b.text);
+        const changedIds = [];
+        const removedBoxes = [];
+        for (const [id, spec] of newBoxes) {
+          if (!oldBoxes.has(id) || oldBoxes.get(id) !== spec) { changedIds.push(id); changeCount++; }
+        }
+        for (const id of oldBoxes.keys()) {
+          if (!newBoxes.has(id)) { removedBoxes.push(`diagram box ${id}`); changeCount++; }
+        }
+        removed.push(...removedBoxes);
+        const wholeChanged = !changedIds.length && !removedBoxes.length;
+        if (wholeChanged) changeCount++;
+        html += `<div class="mermaid-box${wholeChanged ? ' diff-changed' : ''}" data-changed-nodes="${esc(JSON.stringify(changedIds))}">${wholeChanged ? '<div class="diff-chart-badge">Changed since review</div>' : ''}<pre class="mermaid-src">${esc(b.text)}</pre></div>\n`;
+      } else if (b.kind === 'vega-lite') {
+        changeCount++;
+        html += `<div class="vl-box diff-changed"><div class="diff-chart-badge">Changed since review</div><pre class="vl-src">${esc(b.text)}</pre></div>\n`;
+      } else {
+        changeCount++;
+        html += addRootClass(b.html, 'diff-ins-block');
+      }
+    }
+  }
+  return { html, changeCount, removed };
+}
+
 // Browser bundles a document page may load (/__lib/<name>), straight from node_modules.
 const LIBS = {
   'mermaid.js': 'mermaid/dist/mermaid.min.js',
   'vega.js': 'vega/build/vega.min.js', 'vega-lite.js': 'vega-lite/build/vega-lite.min.js', 'vega-embed.js': 'vega-embed/build/vega-embed.min.js',
 };
 
-// The page polls the file's mtime and reloads when an agent changes it.
+function reviewBarHtml(meta) {
+  if (!meta || meta.reviewed === undefined) return '';
+  const status = !meta.reviewed
+    ? (meta.changeCount > 0
+      ? `Tracking changes since you first opened this document · ${meta.changeCount} ${meta.changeCount === 1 ? 'change' : 'changes'}`
+      : 'Tracking changes since you first opened this document')
+    : (meta.changeCount === 0
+      ? '0 changes since you reviewed'
+      : `${meta.changeCount} ${meta.changeCount === 1 ? 'change' : 'changes'} since you reviewed`);
+  const removed = meta.removed?.length
+    ? `<div id="removed-list"><strong>Removed since review:</strong> ${meta.removed.map(esc).join(' · ')}</div>`
+    : '';
+  return `<div id="review-bar" role="region" aria-label="Review status"><span class="review-status">${esc(status)}</span><button type="button" id="mark-reviewed"${meta.reviewed && meta.changeCount === 0 ? ' disabled' : ''}>Mark reviewed</button>${removed}</div>`;
+}
+
+// The page polls the file's mtime and updates its content in place when an agent changes it.
 // base: the room's address (/r/<id>/), so the page's links stay in its room.
-function page(title, body, watch, base = '/') {
+function page(title, body, watch, base = '/', meta = null) {
   const home = `<a href="${esc(base)}">all files</a>`, mtime = `${base}__mtime?f=`;
+  const docHash = meta?.hash ?? null;
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>${esc(title)}</title><style>
 :root { color-scheme: dark; }
@@ -264,13 +730,29 @@ table { border-collapse: collapse; } th, td { border: 1px solid #8886; padding: 
 .sheet td.formula { color: #7aa7ff; }
 .sheet td { cursor: pointer; } .sheet td:hover { background: #2f6fde1f; }
 .sheet td.hl { outline: 2px solid #e07a10; outline-offset: -2px; background: #e07a1026; }
+.sheet td.diff-changed { background: #a6e3a128; outline: 1px solid #a6e3a199; outline-offset: -1px; }
 .mermaid-box { margin: 1rem 0; overflow-x: auto; } .mermaid-box svg { max-width: 100%; height: auto; }
+.mermaid-box.diff-changed { border: 1px solid #a6e3a199; border-radius: 6px; padding: .4rem; background: #a6e3a10d; }
 .mermaid-box g.node { cursor: pointer; }
 .mermaid-box g.node:hover :is(rect, polygon, path, circle, ellipse) { stroke: #2f6fde !important; stroke-width: 2.5px !important; }
+.mermaid-box g.node.diff-changed :is(rect, polygon, path, circle, ellipse) { stroke: #a6e3a1 !important; stroke-width: 3px !important; }
 .mermaid-box g.node.hl :is(rect, polygon, path, circle, ellipse) { stroke: #e07a10 !important; stroke-width: 3.5px !important; }
 .mermaid-error { color: #c33; white-space: pre-wrap; font: 13px ui-monospace, Menlo, monospace; }
 .vl-box { margin: 1rem 0; width: 100%; overflow-x: auto; } .vl-box .vega-embed { width: 100%; }
+.vl-box.diff-changed { border: 1px solid #a6e3a199; border-radius: 6px; padding: .4rem; background: #a6e3a10d; }
+.diff-chart-badge { font: 12px/1.3 system-ui, sans-serif; color: #a6e3a1; margin-bottom: .3rem; }
 .vl-box .hl { stroke: #e07a10 !important; stroke-width: 3px !important; }
+.diff-ins { text-decoration: none; background: #a6e3a12e; border-bottom: 1px solid #a6e3a188; border-radius: 2px; }
+.diff-ins-block { background: #a6e3a11a; border-left: 3px solid #a6e3a199; padding-left: .5rem; }
+.diff-del { text-decoration: line-through; color: #f38ba8; background: #f38ba81f; border-radius: 2px; user-select: none; -webkit-user-select: none; }
+.diff-del-block { text-decoration: line-through; opacity: .7; color: #f38ba8; background: #f38ba814; border-left: 3px solid #f38ba888; padding-left: .5rem; user-select: none; -webkit-user-select: none; }
+#review-bar { display: none; align-items: center; flex-wrap: wrap; gap: .5rem; margin: 0 0 .75rem; padding: .4rem .65rem; border-radius: 8px; background: #1e2430; border: 1px solid #8885; font: 12px/1.4 system-ui, sans-serif; }
+body.in-room #review-bar { display: flex; }
+#review-bar .review-status { flex: 1 1 auto; color: #cdd6f4; }
+#review-bar button { font: inherit; border: 1px solid #2f6fde; background: #2f6fde22; color: #89b4fa; border-radius: 5px; padding: 2px 10px; cursor: pointer; }
+#review-bar button:disabled { opacity: .45; cursor: default; }
+#review-notice { width: 100%; color: #f6c177; }
+#removed-list { width: 100%; padding-top: .25rem; border-top: 1px solid #8883; color: #f38ba8; }
 main { position: relative; }
 #ink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 5; }
 body.drawing #ink { pointer-events: auto; cursor: crosshair; touch-action: none; }
@@ -278,23 +760,62 @@ body.drawing #ink { pointer-events: auto; cursor: crosshair; touch-action: none;
 #ink-tools { position: sticky; top: .5rem; margin: 0 0 .75rem auto; width: max-content; z-index: 10; display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: Canvas; border: 1px solid #8886; font: 12px system-ui, sans-serif; }
 #ink-tools button { font: inherit; border: 1px solid transparent; background: none; color: CanvasText; border-radius: 5px; padding: 2px 8px; cursor: pointer; }
 #ink-tools button[aria-pressed="true"] { border-color: #2f6fde; color: #2f6fde; background: #2f6fde1f; }
+#passage-note { position: fixed; top: .5rem; left: 50%; transform: translateX(-50%); z-index: 20; max-width: 90%; padding: .35rem .75rem; border-radius: 6px; background: #3b2416; color: #f6c177; border: 1px solid #e07a10; font: 12px/1.4 system-ui, sans-serif; box-shadow: 0 2px 8px #0006; }
 nav { font-size: .85rem; opacity: .7; margin-bottom: 1rem; }
-</style></head><body><nav>${home} · ${esc(title)}</nav><main>${body}</main>
-${body.includes('<div class="mermaid-box">') ? `<script src="${esc(base)}__lib/mermaid.js"></script>` : ''}
-${body.includes('<div class="vl-box">') ? ['vega', 'vega-lite', 'vega-embed'].map((l) => `<script src="${esc(base)}__lib/${l}.js"></script>`).join('') : ''}
+</style></head><body><nav>${home} · ${esc(title)}</nav>${reviewBarHtml(meta)}<main${docHash ? ` data-doc-hash="${esc(docHash)}"` : ''}>${body}</main>
+${body.includes('<div class="mermaid-box') ? `<script src="${esc(base)}__lib/mermaid.js"></script>` : ''}
+${body.includes('<div class="vl-box') ? ['vega', 'vega-lite', 'vega-embed'].map((l) => `<script src="${esc(base)}__lib/${l}.js"></script>`).join('') : ''}
 <script>
+if (parent !== window) document.body.classList.add('in-room');
+// Dynamic loader for Mermaid and Vega bundles when an in-place update adds the first diagram or chart.
+const LIB_BASE = ${JSON.stringify(base)} + '__lib/';
+const loadedLibs = new Map();
+const loadScript = (name) => {
+  if (loadedLibs.has(name)) return loadedLibs.get(name);
+  const p = new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = LIB_BASE + name;
+    s.onload = () => ok();
+    s.onerror = () => { loadedLibs.delete(name); fail(new Error('Failed to load ' + name)); };
+    document.head.append(s);
+  });
+  loadedLibs.set(name, p);
+  return p;
+};
 // Vega-Lite blocks: drawn here as SVG. views keeps each chart, for pointing and highlighting.
 const views = [];
-if (window.vegaEmbed) for (const box of document.querySelectorAll('.vl-box')) {
-  const src = box.querySelector('.vl-src'), fail = (err) => {
-    const p = document.createElement('p'); p.className = 'mermaid-error'; p.textContent = 'This chart has an error: ' + ((err && err.message) || err);
-    box.append(p);
-  };
-  let spec;
-  try { spec = JSON.parse(src.textContent); } catch (err) { fail(err); continue; }
-  vegaEmbed(box, spec, { renderer: 'svg', actions: false, theme: 'dark' })
-    .then(({ view }) => { views.push(view); view.addEventListener('click', (e, item) => pointAtDatum(item)); }).catch(fail);
+async function renderCharts() {
+  for (const v of views.splice(0)) { try { v.finalize(); } catch {} }
+  const boxes = [...document.querySelectorAll('.vl-box')].filter((b) => b.querySelector('.vl-src'));
+  if (!boxes.length) return;
+  if (!window.vegaEmbed) {
+    try {
+      await loadScript('vega.js');
+      await loadScript('vega-lite.js');
+      await loadScript('vega-embed.js');
+    } catch { return; }
+  }
+  if (!window.vegaEmbed) return;
+  for (const box of boxes) {
+    const src = box.querySelector('.vl-src'); if (!src) continue;
+    const badge = box.querySelector('.diff-chart-badge');
+    const fail = (err) => {
+      if (!box.isConnected) return;
+      const p = document.createElement('p'); p.className = 'mermaid-error'; p.textContent = 'This chart has an error: ' + ((err && err.message) || err);
+      box.append(p);
+    };
+    let spec;
+    try { spec = JSON.parse(src.textContent); } catch (err) { fail(err); continue; }
+    vegaEmbed(box, spec, { renderer: 'svg', actions: false, theme: 'dark' })
+      .then(({ view }) => {
+        if (!box.isConnected) { try { view.finalize(); } catch {} return; }
+        if (badge && !box.contains(badge)) box.prepend(badge);
+        views.push(view);
+        view.addEventListener('click', (e, item) => pointAtDatum(item));
+      }).catch(fail);
+  }
 }
+renderCharts();
 // A chart item's plain fields, as "day: 16 Nov, runs: 42": not Vega's own (_x, and the
 // runs_start/runs_end it adds for stacking).
 const ownField = (d, k) => !k.startsWith('_') && !(/^(.+)_(start|end)$/.test(k) && k.replace(/_(start|end)$/, '') in d);
@@ -315,30 +836,126 @@ function chartItems() {
 }
 // Mermaid blocks: drawn here, with mermaid's strict security (no scripts or click handlers from
 // the source). A source with an error shows mermaid's message under it.
-if (window.mermaid) {
-  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark', flowchart: { htmlLabels: false } });
-  let n = 0;
-  for (const box of document.querySelectorAll('.mermaid-box')) {
-    const src = box.querySelector('.mermaid-src'), id = 'mermaid-' + (++n);
-    mermaid.render(id, src.textContent).then(({ svg }) => { box.innerHTML = svg; }).catch((err) => {
+let mermaidSeq = 0, mermaidInit = false;
+async function renderDiagrams() {
+  const boxes = [...document.querySelectorAll('.mermaid-box')].filter((b) => b.querySelector('.mermaid-src'));
+  if (!boxes.length) return;
+  if (!window.mermaid) {
+    try { await loadScript('mermaid.js'); } catch { return; }
+  }
+  if (!window.mermaid) return;
+  if (!mermaidInit) {
+    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark', flowchart: { htmlLabels: false } });
+    mermaidInit = true;
+  }
+  for (const box of boxes) {
+    const src = box.querySelector('.mermaid-src'); if (!src) continue;
+    const badge = box.querySelector('.diff-chart-badge');
+    const changedNodes = (() => { try { return new Set(JSON.parse(box.dataset.changedNodes || '[]')); } catch { return new Set(); } })();
+    const id = 'mermaid-' + (++mermaidSeq);
+    try {
+      const { svg } = await mermaid.render(id, src.textContent);
+      if (box.isConnected) {
+        box.innerHTML = svg;
+        if (badge) box.prepend(badge);
+        if (changedNodes.size) {
+          for (const g of box.querySelectorAll('g.node')) {
+            if (changedNodes.has(nodeName(g))) g.classList.add('diff-changed');
+          }
+        }
+      }
+    } catch (err) {
       const stray = document.getElementById('d' + id); if (stray) stray.remove(); // mermaid's own error drawing, left at the end of the page
-      const p = document.createElement('p'); p.className = 'mermaid-error'; p.textContent = 'This diagram has an error: ' + ((err && err.message) || err);
-      box.append(p);
-    });
+      if (box.isConnected) {
+        const p = document.createElement('p'); p.className = 'mermaid-error'; p.textContent = 'This diagram has an error: ' + ((err && err.message) || err);
+        box.append(p);
+      }
+    }
   }
 }
+renderDiagrams();
 // A diagram box's name: its id in the source (Worker in "Worker[The worker]").
 const nodeName = (g) => g.dataset.id || (/flowchart-(.+)-\\d+$/.exec(g.id) || [])[1] || null;
-let last = null;
-setInterval(async () => {
-  const t = await (await fetch(${JSON.stringify(mtime)} + encodeURIComponent(${JSON.stringify(watch)}), { cache: 'no-store' })).text();
-  if (t === 'false') return; // missing for now (being saved?): keep showing it, ask again
-  if (last !== null && t !== last) location.reload();
-  last = t;
-}, 2000);
+let shownHash = ${JSON.stringify(docHash)};
+let last = shownHash, updating = false;
+async function refreshDoc(preserveNotice = null) {
+  const res = await fetch(location.href, { cache: 'no-store' });
+  if (!res.ok) return false;
+  const html = await res.text();
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
+  const nextMain = parsed.querySelector('main');
+  const main = document.querySelector('main');
+  if (!nextMain || !main) return false;
+  const inkEl = document.getElementById('ink');
+  const nextHasFigures = !!nextMain.querySelector('.sheet, .mermaid-box, .vl-box');
+  if (parent !== window && !inkEl && nextHasFigures) { location.reload(); return true; }
+  const sx = window.scrollX, sy = window.scrollY;
+  const frag = document.createDocumentFragment();
+  for (const node of [...nextMain.childNodes]) frag.append(document.adoptNode(node));
+  for (const child of [...main.childNodes]) if (child !== inkEl) child.remove();
+  if (inkEl) main.insertBefore(frag, inkEl); else main.append(frag);
+  const nextHash = nextMain.dataset.docHash || null;
+  if (nextHash) { shownHash = nextHash; main.dataset.docHash = nextHash; }
+  const curBar = document.getElementById('review-bar'), nextBar = parsed.getElementById('review-bar');
+  if (curBar && nextBar) {
+    curBar.innerHTML = nextBar.innerHTML;
+    if (preserveNotice) {
+      const note = document.createElement('div'); note.id = 'review-notice'; note.setAttribute('role', 'status'); note.textContent = preserveNotice;
+      curBar.append(note);
+    }
+  }
+  window.scrollTo(sx, sy);
+  renderDiagrams();
+  renderCharts();
+  return nextHash || true;
+}
+async function pollMtime() {
+  if (updating) return;
+  updating = true;
+  try {
+    const res = await fetch(${JSON.stringify(mtime)} + encodeURIComponent(${JSON.stringify(watch)}), { cache: 'no-store' });
+    if (!res.ok) return;
+    const t = await res.text();
+    if (t === 'false') return; // missing for now (being saved?): keep showing it, ask again
+    if (last === null) { last = t; return; }
+    if (t !== last) {
+      const ok = await refreshDoc();
+      if (ok) last = typeof ok === 'string' ? ok : t;
+    }
+  } catch {
+    // Keep the current pane as it is and try again at the next poll.
+  } finally {
+    updating = false;
+  }
+}
+pollMtime();
+setInterval(pollMtime, 2000);
+document.addEventListener('click', async (e) => {
+  const btn = e.target && e.target.closest && e.target.closest('#mark-reviewed');
+  if (!btn || btn.disabled || !${JSON.stringify(watch)} || !shownHash) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch(${JSON.stringify(base + '__review')}, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ file: ${JSON.stringify(watch)}, hash: shownHash }),
+    });
+    if (res.ok) {
+      const next = await refreshDoc();
+      if (typeof next === 'string') last = next;
+    } else {
+      let msg = 'This version is no longer available: the pane will show the latest';
+      try { const data = await res.json(); if (data && data.message) msg = data.message; } catch {}
+      const next = await refreshDoc(msg);
+      if (typeof next === 'string') last = next;
+    }
+  } catch {
+    btn.disabled = false;
+  }
+});
 // Shown in the room page, with tables, diagrams or charts: a markup layer. Pen, Circle and Arrow
 // draw over the document; a finished mark points at what it covers (an arrow: what its tip is on).
-// Marks stay until Clear marks or a reload. Esc goes back to Point.
+// Marks stay until Clear marks or a manual reload. Esc goes back to Point.
 const pointables = () => [
   ...[...document.querySelectorAll('.sheet td[data-cell]')].map((td) => {
     const sheet = td.closest('table').dataset.sheet;
@@ -443,6 +1060,121 @@ document.addEventListener('click', (e) => {
     text: 'table cell ' + name + ' in ' + ${JSON.stringify(watch)} + ' = ' + td.textContent + ' (' + [rowLabel, colLabel].filter(Boolean).join(', ') + ')' + formula }, location.origin);
   td.classList.add('hl'); setTimeout(() => td.classList.remove('hl'), 1200);
 });
+// Shown in the room page: selecting prose in any Markdown document points at it on mouseup.
+const DOC_PATH = ${JSON.stringify(watch)};
+if (parent !== window && DOC_PATH) {
+  const PASSAGE_LIMIT = 4000;
+  const cleanText = (s) => String(s).replace(/\\s+/g, ' ').trim();
+  const passageLabel = (q) => {
+    const max = 56;
+    if (q.length <= max) return '↳ "' + q + '"';
+    const words = q.split(' ');
+    if (words.length === 1) return '↳ "' + q.slice(0, 26) + '…' + q.slice(-26) + '"';
+    const half = Math.floor((max - 3) / 2);
+    let head = words[0], i = 1;
+    while (i < words.length - 1 && head.length + 1 + words[i].length <= half) head += ' ' + words[i++];
+    let tail = words[words.length - 1], j = words.length - 2;
+    while (j >= i && tail.length + 1 + words[j].length <= half) tail = words[j--] + ' ' + tail;
+    if (head.length > half) head = head.slice(0, half);
+    if (tail.length > half) tail = tail.slice(-half);
+    return '↳ "' + head + ' … ' + tail + '"';
+  };
+  let noteTimer = null;
+  const clearNote = () => {
+    clearTimeout(noteTimer); noteTimer = null;
+    const el = document.getElementById('passage-note'); if (el) el.remove();
+  };
+  const showNote = (msg) => {
+    clearNote();
+    const el = document.createElement('div'); el.id = 'passage-note'; el.setAttribute('role', 'status'); el.textContent = msg;
+    document.body.append(el);
+    noteTimer = setTimeout(clearNote, 5000);
+  };
+  const isDeletedBlock = (el) => el.classList.contains('diff-del-block') || !!el.closest('.diff-del-block');
+  const currentHeadingText = (h) => {
+    const clone = h.cloneNode(true);
+    for (const d of clone.querySelectorAll('.diff-del, .diff-del-block')) d.remove();
+    return cleanText(clone.textContent);
+  };
+  const extractQuote = (range) => {
+    const frag = range.cloneContents();
+    for (const el of frag.querySelectorAll('.diff-del, .diff-del-block')) el.remove();
+    const parts = [];
+    const walk = (node) => {
+      if (node.nodeType === 3) { parts.push(node.nodeValue); return; }
+      if (node.nodeType !== 1 && node.nodeType !== 11) return;
+      const isBlock = node.nodeType === 1 && /^(P|LI|PRE|H[1-6]|BLOCKQUOTE|DIV|TR)$/.test(node.tagName);
+      if (isBlock && parts.length) parts.push(' ');
+      for (const child of node.childNodes) walk(child);
+      if (isBlock) parts.push(' ');
+    };
+    walk(frag);
+    return cleanText(parts.join(''));
+  };
+  const passageLocation = (range, main) => {
+    let start = range.startContainer;
+    if (start === main && range.startOffset < main.childNodes.length) start = main.childNodes[range.startOffset];
+    const startEl = start.nodeType === 1 ? start : start.parentElement;
+    if (!startEl || !main.contains(startEl)) return 'passage in ' + DOC_PATH;
+    let heading = null, inHeading = null;
+    for (const h of main.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+      if (isDeletedBlock(h)) continue;
+      if (h.contains(startEl)) { inHeading = h; break; }
+      if (h.compareDocumentPosition(startEl) & Node.DOCUMENT_POSITION_FOLLOWING) heading = h;
+    }
+    if (inHeading) return 'passage in ' + DOC_PATH + ', heading "' + currentHeadingText(inHeading) + '"';
+    let loc = 'passage in ' + DOC_PATH;
+    if (heading) loc += ', under "' + currentHeadingText(heading) + '"';
+    let block = startEl.closest('p, li, pre');
+    if (block && block.tagName === 'LI' && [...block.children].some((c) => c.tagName === 'P')) {
+      block = [...block.children].find((c) => c.tagName === 'P') || block;
+    }
+    if (block && main.contains(block) && !isDeletedBlock(block) && !block.closest('.mermaid-box, .vl-box')) {
+      const blocks = [...main.querySelectorAll('p, li, pre')].filter((el) =>
+        !isDeletedBlock(el) && !(el.tagName === 'LI' && [...el.children].some((c) => c.tagName === 'P')) && !el.closest('.mermaid-box, .vl-box')
+      );
+      let n = 0, found = false;
+      for (const el of blocks) {
+        if (heading && !(heading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+        n++;
+        if (el === block) { found = true; break; }
+      }
+      if (found) loc += ', paragraph ' + n;
+    }
+    return loc;
+  };
+  let downPos = null;
+  document.addEventListener('mousedown', (e) => { downPos = { x: e.clientX, y: e.clientY }; });
+  document.addEventListener('mouseup', (e) => {
+    const prev = downPos; downPos = null;
+    if (document.body.classList.contains('drawing')) return;
+    if (e.target && e.target.closest && e.target.closest('#ink-tools, nav, #passage-note, #review-bar')) return;
+    if (prev && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 3 && e.detail < 2) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+    const main = document.querySelector('main');
+    if (!main) return;
+    const raw = sel.getRangeAt(0);
+    const insideMain = main.contains(raw.startContainer) && main.contains(raw.endContainer);
+    const touchesMain = insideMain || main.contains(raw.startContainer) || main.contains(raw.endContainer)
+      || (raw.commonAncestorContainer && raw.commonAncestorContainer.contains && raw.commonAncestorContainer.contains(main));
+    if (!touchesMain) return;
+    const commonEl = raw.commonAncestorContainer.nodeType === 1 ? raw.commonAncestorContainer : raw.commonAncestorContainer.parentElement;
+    if (commonEl && commonEl.closest('.sheet, .mermaid-box, .vl-box, .diff-del-block')) return;
+    const range = raw.cloneRange();
+    if (!main.contains(range.startContainer)) range.setStart(main, 0);
+    if (!main.contains(range.endContainer)) range.setEnd(main, main.childNodes.length);
+    const quote = extractQuote(range);
+    if (!quote) return;
+    const text = passageLocation(range, main) + ': "' + quote + '"';
+    if (text.length > PASSAGE_LIMIT) {
+      showNote('Selection is too long to point at (over 4,000 characters with its location) — select a shorter passage.');
+      return;
+    }
+    clearNote();
+    parent.postMessage({ type: 'agent-room:point', kind: 'passage', label: passageLabel(quote), text }, location.origin);
+  });
+}
 </script></body></html>`;
 }
 

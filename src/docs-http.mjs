@@ -2,8 +2,9 @@
 import { readFileSync, statSync } from 'node:fs';
 import { extname } from 'node:path';
 
-export function createFileRoutes({ handleScreen, ownHost, files }) {
-const { LIBS, servable, docFiles, esc, urlPath, page, md, mdText, TYPES, isTextFile } = files;
+export function createFileRoutes({ handleScreen, ownHost, fromOwnPage, files }) {
+const { LIBS, servable, docFiles, esc, urlPath, page, md, mdText, TYPES, isTextFile,
+  sourceHash, recordRenderedVersion, ensureBaseline, markReviewed, renderMarkdownWithDiff } = files;
 // dir: the room's folder; base: its address on the server (/r/<id>/), for the links in its pages.
 function handle(req, res, dir, screen, base = '/') {
   if (/^\/__next\//.test(req.url)) {
@@ -16,6 +17,24 @@ function handle(req, res, dir, screen, base = '/') {
   if (url.pathname.startsWith('/replica/') && (!ownHost(req.headers.host ?? '') || req.headers.origin)) return send(403, 'text/plain', 'Refused peer origin or Host.');
   if (url.pathname.startsWith('/replica/')) return screen?.replicaHandler ? screen.replicaHandler(req, res) : send(404, 'text/plain', 'This room doesn\'t replicate.');
   if (screen && handleScreen(req, res, url, dir, screen)) return;
+  if (url.pathname === '/__review') {
+    if (req.method !== 'POST' || !fromOwnPage?.(req)) return send(403, 'text/plain', 'Refused.');
+    let raw = '';
+    req.on('data', (d) => { raw += d; if (raw.length > 100_000) req.destroy(); });
+    req.on('end', () => {
+      let body;
+      try { body = JSON.parse(raw); } catch { return send(400, 'text/plain', 'Bad JSON'); }
+      const rel = typeof body?.file === 'string' ? body.file : '';
+      const hash = typeof body?.hash === 'string' ? body.hash : '';
+      if (!rel || rel.startsWith('__received/')) return send(404, 'text/plain', 'Not found');
+      const file = servable(dir, rel, screen);
+      if (!file || !/\.md$/i.test(file)) return send(404, 'text/plain', 'Not found');
+      const disk = readFileSync(file, 'utf8');
+      const result = markReviewed(dir, rel, hash, disk);
+      return send(result.ok ? 200 : 409, 'application/json', JSON.stringify(result));
+    });
+    return;
+  }
   // The browser bundles for documents with ```mermaid or ```vega-lite blocks (LIBS).
   if (url.pathname.startsWith('/__lib/')) {
     const lib = Object.hasOwn(LIBS, url.pathname.slice(7)) && LIBS[url.pathname.slice(7)];
@@ -28,7 +47,11 @@ function handle(req, res, dir, screen, base = '/') {
     const rel = url.searchParams.get('f') ?? '';
     if (rel.startsWith('__received/')) return send(200, 'text/plain', 'fixed'); // a received snapshot never changes
     const file = rel ? servable(dir, rel, screen) : null;
-    const stamp = rel ? !!file && statSync(file).mtimeMs : docFiles(dir, screen).join('\n');
+    let stamp;
+    if (!rel) stamp = docFiles(dir, screen).join('\n');
+    else if (!file) stamp = false;
+    else if (/\.md$/i.test(file)) stamp = sourceHash(readFileSync(file, 'utf8'));
+    else stamp = statSync(file).mtimeMs;
     return send(200, 'text/plain', String(stamp));
   }
   const rel = decodeURIComponent(url.pathname.slice(1));
@@ -43,7 +66,23 @@ function handle(req, res, dir, screen, base = '/') {
   // A session transcript quotes whatever was said: its HTML is shown as text, never run.
   // no-cache: a reload after the file changes shows the new content, not a cached copy.
   const sendDoc = (type, body) => { res.writeHead(200, { 'content-type': type, 'cache-control': 'no-cache' }); res.end(body); };
-  if (/\.md$/i.test(file)) return sendDoc('text/html; charset=utf-8', page(rel, ((/(^|\/)transcripts\//.test(rel)) ? mdText : md).parse(readFileSync(file, 'utf8')), rel, base));
+  if (/\.md$/i.test(file)) {
+    const source = readFileSync(file, 'utf8');
+    const hash = sourceHash(source);
+    const isTranscript = /(^|\/)transcripts\//.test(rel);
+    if (!screen || got || isTranscript) {
+      return sendDoc('text/html; charset=utf-8', page(rel, (isTranscript ? mdText : md).parse(source), rel, base, { hash }));
+    }
+    recordRenderedVersion(dir, rel, hash, source);
+    const baseline = ensureBaseline(dir, rel, hash, source);
+    const diff = renderMarkdownWithDiff(baseline.source, source, md);
+    return sendDoc('text/html; charset=utf-8', page(rel, diff.html, rel, base, {
+      hash,
+      reviewed: !!baseline.reviewed,
+      changeCount: diff.changeCount,
+      removed: diff.removed,
+    }));
+  }
   const type = TYPES[extname(file).toLowerCase()] ?? (isTextFile(file) ? 'text/plain; charset=utf-8' : 'application/octet-stream');
   sendDoc(type, readFileSync(file));
 }

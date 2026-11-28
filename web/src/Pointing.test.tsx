@@ -93,3 +93,53 @@ it('sends multiple points in order, truncates their fields, and consumes them on
   expect(body.text).toBe(`[pointing at: ${'y'.repeat(300)}; box A]`);
   expect(screen.queryByTitle('y'.repeat(300))).toBeNull(); expect(screen.queryByTitle('box A')).toBeNull();
 });
+
+it('keeps full passage text up to 4000 characters and drops passages over 4000', async () => {
+  const frame = setup(); const user = userEvent.setup();
+  const prefix = 'passage in discussions/2026-11-28-a-long-sprint-folder-name-for-testing/notes.md, under "A long heading that occupies space in the location", paragraph 2: "';
+  const suffix = '"';
+  const exact4000 = prefix + 'a'.repeat(4000 - prefix.length - suffix.length) + suffix;
+  const over4000 = prefix + 'b'.repeat(4001 - prefix.length - suffix.length) + suffix;
+  expect(exact4000.length).toBe(4000);
+  expect(over4000.length).toBe(4001);
+
+  sendPoint(frame, { type: 'agent-room:point', kind: 'passage', label: '↳ "over"', text: over4000 });
+  expect(screen.queryByTitle(over4000)).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Stop pointing at ↳ "over"' })).toBeNull();
+
+  sendPoint(frame, { type: 'agent-room:point', kind: 'passage', label: '↳ "aaaa … aaaa"', text: exact4000 });
+  expect(screen.getByTitle(exact4000)).toBeTruthy();
+
+  await user.type(screen.getByRole('textbox', { name: 'Message to the agents' }), 'Tighten this{Enter}');
+  await waitFor(() => expect(post.mock.calls.filter(([url]) => url === '__say')).toHaveLength(1));
+  const body = JSON.parse(post.mock.calls.find(([url]) => url === '__say')![1].body);
+  expect(body.text).toBe(`Tighten this\n[pointing at: ${exact4000}]`);
+});
+
+it('sends a pointed passage naming the second heading with its full quote', async () => {
+  const frame = setup(); const user = userEvent.setup();
+  const passage = 'passage in discussions/x/notes.md, under "Second section", paragraph 2: "Keep the shared draft clean and see the spec before merging."';
+  sendPoint(frame, { type: 'agent-room:point', kind: 'passage', label: '↳ "Keep the shared draft … the spec before merging."', text: passage });
+  expect(screen.getByTitle(passage)).toBeTruthy();
+  await user.type(screen.getByRole('textbox', { name: 'Message to the agents' }), 'Tighten it{Enter}');
+  await waitFor(() => expect(post.mock.calls.filter(([url]) => url === '__say')).toHaveLength(1));
+  const body = JSON.parse(post.mock.calls.find(([url]) => url === '__say')![1].body);
+  expect(body.text).toBe(`Tighten it\n[pointing at: ${passage}]`);
+});
+
+it('keeps two chips when pointing at two copies of the same sentence with the same short label', async () => {
+  const frame = setup(); const user = userEvent.setup();
+  const label = '↳ "Keep the shared draft … the spec before merging."';
+  const first = 'passage in discussions/x/notes.md, under "First section", paragraph 2: "Keep the shared draft clean and see the spec before merging."';
+  const second = 'passage in discussions/x/notes.md, under "Second section", paragraph 2: "Keep the shared draft clean and see the spec before merging."';
+  sendPoint(frame, { type: 'agent-room:point', kind: 'passage', label, text: first });
+  sendPoint(frame, { type: 'agent-room:point', kind: 'passage', label, text: second });
+  sendPoint(frame, { type: 'agent-room:point', kind: 'passage', label, text: second });
+  expect(screen.getByTitle(first)).toBeTruthy();
+  expect(screen.getByTitle(second)).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: `Stop pointing at ${label}` })).toHaveLength(2);
+  await user.type(screen.getByRole('textbox', { name: 'Message to the agents' }), 'Compare both{Enter}');
+  await waitFor(() => expect(post.mock.calls.filter(([url]) => url === '__say')).toHaveLength(1));
+  const body = JSON.parse(post.mock.calls.find(([url]) => url === '__say')![1].body);
+  expect(body.text).toBe(`Compare both\n[pointing at: ${first}; ${second}]`);
+});
