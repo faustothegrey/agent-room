@@ -10,6 +10,7 @@ import { TerminalPane } from './Terminal';
 import { InstructionsPanel, ProvidersPanel, SchedulePanel } from './Services';
 import { providerHealth } from './RoomZones';
 import { Notes, NOTES_DRAFT_KEY, type NoteDraft, type NotesApi } from './Notes';
+import { Office, computePassedAgents } from './Office';
 import type { PromptTestRequest, ScheduleRequest, NoteRequest, AgentEnabledRequest, SettingsSaveRequest, Gauge, Monitor, NewRoomRequest, PairRequest, QuotaAt, ReceivedLine, Replica, ViewedLine, ViewReply, ViewRequest, AgentSettings, BoardActionRequest, CliSession, CatchUpReply, DiscardPreview, DiscardReply, FileDetailsResponse, FilesResponse, HighlightMessage, MergePreview, MergeReply, MessageView, Peek, PointMessage, RetryRequest, Room, SayRequest, ScreenEvent, SettingsReply, ShowRequest, StopWorkerRequest, WorkerInfo, WorkerInfoRequest, WorkerMessage, WorkRequest } from '../../src/contract';
 
 type Props = { version: string | undefined; refresh: () => void; navigate?: (url: string) => void };
@@ -31,8 +32,8 @@ type StatusLine = { text: string; error: boolean };
 type Failure = { agent: string; error: string; time: string; earlier: number };
 type Layout = { stacked: boolean; sideClosed: boolean; left: number | null; top: number | null };
 type BoardDialog = { kind: 'merge'; name: string; preview: MergePreview; changed: boolean; error?: string } | { kind: 'discard'; name: string; preview: DiscardPreview; changed: boolean; error?: string } | { kind: 'catchup'; name: string; target: string; behind: number; message: string; changed: boolean; error?: string };
-type Service = 'providers' | 'instructions' | 'schedule' | 'notes' | 'terminal';
-const SERVICES: Record<Service, string> = { providers: 'Providers', instructions: 'Instructions', schedule: 'Schedule', notes: 'My notes', terminal: 'Terminal' };
+type Service = 'providers' | 'instructions' | 'schedule' | 'notes' | 'terminal' | 'office';
+const SERVICES: Record<Service, string> = { providers: 'Providers', instructions: 'Instructions', schedule: 'Schedule', notes: 'My notes', terminal: 'Terminal', office: 'Office' };
 const BOARD_ICONS = new Map<string, { icon: string; label: string }>([
   ['sprint', { icon: '🏃', label: 'Sprint' }],
   ['workbench', { icon: '🔧', label: 'Workbench' }],
@@ -181,6 +182,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
   const [workerNews, setWorkerNews] = useState(false);
   const [thinking, setThinking] = useState<string | null>(null);
   const [yourTurn, setYourTurn] = useState(false);
+  const [passedAgents, setPassedAgents] = useState<string[]>([]);
   const [peek, setPeek] = useState<Peek | null>(null);
   const [filePeek, setFilePeek] = useState<{ path: string; name: string; title: string; readonly: boolean } | null>(null);
   const peekRef = useRef<Peek | null>(null);
@@ -831,12 +833,17 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         offerEpoch.current++; setOffers([]);
         const visible = event.messages.filter((m) => !m.pass && !m.hidden);
         if (!remoteRef.current) setMessages(visible);
+        setPassedAgents(computePassedAgents(event.messages));
         if (!event.peek) { liveMessages.current = visible; if (visible.length || event.worker?.length) void loadFiles(); }
         setThinking(event.thinking ?? null); setYourTurn(!event.thinking);
         if (event.status) addStatus(event.status);
         state.command = !!event.busy; updateBusy();
       } else if (event.type === 'message') {
-        if (event.message.speaker === 'User') { setYourTurn(false); offerEpoch.current++; setOffers([]); }
+        if (event.message.speaker === 'User') { setYourTurn(false); setPassedAgents([]); offerEpoch.current++; setOffers([]); }
+        else if (event.message.speaker) {
+          const who = event.message.speaker, passed = !!event.message.pass;
+          setPassedAgents((previous) => passed ? (previous.includes(who) ? previous : [...previous, who]) : previous.filter((n) => n !== who));
+        }
         if (event.message.error) pin(event.message.speaker, event.message.errorText ?? '');
         if (!event.message.pass && !event.message.hidden) {
           const message = event.message;
@@ -901,7 +908,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
         if (changed && peekRef.current) {
           peekRef.current = null; setPeek(null); setMessages([]); liveMessages.current = []; offerEpoch.current++; setOffers([]);
         }
-        if (changed) setFilePeek(null);
+        if (changed) { setFilePeek(null); setPassedAgents([]); }
         roomRef.current = event.room; setRoom(event.room); setRetryBusy(null); if (event.room.folder) void loadDetails();
         if (event.room.workbench && !peekRef.current) { tabRef.current = 'worker'; setTab('worker'); setWorkerNews(false); }
         else if ((event.room.research || wasWorkbench && !event.room.workbench) && tabRef.current === 'worker' && !peekRef.current) { tabRef.current = 'discussion'; setTab('discussion'); }
@@ -1174,6 +1181,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       <button type="button" className="ctrl-btn" aria-pressed={service === 'schedule'} title="Scheduled tasks and quota guard" onClick={() => openService(service === 'schedule' ? null : 'schedule')}><span className="ctrl-ico">⏰</span> <span className="ctrl-lbl">Schedule</span></button>
       <button type="button" className="ctrl-btn" aria-pressed={service === 'notes'} title="Your own notes for this room's folder, stored on the agent-room computer (not in the folder, not sent to peers); usable from the room's own addresses, the LAN ones too. The agents are not told about them; the files are outside the room's folder." onClick={() => openService(service === 'notes' ? null : 'notes')}><span className="ctrl-ico">📝</span> <span className="ctrl-lbl">My notes</span></button>
       {isLocalPage && <button type="button" id="ctrl-terminal" className={'ctrl-btn' + (shellAlive ? ' running' : '')} aria-pressed={service === 'terminal'} title="A shell on this computer, in the room's folder. Only from this computer, not from other devices." onClick={() => openService(service === 'terminal' ? null : 'terminal')}><span className="ctrl-ico">⌨</span> <span className="ctrl-lbl">Terminal</span></button>}
+      <button type="button" id="ctrl-office" className="ctrl-btn" aria-pressed={service === 'office'} title="Playful pixel-art office showing this board's agents and worker" onClick={() => openService(service === 'office' ? null : 'office')}><span className="ctrl-ico">🏢</span> <span className="ctrl-lbl">Office</span></button>
     </nav>
     <section id="services-panel" aria-label="Services panel" hidden={!service}>
       <div id="services-bar"><span id="services-title">{service ? SERVICES[service] : ''}</span><button type="button" className="pane-ctrl" title="Close services panel" aria-label="Close services panel" onClick={() => openService(null)}>✕</button></div>
@@ -1182,6 +1190,7 @@ export function App({ version, refresh, navigate = navigatePage }: Props) {
       <div className="view" id="schedule" hidden={service !== 'schedule'}><SchedulePanel open={service === 'schedule'} reload={scheduleReload} post={(path, body) => post(path, body)} /></div>
       <div className="view" id="notes" hidden={service !== 'notes'}><Notes open={service === 'notes'} show={() => openService('notes')} api={notesApi} kept={notesKept} brainstorm={(value) => createBoard('/brainstorm', value)} brainstormDisabled={canAddBoards ? '' : ended ? 'This room has ended.' : peek ? 'Leave the peek to create a brainstorm.' : viewLayout ? 'This view is read-only.' : 'A brainstorm cannot be created here.'} armed={!!armedCreation['/brainstorm']} post={(path, body) => post(path, body)} /></div>
       {isLocalPage && <div className="view" id="terminal" hidden={service !== 'terminal'}><TerminalPane visible={service === 'terminal'} fitKey={layout} running={setShellAlive} /></div>}
+      <div className="view" id="office" hidden={service !== 'office'}><Office boardTitle={title} agents={room?.agents ?? room?.members?.map((m) => m.name) ?? []} workerName={room?.worker || 'Worker'} thinking={thinking} working={working} passedAgents={passedAgents} failedAgents={(room?.failedAgents ?? []).map((f) => f.name)} roundEnded={yourTurn} workbench={peek ? peek.kind === 'workbench' : !!room?.workbench} /></div>
     </section>
     <aside ref={listPanel} id="list-panel" className="next-boards" aria-label="Boards">
       <div id="list-head">{!boardsClosed && <span id="list-title">Boards</span>}<button type="button" id="list-toggle" title={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-label={boardsClosed ? 'Expand boards list' : 'Collapse boards list'} aria-expanded={!boardsClosed} onClick={() => { const next = !boardsClosed; setBoardsClosed(next); if (!next) refreshWorker(); if (serviceRef.current === null) { try { localStorage.setItem('agent-room:list-collapsed', next ? '1' : '0'); } catch {} } }}>{boardsClosed ? '»' : '«'}</button></div>
