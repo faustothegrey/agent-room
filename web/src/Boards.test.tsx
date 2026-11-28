@@ -70,3 +70,22 @@ it('shows the closed board after its Peek reset and returns to the current board
   await user.click(within(screen.getByLabelText('Peeked board files')).getByRole('button', { name: 'Back to current' }));
   await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '__say' && JSON.parse(init.body).text === '/peek')).toBe(true));
 });
+
+it('lists unstarted boards in their own section (brainstorms under Brainstorms, not Sprints)', async () => {
+  render(<App version="one" refresh={() => {}} />);
+  Source.current.send({ type: 'reset', room: { ...room, open: [
+    ...room.open,
+    { active: null, current: false, title: 'New sprint (not started)', url: '/r/s/__room', brainstorm: false, workbench: false, research: false, started: false },
+    { active: null, current: false, title: 'New research board (not started)', url: '/r/r/__room', brainstorm: false, workbench: false, research: true, started: false },
+    { active: null, current: false, title: 'New brainstorm (not started)', url: '/r/b/__room', brainstorm: true, workbench: false, research: false, started: false },
+  ] }, input: true, messages: [], peek: null, doc: null });
+  const boards = screen.getByLabelText('Boards');
+  await within(boards).findByRole('button', { name: 'Current title' });
+  const sprintsSection = within(boards).getByText('Sprints (6)').closest('details')!;
+  const researchSection = within(boards).getByText('Research (2)').closest('details')!;
+  const brainstormsSection = within(boards).getByText('Brainstorms (2)').closest('details')!;
+  expect(within(sprintsSection).getByRole('link', { name: 'New sprint (not started)' }).getAttribute('href')).toBe('/r/s/__room');
+  expect(within(sprintsSection).queryByRole('link', { name: 'New brainstorm (not started)' })).toBeNull();
+  expect(within(researchSection).getByRole('link', { name: '🔬 New research board (not started)' }).getAttribute('href')).toBe('/r/r/__room');
+  expect(within(brainstormsSection).getByRole('link', { name: 'New brainstorm (not started)' }).getAttribute('href')).toBe('/r/b/__room');
+});
